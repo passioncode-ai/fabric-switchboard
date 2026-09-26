@@ -41,4 +41,10 @@ Source, specs and checks are durable in this repository. Local-only: `node_modul
 
 The implementation agents' work is integrated; no agent branch is a prerequisite. Observatory remains untouched and this is not yet a Fabric parent submodule. No central multi-repo index is required for a single owning repository.
 
-Delivery/fresh-checkout receipt is appended after push verification. A source branch is not a package release, merger into an existing production branch, notarization or deployment.
+## Delivery receipt
+
+The first complete source/docs snapshot `a478941c7ab7f467ebfde36d592910d2e1fff79c` was pushed and independently fetched from `origin/codex/bootstrap`; `git ls-remote` returned that exact SHA. GitHub reports the repository private and default branch `codex/bootstrap`.
+
+A new remote clone of that commit ran `npm ci` and `./scripts/check.sh` successfully: TypeScript/Vite, 36 Rust tests, fmt, strict clippy, 26 Markdown files / 83 relative links / 0 errors. Its Git working tree remained clean. Cargo dependency/build cache was reused with an explicit `CARGO_TARGET_DIR`; project crates were recompiled from the fresh checkout. No source file, node_modules tree or untracked spec was copied into it. This proves fresh source checkout, not a cold offline build.
+
+This final handoff commit only adds the receipt and repository instructions; application source remains at the implementation baseline. Final remote HEAD equality is checked after pushing this entry. A source branch is not a package release, merger into an existing production branch, notarization or deployment.

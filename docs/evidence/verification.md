@@ -51,6 +51,10 @@ All following links address the implementation commit, so subsequent changes can
 
 SCN-001: browser empty-state implementation, native observation blocked. SCN-002/004/009/011: browser interaction plus core fixtures. SCN-003/005/006: launcher/config fixtures and IPC implementation; actual official login/launch NOT_RUN. SCN-007: in-flight synthetic HTTP/SSE integration test, not real provider acceptance. SCN-008: parser/bounds/stale UI implementation; authentic usage NOT_RUN. SCN-010/012: store removal/restart/fault tests; GUI removal/restart NOT_RUN. SCN-013: semantic controls/focus implementation and visual browser review; full keyboard/VoiceOver/responsive matrix NOT_RUN. Scenario design status `validated` refers to the authorized brief, never these unobserved outcomes.
 
+## Fresh-checkout delivery check
+
+Pushed snapshot `a478941c7ab7f467ebfde36d592910d2e1fff79c` was cloned from GitHub into a new temporary directory. `npm ci` plus `CARGO_TARGET_DIR=<local build cache> ./scripts/check.sh` exited 0: 36 tests passed, strict clippy/fmt and frontend build passed, 26 Markdown files and 83 relative links resolved, Git remained clean. Cargo reused downloaded dependencies and its build cache while recompiling this checkout’s project crates. This is not a cold/offline build claim. Native bundle creation was checked in the owning workspace on the identical implementation source; no actual native window acceptance was possible while locked.
+
 ## Review findings closed before this baseline
 
 - Codex isolated OAuth originally lacked native identity token; now retained in vault and materialized only in its private working copy.
