@@ -1,7 +1,7 @@
 # Packet PA-01 — real provider acceptance
 
 **State:** NOT_RUN. First task for the next operator-assisted session. No live-provider success may be inferred from fixtures.
-**Owns:** provider adapters in `src-tauri/src/launch.rs`, proxy endpoint/headers in `crates/switchboard-proxy`, evidence in `docs/evidence`; UI only for observed recovery defects.
+**Owns:** provider adapters in `crates/switchboard-runtime/src/launch.rs`, proxy endpoint/headers in `crates/switchboard-proxy`, evidence in `docs/evidence`; UI only for observed recovery defects.
 **Shared context:** [contracts](../CONTRACTS.md), [spec §§4–9](../SPEC.md), [research](../research/README.md), [operations](../OPERATIONS.md).
 
 Prerequisites: unlocked Mac, installed official CLIs, operator-owned authorized accounts, operator completing browser authentication, a disposable project with no hooks/MCP side effects, and an explicit bounded usage budget. Never mine another application's active credential store to avoid these prerequisites.

@@ -1,10 +1,10 @@
 # Packet DIST-01 — signed delivery
 
-**State:** planned. Local app builds do not satisfy this packet.
+**State:** 0.2 packaging/signing tools implemented; [execution receipt](../evidence/release-0.2.md) names actual builds and signature state. Notarization, clean-machine Gatekeeper acceptance and signed self-updates are separate gates.
 **Owns:** release packaging/signing/update metadata; never committed certificates or signing secrets.
 **Shared:** [spec §§10,12,13](../SPEC.md), [verification](../evidence/verification.md).
 
-Prerequisites: operator-owned Developer ID/team authorization, release naming/channel decision, successful real-provider acceptance. Build exact reviewed commit with lockfiles, record compiler/SDK and artifact hashes, sign hardened runtime with minimum required entitlements, notarize and staple, verify on a separate clean Mac under normal Gatekeeper settings. Never instruct users to disable Gatekeeper to make a release pass.
+Prerequisites for a generally supported release: operator-owned Developer ID/team authorization, release naming/channel decision, successful real-provider acceptance. The operator separately authorized an engineering beta build and its Developer ID signature before live-provider acceptance. Build exact reviewed commit with lockfiles, record compiler/SDK and artifact hashes, sign hardened runtime with minimum required entitlements, notarize and staple, verify on a separate clean Mac under normal Gatekeeper settings. Never instruct users to disable Gatekeeper to make a release pass.
 
 Add signed update manifest with independent update key custody, version/rollback policy, explicit restart boundary, interrupted-download recovery and retention of user profiles. No update may replace a running client's credential lineage. Windows gets its own code-signing/SmartScreen acceptance after WIN-01.
 

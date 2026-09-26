@@ -1,5 +1,5 @@
 # Fabric Switchboard — product and engineering specification
-Version 0.1, 2026-09-26. Design decisions under the operator's instruction to proceed; outcome validation remains unobserved. This document describes the intended product. [Verification](evidence/verification.md) and [handoff](HANDOFF.md) distinguish built, tested, and deferred functionality.
+Version 0.2, 2026-09-26. Design decisions under the operator's instruction to proceed; outcome validation remains unobserved. This document describes the intended product. [0.2 release evidence](evidence/release-0.2.md), [historical 0.1 verification](evidence/verification.md) and [handoff](HANDOFF.md) distinguish built, tested, and deferred functionality.
 
 ## 1. Product contract
 A local account workbench for developers who own multiple authorized Claude Code and Codex identities. They add an account, see its health and quota, choose its routing pool, and launch an isolated or managed session. The app explains exactly when a selection takes effect. No Fabric cloud dependency is required to run it. “Fabric” here is project ownership; Fabric execution-contract integration is a future adapter, not an invented compatible-agent claim.
@@ -7,11 +7,11 @@ A local account workbench for developers who own multiple authorized Claude Code
 Core outcomes: canonical account secrets stay in the OS vault (isolated CLI mode needs a private access-token working copy, §8); no incidental mutation of the user's global client configuration; explicit pool boundaries between work and personal accounts; visible distinction between a configured route and an account observed serving a request; no lost stream or duplicated tool execution caused by the switcher.
 
 ## 2. Axes and capability matrix
-| Axis | v0.1 macOS | Extension / limitation |
+| Axis | v0.2 implementation | Extension / limitation |
 |---|---|---|
 | Provider | Claude Code, Codex CLI | provider adapters; Claude Desktop excluded |
 | Credential | API key, Claude setup token, imported OAuth JSON | OAuth renewal delegated to official login; no fabricated OAuth app registration |
-| Surface | Tauri desktop window, managed child launch | menu bar/tray convenience after core acceptance |
+| Surface | Tauri desktop window, native `switchboard` CLI, managed child launch | menu bar/tray convenience after core acceptance |
 | Scope | account + provider + pool | project bindings later; no cross-pool auto fallback |
 | Isolation | managed home per account | no automatic MCP/settings/history sharing |
 | Switch | next launch (isolated); next request (proxy) | current stream retains captured identity |
@@ -19,10 +19,10 @@ Core outcomes: canonical account secrets stay in the OS vault (isolated CLI mode
 | Codex Desktop | no live takeover | future explicit idle/restart handoff adapter |
 | Routing | explicit manual choice | quota-based recommendation; automatic rotation separately opt-in future |
 | Quota | timestamped provider observation | unknown/stale/error remain distinct from zero |
-| Storage | macOS Keychain plus private metadata | Windows Credential Manager/DPAPI adapter planned |
-| Distribution | locally buildable .app bundle | Developer ID signing/notarization require operator credentials |
+| Storage | macOS Keychain; Windows DPAPI CurrentUser + user-only DACL | private metadata; no plaintext vault fallback |
+| Distribution | macOS universal app + CLI; Windows NSIS + CLI build workflow | signature, notary and actual artifact states in release evidence |
 | Privacy | local metadata, no analytics, no prompt logging | diagnostics export metadata only, later |
-| Windows | source seams + acceptance plan | no Windows support claim until native tests run |
+| Windows | native vault, filesystem and PowerShell launcher | native fixture success does not prove real-provider or UI acceptance |
 
 No promise that an HTTP proxy can change credentials inside an already-established WebSocket. v0.1 managed transport is HTTP/SSE only. Unsupported endpoints return an explicit error. Proxy use is a compatibility feature relying on provider client behavior, not a provider-endorsed integration claim.
 
@@ -89,8 +89,10 @@ Rust core: typed state transitions, shared cross-platform logic, mature OS-vault
 
 SwiftUI + Swift core would give excellent macOS integration but require another UI implementation for Windows (seen in the Codex comparator). Go CLI is suitable for daemon-first routing but does not itself provide the requested desktop workbench. Python/Textual is excellent for terminal ergonomics and rapid adapters but adds runtime packaging and less direct native IPC. Decisions may be revisited with measured build size/startup time; no invented benchmark table.
 
-## 12. Windows plan
-Port Vault to Windows Credential Manager (small records) or DPAPI current-user envelope plus user-only DACL; verify maximum record sizes and fail closed, never emulate chmod as security. Atomic replace must handle sharing violations with bounded retry, flush buffers, reject reparse points; instance lock uses named mutex/file locking with owner-scoped permissions. Root `%LOCALAPPDATA%/Fabric Switchboard`. Terminal adapter prefers Windows Terminal then PowerShell with argv-safe encoding, no token in commandline. Provider homes use environment variables; no symlink privilege requirement. Tauri uses WebView2; installer detection and accessibility checked on Windows 11. Signing/SmartScreen and update signatures are separate release tasks.
+## 12. Windows implementation and remaining acceptance
+The [native Windows adapter](../crates/switchboard-core/src/windows.rs) uses DPAPI CurrentUser encrypted envelopes with user-only protected DACLs. OAuth JSON can exceed Credential Manager's small-record limit, so one encrypted UUID file holds the bounded record. Private filesystem helpers validate ownership, reject reparse points and multi-link files, and use `MoveFileExW` replacement with write-through. A sharing violation fails without deleting the old state. Store's file lock enforces one owner. Root is `%LOCALAPPDATA%/ai.passioncode.fabric-switchboard`.
+
+The [shared launcher](../crates/switchboard-runtime/src/launch.rs) opens system PowerShell in a new console using a private UTF-8 BOM script and literal argument quoting; no credential is placed in commandline. The execution-policy override is child-scoped. Session identity is PID plus creation FILETIME. Provider homes use child environment variables; no symlink privilege is required. Tauri uses WebView2 with a current-user NSIS installer. Signing/SmartScreen and update signatures are separate release tasks. Every native claim is gated by the [release evidence](evidence/release-0.2.md).
 
 Windows acceptance: native vault roundtrip/denial/user separation, Unicode/spaces in paths, concurrent instances, interrupted write/restart, token redaction, Claude file credentials, Codex home, cancel/login, streaming route switch, system dark mode, keyboard and screen reader, installer/uninstall retains profiles unless explicit purge. Cross-compilation is not native verification.
 
@@ -102,7 +104,7 @@ UI: add/select/edit/remove with synthetic mock marked Demo only; production empt
 Live provider acceptance is separate: user supplies/uses authorized accounts through the built app; verify response identity and next-request switch on exact CLI versions. Until exercised, mark provider integration unverified even if fixture tests and app build pass. Distribution signing/notarization likewise not conflated with compiling a bundle.
 
 ## 14. Deliberate follow-on scope
-Automatic rotation, encrypted cross-device export, menu-bar monitoring, Desktop restart handoff, Windows release, self-update signatures, session supervisor, project-to-pool rules and Fabric provider admission are detailed follow-on packets. v0.1's local/manual capability must remain useful and honest without them. No implementation is marked complete merely because this specification describes it.
+Automatic rotation, encrypted cross-device export, menu-bar monitoring, Desktop restart handoff, native provider acceptance on Windows, self-update signatures, session supervisor, project-to-pool rules and Fabric provider admission remain follow-on work. The local/manual capability must remain useful and honest without them. No implementation is marked complete merely because this specification describes it.
 
 ## 15. Implementation-specific limits and receipts
 The isolated Codex OAuth snapshot preserves `id_token`, access token and account ID; its `last_refresh` is an RFC3339 local snapshot-write time, **not evidence of a provider refresh**. The native client requires the timestamp as well as tokens: [pinned upstream check](https://github.com/openai/codex/blob/e72da2b53805894878023d01949a25a082e0a5cb/codex-rs/login/src/auth/manager.rs#L580-L598). Refresh token is empty by design to avoid two refresh writers; expiry requires reauthentication. Canonical refresh material remains in Keychain. `codex_auth_snapshot` and its fixture guard this shape.
@@ -111,4 +113,12 @@ Working copies and generated scripts persist within app-owned directories; isola
 
 Usage currently collapses available valid windows to their maximum utilization, labelled as the highest reported window. It does not show separate per-window limits or predict exhaustion; resets_at is not populated by the JSON adapter. Failed observations preserve previous data. OAuth identity strings are source claims, not verified profile facts.
 
-Startup corruption/instance-lock failure currently writes a sanitized stderr message and stops; a graphical recovery screen is a follow-on task. The built app is unsigned for distribution, initial validation is Apple Silicon only. See [verification](evidence/verification.md) for exact checks, [operations](OPERATIONS.md) for recovery, and [acceptance packet](packets/provider-acceptance.md) for the first live pass.
+Startup corruption/instance-lock failure currently writes a sanitized stderr message and stops; a graphical recovery screen is a follow-on task. Signature and native-host status are recorded per artifact in [0.2 evidence](evidence/release-0.2.md); historical Apple Silicon validation remains in [0.1 verification](evidence/verification.md). See [operations](OPERATIONS.md) for recovery and [acceptance packet](packets/provider-acceptance.md) for the first live pass.
+
+## 16. CLI and owner control protocol
+
+The [CLI contract](CLI.md) defines account CRUD/selection, cached and probed usage, bounded activity, official login, isolated/managed launch and `serve`, with human and JSON output. Account import accepts at most 64 KiB through nonterminal stdin, never a token argument. Help/version do not open storage. Invalid arguments exit 2; operational failure exits 1. Credential bytes and control capabilities are absent from output.
+
+GUI and `serve` share [Runtime/Owner](../crates/switchboard-runtime/src/lib.rs). One owner holds Store, proxy, pending-login registry and a separate loopback control listener. Metadata commands prefer that owner; only missing/refused-before-request connections may attempt offline Store acquisition, which still requires the exclusive lock. Login and launch require a persistent owner.
+
+The [control protocol](../crates/switchboard-runtime/src/control.rs) has typed operations, protocol version 1, exact Host, no Origin/query/upgrade, constant-time bearer authentication, 128 KiB request and 4 MiB response limits. A private descriptor contains the random address and capability. Listener identity is proven by HMAC over a fresh challenge before sending a bearer or imported secret. The proof must remain bound to the same TCP connection used for the mutation; reconnect is refused. Unsafe descriptor permissions require owner restart and capability rotation. Mutating home lifecycle operations are serialized so removal cannot race a launch reservation. No control endpoint retrieves a credential or accepts an arbitrary upstream URL.

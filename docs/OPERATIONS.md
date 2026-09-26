@@ -1,26 +1,32 @@
 # Operation and recovery
 
-This describes v0.1 implementation boundaries; [verification](evidence/verification.md) is the execution receipt. The source of truth is [launch.rs](../src-tauri/src/launch.rs), [native IPC](../src-tauri/src/main.rs) and the [store](../crates/switchboard-core/src/lib.rs).
+This describes v0.2 implementation boundaries; [release evidence](evidence/release-0.2.md) records tested platforms. The source of truth is [launch.rs](../crates/switchboard-runtime/src/launch.rs), [shared runtime](../crates/switchboard-runtime/src/lib.rs), [native IPC](../src-tauri/src/main.rs) and the [store](../crates/switchboard-core/src/lib.rs).
 
 ## Data locations and ownership
 
-Tauri resolves macOS app data to `~/Library/Application Support/ai.passioncode.fabric-switchboard`. Do not paste its contents into issues: metadata includes account labels/IDs, and managed homes may contain credentials or provider conversation history.
+GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passioncode.fabric-switchboard`; Windows uses `%LOCALAPPDATA%/ai.passioncode.fabric-switchboard`. Do not paste its contents into issues: metadata includes account labels/IDs, and managed homes may contain credentials or provider conversation history.
 
 | Data | Location and protection | Lifetime |
 |---|---|---|
 | Canonical credential | Keychain service `ai.passioncode.fabric-switchboard`, UUID account | until explicit account removal |
+| Windows canonical credential | `vault/<UUID>.dpapi`, DPAPI CurrentUser encrypted, user-only protected DACL | until explicit account removal; bound to Windows user/machine context |
 | Account metadata/routes/events | atomic JSON beneath app data, private files | persisted; bounded event history |
 | Isolated CLI working copy | `homes/<account UUID>/`, 0700 directory, 0600 auth/settings | retained for history; removed by account removal while idle |
 | Managed CLI home | `runtimes/<provider>-<pool>/` | retained; generated capability valid only during one app lifetime |
 | Official login staging | `logins/<login UUID>/` | removed after Finish or successful Cancel |
 | Claude staged OAuth | provider Keychain service derived from staging path | removed after Finish/Cancel, only that derived service |
+| CLI control capability | private `control.json`, separate loopback address and token | rotated when GUI/serve starts; removed on normal shutdown |
 
 No background token refresh exists. Reauthenticate before expiry; a provider may invalidate a snapshot sooner. No token is sent to Fabric or written to the event journal. A same-user process can read that user's runtime files; 0600 is access control, not file encryption.
+
+Windows private filesystem operations use current-user DACLs, reject reparse points and multi-link files, and replace atomically with `MoveFileExW`. A sharing violation refuses the write while preserving the old file; there is no delete-then-rename fallback. DPAPI encrypts canonical credentials, while native CLI working copies remain private plaintext as required by the provider. Implementation and native fixtures: [windows.rs](../crates/switchboard-core/src/windows.rs).
 
 ## Ordinary failures
 
 - Missing CLI: install the official provider CLI, make it available in PATH, `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, then retry. This app never installs it automatically.
 - Keychain refused: grant access through normal macOS controls and retry. There is no plaintext vault fallback.
+- Windows vault refused: use the original Windows user context and verify profile access. Copying a DPAPI blob to another user is not an account migration method; reauthenticate instead.
+- Control capability refused: stop its GUI/serve owner, then restart it to rotate the capability. Do not bypass a live owner with manual file edits. An uncertain mutation result requires inspecting state before retrying.
 - Selected account removal refused: select another in the same provider/pool, or disable this one first. Removal is local, never a provider-side revocation.
 - Already-running home: close that CLI session before launching another with the same home. Selecting another route for its next request does not rewrite the home.
 - Usage unavailable: keep last observation and read the error; API keys and setup tokens are not promised subscription usage probes.
@@ -34,6 +40,8 @@ Keep the app open during official sign-in. Finish can be retried in the same app
 On app crash the in-memory pending-login registry is lost. The app does **not** silently delete leftover login homes or Keychain records at restart. Current recovery is explicit: close the matching Terminal, locate only the UUID under the app's `logins/`, and remove that staging folder and, for Claude, its matching derived Keychain service through Keychain Access after confirming ownership. Never delete the unscoped `Claude Code-credentials` item. Derivation is in `keychain_service` and tested in `service_matches_derived_name`; do not guess it from an account label. Restart sign-in with a new profile. A resumable pending-login registry is a follow-on feature, not current behavior.
 
 If Terminal never acknowledged a launch, `.launch-pending` remains in that home. Verify the corresponding Terminal/process is not running before removing **only that home’s marker**. The app deliberately does not guess that a slow launch has died. A stale `.session-pid` referencing an unrelated reused PID also refuses conservatively. PID identity supervision is a separate task.
+
+On Windows the launcher uses a new PowerShell console, a UTF-8 BOM script and a PID plus process-creation FILETIME marker. Environment changes and execution-policy bypass apply only to the child, not the machine. A closed/reused PID cannot authorize deletion of a currently matching owned process. Native provider login and interactive console acceptance remain separate from synthetic launcher fixtures.
 
 ## Corrupt metadata, backup and uninstall
 

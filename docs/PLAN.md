@@ -21,3 +21,7 @@ Next tasks in order:
 5. [DIST-01 signed distribution](packets/distribution.md).
 
 v0.1 is the local manual workbench and managed routing baseline. These pending packets are not represented as shipped. Runtime/session recovery and authentic client compatibility are more urgent than adding a tray icon or another routing heuristic.
+
+## 0.2 CLI and native distribution extension
+
+The operator promoted CLI, macOS signing and Windows build into current scope. [CLI release plan](CLI-RELEASE-PLAN.md) supersedes the original order for these items. Shared Runtime/Owner and CLI are implemented; Windows now has DPAPI, DACL and launcher implementations. Packaging uses exact-commit universal macOS and native Windows workflows. [0.2 release evidence](evidence/release-0.2.md) is the execution ledger; earlier table counts describe 0.1 only. PA-01, native Windows interactive acceptance, notarization and signed updates remain distinct gates.

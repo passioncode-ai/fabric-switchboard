@@ -1,50 +1,42 @@
 # Fabric Switchboard — start here
 
-**Objective:** research four account-switching implementations, design a detailed product, and build a new Fabric project for macOS with Windows planned.
-**Owner:** `passioncode-ai/fabric-switchboard`, private repository. **Branch:** `codex/bootstrap`. **Implementation:** `a80d86b9a1eded4646bdd9371c5affdce8c93895`; subsequent commits carry documentation/evidence only unless noted.
+**Objective:** research four account-switching implementations, specify and build a Fabric product; extension: CLI, Developer ID signed macOS app/CLI and a native Windows build.
+**Owner:** private `passioncode-ai/fabric-switchboard`. **Branch:** `codex/bootstrap`. This repository owns all source, decisions, task packets and verification records.
 
-Read [Russian product map](PRODUCT.ru.md) → [research](research/README.md) → [specification](SPEC.md) → [shared module contracts](CONTRACTS.md). [Verification](evidence/verification.md) distinguishes tested code, synthetic UI behavior and missing real-provider evidence. [Operations](OPERATIONS.md) names data ownership and recovery limits.
+Read [product map](PRODUCT.ru.md) → [research](research/README.md) → [specification](SPEC.md) → [shared contracts](CONTRACTS.md). Current delivery state is [0.2 release evidence](evidence/release-0.2.md); [0.1 verification](evidence/verification.md) is historical. [CLI](CLI.md), [operations](OPERATIONS.md) and [distribution](DISTRIBUTION.md) are the operating instructions.
 
-## Completed
+## Completed implementation
 
-- Researched the three supplied repositories plus explicitly chosen `farion1231/cc-switch`; recorded four fixed commits and 69 line-addressed source links.
-- Specified account lifecycle, native vault, per-pool routing, isolated/managed sessions, request/stream semantics, usage, failures, OS seams, UI, threat model and acceptance.
-- Built Tauri/Rust/TypeScript desktop implementation, macOS Keychain vault, atomic metadata, official-login adapters, per-home launch reservations, fixed-upstream HTTP/SSE proxy and bounded metadata activity.
-- Passed 36 default Rust tests, separate synthetic Keychain roundtrip, strict clippy/fmt, frontend build and macOS arm64 release bundle. Browser demo flows inspected with CUA. Source and document validators supplied.
-- Added nightly-only hosted workflow; it has not been run. No push/PR full-suite trigger and no signing secret.
+- Four fixed upstream commits researched with 69 line-addressed source links; Claude-swap, codex-account-switcher, subswapper and cc-switch. “Cloud Swap” interpreted as linked claude-swap; the fourth comparator was chosen explicitly because the request supplied three URLs.
+- Tauri/Rust/TypeScript workbench, per-provider/pool routing, native vault, atomic metadata, private official-login homes and HTTP/SSE proxy. A response keeps its immutable identity snapshot; selection affects the next request; no switcher-level replay.
+- Native `switchboard` CLI shares Runtime/Owner with GUI. CRUD, usage, events, official login, launch, JSON and serve; secret stdin only. Separate authenticated control API, private descriptor, HMAC identity proof and mutation on one TCP connection, no reconnect. Home lifecycle mutations serialize under the owner.
+- Windows DPAPI CurrentUser vault, user-only DACL, strict capability reads, reparse/hardlink refusal, atomic replacement, PowerShell child launcher and PID+creation-time identity.
+- Exact-commit universal macOS signing script and manual exact-commit Windows build workflow. Their existence is not the artifact receipt; see release evidence for actual execution.
 
-## Decisions and limits
+Source milestones: [CLI/shared runtime](https://github.com/passioncode-ai/fabric-switchboard/commit/ad0d42d), [Windows core](https://github.com/passioncode-ai/fabric-switchboard/commit/2d92329), [strict capability reads](https://github.com/passioncode-ai/fabric-switchboard/commit/970495c), [control connection and lifecycle fixes](https://github.com/passioncode-ai/fabric-switchboard/commit/9fba411). Subsequent integration changes and tested source SHAs are recorded in release evidence.
 
-“Cloud Swap” interpreted as linked `claude-swap`; fourth source chosen because request contained only three URLs. Organization inferred from existing Fabric ownership; working product name Fabric Switchboard. No global account takeover, global process kill, automatic rotation, background token refresh, Windows release or signed update has been shipped.
+## Decisions and open boundaries
 
-Canonical credentials stay in Keychain. Isolated CLI needs a private access-token working copy; managed mode only passes local capability. One account snapshot owns one whole response. Selection affects the next request. No switcher-level replay, even on 429. Codex identity token and last_refresh native requirements are explicitly handled; timestamp is a local snapshot write, not evidence of refresh.
+Canonical credentials stay in OS protection; isolated official CLI requires a private access-token working copy. No global account takeover, process kill, automatic account rotation or background token refresh. Pending login registry is in-memory; owner restart loses pending IDs and leaves explicit cleanup work. Managed clients require relaunch after owner restart. Quota is a timestamped observation, never inferred from an API-key subscription.
 
-Pending-login recovery is currently in-memory; app restart can leave staged auth to be cleaned deliberately. Managed clients need relaunch after app restart. PID reuse is conservatively refused. These are documented limitations, not concealed green checks.
+Native live-provider login/inference, interactive Windows installer/UI, two-Windows-user isolation and screen-reader acceptance are not replaced by synthetic fixtures. Signing and notarization are separate. Apple Developer ID cannot sign Windows binaries. Self-updates and general-availability claims remain outside the engineering beta.
 
 ## Exact next task
 
-Run [PA-01](packets/provider-acceptance.md). First unlock the Mac and inspect the built `.app` window: CUA was blocked because the machine was locked. Then the operator completes official sign-in with authorized test accounts and a bounded request budget; record exact Claude/Codex versions and verify genuine isolated/managed responses plus A→B request-boundary switching. Do not substitute reading current global credentials or fixture success for this test.
+First consult [release evidence](evidence/release-0.2.md) for pending artifact/signing work. Then execute [PA-01](packets/provider-acceptance.md) on an unlocked native host using authorized test accounts through the official login UI. Record exact Claude/Codex versions, isolated and managed responses, and A→B next-request switching. Do not read existing global credentials as a substitute. Fix observed defects with focused fixtures before repeating the affected acceptance.
 
-Fix any observed adapter defect with a synthetic regression fixture, then rerun affected acceptance. The follow-on [session supervisor](packets/session-supervisor.md), [automatic routing](packets/automatic-routing.md), [Windows](packets/windows.md) and [distribution](packets/distribution.md) packets all link the shared contracts. Their prerequisites and ownership are explicit.
+Bounded follow-ons: [CLI release plan](CLI-RELEASE-PLAN.md), [Windows acceptance](packets/windows.md), [distribution](packets/distribution.md), [session supervisor](packets/session-supervisor.md), [automatic routing](packets/automatic-routing.md). All link the shared contracts; no unmerged implementation-agent branch is a prerequisite.
 
-## Resume and local-only state
+## Reproduce and local-only state
 
 ```sh
 git clone --branch codex/bootstrap git@github.com:passioncode-ai/fabric-switchboard.git
 cd fabric-switchboard
 npm ci
 ./scripts/check.sh
-npm run app:build
+cargo build --release --locked -p switchboard-cli
 ```
 
-Source, specs and checks are durable in this repository. Local-only: `node_modules/`, `target/`, `dist/`, `artifacts/`, OS app data/Keychain and external comparison clones. Do not commit these, any user credential, provider home or environment file. Research source validation needs separate clones at `docs/research/sources.json` pins; no third-party program needs to be executed.
+Keep `node_modules/`, `target/`, `dist/`, `artifacts/`, OS app data, Keychain, provider homes, credentials and external research clones out of Git. Research validation uses separate clones at the pins in `docs/research/sources.json`; it does not execute third-party code. Observatory remains untouched; no Fabric parent submodule pin was changed.
 
-The implementation agents' work is integrated; no agent branch is a prerequisite. Observatory remains untouched and this is not yet a Fabric parent submodule. No central multi-repo index is required for a single owning repository.
-
-## Delivery receipt
-
-The first complete source/docs snapshot `a478941c7ab7f467ebfde36d592910d2e1fff79c` was pushed and independently fetched from `origin/codex/bootstrap`; `git ls-remote` returned that exact SHA. GitHub reports the repository private and default branch `codex/bootstrap`.
-
-A new remote clone of that commit ran `npm ci` and `./scripts/check.sh` successfully: TypeScript/Vite, 36 Rust tests, fmt, strict clippy, 26 Markdown files / 83 relative links / 0 errors. Its Git working tree remained clean. Cargo dependency/build cache was reused with an explicit `CARGO_TARGET_DIR`; project crates were recompiled from the fresh checkout. No source file, node_modules tree or untracked spec was copied into it. This proves fresh source checkout, not a cold offline build.
-
-This final handoff commit only adds the receipt and repository instructions; application source remains at the implementation baseline. Final remote HEAD equality is checked after pushing this entry. A source branch is not a package release, merger into an existing production branch, notarization or deployment.
+The initial 0.1 delivery at `a478941c7ab7f467ebfde36d592910d2e1fff79c` passed an independently fetched checkout, 36 tests and document validation with reused Cargo cache. This is historical evidence only. The current 0.2 remote SHA/fresh-checkout receipt belongs in the current release evidence. A pushed branch is available for handoff, not proof of a release, merge, notarization or deployment.
