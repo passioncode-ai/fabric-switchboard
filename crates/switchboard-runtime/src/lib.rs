@@ -1,6 +1,8 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod control;
 pub mod external;
+#[cfg(target_os = "macos")]
+mod external_keychain;
 pub mod launch;
 mod monitor;
 use serde::{Deserialize, Serialize};
@@ -113,6 +115,14 @@ impl Runtime {
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        // Metadata reads do not wait behind OS credential prompts or network probes.
+        // Store snapshot has its own lock; these operations cannot change auth or homes.
+        if matches!(
+            operation,
+            Operation::Snapshot | Operation::Status | Operation::MonitorStatus
+        ) {
+            return execute(self.store.clone(), &self.root, Some(self), operation).await;
+        }
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
         let _mutation = self.mutations.lock().await;
@@ -436,6 +446,26 @@ fn activate_native(store: &Store, id: &str, expected_id: Option<&str>) -> Result
 mod owner_tests {
     use super::*;
     use switchboard_core::{private_fs, MemoryVault};
+    #[tokio::test]
+    async fn workbench_metadata_stays_available_during_a_reserved_mutation() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::open(root.path().to_owned(), Arc::new(MemoryVault::default()))
+            .await
+            .unwrap();
+        let _reservation = runtime.mutations.lock().await;
+        for operation in [
+            Operation::Snapshot,
+            Operation::Status,
+            Operation::MonitorStatus,
+        ] {
+            let response = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                runtime.execute(operation),
+            )
+            .await;
+            assert!(response.unwrap().is_ok());
+        }
+    }
     #[tokio::test]
     async fn home_cleanup_waits_for_the_owners_launch_reservation() {
         let root = tempfile::tempdir().unwrap();

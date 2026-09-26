@@ -19,3 +19,6 @@ Read AGENTS, HANDOFF, INSTALL, DISTRIBUTION, release-0.3.1 evidence, native setu
 4. Commit/push owning repositories and verify remote SHAs.
 
 Apple authorization is a material prerequisite: asked for existing notary profile or operator-local setup. Do not claim public launch repair while Gatekeeper rejects the archive. Native Windows and real-provider acceptance remain separate.
+
+## Scope extension and measured correction
+Operator explicitly requested investigation of the real authorized session and complete import workflow. Read-only Keychain/source discovery is authorized, as are app-owned capture/import, quota checks and installing the final app. External login is present; bounded system `security` succeeds where framework reader reports unavailable. Six profiles imported with zero failures; current identity matches and live quota returns two windows. The earlier empty-sign-in message came from an isolated diagnostic home; subsequent checks use the actual configured homes under this explicit authorization. No external native account replacement or paid inference is needed to verify this repair.

@@ -3,7 +3,7 @@ import './style.css';
 import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
-import { demo, native, nativeAdapter, safeError } from './adapter';
+import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { Account, Adapter, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -57,12 +57,22 @@ function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLEle
 async function reload() {
   if (!native && !demo) { loading = false; render(); return; }
   loading = true; loadError = ''; render();
-  const [data, status] = await Promise.allSettled([adapter.snapshot(), adapter.runtime(), refreshContext()]);
+  const [data, status] = await Promise.allSettled([adapter.snapshot(), adapter.runtime()]);
   if (data.status === 'fulfilled') snapshot = data.value;
   else { loadError = safeError(data.reason); announce(loadError); }
   if (status.status === 'fulfilled') { runtime = status.value; runtimeError = false; }
   else { runtime = null; runtimeError = true; }
   loading = false; render();
+  // OS credential prompts must not hold the entire workbench in its loading state.
+  void refreshContext().then(() => {
+    if (!busy && !loading && !document.querySelector('dialog')) {
+      const key = (document.activeElement as HTMLElement)?.dataset.focus;
+      render(); restoreFocus(key);
+    }
+    if (native && data.status === 'fulfilled' && status.status === 'fulfilled' && currentAccounts && monitor) {
+      void reportFrontendReady().catch(() => { /* Smoke runner owns the deadline. */ });
+    }
+  });
 }
 async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string) {
   busy = true; notice = ''; render();
@@ -252,6 +262,7 @@ async function dialogSave(context: DialogContext, action: () => Promise<unknown>
 }
 function addDialog() {
   const context = openDialog('Add account', 'Capture an account already signed in to the CLI, or sign in with another account.');
+  context.body.append(button('Import Claude Swap', () => { context.close(); importDialog(); }, 'button'));
   const provider = select([['claude', 'Claude Code'], ['codex', 'Codex CLI']]);
   const method = select([['capture', 'Capture current CLI account'], ['login', 'Official sign-in with another account'], ['api_key', 'API key'], ['setup_token', 'Claude setup token'], ['oauth', 'Import OAuth JSON']]);
   const label = input(); label.maxLength = 80; label.placeholder = 'e.g. Studio';

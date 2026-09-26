@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import ts from 'typescript';
+import { readFileSync } from 'node:fs';
+const compiled = ts.transpileModule(readFileSync(new URL('../src/read-deadline.ts', import.meta.url), 'utf8'), {compilerOptions: {module: ts.ModuleKind.ESNext}}).outputText;
+const {readWithDeadline, READ_TIMEOUT} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+assert.equal(await readWithDeadline(Promise.resolve('ready'), 50), 'ready');
+await assert.rejects(readWithDeadline(Promise.reject(new Error('denied')), 50), /denied/);
+await assert.rejects(readWithDeadline(new Promise(() => {}), 10), {message: READ_TIMEOUT});
+let finish;
+const late = new Promise(resolve => { finish = resolve; });
+await assert.rejects(readWithDeadline(late, 10), {message: READ_TIMEOUT});
+finish('too late');
+assert.equal(await readWithDeadline(Promise.resolve('retry ready'), 50), 'retry ready');
+console.log('5 read-deadline cases passed; stalled/late IPC cannot hold loading forever.');

@@ -174,11 +174,7 @@ impl Reader for Native {
     fn keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
         #[cfg(target_os = "macos")]
         {
-            match security_framework::passwords::get_generic_password(service, account) {
-                Ok(bytes) if bytes.len() <= SECRET_CAP => Ok(Some(bytes)),
-                Err(e) if e.code() == -25300 => Ok(None),
-                _ => Err("Keychain unavailable. Unlock it and allow access, then retry.".into()),
-            }
+            crate::external_keychain::read(service, account)
         }
         #[cfg(not(target_os = "macos"))]
         {

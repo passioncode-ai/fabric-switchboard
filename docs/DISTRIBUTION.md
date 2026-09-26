@@ -10,10 +10,12 @@ Build prerequisites: Node/npm, Rust Apple Silicon + Intel targets, Xcode Command
 
 ```sh
 npm ci
-python3 scripts/build_macos.py --identity 'Developer ID Application: YOUR NAME (YOURTEAM)' --arch universal
+python3 scripts/build_macos.py --identity 'Developer ID Application: YOUR NAME (YOURTEAM)' --arch universal --notary-profile switchboard-notary
 ```
 
-This builds app plus `switchboard` CLI, combines the CLI architectures with lipo, signs both with hardened runtime and trusted timestamp, then verifies signatures strictly. Output lives in ignored `artifacts/`, with a sibling JSON receipt containing source commit and SHA-256. A clean source tree is required and the exact source SHA is captured before compilation, then checked again. Both executables are checked with lipo. Existing output folders, ZIPs or receipts are refused to preserve previous artifacts.
+For local engineering builds while Apple authorization is unavailable, explicitly add `--allow-unnotarized` instead of `--notary-profile`. The default refuses to produce a public signed-only build. If selected Xcode is unusable, the script checks and uses installed Command Line Tools only for its child processes; no global setting or license acceptance is changed.
+
+This builds app plus `switchboard` CLI, combines the CLI architectures with lipo, signs both with hardened runtime and trusted timestamp, then verifies signatures strictly. Output lives in ignored `artifacts/`, with a sibling JSON receipt containing source commit and SHA-256. A clean source tree is required and the exact source SHA is captured before compilation, then checked again. Both executables are checked with lipo. The signed desktop must also pass `scripts/smoke_native.py`: bundled UI renders, native snapshot/status/current-account/monitor IPC completes and the app emits a versioned readiness marker before exiting. This mode uses an empty temporary store, memory vault and stub current identity; no provider auth is read. Existing output folders, ZIPs or receipts are refused to preserve previous artifacts.
 
 If a **saved** notarytool profile exists, add `--notary-profile PROFILE_NAME`. The tool submits the archive to Apple, waits for `Accepted`, staples/validates the app ticket and repackages. CLI notarization is assessed online using the notarized code hash; an individual Mach-O does not accept an app staple. Submission ID/status are saved before waiting. Resume a retained signed archive with `python3 scripts/build_macos.py --notarize-existing artifacts/RECEIPT.json --notary-profile PROFILE_NAME`; the archive hash is checked first. No Apple password or key is a script argument. Do not call a signed-only archive notarized or claim Gatekeeper acceptance without an actual assessment.
 
@@ -48,3 +50,13 @@ The script adjusts PATH only for its child processes and lets cargo-xwin use its
 ## Sources
 
 The implementation procedure follows [Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos/), [Tauri Windows installer support](https://v2.tauri.app/distribute/windows-installer/) and [Apple Developer ID distribution](https://developer.apple.com/developer-id/). Platform protection is based on native Windows APIs; [DPAPI current-user behavior](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata) distinguishes user-bound protection from machine-wide decryption.
+
+## Configure Apple notarization locally
+
+The installed Developer ID certificate signs code; it does not authenticate submissions to Apple. In your own Terminal, use the interactive prompt (never paste an Apple password into chat):
+
+```sh
+xcrun notarytool store-credentials switchboard-notary --team-id KJ35UYYL22
+```
+
+Enter the Apple ID and its app-specific password in that local prompt. Alternatively configure an authorized App Store Connect API key profile locally. Then supply only the profile name `switchboard-notary` to the build/resume command. A release can be called notarized only after Accepted, staple validation and Gatekeeper assessment succeed.

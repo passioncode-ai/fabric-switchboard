@@ -1,17 +1,19 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Adapter } from './types';
+import { readWithDeadline, READ_TIMEOUT } from './read-deadline';
+export const reportFrontendReady = () => invoke('frontend_ready');
 
 export const native = isTauri();
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
-  snapshot: () => invoke('snapshot'),
-  currentAccounts: () => invoke('current_accounts'),
+  snapshot: () => readWithDeadline(invoke('snapshot')),
+  currentAccounts: () => readWithDeadline(invoke('current_accounts')),
   captureCurrent: (input) => invoke('capture_current', { ...input }),
   importClaudeSwap: (pool) => invoke('import_claude_swap', { pool }),
   activateNative: (id) => invoke('activate_native', { id }),
   setPolicy: (policy) => invoke('set_policy', { policy }),
-  monitorStatus: () => invoke('monitor_status'),
-  runtime: () => invoke('runtime_status'),
+  monitorStatus: () => readWithDeadline(invoke('monitor_status')),
+  runtime: () => readWithDeadline(invoke('runtime_status')),
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
   remove: (id) => invoke('remove_account', { id }),
@@ -26,6 +28,7 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  READ_TIMEOUT,
   'Disable the existing Claude CLI rotation policy before enabling another pool.',
   'Claude account lock was lost after credential write. Sign in through Claude before retrying.',
   'Provider CLI not found. Install the official CLI and retry.',

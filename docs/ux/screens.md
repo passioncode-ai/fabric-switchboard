@@ -23,3 +23,6 @@ Scenarios: SCN-018 through SCN-022. Current CLI identity panel, capture-first ad
 
 ## Shared chrome and identity (0.3.1)
 SCN-023 covers the fixed dark register, yellow S icon, Switchboard / by PassionCode sidebar, and separate information-blue current-CLI versus gold next-request status. Component structure and account behavior remain unchanged. Native icons are generated from the same canonical SVG via `node scripts/generate-icons.mjs`. Native controls remain the existing component layer; no kit migration or animation added. Browser rendering evidence and limits: [0.3.1 design evidence](../evidence/design-0.3.1.md).
+
+## Startup and import recovery (0.3.2)
+SCN-024: primary metadata loads independently of external credential observation; bounded native reads expose Retry. SCN-019: Import Claude Swap remains on Accounts and is also directly reachable from Add account. No visual theme changes.

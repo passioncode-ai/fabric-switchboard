@@ -1,5 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+struct SmokeMode(Option<tempfile::TempDir>);
+
+#[tauri::command]
+fn frontend_ready(app: tauri::AppHandle, mode: State<'_, SmokeMode>) {
+    if mode.0.is_some() {
+        println!("SWITCHBOARD_FRONTEND_READY {}", env!("CARGO_PKG_VERSION"));
+        app.exit(0);
+    }
+}
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{default_root, Operation, Owner};
 use tauri::{Manager, State};
@@ -9,7 +20,16 @@ async fn snapshot(state: State<'_, Owner>) -> Result<Value, String> {
     state.runtime.execute(Operation::Snapshot).await
 }
 #[tauri::command]
-async fn current_accounts(state: State<'_, Owner>) -> Result<Value, String> {
+async fn current_accounts(
+    state: State<'_, Owner>,
+    mode: State<'_, SmokeMode>,
+) -> Result<Value, String> {
+    if mode.0.is_some() {
+        return Ok(json!({
+            "claude": {"status":"missing", "identity":null, "account_id":null},
+            "codex": {"status":"missing", "identity":null, "account_id":null}
+        }));
+    }
     state.runtime.execute(Operation::CurrentAccounts).await
 }
 #[tauri::command]
@@ -153,15 +173,34 @@ async fn probe_usage(id: String, state: State<'_, Owner>) -> Result<Value, Strin
     state.runtime.execute(Operation::Usage { id }).await
 }
 fn main() {
+    let smoke = std::env::args().any(|argument| argument == "--smoke-test");
     let result = tauri::Builder::default()
-        .setup(|app| {
-            let root = default_root().map_err(std::io::Error::other)?;
-            let owner = tauri::async_runtime::block_on(Owner::native(root))
-                .map_err(std::io::Error::other)?;
+        .setup(move |app| {
+            let temporary = if smoke {
+                Some(
+                    tempfile::Builder::new()
+                        .prefix("switchboard-smoke-")
+                        .tempdir()?,
+                )
+            } else {
+                None
+            };
+            let owner = if let Some(directory) = &temporary {
+                tauri::async_runtime::block_on(Owner::start(
+                    directory.path().to_owned(),
+                    Arc::new(switchboard_core::MemoryVault::default()),
+                ))
+            } else {
+                let root = default_root().map_err(std::io::Error::other)?;
+                tauri::async_runtime::block_on(Owner::native(root))
+            }
+            .map_err(std::io::Error::other)?;
             app.manage(owner);
+            app.manage(SmokeMode(temporary));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            frontend_ready,
             snapshot,
             current_accounts,
             capture_current,
@@ -183,5 +222,6 @@ fn main() {
         .run(tauri::generate_context!());
     if result.is_err() {
         eprintln!("Fabric Switchboard could not start. Check app-data permissions, another running instance and native vault access.");
+        std::process::exit(1);
     }
 }

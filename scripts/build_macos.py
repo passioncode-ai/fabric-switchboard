@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build and Developer-ID sign app + CLI; preserve resumable notarization receipts."""
 import argparse
+import os
+from smoke_native import verify as verify_native_startup
 import hashlib
 import json
 from pathlib import Path
@@ -91,6 +93,8 @@ def notarize(receipt_path, profile):
             run(['/usr/bin/codesign', '--verify', '--deep', '--strict', str(item)])
         run(['xcrun', 'stapler', 'staple', str(app)])
         run(['xcrun', 'stapler', 'validate', str(app)])
+        run(['/usr/sbin/spctl', '--assess', '--type', 'execute', '--verbose=2', str(app)])
+        receipt['notarization']['gatekeeper_accepted'] = True
         replacement = staging / 'stapled.zip'
         archive_folder(folder, replacement)
         # Atomic publication keeps the original ZIP intact on failure.
@@ -105,10 +109,22 @@ def main():
     parser.add_argument('--identity', help='Exact installed Developer ID Application name or SHA-1')
     parser.add_argument('--notary-profile', help='Existing notarytool profile name, never a password')
     parser.add_argument('--notarize-existing', type=Path, help='Resume from an existing adjacent receipt JSON')
+    parser.add_argument('--allow-unnotarized', action='store_true', help='Explicit local engineering build; does not pass public Gatekeeper acceptance')
     parser.add_argument('--arch', choices=['universal', 'arm64'], default='universal')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('This command requires macOS.')
+    # Use a working installed toolchain without accepting a license or changing xcode-select.
+    if 'DEVELOPER_DIR' not in os.environ:
+        probe = subprocess.run(['xcrun', '--show-sdk-version'], capture_output=True)
+        clt = Path('/Library/Developer/CommandLineTools')
+        if probe.returncode and clt.is_dir():
+            env = dict(os.environ, DEVELOPER_DIR=str(clt))
+            if subprocess.run(['xcrun', '--show-sdk-version'], env=env, capture_output=True).returncode == 0:
+                os.environ['DEVELOPER_DIR'] = str(clt)
+                print('Using installed Command Line Tools for this build only.')
+    if not args.notary_profile and not args.allow_unnotarized:
+        parser.error('Public macOS builds require --notary-profile. For local engineering only, explicitly use --allow-unnotarized.')
     if args.notarize_existing:
         if not args.notary_profile:
             parser.error('--notarize-existing requires --notary-profile')
@@ -149,12 +165,13 @@ def main():
     for binary in (cli, app):
         run(['/usr/bin/codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', identity_hash, str(binary)])
         run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=2', str(binary)])
+    startup = verify_native_startup(app/'Contents/MacOS/fabric-switchboard', version)
     (folder/'README.txt').write_text(f'Fabric Switchboard {version}\nMove the app to Applications. CLI: ./switchboard --help\nKeep GUI or switchboard serve open for managed sessions. See repository docs/CLI.md.\nSignature and notarization differ; see the adjacent release receipt JSON.\n')
     archive = Path(str(folder)+'.zip')
     archive_folder(folder, archive)
     verify_source(commit)
     toolchain = {'rustc': capture(['rustc', '--version']), 'node': capture(['node', '--version']), 'macos': capture(['sw_vers', '-productVersion']), 'sdk': capture(['xcrun', '--show-sdk-version'])}
-    receipt = {'version':version, 'commit':commit, 'source_clean':True, 'toolchain':toolchain, 'architectures':architectures, 'developer_id_identity':identity_name, 'signing_certificate_sha1':identity_hash, 'signature_verified':True, 'notarization':{'status':'NOT_RUN','reason':'No notarytool profile supplied'}, 'cli_sha256':sha(cli), 'archive_sha256':sha(archive), 'archive':archive.name, 'folder':folder.name}
+    receipt = {'version':version, 'commit':commit, 'source_clean':True, 'toolchain':toolchain, 'architectures':architectures, 'developer_id_identity':identity_name, 'signing_certificate_sha1':identity_hash, 'signature_verified':True, 'native_startup':startup, 'notarization':{'status':'NOT_RUN','reason':'No notarytool profile supplied'}, 'cli_sha256':sha(cli), 'archive_sha256':sha(archive), 'archive':archive.name, 'folder':folder.name}
     receipt_path = ARTIFACTS/(folder.name+'-receipt.json')
     save(receipt_path, receipt)
     if args.notary_profile:

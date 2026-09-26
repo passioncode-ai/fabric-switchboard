@@ -10,3 +10,4 @@ switchboard-runtime = { path = "../crates/switchboard-runtime" }
 switchboard-core = { path = "../crates/switchboard-core" }
 tauri = { version = "2", features = [] }
 serde_json.workspace = true
+tempfile = "3"

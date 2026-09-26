@@ -31,6 +31,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-021 | Inspect quota windows and failed checks | validated |
 | SCN-022 | Configure and stop automatic rotation | validated |
 | SCN-023 | Recognize Switchboard across desktop surfaces | validated |
+| SCN-024 | Open the app and recover a delayed startup | validated |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -444,5 +445,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Status:** validated
 **Meaning:** operator explicitly requested the dark/gold PassionCode system and S icon; observed product outcome remains separate.
 **Coverage:** [0.3.1 design evidence](../evidence/design-0.3.1.md); browser fixtures only; native/live acceptance NOT_RUN.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-024 — Open the app and recover a delayed startup
+**Persona:** P-01
+**Goal:** Open the account workbench without waiting indefinitely for native identity checks.
+**Preconditions:** Supported macOS/Windows; native startup verification uses a temporary empty store and memory vault.
+**Entry point:** App launcher → SCR-01 Accounts
+**Steps:**
+1. Open Switchboard → account metadata and runtime status load; native CLI identity loads independently.
+2. If a metadata read stops responding → loading ends with an actionable error and Retry.
+**Alt paths:** A delayed current-account read leaves the main account list usable and reports identity unavailable. Mutation completion is never inferred from a timeout.
+**Expected result:** No indefinite startup spinner. A package smoke check requires frontend render and native round trips from the built executable.
+**UI elements:** loading state, account list, current identity, Retry.
+**States covered:** loading, empty, ready, unavailable, retry
+**Errors & recovery:** Native reads time out after 12 seconds; Retry requests fresh metadata. Existing in-flight mutations are not replayed.
+**Status:** validated
+**Meaning:** implements the operator request to repair launch and verify the distributed build.
+**Coverage:** pending focused and native build checks in launch-repair evidence.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
