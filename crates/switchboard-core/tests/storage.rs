@@ -1,0 +1,559 @@
+use std::{
+    fs,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+use switchboard_core::{Account, AuthKind, Credential, MemoryVault, Provider, Store, Usage, Vault};
+use tempfile::TempDir;
+
+fn token(value: &str) -> Credential {
+    Credential::parse(Provider::Claude, AuthKind::ApiKey, value).unwrap()
+}
+fn setup() -> (TempDir, Arc<MemoryVault>, Store) {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(MemoryVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    (root, vault, store)
+}
+fn add(store: &Store, secret: &str) -> Account {
+    store
+        .add(
+            "Synthetic account".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token(secret),
+        )
+        .unwrap()
+}
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+#[test]
+fn parses_provider_formats_and_rejects_invalid_credentials() {
+    let c = Credential::parse(Provider::Claude, AuthKind::OAuth, r#"{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic-refresh","expiresAt":2000000000000}}"#).unwrap();
+    assert_eq!(c.expires_at, Some(2000000000));
+    let c = Credential::parse(Provider::Codex, AuthKind::OAuth, r#"{"tokens":{"access_token":"synthetic","refresh_token":"synthetic-refresh","account_id":"account-claimed"}}"#).unwrap();
+    assert_eq!(c.account_id.as_deref(), Some("account-claimed"));
+    for bad in ["", "a\nb", "a b", "a\0b", "a\rb", "é"] {
+        assert!(Credential::parse(Provider::Claude, AuthKind::ApiKey, bad).is_err());
+    }
+    assert!(Credential::parse(Provider::Codex, AuthKind::SetupToken, "synthetic").is_err());
+    assert!(!Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        "synthetic-sensitive-invalid"
+    )
+    .err()
+    .unwrap()
+    .contains("synthetic-sensitive"));
+    assert!(Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        r#"{"claudeAiOauth":{"accessToken":"synthetic","expiresAt":"later"}}"#
+    )
+    .is_err());
+    assert!(Credential::parse(
+        Provider::Codex,
+        AuthKind::OAuth,
+        r#"{"tokens":{"access_token":"synthetic","account_id":"bad\r\nheader"}}"#
+    )
+    .is_err());
+    assert!(Credential::parse(Provider::Claude, AuthKind::ApiKey, &"x".repeat(65_537)).is_err());
+}
+
+#[test]
+fn codex_jwt_expiry_is_a_hint_not_a_verified_identity() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    let body =
+        URL_SAFE_NO_PAD.encode(br#"{"exp":1700000000,"email":"unverified@example.invalid"}"#);
+    let json =
+        serde_json::json!({"tokens":{"access_token":format!("header.{body}.synthetic-signature")}})
+            .to_string();
+    let c = Credential::parse(Provider::Codex, AuthKind::OAuth, &json).unwrap();
+    assert_eq!(c.expires_at, Some(1700000000));
+    assert!(c.account_id.is_none());
+}
+
+#[test]
+fn lifecycle_routes_are_scoped_and_survive_restart_without_secret_metadata() {
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-secret-alpha");
+    let b = add(&store, "synthetic-secret-beta");
+    store.select(Provider::Claude, "default", &a.id).unwrap();
+    let captured = store.route(Provider::Claude, "default").unwrap();
+    store.select(Provider::Claude, "default", &b.id).unwrap();
+    assert_eq!(captured.0.id, a.id);
+    assert_eq!(captured.1.access_token, "synthetic-secret-alpha");
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b.id);
+    assert!(store.select(Provider::Codex, "default", &a.id).is_err());
+    assert!(store.select(Provider::Claude, "work", &a.id).is_err());
+    assert!(store.route(Provider::Claude, "work").is_err());
+    assert!(store.remove(&b.id).is_err());
+    store.update(&b.id, "Disabled".into(), false).unwrap();
+    assert!(store.route(Provider::Claude, "default").is_err());
+    assert!(store.select(Provider::Claude, "default", &b.id).is_err());
+    store.remove(&b.id).unwrap();
+    assert!(vault.get(&b.id).is_err());
+    store.select(Provider::Claude, "default", &a.id).unwrap();
+    let before = serde_json::to_value(store.snapshot().unwrap()).unwrap();
+    drop(store);
+    let store = Store::open(root.path().into(), vault).unwrap();
+    assert_eq!(
+        before,
+        serde_json::to_value(store.snapshot().unwrap()).unwrap()
+    );
+    let disk = fs::read_to_string(root.path().join("accounts.json")).unwrap();
+    assert!(!disk.contains("synthetic-secret"));
+    assert!(!disk.contains("access_token"));
+}
+
+#[test]
+fn duplicates_are_secret_and_pool_based_and_direct_structs_are_validated() {
+    let (_root, _vault, store) = setup();
+    add(&store, "synthetic");
+    assert!(store
+        .add(
+            "Different label".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic")
+        )
+        .is_err());
+    store
+        .add(
+            "Different pool".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "work".into(),
+            token("synthetic"),
+        )
+        .unwrap();
+    add(&store, "synthetic-other");
+    for pool in ["", "../work", "Work", "has space"] {
+        assert!(store
+            .add(
+                "Label".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                pool.into(),
+                token("synthetic-new")
+            )
+            .is_err());
+    }
+    assert!(store
+        .add(
+            " ".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-new")
+        )
+        .is_err());
+    assert!(store
+        .add(
+            "Label".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential {
+                access_token: "unsafe\nheader".into(),
+                refresh_token: None,
+                expires_at: None,
+                account_id: None
+            }
+        )
+        .is_err());
+}
+
+#[test]
+fn expired_or_missing_credentials_never_become_selected() {
+    let (_root, vault, store) = setup();
+    let a = store
+        .add(
+            "Expired".into(),
+            Provider::Codex,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential {
+                access_token: "synthetic".into(),
+                refresh_token: None,
+                expires_at: Some(now() - 1),
+                account_id: None,
+            },
+        )
+        .unwrap();
+    assert!(store.select(Provider::Codex, "default", &a.id).is_err());
+    assert!(store.credential(&a.id).is_err());
+    let b = add(&store, "synthetic-live");
+    store.select(Provider::Claude, "default", &b.id).unwrap();
+    vault.delete(&b.id).unwrap();
+    assert!(store.route(Provider::Claude, "default").is_err());
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 2);
+}
+
+#[test]
+fn lock_contends_and_releases_on_drop() {
+    let (root, vault, store) = setup();
+    assert!(Store::open(root.path().into(), vault.clone()).is_err());
+    drop(store);
+    assert!(Store::open(root.path().into(), vault).is_ok());
+}
+
+#[test]
+fn corruption_unknown_schema_and_oversized_metadata_fail_closed() {
+    for content in ["invalid".to_owned(), r#"{"schema_version":42,"snapshot":{"accounts":[],"routes":{},"events":[]}}"#.into(), "x".repeat(2 * 1024 * 1024 + 1), r#"{"schema_version":1,"snapshot":{"accounts":[],"routes":{"claude:default":"unknown"},"events":[]}}"#.into()] {
+        let root = TempDir::new().unwrap(); fs::write(root.path().join("accounts.json"), content).unwrap();
+        assert!(Store::open(root.path().into(), Arc::new(MemoryVault::default())).is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn private_permissions_and_symlink_and_hardlink_refusal() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let (root, vault, store) = setup();
+    add(&store, "synthetic");
+    assert_eq!(
+        fs::metadata(root.path()).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(root.path().join("accounts.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(root.path().join("instance.lock"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    drop(store);
+    let other = TempDir::new().unwrap();
+    symlink(root.path(), other.path().join("linked-root")).unwrap();
+    assert!(Store::open(other.path().join("linked-root"), vault.clone()).is_err());
+    fs::rename(
+        root.path().join("accounts.json"),
+        root.path().join("safe.json"),
+    )
+    .unwrap();
+    symlink(
+        root.path().join("safe.json"),
+        root.path().join("accounts.json"),
+    )
+    .unwrap();
+    assert!(Store::open(root.path().into(), vault.clone()).is_err());
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::hard_link(
+        root.path().join("safe.json"),
+        root.path().join("accounts.json"),
+    )
+    .unwrap();
+    assert!(Store::open(root.path().into(), vault.clone()).is_err());
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::remove_file(root.path().join("instance.lock")).unwrap();
+    symlink(
+        root.path().join("safe.json"),
+        root.path().join("instance.lock"),
+    )
+    .unwrap();
+    assert!(Store::open(root.path().into(), vault).is_err());
+}
+
+#[derive(Default)]
+struct FaultVault {
+    memory: MemoryVault,
+    fail_put: AtomicBool,
+    fail_delete: AtomicBool,
+    fail_get: AtomicBool,
+    written_ids: std::sync::Mutex<Vec<String>>,
+}
+impl Vault for FaultVault {
+    fn put(&self, id: &str, c: &Credential) -> Result<(), String> {
+        if self.fail_put.load(Ordering::SeqCst) {
+            Err("synthetic-sensitive-error".into())
+        } else {
+            self.written_ids.lock().unwrap().push(id.into());
+            self.memory.put(id, c)
+        }
+    }
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        if self.fail_get.load(Ordering::SeqCst) {
+            Err("synthetic-sensitive-error".into())
+        } else {
+            self.memory.get(id)
+        }
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        if self.fail_delete.load(Ordering::SeqCst) {
+            Err("synthetic-sensitive-error".into())
+        } else {
+            self.memory.delete(id)
+        }
+    }
+}
+
+#[test]
+fn vault_failures_preserve_state_and_never_echo_secret_errors() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    let e = store
+        .add(
+            "Label".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic"),
+        )
+        .err()
+        .unwrap();
+    assert!(!e.contains("sensitive"));
+    assert!(store.snapshot().unwrap().accounts.is_empty());
+    vault.fail_put.store(false, Ordering::SeqCst);
+    let a = add(&store, "synthetic");
+    vault.fail_delete.store(true, Ordering::SeqCst);
+    assert!(store.remove(&a.id).is_err());
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 1);
+    vault.fail_get.store(true, Ordering::SeqCst);
+    assert!(store.select(Provider::Claude, "default", &a.id).is_err());
+    assert!(store.snapshot().unwrap().routes.is_empty());
+}
+
+#[test]
+fn disk_failure_rolls_back_memory_and_added_secret() {
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-existing");
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store.update(&a.id, "Changed".into(), false).is_err());
+    assert!(store.snapshot().unwrap().accounts[0].enabled);
+    assert!(store
+        .add(
+            "New".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-new")
+        )
+        .is_err());
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 1);
+    fs::remove_dir(root.path().join("accounts.json")).unwrap();
+    // A second add with the same token works after rollback and recovery.
+    add(&store, "synthetic-new");
+    assert!(vault.get(&a.id).is_ok());
+}
+
+#[test]
+fn failed_removal_publication_leaves_visible_unusable_account_and_retry_recovers() {
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic");
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store.remove(&a.id).is_err());
+    assert!(vault.get(&a.id).is_err());
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 1);
+    assert!(store.select(Provider::Claude, "default", &a.id).is_err());
+    fs::remove_dir(root.path().join("accounts.json")).unwrap();
+    store.remove(&a.id).unwrap();
+    assert!(store.snapshot().unwrap().accounts.is_empty());
+}
+
+#[test]
+fn usage_validates_bounds_and_preserves_previous_observation() {
+    let (_root, _vault, store) = setup();
+    let a = add(&store, "synthetic");
+    let good = Usage {
+        used_percent: 0.0,
+        observed_at: now(),
+        resets_at: Some(now() + 500),
+        source: "claude_oauth".into(),
+    };
+    store.observe(&a.id, good.clone()).unwrap();
+    for n in [f64::NAN, f64::INFINITY, -0.1, 100.1] {
+        let mut bad = good.clone();
+        bad.used_percent = n;
+        assert!(store.observe(&a.id, bad).is_err());
+    }
+    let mut bad = good.clone();
+    bad.source = "synthetic-sensitive-provider-body".into();
+    assert!(store.observe(&a.id, bad).is_err());
+    let mut bad = good.clone();
+    bad.observed_at = now() + 3600;
+    assert!(store.observe(&a.id, bad).is_err());
+    let mut bad = good.clone();
+    bad.observed_at -= 1;
+    assert!(store.observe(&a.id, bad).is_err());
+    assert_eq!(
+        store.snapshot().unwrap().accounts[0]
+            .usage
+            .as_ref()
+            .unwrap()
+            .used_percent,
+        0.0
+    );
+}
+
+#[test]
+fn events_are_allowlisted_bounded_and_persisted() {
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic");
+    assert!(store
+        .record("request", Some(&a.id), "synthetic-secret-provider-body")
+        .is_err());
+    assert!(store
+        .record("synthetic-sensitive-action", None, "success")
+        .is_err());
+    assert!(store
+        .record("request", Some("synthetic-secret-id"), "success")
+        .is_err());
+    for _ in 0..270 {
+        store.record("request", Some(&a.id), "success").unwrap();
+    }
+    assert_eq!(store.snapshot().unwrap().events.len(), 256);
+    drop(store);
+    assert_eq!(
+        Store::open(root.path().into(), vault)
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .events
+            .len(),
+        256
+    );
+}
+
+#[test]
+fn concurrent_updates_are_serialized_without_lost_accounts() {
+    let (_root, _, store) = setup();
+    let store = Arc::new(store);
+    let threads: Vec<_> = (0..16)
+        .map(|n| {
+            let store = store.clone();
+            std::thread::spawn(move || add(&store, &format!("synthetic-{n}")))
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.accounts.len(), 16);
+    assert_eq!(snapshot.events.len(), 16);
+}
+
+#[test]
+fn add_rollback_deletes_exact_new_item_and_failed_cleanup_is_explicit() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store
+        .add(
+            "Label".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic")
+        )
+        .is_err());
+    let first_id = vault.written_ids.lock().unwrap()[0].clone();
+    assert!(vault.get(&first_id).is_err());
+    vault.fail_delete.store(true, Ordering::SeqCst);
+    let error = store
+        .add(
+            "Label".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic"),
+        )
+        .err()
+        .unwrap();
+    assert!(error.contains("cleanup requires recovery"));
+    assert!(!error.contains("sensitive"));
+    let second_id = vault.written_ids.lock().unwrap()[1].clone();
+    assert!(vault.get(&second_id).is_ok());
+    assert!(store.snapshot().unwrap().accounts.is_empty());
+}
+
+#[test]
+fn simultaneous_duplicate_adds_publish_only_one_account() {
+    let (_root, _, store) = setup();
+    let store = Arc::new(store);
+    let threads: Vec<_> = (0..8)
+        .map(|_| {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                store.add(
+                    "Label".into(),
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "default".into(),
+                    token("synthetic-shared"),
+                )
+            })
+        })
+        .collect();
+    let successes = threads
+        .into_iter()
+        .map(|t| t.join().unwrap())
+        .filter(Result::is_ok)
+        .count();
+    assert_eq!(successes, 1);
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 1);
+}
+
+#[test]
+fn child_process_cannot_open_locked_store() {
+    let (root, _vault, _store) = setup();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "process_lock_probe", "--nocapture"])
+        .env("SWITCHBOARD_SYNTHETIC_LOCK_PROBE", root.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn process_lock_probe() {
+    if let Some(path) = std::env::var_os("SWITCHBOARD_SYNTHETIC_LOCK_PROBE") {
+        assert!(Store::open(path.into(), Arc::new(MemoryVault::default())).is_err());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "Explicit synthetic native Keychain acceptance; may require an OS access prompt"]
+fn native_vault_roundtrip_uses_only_random_app_owned_item() {
+    use switchboard_core::NativeVault;
+    let vault = NativeVault::new();
+    let id = uuid::Uuid::new_v4().to_string();
+    struct Cleanup(String);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = NativeVault::new().delete(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(id.clone());
+    let expected = token("synthetic-keychain-test-only");
+    vault.put(&id, &expected).unwrap();
+    assert_eq!(vault.get(&id).unwrap().access_token, expected.access_token);
+    vault.delete(&id).unwrap();
+    assert!(vault.get(&id).is_err());
+    vault.delete(&id).unwrap();
+}
