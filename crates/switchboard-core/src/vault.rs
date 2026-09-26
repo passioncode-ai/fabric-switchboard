@@ -87,7 +87,7 @@ impl Vault for NativeVault {
         }
     }
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 impl Vault for NativeVault {
     fn get(&self, _: &str) -> Result<Credential, String> {
         Err("Native vault is not implemented on this platform".into())
@@ -97,5 +97,36 @@ impl Vault for NativeVault {
     }
     fn delete(&self, _: &str) -> Result<(), String> {
         Err("Native vault is not implemented on this platform".into())
+    }
+}
+
+#[cfg(windows)]
+impl Vault for NativeVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        let path = crate::windows::vault_path(id)?;
+        let encrypted = crate::private_fs::read_private(&path, 128 * 1024)?;
+        let plain = crate::windows::crypt(&encrypted, false)?;
+        if plain.len() > 64 * 1024 {
+            return Err("Stored credential is invalid".into());
+        }
+        serde_json::from_slice(&plain).map_err(|_| "Stored credential is invalid".into())
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        let path = crate::windows::vault_path(id)?;
+        let data = serde_json::to_vec(value).map_err(|_| "Credential serialization failed")?;
+        if data.len() > 64 * 1024 {
+            return Err("Stored credential is too large".into());
+        }
+        let encrypted = crate::windows::crypt(&data, true)?;
+        crate::private_fs::private_write(&path, &encrypted)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        let path = crate::windows::vault_path(id)?;
+        crate::private_fs::check_path(&path)?;
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err("Native credential storage unavailable".into()),
+        }
     }
 }

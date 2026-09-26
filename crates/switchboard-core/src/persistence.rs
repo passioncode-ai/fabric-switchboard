@@ -1,10 +1,12 @@
 use crate::{validate_snapshot, Snapshot};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use std::{fs::File, path::Path};
+
+#[cfg(unix)]
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{Read, Write},
-    path::Path,
 };
 
 const MAX_FILE: u64 = 2 * 1024 * 1024;
@@ -151,11 +153,54 @@ pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
     result
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn open(_: &Path) -> Result<(File, Snapshot), String> {
     Err("Secure metadata storage is not implemented on this platform".into())
 }
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn write(_: &Path, _: &Snapshot) -> Result<(), String> {
     Err("Secure metadata storage is not implemented on this platform".into())
+}
+
+#[cfg(windows)]
+pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
+    use crate::private_fs::*;
+    private_dir(root)?;
+    let lock_path = root.join("instance.lock");
+    let lock = if lock_path.exists() {
+        open_private(&lock_path, true)?
+    } else {
+        match create_new(&lock_path) {
+            Ok(f) => f,
+            Err(_) => open_private(&lock_path, true)?,
+        }
+    };
+    lock.try_lock_exclusive()
+        .map_err(|_| "Another Switchboard instance owns this account storage")?;
+    let path = root.join(METADATA);
+    let snapshot = if path.exists() {
+        let bytes = read_private(&path, MAX_FILE)?;
+        let disk: Disk = serde_json::from_slice(&bytes)
+            .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
+        if disk.schema_version != 1 {
+            return Err("Unsupported account metadata version".into());
+        }
+        validate_snapshot(&disk.snapshot)?;
+        disk.snapshot
+    } else {
+        Snapshot::default()
+    };
+    Ok((lock, snapshot))
+}
+#[cfg(windows)]
+pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
+    let data = serde_json::to_vec(&Disk {
+        schema_version: 1,
+        snapshot: snapshot.clone(),
+    })
+    .map_err(error)?;
+    if data.len() as u64 > MAX_FILE {
+        return Err("Account metadata exceeds size limit".into());
+    }
+    crate::private_fs::private_write(&root.join(METADATA), &data)
 }

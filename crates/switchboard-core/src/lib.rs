@@ -1,7 +1,10 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
 mod credential;
 mod persistence;
+pub mod private_fs;
 mod vault;
+#[cfg(windows)]
+pub mod windows;
 
 pub use credential::Credential;
 pub use vault::{MemoryVault, NativeVault, Vault};
