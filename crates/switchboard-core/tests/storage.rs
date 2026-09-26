@@ -83,6 +83,51 @@ fn codex_jwt_expiry_is_a_hint_not_a_verified_identity() {
 }
 
 #[test]
+fn codex_id_token_is_preserved_in_vault_only_and_is_bounded() {
+    let (_root, vault, store) = setup();
+    let input = serde_json::json!({"tokens": {
+        "access_token": "synthetic-access", "id_token": "synthetic.claimed.identity-token",
+        "refresh_token": "synthetic-refresh", "account_id": "claimed-account"
+    }})
+    .to_string();
+    let credential = Credential::parse(Provider::Codex, AuthKind::OAuth, &input).unwrap();
+    assert_eq!(
+        credential.id_token.as_deref(),
+        Some("synthetic.claimed.identity-token")
+    );
+    let account = store
+        .add(
+            "Claimed account".into(),
+            Provider::Codex,
+            AuthKind::OAuth,
+            "default".into(),
+            credential,
+        )
+        .unwrap();
+    assert_eq!(
+        vault.get(&account.id).unwrap().id_token.as_deref(),
+        Some("synthetic.claimed.identity-token")
+    );
+    let snapshot = serde_json::to_string(&store.snapshot().unwrap()).unwrap();
+    assert!(!snapshot.contains("identity-token"));
+    assert!(!snapshot.contains("id_token"));
+    for value in [
+        "bad\nheader".into(),
+        "x".repeat(16 * 1024 + 1),
+        String::new(),
+    ] {
+        let input = serde_json::json!({"tokens":{"access_token":"synthetic", "id_token":value}})
+            .to_string();
+        assert!(Credential::parse(Provider::Codex, AuthKind::OAuth, &input).is_err());
+    }
+    let legacy: Credential = serde_json::from_str(
+        r#"{"access_token":"synthetic","refresh_token":null,"expires_at":null,"account_id":null}"#,
+    )
+    .unwrap();
+    assert!(legacy.id_token.is_none());
+}
+
+#[test]
 fn lifecycle_routes_are_scoped_and_survive_restart_without_secret_metadata() {
     let (root, vault, store) = setup();
     let a = add(&store, "synthetic-secret-alpha");
@@ -167,6 +212,7 @@ fn duplicates_are_secret_and_pool_based_and_direct_structs_are_validated() {
             Credential {
                 access_token: "unsafe\nheader".into(),
                 refresh_token: None,
+                id_token: None,
                 expires_at: None,
                 account_id: None
             }
@@ -186,6 +232,7 @@ fn expired_or_missing_credentials_never_become_selected() {
             Credential {
                 access_token: "synthetic".into(),
                 refresh_token: None,
+                id_token: None,
                 expires_at: Some(now() - 1),
                 account_id: None,
             },

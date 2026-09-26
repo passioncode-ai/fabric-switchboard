@@ -11,6 +11,10 @@ const MAX_TOKEN: usize = 16 * 1024;
 pub struct Credential {
     pub access_token: String,
     pub refresh_token: Option<String>,
+    /// Captured Codex identity token, retained only inside the vault for native export.
+    /// Parsing it does not establish a verified identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_token: Option<String>,
     pub expires_at: Option<i64>,
     pub account_id: Option<String>,
 }
@@ -32,12 +36,15 @@ impl Credential {
         }
         if !token_valid(&self.access_token)
             || self.refresh_token.as_ref().is_some_and(|s| !token_valid(s))
+            || self.id_token.as_ref().is_some_and(|s| !token_valid(s))
+            || (provider != Provider::Codex && self.id_token.is_some())
             || self.account_id.as_ref().is_some_and(|s| !identity_valid(s))
             || self
                 .expires_at
                 .is_some_and(|t| t <= 0 || t > 253_402_300_799)
             || (kind != AuthKind::OAuth
                 && (self.refresh_token.is_some()
+                    || self.id_token.is_some()
                     || self.expires_at.is_some()
                     || self.account_id.is_some()))
         {
@@ -108,6 +115,11 @@ impl Credential {
             Self {
                 access_token,
                 refresh_token: string(refresh)?,
+                id_token: if provider == Provider::Codex {
+                    string("id_token")?
+                } else {
+                    None
+                },
                 expires_at,
                 account_id: string(account)?,
             }
@@ -115,6 +127,7 @@ impl Credential {
             Self {
                 access_token: input.into(),
                 refresh_token: None,
+                id_token: None,
                 expires_at: None,
                 account_id: None,
             }
