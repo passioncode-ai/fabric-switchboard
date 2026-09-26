@@ -1,0 +1,38 @@
+name: Nightly macOS checks
+on:
+  schedule:
+    - cron: '0 21 * * *'
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nightly-macos
+  cancel-in-progress: false
+jobs:
+  clock:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.clock.outputs.run }}
+    steps:
+      - id: clock
+        run: |
+          if [ '${{ github.event_name }}' = workflow_dispatch ] || [ "$(TZ=Europe/Warsaw date +%H)" = 23 ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+  checks:
+    needs: clock
+    if: needs.clock.outputs.run == 'true'
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Rust stable with lint tools
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+      - run: npm ci
+      - run: ./scripts/check.sh
+      - run: npm run app:build

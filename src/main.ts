@@ -144,7 +144,7 @@ function accountCard(account: Account) {
   if (account.usage) {
     const observation = account.usage; const stale = Date.now() / 1000 - observation.observed_at > 300;
     const label = el('div', 'usage-label'); label.append(el('strong', '', `${Math.round(observation.used_percent)}% used`), el('span', stale ? 'stale' : '', `${stale ? 'Stale · ' : ''}${age(observation.observed_at)}`)); usage.append(label);
-    const meter = el('progress', 'usage-meter'); meter.max = 100; meter.value = observation.used_percent; meter.setAttribute('aria-label', `Quota used for ${account.label}`); usage.append(meter);
+    const meter = el('progress', 'usage-meter'); meter.max = 100; meter.value = observation.used_percent; meter.setAttribute('aria-label', `Quota used for ${account.label}`); usage.append(meter, el('span', 'usage-caption', 'Highest reported window'));
     usage.title = `${observation.source} · Observed ${date(observation.observed_at)}${observation.resets_at ? ` · Resets ${date(observation.resets_at)}` : ''}`;
   } else usage.append(el('strong', 'usage-unknown', 'Usage unknown'), el('span', 'usage-caption', account.kind === 'api_key' ? 'API billing is separate' : 'No observation yet'));
   if (usageErrors.has(account.id)) usage.append(el('p', 'usage-error', usageErrors.get(account.id)!));
@@ -231,7 +231,7 @@ function addDialog() {
   const provider = select([['claude', 'Claude Code'], ['codex', 'Codex CLI']]);
   const method = select([['login', 'Official sign-in'], ['api_key', 'API key'], ['setup_token', 'Claude setup token'], ['oauth', 'Import OAuth JSON']]);
   const label = input(); label.maxLength = 80; label.placeholder = 'e.g. Studio';
-  const pool = input('work'); pool.maxLength = 40; pool.pattern = '[a-z0-9_-]+'; pool.title = 'Use lowercase letters, numbers, hyphens, or underscores.';
+  const pool = input('work'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+'; pool.title = 'Use lowercase letters, numbers, hyphens, or underscores.';
   const grid = el('div', 'form-grid'); grid.append(field('Provider', provider), field('Authentication', method), field('Account label', label), field('Pool', pool, 'A boundary for routing, such as work or personal.'));
   const credentialSlot = el('div'); const submitButton = submit('Begin sign-in'); context.actions.append(submitButton); context.body.append(grid, credentialSlot);
   let secret: HTMLInputElement | HTMLTextAreaElement | null = null;
