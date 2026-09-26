@@ -180,6 +180,16 @@ impl Store {
 fn fresh_usage(account: &Account, policy: &RotationPolicy, now: i64) -> Option<f64> {
     let usage = account.usage.as_ref()?;
     let health = account.usage_health.as_ref()?;
+    // A partial response header set cannot establish available subscription capacity:
+    // the missing weekly window may already be exhausted. JSON endpoints may legitimately
+    // return null optional windows, so this requirement is specific to response headers.
+    if usage.source == "response_headers"
+        && !["five_hour", "seven_day"]
+            .iter()
+            .all(|name| usage.windows.iter().any(|w| w.name == *name))
+    {
+        return None;
+    }
     if health.status != "ok" || health.checked_at < usage.observed_at || health.checked_at > now
         || usage.observed_at > now || now - usage.observed_at > policy.max_age_seconds
         || now - health.checked_at > policy.max_age_seconds

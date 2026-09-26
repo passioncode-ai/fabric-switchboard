@@ -657,3 +657,68 @@ fn one_native_cli_target_cannot_have_competing_enabled_pools_even_on_disk() {
     std::fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
     assert!(Store::open(root.path().into(), vault).is_err());
 }
+
+#[test]
+fn partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation() {
+    let (_root, _vault, store) = setup();
+    let time = clock();
+    let current = account(&store, "org-current", time);
+    let candidate = account(&store, "org-candidate", time);
+    observe(&store, &current, 99., time);
+    store
+        .observe(
+            &candidate,
+            Usage {
+                used_percent: 98.,
+                observed_at: time,
+                resets_at: Some(time + 3600),
+                source: "claude_oauth".into(),
+                windows: vec![
+                    UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: 10.,
+                        resets_at: Some(time + 3600),
+                    },
+                    UsageWindow {
+                        name: "seven_day".into(),
+                        used_percent: 98.,
+                        resets_at: Some(time + 7200),
+                    },
+                ],
+            },
+        )
+        .unwrap();
+    let partial = Usage {
+        used_percent: 10.,
+        observed_at: time + 1,
+        resets_at: Some(time + 3600),
+        source: "response_headers".into(),
+        windows: vec![UsageWindow {
+            name: "five_hour".into(),
+            used_percent: 10.,
+            resets_at: Some(time + 3600),
+        }],
+    };
+    store.observe(&candidate, partial.clone()).unwrap();
+    assert_eq!(
+        store
+            .rotation_decision(&policy(), Some(&current), time + 1)
+            .unwrap()
+            .reason,
+        "no_eligible_account"
+    );
+    let mut complete = partial;
+    complete.windows.push(UsageWindow {
+        name: "seven_day".into(),
+        used_percent: 5.,
+        resets_at: Some(time + 7200),
+    });
+    store.observe(&candidate, complete).unwrap();
+    assert_eq!(
+        store
+            .rotation_decision(&policy(), Some(&current), time + 1)
+            .unwrap()
+            .candidate_id,
+        Some(candidate)
+    );
+}
