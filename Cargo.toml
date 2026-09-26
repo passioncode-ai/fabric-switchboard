@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/switchboard-core", "crates/switchboard-proxy", "src-tauri", "crates/switchboard-runtime"]
+members = ["crates/switchboard-core", "crates/switchboard-proxy", "src-tauri", "crates/switchboard-runtime", "crates/switchboard-cli"]
 resolver = "2"
 [workspace.package]
 version = "0.2.0"
