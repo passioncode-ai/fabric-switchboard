@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod launch;
+use switchboard_runtime::launch;
 use serde::Serialize;
 use std::{
     collections::HashMap,

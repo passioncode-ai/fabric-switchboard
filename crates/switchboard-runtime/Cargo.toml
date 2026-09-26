@@ -1,15 +1,11 @@
 [package]
-name = "fabric-switchboard"
+name = "switchboard-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
 [dependencies]
-switchboard-runtime = { path = "../crates/switchboard-runtime" }
-tauri = { version = "2", features = [] }
-switchboard-core = { path = "../crates/switchboard-core" }
-switchboard-proxy = { path = "../crates/switchboard-proxy" }
+switchboard-core = { path = "../switchboard-core" }
+switchboard-proxy = { path = "../switchboard-proxy" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
