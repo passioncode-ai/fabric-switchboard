@@ -21,10 +21,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-012 | Return after restart | validated |
 | SCN-013 | Keyboard and narrow window | validated |
 
-| SCN-014 | Command-line account management | draft |
-| SCN-015 | CLI with a running desktop or server | draft |
-| SCN-016 | CLI login and launch | draft |
-| SCN-017 | Install native builds | draft |
+| SCN-014 | Command-line account management | validated |
+| SCN-015 | CLI with a running desktop or server | validated |
+| SCN-016 | CLI login and launch | validated |
+| SCN-017 | Install native builds | validated |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -271,8 +271,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **UI elements:** terminal help, stdout, stderr, exit code, native shell.
 **States covered:** empty, success, error, running
 **Errors & recovery:** Invalid input, vault denial, selected removal and unavailable owner return a nonzero exit code with actionable sanitized error.
-**Status:** draft
-**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Status:** validated
+**Meaning:** scenario design validated against the authorized brief; native execution and user outcomes are separate.
+**Coverage:** [0.2 execution evidence](../evidence/release-0.2.md): CLI/runtime fixtures and signed macOS smoke passed; Windows cross-build passed, native Windows/provider acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -288,8 +289,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **UI elements:** terminal help, stdout, stderr, exit code, native shell.
 **States covered:** empty, success, error, running
 **Errors & recovery:** Invalid/stale capability and wrong host/origin refuse; no second process bypasses the Store lock.
-**Status:** draft
-**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Status:** validated
+**Meaning:** scenario design validated against the authorized brief; native execution and user outcomes are separate.
+**Coverage:** [0.2 execution evidence](../evidence/release-0.2.md): CLI/runtime fixtures and signed macOS smoke passed; Windows cross-build passed, native Windows/provider acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -305,8 +307,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **UI elements:** terminal help, stdout, stderr, exit code, native shell.
 **States covered:** empty, success, error, running
 **Errors & recovery:** Incomplete sign-in, missing CLI, active home, server absence and invalid project path return recovery instructions.
-**Status:** draft
-**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Status:** validated
+**Meaning:** scenario design validated against the authorized brief; native execution and user outcomes are separate.
+**Coverage:** [0.2 execution evidence](../evidence/release-0.2.md): CLI/runtime fixtures and signed macOS smoke passed; Windows cross-build passed, native Windows/provider acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -322,7 +325,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **UI elements:** terminal help, stdout, stderr, exit code, native shell.
 **States covered:** empty, success, error, running
 **Errors & recovery:** Signing, notarization, Windows installer build and live provider compatibility remain separately evidenced.
-**Status:** draft
-**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Status:** validated
+**Meaning:** scenario design validated against the authorized brief; native execution and user outcomes are separate.
+**Coverage:** [0.2 execution evidence](../evidence/release-0.2.md): CLI/runtime fixtures and signed macOS smoke passed; Windows cross-build passed, native Windows/provider acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01

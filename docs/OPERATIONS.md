@@ -14,7 +14,8 @@ GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passionc
 | Isolated CLI working copy | `homes/<account UUID>/`, 0700 directory, 0600 auth/settings | retained for history; removed by account removal while idle |
 | Managed CLI home | `runtimes/<provider>-<pool>/` | retained; generated capability valid only during one app lifetime |
 | Official login staging | `logins/<login UUID>/` | removed after Finish or successful Cancel |
-| Claude staged OAuth | provider Keychain service derived from staging path | removed after Finish/Cancel, only that derived service |
+| Claude staged OAuth (macOS) | provider Keychain service derived from staging path | removed after Finish/Cancel, only that derived service |
+| Claude staged OAuth (Windows) | private `.credentials.json` under the login staging home | captured into DPAPI vault; staging cleaned after Finish/Cancel |
 | CLI control capability | private `control.json`, separate loopback address and token | rotated when GUI/serve starts; removed on normal shutdown |
 
 No background token refresh exists. Reauthenticate before expiry; a provider may invalidate a snapshot sooner. No token is sent to Fabric or written to the event journal. A same-user process can read that user's runtime files; 0600 is access control, not file encryption.

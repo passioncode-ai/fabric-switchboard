@@ -23,7 +23,9 @@ Native live-provider login/inference, interactive Windows installer/UI, two-Wind
 
 ## Exact next task
 
-First consult [release evidence](evidence/release-0.2.md) for pending artifact/signing work. Then execute [PA-01](packets/provider-acceptance.md) on an unlocked native host using authorized test accounts through the official login UI. Record exact Claude/Codex versions, isolated and managed responses, and A→B next-request switching. Do not read existing global credentials as a substitute. Fix observed defects with focused fixtures before repeating the affected acceptance.
+Artifacts are built and retained in the [private draft release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-58813c81ca48bc2e938c); [release evidence](evidence/release-0.2.md) names their exact source SHAs and hashes. First release prerequisite: obtain the existing notarytool profile name from the operator and resume notarization of the retained signed archive using [distribution](DISTRIBUTION.md). Native Windows verification needs an available Windows runner: the attempted hosted job was billing-blocked before executing any step. Do not mark cross-compilation as that verification.
+
+Native Mac window inspection is now complete. Execute [PA-01](packets/provider-acceptance.md) using authorized test accounts through official login, with a bounded request budget. Record exact Claude/Codex versions, isolated and managed responses, and A→B next-request switching. Do not read existing global credentials as a substitute. Fix observed defects with focused fixtures before repeating the affected acceptance.
 
 Bounded follow-ons: [CLI release plan](CLI-RELEASE-PLAN.md), [Windows acceptance](packets/windows.md), [distribution](packets/distribution.md), [session supervisor](packets/session-supervisor.md), [automatic routing](packets/automatic-routing.md). All link the shared contracts; no unmerged implementation-agent branch is a prerequisite.
 

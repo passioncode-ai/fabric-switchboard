@@ -1,0 +1,73 @@
+{
+  "macos-universal": {
+    "version": "0.2.0",
+    "commit": "5ee501eb9913527e8295f14b3e25843cc9cb5230",
+    "source_clean": true,
+    "toolchain": {
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+      "node": "v26.8.2",
+      "macos": "26.6.2",
+      "sdk": "26.2"
+    },
+    "architectures": {
+      "cli": [
+        "x86_64",
+        "arm64"
+      ],
+      "app": [
+        "x86_64",
+        "arm64"
+      ]
+    },
+    "developer_id_identity": "Developer ID Application: Sergei Viktorovich Sheleg (KJ35UYYL22)",
+    "signing_certificate_sha1": "4E9DE832FB92D08CFD02B215BE1E0EF9B1E854CE",
+    "signature_verified": true,
+    "notarization": {
+      "status": "NOT_RUN",
+      "reason": "No notarytool profile supplied"
+    },
+    "cli_sha256": "f6a662df3a1750b15dce46b40f67748107b8e41f94352e68fdb1186ee0c45c6b",
+    "archive_sha256": "2215257d134a8f1474f15eeabad38b3060d7c75b7f5c80bfa825f0d49fa99e3a",
+    "archive": "Fabric-Switchboard-0.2.0-macos-universal.zip",
+    "folder": "Fabric-Switchboard-0.2.0-macos-universal"
+  },
+  "windows-x64": {
+    "version": "0.2.0",
+    "commit": "b602e1196d4413e249555cf46f398f578c5fcbe5",
+    "source_clean": true,
+    "target": "x86_64-pc-windows-msvc",
+    "build_host": "Darwin arm64",
+    "method": "cross-compiled; native acceptance NOT_RUN",
+    "toolchain": {
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+      "cargo_xwin": "cargo-xwin-xwin 0.23.1",
+      "llvm": "Homebrew clang version 23.1.2",
+      "nsis": "v3.12"
+    },
+    "cli_rustflags": "-C target-feature=+crt-static",
+    "cli_external_vcruntime_import": false,
+    "pe_headers": {
+      "fabric-switchboard.exe": {
+        "machine": "0x8664",
+        "subsystem": 2
+      },
+      "switchboard.exe": {
+        "machine": "0x8664",
+        "subsystem": 3
+      },
+      "Fabric Switchboard_0.2.0_x64-setup.exe": {
+        "machine": "0x14c",
+        "subsystem": 2
+      }
+    },
+    "sha256": {
+      "Fabric Switchboard_0.2.0_x64-setup.exe": "1037a836a09ac5e1b90d8f699724e5413ea0c24963b6ffe180318b02e4ba73b1",
+      "switchboard.exe": "9502137203708eab444bf3a8a96aaffb74d750422083262d37fb27a4228e7d87"
+    },
+    "native_windows_tests": "NOT_RUN",
+    "windows_authenticode": "NOT_SIGNED",
+    "provider_live_acceptance": "NOT_RUN",
+    "archive": "Fabric-Switchboard-0.2.0-windows-x64.zip",
+    "archive_sha256": "305642f590b35aa9ee87d5afa720c59a2ec7f8115da1f6352064f4e254121df4"
+  }
+}

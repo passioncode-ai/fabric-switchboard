@@ -1,0 +1,20 @@
+{
+  "tested_source": "5ee501eb9913527e8295f14b3e25843cc9cb5230",
+  "local_gate_exit": 0,
+  "fresh_clone_gate_exit": 0,
+  "rust_tests_passed": 50,
+  "rust_tests_ignored": 1,
+  "log_sha256": {
+    "check-0.2.log": "c88825d414afa63e6f8b834fe7651e3e28b5eefced1513d607e6f95334c03da1",
+    "fresh-check-0.2.log": "fe94768c2643c43ad7a3899ccb2d5ba14169cf3e113cc7d0191871905d04de3b",
+    "build-macos-0.2.log": "8732bba1ca041994090cb1ad289669715f5be90e22f9eab3f8b526290af112dd",
+    "build-windows-final-0.2.log": "5b7e66fa9e1cad4879750c87a949859376b6b903a6a0ecdb10c00c0f1c40f9a4"
+  },
+  "macos_signed_cli_native_keychain_lifecycle": "PASS; disposable app-owned credential removed",
+  "macos_native_window": "PASS; zero-account ready state, add/cancel, signed CLI control connection",
+  "macos_gatekeeper": "REJECTED: Unnotarized Developer ID",
+  "windows_hosted_run": "https://github.com/passioncode-ai/fabric-switchboard/actions/runs/36249340921",
+  "windows_hosted_status": "BILLING_BLOCKED; no steps started",
+  "windows_native_execution": "NOT_RUN",
+  "provider_live_acceptance": "NOT_RUN"
+}
