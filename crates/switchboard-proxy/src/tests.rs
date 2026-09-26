@@ -21,6 +21,7 @@ fn add(
         access_token: token.into(),
         refresh_token: None,
         id_token: None,
+        native_context: None,
         expires_at: None,
         account_id: if kind == AuthKind::OAuth {
             Some(format!("identity-{label}"))
@@ -436,4 +437,78 @@ async fn oversized_body_is_rejected_without_upstream_request() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     p.shutdown().await;
     up.abort();
+}
+
+#[test]
+fn quota_windows_keep_each_reset_and_aggregate_the_limiting_window() {
+    let observed_at = 1_700_000_000;
+    let claude = parse_usage_at(
+        Provider::Claude,
+        &serde_json::json!({
+            "five_hour":{"utilization":20,"resets_at":"2023-11-14T23:13:20.123Z"},
+            "seven_day":{"utilization":92,"resets_at":"2023-11-21T22:13:20+00:00"},
+            "seven_day_sonnet":{"utilization":0,"resets_at":1700007200},
+            "seven_day_opus":null
+        }),
+        observed_at,
+    )
+    .unwrap();
+    assert_eq!(claude.windows.len(), 3);
+    assert_eq!(claude.used_percent, 92.);
+    assert_eq!(claude.windows[0].resets_at, Some(observed_at + 3600));
+    assert_eq!(claude.resets_at, Some(observed_at + 604800));
+    let codex = parse_usage_at(
+        Provider::Codex,
+        &serde_json::json!({"rate_limit":{
+            "primary_window":{"used_percent":80,"reset_after_seconds":500},
+            "secondary_window":{"used_percent":10,"reset_at":1700008000,"reset_after_seconds":8001}
+        }}),
+        observed_at,
+    )
+    .unwrap();
+    assert_eq!(codex.windows.len(), 2);
+    assert_eq!(codex.windows[0].resets_at, Some(observed_at + 500));
+    assert_eq!(codex.windows[1].resets_at, Some(1700008000));
+    assert_eq!(codex.resets_at, Some(observed_at + 500));
+}
+#[test]
+fn malformed_or_partial_windows_never_turn_into_invented_available_quota() {
+    let at = 1_700_000_000;
+    for value in [
+        serde_json::json!({"five_hour":{"utilization":20,"resets_at":"sensitive-invalid-body"}}),
+        serde_json::json!({"five_hour":{"utilization":20,"resets_at":1699999999}}),
+        serde_json::json!({"five_hour":{"utilization":20},"seven_day":{}}),
+        serde_json::json!({"five_hour":null}),
+        serde_json::json!({"five_hour":{"utilization":101}}),
+    ] {
+        let error = parse_usage_at(Provider::Claude, &value, at).unwrap_err();
+        assert!(!error.contains("sensitive"));
+    }
+    for reset in [
+        serde_json::json!(-1),
+        serde_json::json!(i64::MAX),
+        serde_json::json!("later"),
+    ] {
+        assert!(parse_usage_at(Provider::Codex,&serde_json::json!({"rate_limit":{"primary_window":{"used_percent":1,"reset_after_seconds":reset}}}),at).is_err());
+    }
+}
+#[test]
+fn headers_allow_one_window_but_reject_malformed_present_window() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "anthropic-ratelimit-unified-5h-utilization",
+        "0.12".parse().unwrap(),
+    );
+    headers.insert(
+        "anthropic-ratelimit-unified-5h-reset",
+        (now() + 3600).to_string().parse().unwrap(),
+    );
+    let usage = usage_from_headers(&headers).unwrap();
+    assert_eq!(usage.windows.len(), 1);
+    assert_eq!(usage.used_percent, 12.);
+    headers.insert(
+        "anthropic-ratelimit-unified-7d-utilization",
+        "invalid".parse().unwrap(),
+    );
+    assert!(usage_from_headers(&headers).is_none());
 }

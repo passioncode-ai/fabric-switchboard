@@ -2,11 +2,13 @@
 mod credential;
 mod persistence;
 pub mod private_fs;
+mod rotation;
 mod vault;
 #[cfg(windows)]
 pub mod windows;
 
 pub use credential::Credential;
+pub use rotation::{RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 
 use serde::{Deserialize, Serialize};
@@ -45,9 +47,62 @@ pub enum AuthKind {
     OAuth,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalIdentity {
+    pub account_id: Option<String>,
+    pub organization_id: Option<String>,
+    pub email: Option<String>,
+}
+impl ExternalIdentity {
+    fn valid(&self) -> bool {
+        self.account_id
+            .as_ref()
+            .is_none_or(|v| credential::identity_valid(v))
+            && self
+                .organization_id
+                .as_ref()
+                .is_none_or(|v| credential::identity_valid(v))
+            && self
+                .email
+                .as_ref()
+                .is_none_or(|v| !v.is_empty() && v.len() <= 256 && !v.chars().any(char::is_control))
+    }
+    fn matches(&self, other: &Self) -> bool {
+        self.account_id.is_some()
+            && self.account_id == other.account_id
+            && self.organization_id == other.organization_id
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageWindow {
+    pub name: String,
+    pub used_percent: f64,
+    pub resets_at: Option<i64>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageHealth {
+    pub status: String,
+    pub checked_at: i64,
+    pub next_check_at: i64,
+}
+impl UsageHealth {
+    fn valid(&self) -> bool {
+        matches!(self.status.as_str(), "ok" | "failed" | "unavailable")
+            && self.checked_at > 0
+            && self.checked_at <= now() + 60
+            && self.next_check_at >= self.checked_at
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
+    #[serde(default)]
+    pub windows: Vec<UsageWindow>,
     pub used_percent: f64,
     pub observed_at: i64,
     pub resets_at: Option<i64>,
@@ -66,6 +121,10 @@ pub struct Account {
     pub created_at: i64,
     pub identity: Option<String>,
     pub usage: Option<Usage>,
+    #[serde(default)]
+    pub external_identity: Option<ExternalIdentity>,
+    #[serde(default)]
+    pub usage_health: Option<UsageHealth>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,6 +139,8 @@ pub struct Event {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub policies: Vec<RotationPolicy>,
     pub accounts: Vec<Account>,
     pub routes: BTreeMap<String, String>,
     pub events: Vec<Event>,
@@ -112,7 +173,22 @@ fn uuid_valid(s: &str) -> bool {
     uuid::Uuid::parse_str(s).is_ok_and(|u| u.to_string() == s)
 }
 fn usage_valid(u: &Usage) -> bool {
-    u.used_percent.is_finite()
+    let mut names = std::collections::HashSet::new();
+    u.windows.len() <= 16
+        && u.windows.iter().all(|w| {
+            !w.name.is_empty()
+                && w.name.len() <= 64
+                && w.name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                && names.insert(&w.name)
+                && w.used_percent.is_finite()
+                && (0.0..=100.0).contains(&w.used_percent)
+                && w.resets_at.is_none_or(|t| t >= u.observed_at)
+        })
+        && (u.windows.is_empty()
+            || u.windows.iter().map(|w| w.used_percent).reduce(f64::max) == Some(u.used_percent))
+        && u.used_percent.is_finite()
         && (0.0..=100.0).contains(&u.used_percent)
         && u.observed_at > 0
         && u.observed_at <= now() + 60
@@ -172,6 +248,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     if s.accounts.len() > MAX_ACCOUNTS
         || s.events.len() > MAX_EVENTS
         || s.routes.len() > MAX_ACCOUNTS
+        || s.policies.len() > MAX_ACCOUNTS
     {
         return Err("Invalid metadata bounds".into());
     }
@@ -186,8 +263,17 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
                 .as_ref()
                 .is_some_and(|v| !credential::identity_valid(v))
             || a.usage.as_ref().is_some_and(|u| !usage_valid(u))
+            || a.external_identity.as_ref().is_some_and(|i| !i.valid())
+            || a.usage_health.as_ref().is_some_and(|h| !h.valid())
         {
             return Err("Invalid account metadata".into());
+        }
+    }
+    let mut policies = std::collections::HashSet::new();
+    for p in &s.policies {
+        p.validate()?;
+        if !policies.insert((p.provider, &p.pool, &p.target)) {
+            return Err("Duplicate rotation policy".into());
         }
     }
     for (key, id) in &s.routes {
@@ -240,54 +326,234 @@ impl Store {
         pool: String,
         credential: Credential,
     ) -> Result<Account, String> {
-        if !label_valid(&label) || !pool_valid(&pool) {
-            return Err("Label or pool is invalid".into());
-        }
-        credential.validate(provider, kind)?;
-        let mut state = self.lock()?;
-        if state.accounts.len() >= MAX_ACCOUNTS {
-            return Err("Account limit reached".into());
-        }
-        for a in &state.accounts {
-            if a.provider == provider && a.pool == pool {
-                let existing = self
-                    .vault
-                    .get(&a.id)
-                    .map_err(|_| "Credential storage unavailable")?;
-                if existing.access_token == credential.access_token {
-                    return Err("Account credential already exists in this pool".into());
-                }
-            }
-        }
-        let account = Account {
-            id: uuid::Uuid::new_v4().to_string(),
-            label: label.trim().into(),
+        self.save_account(label, provider, kind, pool, credential, None, false)
+    }
+    pub fn upsert(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+        external_identity: Option<ExternalIdentity>,
+    ) -> Result<Account, String> {
+        self.save_account(
+            label,
             provider,
             kind,
             pool,
-            enabled: true,
-            created_at: now(),
-            identity: credential.account_id.clone(),
-            usage: None,
+            credential,
+            external_identity,
+            true,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn save_account(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+        external_identity: Option<ExternalIdentity>,
+        upsert: bool,
+    ) -> Result<Account, String> {
+        if !label_valid(&label)
+            || !pool_valid(&pool)
+            || external_identity.as_ref().is_some_and(|i| !i.valid())
+        {
+            return Err("Label, pool or identity is invalid".into());
+        }
+        credential.validate(provider, kind)?;
+        if credential
+            .account_id
+            .as_ref()
+            .zip(
+                external_identity
+                    .as_ref()
+                    .and_then(|i| i.account_id.as_ref()),
+            )
+            .is_some_and(|(a, b)| a != b)
+        {
+            return Err("Credential identity does not match account identity".into());
+        }
+        let mut state = self.lock()?;
+        let mut matched = None;
+        for a in &state.accounts {
+            if a.provider != provider || a.pool != pool {
+                continue;
+            }
+            let both_known = a
+                .external_identity
+                .as_ref()
+                .is_some_and(|i| i.account_id.is_some())
+                && external_identity
+                    .as_ref()
+                    .is_some_and(|i| i.account_id.is_some());
+            let identity_match = a
+                .external_identity
+                .as_ref()
+                .zip(external_identity.as_ref())
+                .is_some_and(|(a, b)| a.matches(b));
+            let token_match = if !upsert || !both_known {
+                self.vault
+                    .get(&a.id)
+                    .map_err(|_| "Credential storage unavailable")?
+                    .access_token
+                    == credential.access_token
+            } else {
+                false
+            };
+            if identity_match || token_match {
+                if !upsert {
+                    return Err("Account credential already exists in this pool".into());
+                }
+                if matched.is_some() {
+                    return Err("Account identity is ambiguous in this pool".into());
+                }
+                matched = Some(a.clone());
+            }
+        }
+        let (account, old_credential) = if let Some(mut account) = matched {
+            let old = self
+                .vault
+                .get(&account.id)
+                .map_err(|_| "Credential storage unavailable")?;
+            account.label = label.trim().into();
+            account.kind = kind;
+            account.identity = credential.account_id.clone();
+            account.external_identity = external_identity.or(account.external_identity);
+            // A new credential generation cannot inherit an old generation's quota verdict.
+            if old.access_token != credential.access_token
+                || old.expires_at != credential.expires_at
+            {
+                account.usage = None;
+                account.usage_health = None;
+            }
+            (account, Some(old))
+        } else {
+            if state.accounts.len() >= MAX_ACCOUNTS {
+                return Err("Account limit reached".into());
+            }
+            (
+                Account {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    label: label.trim().into(),
+                    provider,
+                    kind,
+                    pool,
+                    enabled: true,
+                    created_at: now(),
+                    identity: credential.account_id.clone(),
+                    usage: None,
+                    external_identity,
+                    usage_health: None,
+                },
+                None,
+            )
         };
-        self.vault
-            .put(&account.id, &credential)
-            .map_err(|_| "Credential storage unavailable")?;
         let mut candidate = state.clone();
-        candidate.accounts.push(account.clone());
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == account.id) {
+            *a = account.clone();
+        } else {
+            candidate.accounts.push(account.clone());
+        }
         append_event(
             &mut candidate,
-            "account_added",
+            if old_credential.is_some() {
+                "account_updated"
+            } else {
+                "account_added"
+            },
             Some(&account.id),
             "success",
         );
+        validate_snapshot(&candidate)?;
+        self.vault
+            .put(&account.id, &credential)
+            .map_err(|_| "Credential storage unavailable")?;
         if self.publish(&mut state, candidate).is_err() {
-            self.vault
-                .delete(&account.id)
-                .map_err(|_| "Storage failure; credential cleanup requires recovery")?;
+            let restored = if let Some(old) = old_credential {
+                self.vault.put(&account.id, &old)
+            } else {
+                self.vault.delete(&account.id)
+            };
+            restored.map_err(|_| "Storage failure; credential cleanup requires recovery")?;
             return Err("Account metadata could not be saved".into());
         }
         Ok(account)
+    }
+    pub fn match_external(
+        &self,
+        provider: Provider,
+        pool: &str,
+        identity: &ExternalIdentity,
+    ) -> Result<Option<Account>, String> {
+        if !pool_valid(pool) || !identity.valid() {
+            return Err("Pool or identity is invalid".into());
+        }
+        let state = self.lock()?;
+        let mut matches = state.accounts.iter().filter(|a| {
+            a.provider == provider
+                && a.pool == pool
+                && a.external_identity
+                    .as_ref()
+                    .is_some_and(|i| i.matches(identity))
+        });
+        let found = matches.next().cloned();
+        if matches.next().is_some() {
+            return Err("Account identity is ambiguous in this pool".into());
+        }
+        Ok(found)
+    }
+    /// Backend synchronization only: validates format but permits disabled/expired snapshots.
+    pub fn stored_credential(&self, id: &str) -> Result<Credential, String> {
+        let state = self.lock()?;
+        let a = state
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or("Account not found")?;
+        let credential = self
+            .vault
+            .get(id)
+            .map_err(|_| "Credential storage unavailable")?;
+        credential.validate(a.provider, a.kind)?;
+        Ok(credential)
+    }
+    pub fn usage_health(
+        &self,
+        id: &str,
+        status: &str,
+        checked_at: i64,
+        next_check_at: i64,
+    ) -> Result<(), String> {
+        let health = UsageHealth {
+            status: status.into(),
+            checked_at,
+            next_check_at,
+        };
+        if !health.valid() {
+            return Err("Invalid usage health".into());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let a = candidate
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or("Account not found")?;
+        if a.usage_health
+            .as_ref()
+            .is_some_and(|old| old.checked_at > checked_at)
+            || a.usage
+                .as_ref()
+                .is_some_and(|old| old.observed_at > checked_at)
+        {
+            return Err("Usage health is older than the stored observation".into());
+        }
+        a.usage_health = Some(health);
+        self.publish(&mut state, candidate)
     }
     pub fn update(&self, id: &str, label: String, enabled: bool) -> Result<(), String> {
         if !label_valid(&label) {
@@ -379,6 +645,23 @@ impl Store {
         )
     }
     pub fn observe(&self, id: &str, usage: Usage) -> Result<(), String> {
+        self.observe_generation(id, None, usage)
+    }
+    /// Only publishes quota if the request's captured credential generation is still stored.
+    pub fn observe_credential(
+        &self,
+        id: &str,
+        credential: &Credential,
+        usage: Usage,
+    ) -> Result<(), String> {
+        self.observe_generation(id, Some(credential), usage)
+    }
+    fn observe_generation(
+        &self,
+        id: &str,
+        expected: Option<&Credential>,
+        usage: Usage,
+    ) -> Result<(), String> {
         if !usage_valid(&usage) {
             return Err("Invalid usage observation".into());
         }
@@ -395,6 +678,22 @@ impl Store {
         {
             return Err("Usage observation is older than the stored observation".into());
         }
+        if let Some(expected) = expected {
+            let current = self
+                .vault
+                .get(id)
+                .map_err(|_| "Credential storage unavailable")?;
+            if current.access_token != expected.access_token
+                || current.expires_at != expected.expires_at
+            {
+                return Err("Credential changed during usage check".into());
+            }
+        }
+        a.usage_health = Some(UsageHealth {
+            status: "ok".into(),
+            checked_at: usage.observed_at,
+            next_check_at: usage.observed_at.saturating_add(180),
+        });
         a.usage = Some(usage);
         append_event(&mut candidate, "usage", Some(id), "observed");
         self.publish(&mut state, candidate)

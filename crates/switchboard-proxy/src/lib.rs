@@ -10,7 +10,7 @@ use axum::{
 use futures_util::StreamExt;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
-use switchboard_core::{AuthKind, Provider, Store, Usage};
+use switchboard_core::{AuthKind, Provider, Store, Usage, UsageWindow};
 use tokio::{
     sync::{oneshot, Semaphore},
     task::JoinHandle,
@@ -322,7 +322,7 @@ async fn relay(
         outgoing = outgoing.header("anthropic-version", "2023-06-01");
     }
     if provider == Provider::Codex && account.kind == AuthKind::OAuth {
-        let Some(id) = credential.account_id else {
+        let Some(id) = credential.account_id.as_ref() else {
             return error(
                 StatusCode::CONFLICT,
                 "Account identity missing. Sign in again.",
@@ -359,7 +359,7 @@ async fn relay(
     }
     if provider == Provider::Claude {
         if let Some(usage) = usage_from_headers(upstream.headers()) {
-            let _ = g.store.observe(&account.id, usage);
+            let _ = g.store.observe_credential(&account.id, &credential, usage);
         }
     }
     let mut response = Response::builder().status(status);
@@ -401,27 +401,69 @@ pub fn now() -> i64 {
         .as_secs() as i64
 }
 fn usage_from_headers(headers: &HeaderMap) -> Option<Usage> {
-    let mut worst: Option<(f64, Option<i64>)> = None;
-    for window in ["5h", "7d"] {
-        let name = format!("anthropic-ratelimit-unified-{window}-utilization");
-        let value = headers.get(name)?.to_str().ok()?.parse::<f64>().ok()? * 100.;
-        if !value.is_finite() || !(0. ..=100.).contains(&value) {
+    let observed_at = now();
+    let mut windows = Vec::new();
+    for (window, name) in [("5h", "five_hour"), ("7d", "seven_day")] {
+        let header = format!("anthropic-ratelimit-unified-{window}-utilization");
+        let Some(raw) = headers.get(header) else {
+            continue;
+        };
+        let used_percent = raw.to_str().ok()?.parse::<f64>().ok()? * 100.;
+        if !used_percent.is_finite() || !(0. ..=100.).contains(&used_percent) {
             return None;
         }
-        let reset = headers
-            .get(format!("anthropic-ratelimit-unified-{window}-reset"))
-            .and_then(|s| s.to_str().ok())
-            .and_then(|s| s.parse().ok());
-        if worst.is_none_or(|w| value > w.0) {
-            worst = Some((value, reset));
-        }
+        let resets_at = match headers.get(format!("anthropic-ratelimit-unified-{window}-reset")) {
+            Some(value) => Some(
+                parse_reset(
+                    &serde_json::Value::String(value.to_str().ok()?.into()),
+                    observed_at,
+                )
+                .ok()?,
+            ),
+            None => None,
+        };
+        windows.push(UsageWindow {
+            name: name.into(),
+            used_percent,
+            resets_at,
+        });
     }
-    worst.map(|(used_percent, resets_at)| Usage {
-        used_percent,
-        resets_at,
-        observed_at: now(),
-        source: "response_headers".into(),
+    aggregate_usage(windows, observed_at, "response_headers").ok()
+}
+fn aggregate_usage(
+    windows: Vec<UsageWindow>,
+    observed_at: i64,
+    source: &str,
+) -> Result<Usage, String> {
+    let worst = windows
+        .iter()
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))
+        .ok_or("Provider returned no usage windows.")?;
+    Ok(Usage {
+        used_percent: worst.used_percent,
+        resets_at: worst.resets_at,
+        windows,
+        observed_at,
+        source: source.into(),
     })
+}
+fn parse_reset(value: &serde_json::Value, observed_at: i64) -> Result<i64, String> {
+    let parsed = value
+        .as_i64()
+        .or_else(|| {
+            value.as_str().and_then(|s| {
+                s.parse::<i64>().ok().or_else(|| {
+                    chrono::DateTime::parse_from_rfc3339(s)
+                        .ok()
+                        .map(|t| t.timestamp())
+                })
+            })
+        })
+        .ok_or("Usage reset unsupported.")?;
+    if parsed < observed_at || parsed > 253_402_300_799 {
+        return Err("Usage reset unsupported.".into());
+    }
+    Ok(parsed)
 }
 
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
@@ -449,11 +491,11 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
         Provider::Claude => "https://api.anthropic.com/api/oauth/usage",
         Provider::Codex => "https://chatgpt.com/backend-api/wham/usage",
     };
-    let mut request = client.get(url).bearer_auth(credential.access_token);
+    let mut request = client.get(url).bearer_auth(&credential.access_token);
     if account.provider == Provider::Claude {
         request = request.header("anthropic-beta", "oauth-2025-04-20");
     }
-    if let Some(account_id) = credential.account_id {
+    if let Some(account_id) = credential.account_id.as_ref() {
         if account.provider == Provider::Codex {
             request = request.header("chatgpt-account-id", account_id);
         }
@@ -477,37 +519,90 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|_| "Usage response unsupported.")?;
     let usage = parse_usage(account.provider, &value)?;
-    store.observe(&id, usage.clone())?;
+    store.observe_credential(&id, &credential, usage.clone())?;
     Ok(usage)
 }
 pub fn parse_usage(provider: Provider, value: &serde_json::Value) -> Result<Usage, String> {
-    let paths = match provider {
-        Provider::Codex => [
-            "/rate_limit/primary_window/used_percent",
-            "/rate_limit/secondary_window/used_percent",
-        ],
-        Provider::Claude => ["/five_hour/utilization", "/seven_day/utilization"],
-    };
-    let mut values = Vec::new();
-    for path in paths {
-        if let Some(v) = value.pointer(path) {
-            let v = v.as_f64().ok_or("Usage response unsupported.")?;
-            if !v.is_finite() || !(0. ..=100.).contains(&v) {
-                return Err("Usage response unsupported.".into());
-            }
-            values.push(v);
-        }
+    parse_usage_at(provider, value, now())
+}
+/// Clock injection keeps reset parsing and quota tests independent of wall time.
+pub fn parse_usage_at(
+    provider: Provider,
+    value: &serde_json::Value,
+    observed_at: i64,
+) -> Result<Usage, String> {
+    if observed_at <= 0 {
+        return Err("Usage observation time invalid.".into());
     }
-    let used_percent = values
-        .into_iter()
-        .reduce(f64::max)
-        .ok_or("Provider returned no usage windows.")?;
-    Ok(Usage {
-        used_percent,
-        observed_at: now(),
-        resets_at: None,
-        source: "provider".into(),
-    })
+    let definitions: &[(&str, &str, &str)] = match provider {
+        Provider::Codex => &[
+            ("primary", "/rate_limit/primary_window", "used_percent"),
+            ("secondary", "/rate_limit/secondary_window", "used_percent"),
+        ],
+        Provider::Claude => &[
+            ("five_hour", "/five_hour", "utilization"),
+            ("seven_day", "/seven_day", "utilization"),
+            ("seven_day_sonnet", "/seven_day_sonnet", "utilization"),
+            ("seven_day_opus", "/seven_day_opus", "utilization"),
+            (
+                "seven_day_oauth_apps",
+                "/seven_day_oauth_apps",
+                "utilization",
+            ),
+        ],
+    };
+    let mut windows = Vec::new();
+    for &(name, path, key) in definitions {
+        let Some(window) = value.pointer(path).filter(|v| !v.is_null()) else {
+            continue;
+        };
+        let used_percent = window
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .ok_or("Usage response unsupported.")?;
+        if !used_percent.is_finite() || !(0. ..=100.).contains(&used_percent) {
+            return Err("Usage response unsupported.".into());
+        }
+        let reset_key = if provider == Provider::Claude {
+            "resets_at"
+        } else {
+            "reset_at"
+        };
+        let resets_at = if let Some(reset) = window.get(reset_key).filter(|v| !v.is_null()) {
+            Some(parse_reset(reset, observed_at)?)
+        } else if provider == Provider::Codex {
+            match window.get("reset_after_seconds").filter(|v| !v.is_null()) {
+                Some(reset) => {
+                    let seconds = reset
+                        .as_i64()
+                        .filter(|n| *n >= 0)
+                        .ok_or("Usage reset unsupported.")?;
+                    Some(
+                        observed_at
+                            .checked_add(seconds)
+                            .filter(|t| *t <= 253_402_300_799)
+                            .ok_or("Usage reset unsupported.")?,
+                    )
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        windows.push(UsageWindow {
+            name: name.into(),
+            used_percent,
+            resets_at,
+        });
+    }
+    aggregate_usage(
+        windows,
+        observed_at,
+        match provider {
+            Provider::Claude => "claude_oauth",
+            Provider::Codex => "codex_oauth",
+        },
+    )
 }
 
 #[cfg(test)]

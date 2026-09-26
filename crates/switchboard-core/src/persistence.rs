@@ -99,7 +99,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if disk.schema_version != 1 {
+            if !matches!(disk.schema_version, 1 | 2) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -124,7 +124,7 @@ pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
         Err(e) => return Err(error(e)),
     }
     let data = serde_json::to_vec(&Disk {
-        schema_version: 1,
+        schema_version: 2,
         snapshot: snapshot.clone(),
     })
     .map_err(error)?;
@@ -182,7 +182,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if disk.schema_version != 1 {
+        if !matches!(disk.schema_version, 1 | 2) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;
@@ -195,7 +195,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
 #[cfg(windows)]
 pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
     let data = serde_json::to_vec(&Disk {
-        schema_version: 1,
+        schema_version: 2,
         snapshot: snapshot.clone(),
     })
     .map_err(error)?;

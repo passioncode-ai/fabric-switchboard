@@ -213,6 +213,7 @@ fn duplicates_are_secret_and_pool_based_and_direct_structs_are_validated() {
                 access_token: "unsafe\nheader".into(),
                 refresh_token: None,
                 id_token: None,
+                native_context: None,
                 expires_at: None,
                 account_id: None
             }
@@ -233,6 +234,7 @@ fn expired_or_missing_credentials_never_become_selected() {
                 access_token: "synthetic".into(),
                 refresh_token: None,
                 id_token: None,
+                native_context: None,
                 expires_at: Some(now() - 1),
                 account_id: None,
             },
@@ -426,6 +428,7 @@ fn usage_validates_bounds_and_preserves_previous_observation() {
     let (_root, _vault, store) = setup();
     let a = add(&store, "synthetic");
     let good = Usage {
+        windows: vec![],
         used_percent: 0.0,
         observed_at: now(),
         resets_at: Some(now() + 500),

@@ -15,6 +15,9 @@ pub struct Credential {
     /// Parsing it does not establish a verified identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_token: Option<String>,
+    /// Native Claude envelope; secret-bearing and retained only inside the vault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_context: Option<Value>,
     pub expires_at: Option<i64>,
     pub account_id: Option<String>,
 }
@@ -34,10 +37,14 @@ impl Credential {
         if provider == Provider::Codex && kind == AuthKind::SetupToken {
             return Err("Codex does not support setup tokens".into());
         }
-        if !token_valid(&self.access_token)
+        if serde_json::to_vec(self).map_or(true, |bytes| bytes.len() > MAX_INPUT)
+            || !token_valid(&self.access_token)
             || self.refresh_token.as_ref().is_some_and(|s| !token_valid(s))
             || self.id_token.as_ref().is_some_and(|s| !token_valid(s))
             || (provider != Provider::Codex && self.id_token.is_some())
+            || self.native_context.as_ref().is_some_and(|v| {
+                provider != Provider::Claude || kind != AuthKind::OAuth || !native_context_valid(v)
+            })
             || self.account_id.as_ref().is_some_and(|s| !identity_valid(s))
             || self
                 .expires_at
@@ -120,6 +127,7 @@ impl Credential {
                 } else {
                     None
                 },
+                native_context: None,
                 expires_at,
                 account_id: string(account)?,
             }
@@ -128,6 +136,7 @@ impl Credential {
                 access_token: input.into(),
                 refresh_token: None,
                 id_token: None,
+                native_context: None,
                 expires_at: None,
                 account_id: None,
             }
@@ -135,4 +144,16 @@ impl Credential {
         credential.validate(provider, kind)?;
         Ok(credential)
     }
+}
+
+fn native_context_valid(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    object.len() == 2
+        && object.get("auth").is_some_and(Value::is_object)
+        && object
+            .get("oauth_account")
+            .is_some_and(|v| v.is_object() || v.is_null())
+        && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_INPUT)
 }
