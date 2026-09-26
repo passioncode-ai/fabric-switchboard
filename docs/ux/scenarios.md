@@ -21,6 +21,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-012 | Return after restart | validated |
 | SCN-013 | Keyboard and narrow window | validated |
 
+| SCN-014 | Command-line account management | draft |
+| SCN-015 | CLI with a running desktop or server | draft |
+| SCN-016 | CLI login and launch | draft |
+| SCN-017 | Install native builds | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -252,5 +256,73 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
 **Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-014 — Command-line account management
+**Persona:** P-01
+**Goal:** Manage authorized coding accounts from a terminal or native OS build.
+**Preconditions:** User-owned accounts; synthetic fixtures for tests.
+**Entry point:** CLI or native installer
+**Steps:**
+1. Run switchboard accounts list/add/select/update/remove with explicit UUID, provider/pool and stdin credential → backend reports the same state as the desktop, never credential material.
+**Alt paths:** Use --help without opening storage; cancel before secret input without mutation.
+**Expected result:** One consistent account state; credentials never in output.
+**UI elements:** terminal help, stdout, stderr, exit code, native shell.
+**States covered:** empty, success, error, running
+**Errors & recovery:** Invalid input, vault denial, selected removal and unavailable owner return a nonzero exit code with actionable sanitized error.
+**Status:** draft
+**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-015 — CLI with a running desktop or server
+**Persona:** P-01
+**Goal:** Manage authorized coding accounts from a terminal or native OS build.
+**Preconditions:** User-owned accounts; synthetic fixtures for tests.
+**Entry point:** CLI or native installer
+**Steps:**
+1. Start GUI or switchboard serve, then select through CLI → active owner persists the route; next request uses the new account.
+**Alt paths:** Use --help without opening storage; cancel before secret input without mutation.
+**Expected result:** One consistent account state; credentials never in output.
+**UI elements:** terminal help, stdout, stderr, exit code, native shell.
+**States covered:** empty, success, error, running
+**Errors & recovery:** Invalid/stale capability and wrong host/origin refuse; no second process bypasses the Store lock.
+**Status:** draft
+**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-016 — CLI login and launch
+**Persona:** P-01
+**Goal:** Manage authorized coding accounts from a terminal or native OS build.
+**Preconditions:** User-owned accounts; synthetic fixtures for tests.
+**Entry point:** CLI or native installer
+**Steps:**
+1. Use login/launch with explicit account and project directory → official provider flow uses a private home and managed launch requires a live owner.
+**Alt paths:** Use --help without opening storage; cancel before secret input without mutation.
+**Expected result:** One consistent account state; credentials never in output.
+**UI elements:** terminal help, stdout, stderr, exit code, native shell.
+**States covered:** empty, success, error, running
+**Errors & recovery:** Incomplete sign-in, missing CLI, active home, server absence and invalid project path return recovery instructions.
+**Status:** draft
+**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-017 — Install native builds
+**Persona:** P-01
+**Goal:** Manage authorized coding accounts from a terminal or native OS build.
+**Preconditions:** User-owned accounts; synthetic fixtures for tests.
+**Entry point:** CLI or native installer
+**Steps:**
+1. Open the signed macOS app or install the Windows build → app starts with the appropriate OS vault and shared CLI metadata root.
+**Alt paths:** Use --help without opening storage; cancel before secret input without mutation.
+**Expected result:** One consistent account state; credentials never in output.
+**UI elements:** terminal help, stdout, stderr, exit code, native shell.
+**States covered:** empty, success, error, running
+**Errors & recovery:** Signing, notarization, Windows installer build and live provider compatibility remain separately evidenced.
+**Status:** draft
+**Coverage:** planned in [CLI release plan](../CLI-RELEASE-PLAN.md); execution evidence pending.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
