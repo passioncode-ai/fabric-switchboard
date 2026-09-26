@@ -187,7 +187,7 @@ pub fn private_dir(path: &Path) -> Result<(), String> {
     }
     protect(path)
 }
-fn file(path: &Path, create: bool, write: bool) -> Result<File, String> {
+fn file(path: &Path, create: bool, write: bool, strict: bool) -> Result<File, String> {
     check_path(path)?;
     let sd = descriptor()?;
     let sa = SECURITY_ATTRIBUTES {
@@ -217,14 +217,81 @@ fn file(path: &Path, create: bool, write: bool) -> Result<File, String> {
     {
         return Err("Unsafe Windows private file".into());
     }
-    protect(path)?;
+    if strict {
+        verify_private_handle(&f)?;
+    } else {
+        protect(path)?;
+    }
     Ok(f)
 }
 pub fn create_new(path: &Path) -> Result<File, String> {
-    file(path, true, true)
+    file(path, true, true, false)
 }
 pub fn open_private(path: &Path, write: bool) -> Result<File, String> {
-    file(path, false, write)
+    file(path, false, write, false)
+}
+pub(crate) fn open_private_strict(path: &Path) -> Result<File, String> {
+    file(path, false, false, true)
+}
+fn verify_private_handle(file: &File) -> Result<(), String> {
+    let refused =
+        || "Private file permissions are unsafe; rotate its capability before reuse".to_string();
+    unsafe {
+        let mut sd = null_mut();
+        let mut owner = null_mut();
+        let mut dacl = null_mut();
+        if GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut sd,
+        ) != 0
+        {
+            return Err(refused());
+        }
+        let _allocation = Local(sd);
+        let expected = descriptor()?;
+        let mut expected_owner = null_mut();
+        let mut defaulted = 0;
+        if GetSecurityDescriptorOwner(expected.0, &mut expected_owner, &mut defaulted) == 0
+            || EqualSid(owner, expected_owner) == 0
+        {
+            return Err(refused());
+        }
+        let mut control = 0;
+        let mut revision = 0;
+        if GetSecurityDescriptorControl(sd, &mut control, &mut revision) == 0
+            || control & SE_DACL_PROTECTED == 0
+            || dacl.is_null()
+            || (*dacl).AceCount == 0
+        {
+            return Err(refused());
+        }
+        for index in 0..(*dacl).AceCount {
+            let mut raw = null_mut();
+            if GetAce(dacl, index.into(), &mut raw) == 0 || raw.is_null() {
+                return Err(refused());
+            }
+            let header = &*(raw as *const ACE_HEADER);
+            // Only ordinary, explicit current-user allow ACEs are accepted. Object,
+            // callback, inherited and foreign-principal ACEs are deliberately refused.
+            if header.AceType != 0
+                || header.AceFlags & INHERITED_ACE as u8 != 0
+                || (header.AceSize as usize) < size_of::<ACCESS_ALLOWED_ACE>()
+            {
+                return Err(refused());
+            }
+            let ace = &*(raw as *const ACCESS_ALLOWED_ACE);
+            if EqualSid((&ace.SidStart as *const u32) as *mut c_void, expected_owner) == 0 {
+                return Err(refused());
+            }
+        }
+        Ok(())
+    }
 }
 pub fn replace(source: &Path, destination: &Path) -> Result<(), String> {
     check_path(source)?;
@@ -332,6 +399,56 @@ pub fn process_matches(pid: u32, created: u64) -> Result<bool, String> {
 mod tests {
     use super::*;
     use crate::{private_fs, AuthKind, Credential, NativeVault, Provider, Vault};
+    #[test]
+    fn windows_strict_read_refuses_widened_acl_without_mutating_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("control.json");
+        private_fs::private_write(&path, b"synthetic capability").unwrap();
+        assert_eq!(
+            private_fs::read_private_strict(&path, 128).unwrap(),
+            b"synthetic capability"
+        );
+        unsafe {
+            let s = format!("D:P(A;;FA;;;{})(A;;FR;;;WD)", user_sid().unwrap());
+            let s: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+            let mut sd = null_mut();
+            assert_ne!(
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    s.as_ptr(),
+                    1,
+                    &mut sd,
+                    null_mut()
+                ),
+                0
+            );
+            let _sd = Local(sd);
+            let mut dacl = null_mut();
+            let mut present = 0;
+            let mut defaulted = 0;
+            assert_ne!(
+                GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted),
+                0
+            );
+            assert_eq!(
+                SetNamedSecurityInfoW(
+                    wide(&path).unwrap().as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    dacl,
+                    null()
+                ),
+                0
+            );
+        }
+        for _ in 0..2 {
+            assert!(private_fs::read_private_strict(&path, 128)
+                .unwrap_err()
+                .contains("permissions are unsafe"));
+        }
+        assert_eq!(fs::read(&path).unwrap(), b"synthetic capability");
+    }
     #[test]
     fn windows_dpapi_roundtrip_large_oauth_and_tamper_refusal() {
         let id = uuid::Uuid::new_v4().to_string();

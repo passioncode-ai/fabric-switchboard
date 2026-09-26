@@ -1,8 +1,9 @@
 //! App-owned storage primitives. Callers must supply absolute paths within their private root.
 //! Windows uses protected current-user DACLs, reparse refusal and native replacement;
 //! Unix uses owner checks, no-follow opens and 0700/0600 permissions.
+use std::fs::File;
 #[cfg(unix)]
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::{
     fs,
     io::{Read, Write},
@@ -12,6 +13,8 @@ fn err(_: impl std::fmt::Display) -> String {
     "Private account storage unavailable".into()
 }
 
+#[cfg(windows)]
+use crate::windows::open_private_strict;
 #[cfg(windows)]
 pub use crate::windows::{check_path, create_new, open_private, private_dir, replace};
 
@@ -76,12 +79,34 @@ pub fn open_private(path: &Path, write: bool) -> Result<File, String> {
     Ok(f)
 }
 #[cfg(unix)]
+fn open_private_strict(path: &Path) -> Result<File, String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let file = options().read(true).open(path).map_err(err)?;
+    let meta = file.metadata().map_err(err)?;
+    if !meta.is_file() || meta.nlink() != 1 || meta.uid() != unsafe { libc::geteuid() } {
+        return Err("Unsafe private storage file".into());
+    }
+    if meta.permissions().mode() & 0o077 != 0 {
+        return Err(
+            "Private file permissions are unsafe; rotate its capability before reuse".into(),
+        );
+    }
+    Ok(file)
+}
+#[cfg(unix)]
 pub fn replace(source: &Path, destination: &Path) -> Result<(), String> {
     fs::rename(source, destination).map_err(err)
 }
 
 pub fn read_private(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
-    let f = open_private(path, false)?;
+    read_bounded(open_private(path, false)?, max_bytes)
+}
+/// Verify current private permissions on the same opened handle, without fixing them.
+/// Use this for capability descriptors: narrowing an exposed ACL cannot revoke a leaked token.
+pub fn read_private_strict(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    read_bounded(open_private_strict(path)?, max_bytes)
+}
+fn read_bounded(f: File, max_bytes: u64) -> Result<Vec<u8>, String> {
     if f.metadata().map_err(err)?.len() > max_bytes {
         return Err("Private file exceeds size limit".into());
     }
@@ -120,4 +145,29 @@ pub fn private_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(temporary);
     }
     result
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn strict_read_refuses_exposed_capability_without_changing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("control.json");
+        private_write(&path, b"synthetic capability").unwrap();
+        assert_eq!(
+            read_private_strict(&path, 128).unwrap(),
+            b"synthetic capability"
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_private_strict(&path, 128)
+            .unwrap_err()
+            .contains("permissions are unsafe"));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"synthetic capability");
+    }
 }
