@@ -1,0 +1,30 @@
+[
+  {
+    "name": "codex-account-switcher",
+    "remote": "https://github.com/liuzhao1225/codex-account-switcher.git",
+    "commit": "a371af174defd4e579424286e71f2c08db1f3514",
+    "examined_at": "2026-09-26",
+    "method": "shallow clone; static source inspection, not execution"
+  },
+  {
+    "name": "subswapper",
+    "remote": "https://github.com/lawzava/subswapper.git",
+    "commit": "cba1f91958cfe1cf49209aead8c2527220da9b9d",
+    "examined_at": "2026-09-26",
+    "method": "shallow clone; static source inspection, not execution"
+  },
+  {
+    "name": "claude-swap",
+    "remote": "https://github.com/realiti4/claude-swap.git",
+    "commit": "9aa6d0292736173e70d4c5d8e2026210fe39a9ee",
+    "examined_at": "2026-09-26",
+    "method": "shallow clone; static source inspection, not execution"
+  },
+  {
+    "name": "cc-switch",
+    "remote": "https://github.com/farion1231/cc-switch.git",
+    "commit": "1ee2fdc3a791f1e73476c631c7ab7ce8fac0638f",
+    "examined_at": "2026-09-26",
+    "method": "shallow clone; static source inspection, not execution"
+  }
+]

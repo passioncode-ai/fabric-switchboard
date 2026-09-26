@@ -1,0 +1,9 @@
+/target/
+/node_modules/
+/dist/
+/src-tauri/gen/
+/.task-pipeline/
+*.log
+.DS_Store
+.env*
+/artifacts/
