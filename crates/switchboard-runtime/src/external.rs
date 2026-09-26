@@ -684,7 +684,9 @@ fn directory_file(path: &Path) -> Result<fs::File, String> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x02000000 | 0x00200000);
+        options
+            .custom_flags(0x02000000 | 0x00200000)
+            .access_mode(0x80 | 0x100);
     }
     options
         .open(path)
@@ -901,7 +903,9 @@ fn activate(
     // may now own the live generation. Surface the partial result explicitly.
     ensure_lock().map_err(|_|"Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
     if writer.config_write(&c.config, Some(&new_config)).is_err() {
+        ensure_lock().map_err(|_| "Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
         let auth_restored = writer.auth_write(c, old_auth.as_deref()).is_ok();
+        ensure_lock().map_err(|_| "Claude rollback lost its account lock. Check the current Claude sign-in before retrying.")?;
         // Atomic config writes leave the old file intact on failure; restore as
         // well for writer backends where the failure can occur after commit.
         let config_restored = writer
@@ -1240,5 +1244,35 @@ mod tests {
         let result = import(&f, root, true).unwrap();
         assert!(result.profiles.is_empty());
         assert_eq!(result.failed, 1);
+    }
+    #[test]
+    fn lost_lock_before_rollback_never_overwrites_new_owner() {
+        let f = Fixture::new();
+        let c = ctx();
+        f.put(&c.config, &config("old@example.test"));
+        f.put(&c.home.join(".credentials.json"), &auth("old-token"));
+        let old = capture(&f, Provider::Claude, &c).unwrap();
+        let new = claude_profile(&auth("new-token"), &config("new@example.test"), None).unwrap();
+        f.fail_config.set(true);
+        let calls = Cell::new(0);
+        let result = activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old.identity),
+            || {
+                let n = calls.get() + 1;
+                calls.set(n);
+                if n >= 3 {
+                    Err("lost".into())
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.unwrap_err().contains("lock was lost"));
+        let auth = parse(&f.files.borrow()[&c.home.join(".credentials.json")]).unwrap();
+        assert_eq!(auth["claudeAiOauth"]["accessToken"], "new-token");
     }
 }
