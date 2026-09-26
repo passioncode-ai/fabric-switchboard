@@ -23,7 +23,7 @@ Native live-provider login/inference, interactive Windows installer/UI, two-Wind
 
 ## Exact next task
 
-Artifacts are built and retained in the [private draft release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-58813c81ca48bc2e938c); [release evidence](evidence/release-0.2.md) names their exact source SHAs and hashes. First release prerequisite: obtain the existing notarytool profile name from the operator and resume notarization of the retained signed archive using [distribution](DISTRIBUTION.md). Native Windows verification needs an available Windows runner: the attempted hosted job was billing-blocked before executing any step. Do not mark cross-compilation as that verification.
+Artifacts are built and retained in the [private draft release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-9cc7b70fc69e791cd8bf); [release evidence](evidence/release-0.2.md) names their exact source SHAs and hashes. First release prerequisite: obtain the existing notarytool profile name from the operator and resume notarization of the retained signed archive using [distribution](DISTRIBUTION.md). Native Windows verification needs an available Windows runner: the attempted hosted job was billing-blocked before executing any step. Do not mark cross-compilation as that verification.
 
 Native Mac window inspection is now complete. Execute [PA-01](packets/provider-acceptance.md) using authorized test accounts through official login, with a bounded request budget. Record exact Claude/Codex versions, isolated and managed responses, and A→B next-request switching. Do not read existing global credentials as a substitute. Fix observed defects with focused fixtures before repeating the affected acceptance.
 
@@ -42,3 +42,7 @@ cargo build --release --locked -p switchboard-cli
 Keep `node_modules/`, `target/`, `dist/`, `artifacts/`, OS app data, Keychain, provider homes, credentials and external research clones out of Git. Research validation uses separate clones at the pins in `docs/research/sources.json`; it does not execute third-party code. Observatory remains untouched; no Fabric parent submodule pin was changed.
 
 The initial 0.1 delivery at `a478941c7ab7f467ebfde36d592910d2e1fff79c` passed an independently fetched checkout, 36 tests and document validation with reused Cargo cache. This is historical evidence only. The current 0.2 remote SHA/fresh-checkout receipt belongs in the current release evidence. A pushed branch is available for handoff, not proof of a release, merge, notarization or deployment.
+
+## 0.2 delivery receipt
+
+Source/docs snapshot `e1b5aab92fba3b7c0be14a77e645beab0843a257` was pushed, independently fetched into the existing clean remote clone and verified: 30 Markdown files / 132 relative links / 0 errors, signing/cross-build script syntax passed, clean Git status. Application tests passed earlier from source `5ee501e`, and its application source is unchanged. Both ZIPs and adjacent receipts were downloaded back from GitHub and matched their local SHA-256. Draft release ID is `397271377`, tag name `v0.2.0-beta.1`; `gh release view v0.2.0-beta.1` resolves its current address if GitHub changes the draft URL. This final handoff-only change corrects that URL and records this receipt; remote HEAD equality is checked again after push.

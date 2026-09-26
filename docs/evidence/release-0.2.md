@@ -6,7 +6,7 @@ Task authorized 2026-09-26: add CLI, sign macOS build, build Windows artifact. B
 
 ## Delivered artifacts
 
-Engineering artifacts are retained in the private repository's [draft release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-58813c81ca48bc2e938c). It has not been published as a generally supported release. Each ZIP has an adjacent receipt naming its actual source commit and checksum.
+Engineering artifacts are retained in the private repository's [draft release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-9cc7b70fc69e791cd8bf). It has not been published as a generally supported release. Each ZIP has an adjacent receipt naming its actual source commit and checksum.
 
 | Artifact | Source commit | Observed result |
 |---|---|---|
