@@ -1,0 +1,10 @@
+{
+  "source": "brand/passioncode/switchboard-mark.svg",
+  "generator": "@tauri-apps/cli 2.11.5",
+  "command": "node scripts/generate-icons.mjs",
+  "sha256": {
+    "src-tauri/icons/icon.png": "bad0d0b83b52135583c192a40a51eb8360eca7c223426aee5701f36e79ed748a",
+    "src-tauri/icons/icon.icns": "d8107cce0a74f2a91dce26e6b25664b6fc1780ff86cfc853e68a7b8ab7144b24",
+    "src-tauri/icons/icon.ico": "f041e3c6e39c43a2997a938524882fc8131db803b988ecc0fe33ff3193e7a761"
+  }
+}

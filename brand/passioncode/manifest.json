@@ -1,0 +1,18 @@
+{
+  "system": "PassionCode",
+  "version": "1.0.0",
+  "repository": "https://github.com/passioncode-ai/passioncode-ai.github.io",
+  "commit": "508e91793fcb79d6a59bd2265551dbc76f7a8f97",
+  "files": [
+    {
+      "source": "design-system/tokens.css",
+      "vendored": "brand/passioncode/tokens.css",
+      "sha256": "a2ff52c6323de40aecd055a89c6629c25c94a6ce96eed7cd31ee333f210284ce"
+    },
+    {
+      "source": "assets/switchboard-mark.svg",
+      "vendored": "brand/passioncode/switchboard-mark.svg",
+      "sha256": "0aca33c30ea680663e010a468cb575f8f4ac681fc269ceafa99516813c086926"
+    }
+  ]
+}

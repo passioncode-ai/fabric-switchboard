@@ -1,7 +1,7 @@
 # Fabric Switchboard — start here
 
 **Objective:** a Fabric account workbench for Claude Code/Codex, CLI and macOS/Windows builds. Current extension: capture existing CLI authorization, official console login for additional accounts, Claude Swap import, actual active identity, detailed quota and opt-in rotation.
-**Owner:** private `passioncode-ai/fabric-switchboard`, branch `codex/bootstrap`. Observatory and other projects are unchanged.
+**Owner:** `passioncode-ai/fabric-switchboard`; 0.3.1 source branch `codex/passioncode-design-v031`. Public repository/release publication is owned by the parent launch task; this design packet does not claim it completed. Observatory and other projects are unchanged.
 
 Read [0.3 account/rotation contract](ACCOUNTS-AND-ROTATION.md) → [research delta](RESEARCH-0.3-IMPORTS.md) → [spec](SPEC.md) → [shared contracts](CONTRACTS.md). Current checks/artifacts: [release evidence](evidence/release-0.3.md). [0.2](evidence/release-0.2.md) and [0.1](evidence/verification.md) reports are historical.
 
@@ -25,16 +25,24 @@ Inactive snapshots can expire; recapture/reimport or official login is recovery.
 
 Signing is separate from notarization. Native Windows and provider acceptance remain separate. Hosted full checks remain nightly only; previous hosted run was billing-blocked before any step.
 
+## 0.3.1 PassionCode design packet
+
+Completed: exact shared PassionCode v1.0.0 tokens and S mark vendored with immutable source commit and SHA-256; fixed dark appearance; gold next-request selection separated from blue current identity; native PNG/ICNS/ICO regenerated from that same S vector; app/workspace packages bumped to 0.3.1. The independent switchboard-core crate retains its existing 0.1.0 version. Credentials and routing behavior are unchanged.
+
+Read [design evidence](evidence/design-0.3.1.md), [source manifest](../brand/passioncode/manifest.json), [SCN-023](ux/scenarios.md#scn-023--recognize-switchboard-across-desktop-surfaces) and [contracts](CONTRACTS.md). Parent packet: [public launch](https://github.com/passioncode-ai/passioncode-ai.github.io/blob/508e91793fcb79d6a59bd2265551dbc76f7a8f97/docs/tasks/2026-09-26-public-launch.md).
+
+Checks: npm ci, full `./scripts/check.sh` (81 passed, 1 opt-in Keychain test ignored), 2 canonical asset hashes, 3 generated native hashes, token-reference and version gate; repeat icon generation is byte-identical after sorting ICNS chunks. Synthetic browser review covered Accounts, Activity and Add account at 1280×720 and 740×560. No native/auth test run for this visual patch. Brand lint is NOT_RUN: this repository has no docs/brand/lint.py; identity labels reviewed manually.
+
 ## Exact next task
 
-Read [0.3 release evidence](evidence/release-0.3.md) for final source SHA, checks and receipts. Both builds are available in the linked draft release, with four asset hashes verified by download. macOS app/CLI are Developer ID signed and not notarized; Windows CLI/NSIS are cross-built and unsigned. A fresh remote clone passed the full gate (81 tests passed, 1 ignored). Next acceptance: [PA-01](packets/provider-acceptance.md), extended with SCN-018..022: authorized capture/import, quota, native Claude activation and managed A→B next-request behavior, exact CLI versions and bounded request budget. Do not read real auth merely to test without an operator action. Native Windows acceptance needs an available Windows host.
+Parent launch task: review/commit-address the final design evidence, build and sign 0.3.1 from this source, inspect packaged icon, verify package hashes and publish authorized repository/release; then update website download references and integration receipts. No push, packaging, native app launch, publication or deployment was performed by this bounded implementation packet. The synthetic Vite demo is at `http://127.0.0.1:5178/?demo=1` while its local task process remains running.
 
-Distribution prerequisite: saved notarytool profile name; resume the retained signed archive per [distribution](DISTRIBUTION.md). Developer ID authorization already exists; no key export. Windows signing needs a separate certificate/service.
+Acceptance remains [PA-01](packets/provider-acceptance.md), extended with SCN-018..023. Do not read real auth merely to test. Native Windows acceptance needs an available Windows host. macOS notarization needs the saved notarytool profile; Windows signing needs its separate certificate/service. Prior release facts remain in [0.3 evidence](evidence/release-0.3.md).
 
 ## Reproduce and local-only state
 
 ```sh
-git clone --branch codex/bootstrap git@github.com:passioncode-ai/fabric-switchboard.git
+git clone --branch codex/passioncode-design-v031 git@github.com:passioncode-ai/fabric-switchboard.git
 cd fabric-switchboard
 npm ci
 ./scripts/check.sh

@@ -1,7 +1,7 @@
 Contract: ux-contract v4
 # Screens
 **Web surfaces:** no — local authenticated desktop workbench; browser demo contains only fixtures.
-Design system: Workbench token layer; native semantic HTML controls in Tauri. Product-specific states are our decisions, not claimed as kit validation. No cinematic motion. Variance 2 (consistent rows), motion 1 (focus/hover), density 6 (five rows and actions visible at 1100×760).
+Design system: PassionCode v1.0.0, vendored from the [immutable canonical source](../../brand/passioncode/manifest.json); native semantic HTML controls in Tauri. Product-specific states are our decisions, not claimed as kit validation. No cinematic motion. Variance 2 (consistent rows), motion 1 (focus/hover), density 6 (compact account rows and current identity visible before account actions; retained workbench hierarchy).
 Falsifier: user cannot tell which account handles the next request, or cannot recover from a failed addition.
 ## SCR-01 — Accounts
 Status: designed
@@ -19,4 +19,7 @@ Coverage: [verification](../evidence/verification.md); browser inspected, histor
 Figma: not used
 
 ## SCR-01 extension — current accounts and rotation (0.3)
-Scenarios: SCN-018 through SCN-022. Current CLI identity panel, capture-first add dialog, explicit official sign-in alternative, Claude Swap import result, quota window disclosure, rotation policy editor/status, and native Claude activation confirmation. Workbench tokens and semantic controls retained. Integrated browser demo inspected with synthetic profiles; native/live 0.3 acceptance is separately declared in [release evidence](../evidence/release-0.3.md).
+Scenarios: SCN-018 through SCN-022. Current CLI identity panel, capture-first add dialog, explicit official sign-in alternative, Claude Swap import result, quota window disclosure, rotation policy editor/status, and native Claude activation confirmation. Existing semantic controls retained; PassionCode tokens applied in 0.3.1. Integrated browser demo inspected with synthetic profiles; native/live 0.3 acceptance is separately declared in [release evidence](../evidence/release-0.3.md).
+
+## Shared chrome and identity (0.3.1)
+SCN-023 covers the fixed dark register, yellow S icon, Switchboard / by PassionCode sidebar, and separate information-blue current-CLI versus gold next-request status. Component structure and account behavior remain unchanged. Native icons are generated from the same canonical SVG via `node scripts/generate-icons.mjs`. Native controls remain the existing component layer; no kit migration or animation added. Browser rendering evidence and limits: [0.3.1 design evidence](../evidence/design-0.3.1.md).

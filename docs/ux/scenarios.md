@@ -30,6 +30,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-020 | Distinguish native identity and managed selection | validated |
 | SCN-021 | Inspect quota windows and failed checks | validated |
 | SCN-022 | Configure and stop automatic rotation | validated |
+| SCN-023 | Recognize Switchboard across desktop surfaces | validated |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -423,5 +424,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Status:** validated
 **Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
 **Coverage:** Save-enable and one-action stop observed using the synthetic browser fixture on 2026-09-26; demo never performs automatic switching. Runtime policy execution is separately tested. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-023 — Recognize Switchboard across desktop surfaces
+**Persona:** P-01
+**Goal:** Recognize the PassionCode tool and distinguish current identity from next-request selection.
+**Preconditions:** App or synthetic browser demo; operating-system light/dark preference may vary.
+**Entry point:** App launcher → SCR-01 Accounts; SCR-02 Activity; About.
+**Steps:**
+1. Open Switchboard → Yellow S on the dark app icon matches the sidebar; Switchboard and PassionCode are named.
+2. Read account states → Gold selection names the next managed request; blue “Current CLI account” names the separate local identity.
+3. Open a dialog, change navigation, or use a narrow window → Shared dark roles and visible keyboard focus persist.
+**Alt paths:** Unknown usage remains unknown; error and disabled states retain their words and actions.
+**Expected result:** The shared design system changes presentation without asserting an account was authenticated or changing routing behavior.
+**UI elements:** native icon, sidebar mark/name, role tokens, selection label, current-identity badge.
+**States covered:** populated, empty, error, dialog, keyboard focus; native rendering separately unverified.
+**Errors & recovery:** Visual identity never replaces textual state labels; Refresh/recovery actions retain their existing meanings.
+**Status:** validated
+**Meaning:** operator explicitly requested the dark/gold PassionCode system and S icon; observed product outcome remains separate.
+**Coverage:** [0.3.1 design evidence](../evidence/design-0.3.1.md); browser fixtures only; native/live acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01

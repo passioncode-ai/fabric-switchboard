@@ -1,0 +1,38 @@
+{
+  "baseCommit": "1be03587140f53dc75a3971f9388b24315aefe30",
+  "route": "http://127.0.0.1:5178/?demo=1",
+  "scenario": [
+    "SCN-013",
+    "SCN-020",
+    "SCN-023"
+  ],
+  "states": [
+    "accounts populated",
+    "add account dialog",
+    "activity populated"
+  ],
+  "viewports": [
+    [
+      1280,
+      720
+    ],
+    [
+      740,
+      560
+    ]
+  ],
+  "dpr": 1,
+  "locale": "en",
+  "theme": "dark",
+  "reducedMotion": false,
+  "fonts": "loaded",
+  "reviewedAt": "2026-09-26T16:17:00Z",
+  "source": "cua in-app browser",
+  "sha256": {
+    "src/main.ts": "ed0d8d17eaa77cf38864322d2b447157bfe6cec02140a331c4a3db38a193f3a5",
+    "src/style.css": "9fe446a54e9ec000a9692218489455e7b5b0edb62eb12fa846d074f622146575",
+    "src/tokens.css": "431800eb495a1da5b7ee1206ef69c50976c20f60970457ddcfb389be4f516946",
+    "brand/passioncode/tokens.css": "a2ff52c6323de40aecd055a89c6629c25c94a6ce96eed7cd31ee333f210284ce",
+    "brand/passioncode/switchboard-mark.svg": "0aca33c30ea680663e010a468cb575f8f4ac681fc269ceafa99516813c086926"
+  }
+}

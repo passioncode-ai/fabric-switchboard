@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "fabric-switchboard"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde_json",
  "switchboard-core",
@@ -3463,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap",
  "serde_json",
@@ -3490,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-proxy"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "chrono",
@@ -3506,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-runtime"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "base64 0.22.1",

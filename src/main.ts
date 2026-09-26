@@ -1,14 +1,14 @@
 import './tokens.css';
 import './style.css';
+import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
+import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError } from './adapter';
 import type { Account, Adapter, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
-const theme = matchMedia('(prefers-color-scheme: dark)');
-const setTheme = () => { document.documentElement.dataset.theme = theme.matches ? 'dark' : 'light'; };
-theme.addEventListener('change', setTheme); setTheme();
+document.documentElement.dataset.theme = 'dark';
 let adapter: Adapter = nativeAdapter;
 let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
@@ -82,8 +82,11 @@ function render() {
   root.replaceChildren();
   const shell = el('div', 'shell');
   const sidebar = el('aside', 'sidebar');
-  const brand = el('div', 'brand'); brand.append(el('div', 'brand-mark', 'F'), el('div', '', 'FABRIC'));
-  sidebar.append(brand, el('p', 'product-name', 'Switchboard'));
+  const brand = el('div', 'brand');
+  const mark = el('img', 'brand-mark'); mark.src = switchboardMark; mark.alt = ''; mark.width = 40; mark.height = 40;
+  const brandName = el('div', 'brand-name'); brandName.append(el('strong', '', 'Switchboard'), el('span', 'brand-family', 'by PassionCode'));
+  brand.append(mark, brandName);
+  sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', 'Main navigation');
   for (const [target, label, icon] of [['accounts', 'Accounts', '▦'], ['activity', 'Activity', '≋'], ['about', 'About', '○']] as const) {
     const control = button('', () => { page = target; notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`);
@@ -92,7 +95,7 @@ function render() {
   }
   sidebar.append(nav);
   const sidebarFoot = el('div', 'sidebar-foot');
-  sidebarFoot.append(el('span', 'eyebrow', 'LOCAL WORKBENCH'), el('p', '', demo ? 'Synthetic session' : 'Your accounts. Your machine.'), el('span', 'version', `v0.3.0 · ${demo ? 'Browser demo' : platformLabel(runtime?.platform)}`));
+  sidebarFoot.append(el('span', 'eyebrow', 'LOCAL WORKBENCH'), el('p', '', demo ? 'Synthetic session' : 'Your accounts. Your machine.'), el('span', 'version', `v${version} · ${demo ? 'Browser demo' : platformLabel(runtime?.platform)}`));
   sidebar.append(sidebarFoot); shell.append(sidebar);
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));

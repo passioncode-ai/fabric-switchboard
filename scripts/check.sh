@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+node scripts/check-brand.mjs
 npm run build
 cargo fmt --all -- --check
 cargo test --workspace --locked
