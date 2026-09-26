@@ -269,6 +269,16 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
             return Err("Invalid account metadata".into());
         }
     }
+    if s.policies
+        .iter()
+        .filter(|p| p.enabled && p.target == "claude_cli")
+        .count()
+        > 1
+    {
+        return Err(
+            "Disable the existing Claude CLI rotation policy before enabling another pool.".into(),
+        );
+    }
     let mut policies = std::collections::HashSet::new();
     for p in &s.policies {
         p.validate()?;
@@ -528,6 +538,27 @@ impl Store {
         checked_at: i64,
         next_check_at: i64,
     ) -> Result<(), String> {
+        self.usage_health_generation(id, None, status, checked_at, next_check_at)
+    }
+    /// Late failed probes must not postpone checking a newly captured credential generation.
+    pub fn usage_health_credential(
+        &self,
+        id: &str,
+        credential: &Credential,
+        status: &str,
+        checked_at: i64,
+        next_check_at: i64,
+    ) -> Result<(), String> {
+        self.usage_health_generation(id, Some(credential), status, checked_at, next_check_at)
+    }
+    fn usage_health_generation(
+        &self,
+        id: &str,
+        expected: Option<&Credential>,
+        status: &str,
+        checked_at: i64,
+        next_check_at: i64,
+    ) -> Result<(), String> {
         let health = UsageHealth {
             status: status.into(),
             checked_at,
@@ -551,6 +582,17 @@ impl Store {
                 .is_some_and(|old| old.observed_at > checked_at)
         {
             return Err("Usage health is older than the stored observation".into());
+        }
+        if let Some(expected) = expected {
+            let current = self
+                .vault
+                .get(id)
+                .map_err(|_| "Credential storage unavailable")?;
+            if current.access_token != expected.access_token
+                || current.expires_at != expected.expires_at
+            {
+                return Err("Credential changed during usage check".into());
+            }
         }
         a.usage_health = Some(health);
         self.publish(&mut state, candidate)
@@ -593,6 +635,28 @@ impl Store {
         self.publish(&mut state, candidate)
     }
     pub fn select(&self, provider: Provider, pool: &str, id: &str) -> Result<(), String> {
+        self.select_transaction(provider, pool, id, None)
+    }
+    /// Publishes the managed route and any matching policy's cooldown in one metadata write.
+    pub fn select_with_cooldown(
+        &self,
+        provider: Provider,
+        pool: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        if now <= 0 {
+            return Err("Invalid rotation time".into());
+        }
+        self.select_transaction(provider, pool, id, Some(now))
+    }
+    fn select_transaction(
+        &self,
+        provider: Provider,
+        pool: &str,
+        id: &str,
+        switched_at: Option<i64>,
+    ) -> Result<(), String> {
         let mut state = self.lock()?;
         let a = state
             .accounts
@@ -604,6 +668,18 @@ impl Store {
         candidate
             .routes
             .insert(format!("{}:{}", provider.as_str(), pool), id.into());
+        if let Some(time) = switched_at {
+            if let Some(policy) = candidate
+                .policies
+                .iter_mut()
+                .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
+            {
+                if policy.last_switched_at.is_some_and(|last| last > time) {
+                    return Err("Rotation time precedes the last switch".into());
+                }
+                policy.last_switched_at = Some(time);
+            }
+        }
         append_event(&mut candidate, "account_selected", Some(id), "success");
         self.publish(&mut state, candidate)
     }

@@ -474,7 +474,22 @@ fn recapturing_same_generation_preserves_quota_and_late_old_response_cannot_over
         source: "claude_oauth".into(),
     };
     assert!(store.observe_credential(&id, &old, usage.clone()).is_err());
+    assert!(store
+        .usage_health_credential(&id, &old, "failed", now, now + 1800)
+        .is_err());
+    assert!(store.snapshot().unwrap().accounts[0].usage_health.is_none());
     let current = store.stored_credential(&id).unwrap();
+    store
+        .usage_health_credential(&id, &current, "failed", now, now + 180)
+        .unwrap();
+    assert_eq!(
+        store.snapshot().unwrap().accounts[0]
+            .usage_health
+            .as_ref()
+            .unwrap()
+            .status,
+        "failed"
+    );
     store.observe_credential(&id, &current, usage).unwrap();
     assert_eq!(
         store.snapshot().unwrap().accounts[0]
@@ -544,4 +559,101 @@ fn native_target_excludes_api_keys_and_scope_crossings_even_with_better_quota() 
             .unwrap()
             .enabled
     );
+}
+
+#[test]
+fn managed_route_and_cooldown_publish_together_or_neither() {
+    let (root, vault, store) = setup();
+    let time = clock();
+    let a = account(&store, "org-a", time);
+    let b = account(&store, "org-b", time);
+    // No policy: selecting remains valid and does not invent settings.
+    store
+        .select_with_cooldown(Provider::Claude, "default", &a, time)
+        .unwrap();
+    assert!(store.snapshot().unwrap().policies.is_empty());
+    store.set_policy(policy()).unwrap();
+    store
+        .select_with_cooldown(Provider::Claude, "default", &a, time)
+        .unwrap();
+    let before = serde_json::to_value(store.snapshot().unwrap()).unwrap();
+    let metadata = root.path().join("accounts.json");
+    let backup = root.path().join("before.json");
+    std::fs::rename(&metadata, &backup).unwrap();
+    std::fs::create_dir(&metadata).unwrap();
+    assert!(store
+        .select_with_cooldown(Provider::Claude, "default", &b, time + 1)
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(store.snapshot().unwrap()).unwrap(),
+        before
+    );
+    std::fs::remove_dir(&metadata).unwrap();
+    std::fs::rename(&backup, &metadata).unwrap();
+    drop(store);
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(store.snapshot().unwrap()).unwrap(),
+        before
+    );
+    // Credential validation fails before either field is changed, too.
+    vault.delete(&b).unwrap();
+    assert!(store
+        .select_with_cooldown(Provider::Claude, "default", &b, time + 1)
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(store.snapshot().unwrap()).unwrap(),
+        before
+    );
+    vault.put(&b, &credential("org-b", time + 9000)).unwrap();
+    assert!(store
+        .select_with_cooldown(Provider::Claude, "default", &b, time - 1)
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(store.snapshot().unwrap()).unwrap(),
+        before
+    );
+    store
+        .select_with_cooldown(Provider::Claude, "default", &b, time + 1)
+        .unwrap();
+    drop(store);
+    let store = Store::open(root.path().into(), vault).unwrap();
+    let after = store.snapshot().unwrap();
+    assert_eq!(after.routes["claude:default"], b);
+    assert_eq!(after.policies[0].last_switched_at, Some(time + 1));
+    assert_eq!(
+        after.events.len(),
+        before["events"].as_array().unwrap().len() + 1
+    );
+    assert_eq!(after.events.last().unwrap().action, "account_selected");
+}
+
+#[test]
+fn one_native_cli_target_cannot_have_competing_enabled_pools_even_on_disk() {
+    let (root, vault, store) = setup();
+    let mut first = policy();
+    first.target = "claude_cli".into();
+    store.set_policy(first.clone()).unwrap();
+    let mut second = first.clone();
+    second.pool = "work".into();
+    assert_eq!(
+        store.set_policy(second.clone()).unwrap_err(),
+        "Disable the existing Claude CLI rotation policy before enabling another pool."
+    );
+    // Disabled settings can coexist; explicitly handing ownership to another pool works.
+    second.enabled = false;
+    store.set_policy(second.clone()).unwrap();
+    first.enabled = false;
+    store.set_policy(first.clone()).unwrap();
+    second.enabled = true;
+    store.set_policy(second.clone()).unwrap();
+    // Managed policy is a separate target, not a competing native policy.
+    store.set_policy(policy()).unwrap();
+    drop(store);
+    let path = root.path().join("accounts.json");
+    let mut disk: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    disk["snapshot"]["policies"][0]["enabled"] = true.into();
+    std::fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
+    assert!(Store::open(root.path().into(), vault).is_err());
 }
