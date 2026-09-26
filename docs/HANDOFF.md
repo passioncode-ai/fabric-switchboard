@@ -27,7 +27,7 @@ Signing is separate from notarization. Native Windows and provider acceptance re
 
 ## Exact next task
 
-Read [0.3 release evidence](evidence/release-0.3.md) for final source SHA, checks and receipts. Pending build fields must be resolved before claiming delivery. Next acceptance: [PA-01](packets/provider-acceptance.md), extended with SCN-018..022: authorized capture/import, quota, native Claude activation and managed A→B next-request behavior, exact CLI versions and bounded request budget. Do not read real auth merely to test without an operator action. Native Windows acceptance needs an available Windows host.
+Read [0.3 release evidence](evidence/release-0.3.md) for final source SHA, checks and receipts. Both builds are available in the linked draft release, with four asset hashes verified by download. macOS app/CLI are Developer ID signed and not notarized; Windows CLI/NSIS are cross-built and unsigned. A fresh remote clone passed the full gate (81 tests passed, 1 ignored). Next acceptance: [PA-01](packets/provider-acceptance.md), extended with SCN-018..022: authorized capture/import, quota, native Claude activation and managed A→B next-request behavior, exact CLI versions and bounded request budget. Do not read real auth merely to test without an operator action. Native Windows acceptance needs an available Windows host.
 
 Distribution prerequisite: saved notarytool profile name; resume the retained signed archive per [distribution](DISTRIBUTION.md). Developer ID authorization already exists; no key export. Windows signing needs a separate certificate/service.
 

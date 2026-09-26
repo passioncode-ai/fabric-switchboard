@@ -54,7 +54,7 @@ Backing up app data alone does not back up the Keychain credential items. Copyin
 
 The complete contract is [accounts and rotation](ACCOUNTS-AND-ROTATION.md). Metadata version 2 accepts version 1 with defaults, then writes version 2 on mutation. Do not downgrade to 0.2 against the same metadata after migration. No automatic destructive downgrade is provided.
 
-Current CLI observation reads the authorization visible to the running process, not arbitrary other shells. Run the CLI from the intended environment for custom `CLAUDE_CONFIG_DIR`/`CODEX_HOME`. A mismatched secure-storage override or unsupported Codex secrets backend reports unavailable. Official isolated login remains available.
+Current CLI observation reads the authorization visible to the running process, not arbitrary other shells. For custom `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, launch the GUI or `serve` owner from the intended environment: connected CLI capture/current commands execute in that owner’s environment. Offline capture uses the caller’s environment. A mismatched secure-storage override or unsupported Codex secrets backend reports unavailable. Official isolated login remains available.
 
 Native activation refuses locks held by Claude; wait for its login/refresh to finish and retry. A lock lost after credential write, or failed rollback, needs explicit official Claude sign-in before retrying; the app will not kill processes or overwrite another lock owner. The active identity should be re-read after any uncertain result. An activation success is a storage result, not proof of a provider response or instantaneous client cache reload.
 

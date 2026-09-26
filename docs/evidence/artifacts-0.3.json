@@ -1,0 +1,110 @@
+{
+  "source_commit": "0b415ef6f5c7b8046afe55152a730fd620afab7d",
+  "release_url": "https://github.com/passioncode-ai/fabric-switchboard/releases/tag/untagged-d7c7cf8b04d5f90c39c1",
+  "draft": true,
+  "assets": [
+    {
+      "name": "Fabric-Switchboard-0.3.0-macos-universal-receipt.json",
+      "sha256": "8c4853ff3a4287c85d8cbb95d24998e759d22b9ac4fee2661cc073a25e9c1ae3",
+      "download_roundtrip": "PASS"
+    },
+    {
+      "name": "Fabric-Switchboard-0.3.0-macos-universal.zip",
+      "sha256": "ec9158a1f5f55320e23c0a80e5a68630d9ff8ef8981f84a703c9992b0ddab66e",
+      "download_roundtrip": "PASS"
+    },
+    {
+      "name": "Fabric-Switchboard-0.3.0-windows-x64-receipt.json",
+      "sha256": "ef4526bbe251628512a545e1f7e2b71a8c47d0249f7edec267c41f6c4ad50be3",
+      "download_roundtrip": "PASS"
+    },
+    {
+      "name": "Fabric-Switchboard-0.3.0-windows-x64.zip",
+      "sha256": "cc70df00f3930250536963d6dcaadfa5a9134613f20eb452fc9d0d6ef329021f",
+      "download_roundtrip": "PASS"
+    }
+  ],
+  "macos": {
+    "version": "0.3.0",
+    "commit": "0b415ef6f5c7b8046afe55152a730fd620afab7d",
+    "source_clean": true,
+    "toolchain": {
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+      "node": "v26.8.2",
+      "macos": "26.6.2",
+      "sdk": "26.2"
+    },
+    "architectures": {
+      "cli": [
+        "x86_64",
+        "arm64"
+      ],
+      "app": [
+        "x86_64",
+        "arm64"
+      ]
+    },
+    "developer_id_identity": "Developer ID Application: Sergei Viktorovich Sheleg (KJ35UYYL22)",
+    "signing_certificate_sha1": "4E9DE832FB92D08CFD02B215BE1E0EF9B1E854CE",
+    "signature_verified": true,
+    "notarization": {
+      "status": "NOT_RUN",
+      "reason": "No notarytool profile supplied"
+    },
+    "cli_sha256": "db30191c8b248cc16493e61e50dc33689947a6d3c2727c9166596bf21d2f2e14",
+    "archive_sha256": "ec9158a1f5f55320e23c0a80e5a68630d9ff8ef8981f84a703c9992b0ddab66e",
+    "archive": "Fabric-Switchboard-0.3.0-macos-universal.zip",
+    "folder": "Fabric-Switchboard-0.3.0-macos-universal"
+  },
+  "windows": {
+    "version": "0.3.0",
+    "commit": "0b415ef6f5c7b8046afe55152a730fd620afab7d",
+    "source_clean": true,
+    "target": "x86_64-pc-windows-msvc",
+    "build_host": "Darwin arm64",
+    "method": "cross-compiled; native acceptance NOT_RUN",
+    "toolchain": {
+      "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+      "cargo_xwin": "cargo-xwin-xwin 0.23.1",
+      "llvm": "Homebrew clang version 23.1.2",
+      "nsis": "v3.12"
+    },
+    "cli_rustflags": "-C target-feature=+crt-static",
+    "cli_external_vcruntime_import": false,
+    "pe_headers": {
+      "fabric-switchboard.exe": {
+        "machine": "0x8664",
+        "subsystem": 2
+      },
+      "switchboard.exe": {
+        "machine": "0x8664",
+        "subsystem": 3
+      },
+      "Fabric Switchboard_0.3.0_x64-setup.exe": {
+        "machine": "0x14c",
+        "subsystem": 2
+      }
+    },
+    "sha256": {
+      "Fabric Switchboard_0.3.0_x64-setup.exe": "aabeacb8877f859d1bc59df43bcf09e2aba672c7f553a216968ffd1d1635cad5",
+      "switchboard.exe": "d977df4d5e40f352430af5e6af4b30d3026c06674e51a4967f68a610f894dbd7"
+    },
+    "native_windows_tests": "NOT_RUN",
+    "windows_authenticode": "NOT_SIGNED",
+    "provider_live_acceptance": "NOT_RUN",
+    "archive": "Fabric-Switchboard-0.3.0-windows-x64.zip",
+    "archive_sha256": "cc70df00f3930250536963d6dcaadfa5a9134613f20eb452fc9d0d6ef329021f"
+  },
+  "native_cli_smoke": "PASS: version, empty accounts list, empty rotation status in temporary data directory",
+  "gatekeeper": {
+    "exit_code": 3,
+    "source": "Unnotarized Developer ID"
+  },
+  "fresh_checkout_gate": {
+    "command": "./scripts/check.sh",
+    "exit_code": 0,
+    "passed": 81,
+    "failed": 0,
+    "ignored": 1
+  }
+}
