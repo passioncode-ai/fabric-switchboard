@@ -1,7 +1,7 @@
 # Fabric Switchboard — start here
 
 **Objective:** a Fabric account workbench for Claude Code/Codex, CLI and macOS/Windows builds. Current extension: capture existing CLI authorization, official console login for additional accounts, Claude Swap import, actual active identity, detailed quota and opt-in rotation.
-**Owner:** `passioncode-ai/fabric-switchboard`; 0.3.1 source branch `codex/passioncode-design-v031`. Public repository/release publication is owned by the parent launch task; this design packet does not claim it completed. Observatory and other projects are unchanged.
+**Owner:** `passioncode-ai/fabric-switchboard`; 0.3.1 source branch `codex/passioncode-design-v031`. The repository is public with default branch `main`; [0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1) is published. See [anonymous verification](evidence/publication-0.3.1.json). Observatory and other projects are unchanged.
 
 Read [0.3 account/rotation contract](ACCOUNTS-AND-ROTATION.md) → [research delta](RESEARCH-0.3-IMPORTS.md) → [spec](SPEC.md) → [shared contracts](CONTRACTS.md). Current checks/artifacts: [0.3.1 release evidence](evidence/release-0.3.1.md); [0.3 implementation evidence](evidence/release-0.3.md) is historical. [0.2](evidence/release-0.2.md) and [0.1](evidence/verification.md) reports are historical.
 
@@ -35,11 +35,9 @@ Checks: npm ci, full `./scripts/check.sh` (81 passed, 1 opt-in Keychain test ign
 
 ## Exact next task
 
-Both 0.3.1 platform builds completed from clean source `9e20a49ad7ef917068c266eff4283180209965dc`. [Release evidence](evidence/release-0.3.1.md) records verified local archive hashes and links exact build receipts. [INSTALL.md](INSTALL.md) now separates end-user installation from developer packaging instructions. macOS is Developer ID signed but not notarized; Windows is unsigned and cross-built.
+Public release and anonymous archive/hash checks are complete ([receipt](evidence/publication-0.3.1.json)). Website and organization profile publication are tracked in the [website handoff](https://github.com/passioncode-ai/passioncode-ai.github.io/blob/main/docs/HANDOFF.md). Both binaries use source `9e20a49ad7ef917068c266eff4283180209965dc`; later commits contain documentation only.
 
-Parent launch task: publish authorized source/default `main`, tag `v0.3.1-beta.1` at the binary source commit, upload archives/receipts and verify anonymous downloads/hashes; then deploy website links and record public access receipts. This docs-only commit does not claim publication, deployment, native Windows or provider acceptance. The binary source and later documentation commit must remain distinguishable.
-
-Acceptance remains [PA-01](packets/provider-acceptance.md), extended with SCN-018..023. Do not read real auth merely to test. Native Windows acceptance needs an available Windows host. macOS notarization needs the saved notarytool profile; Windows signing needs its separate certificate/service. Prior release facts remain in [0.3 evidence](evidence/release-0.3.md).
+Acceptance remains [PA-01](packets/provider-acceptance.md), extended with SCN-018..023. Native Windows acceptance needs an available Windows host. macOS notarization needs the saved notarytool profile; Windows signing needs its separate certificate/service. Do not read real auth merely to test. Keep the beta limits visible until the corresponding acceptance actually passes.
 
 ## Reproduce and local-only state
 

@@ -1,6 +1,6 @@
 # Switchboard 0.3.1 — build and release handoff
 
-Recorded 2026-09-26. **Builds complete; public publication is not claimed by this record.** The parent launch task will publish the repository and tag `v0.3.1-beta.1`, upload the checked archives and verify anonymous downloads before deploying website links.
+Recorded 2026-09-26. **Published public beta:** [v0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1). Repository visibility is public, default branch is `main`. [Anonymous publication receipt](publication-0.3.1.json) records the release ID, exact tag source and both downloaded archive hashes.
 
 ## Source identity
 
@@ -22,7 +22,7 @@ These JSON files are exact copies of the non-secret build receipts under ignored
 | `Fabric-Switchboard-0.3.1-macos-universal.zip` | `5bdece37fb9965019d2a1f84af45075b571b7979dca8b8c475495ff4b50bed25` |
 | `Fabric-Switchboard-0.3.1-windows-x64.zip` | `f3fb96619e2722bbee954eb5758800c790df6dee6e2cd4763372b1a2a9df4665` |
 
-Individual binary hashes and toolchain versions are in the JSON receipts. Public-download byte verification remains the publisher's next step; these checks prove the local archives only.
+Individual binary hashes and toolchain versions are in the JSON receipts. Anonymous full downloads of both archives matched these SHA-256 values and GitHub asset sizes; see [publication receipt](publication-0.3.1.json).
 
 ## Verification and limits
 
@@ -34,4 +34,10 @@ Individual binary hashes and toolchain versions are in the JSON receipts. Public
 
 ## Exact next task
 
-Publish the authorized source/default branch and tag, preserving the binary source identity above. Upload both ZIPs and their receipt JSON, verify anonymous downloads and hashes, then point the website's selected release manifest at this public beta. Record actual repository visibility, tag target and release/download verification in a follow-up receipt. Keep signing credentials, local provider state, dependencies and archive build directories out of Git.
+The repository and release are public; both archives, their build receipts and SHA256SUMS are attached. Next: complete notarization with a saved signing profile, run native Windows acceptance and signing, and perform the explicitly operator-assisted live-provider acceptance packet. Website publication is recorded by its owning repository. Keep signing credentials, local provider state, dependencies and archive build directories out of Git.
+
+## Publication review
+
+Before opening repository visibility, Gitleaks scanned 56 Git commits (1.41 MB). One generic-api-key finding was reviewed at historical source `a80d86b9a1eded4646bdd9371c5affdce8c93895:src-tauri/src/launch.rs:537`: the synthetic fixture for `codex_export_preserves_native_auth_shape_without_refresh_lineage`, with deliberately synthetic access/refresh/account values. Zero actionable secrets were found in that scan; this is an adjudicated finding, not a claim of zero raw matches. No real provider credentials were read.
+
+Packaging used `DEVELOPER_DIR=/Library/Developer/CommandLineTools` for both scripts. The initial active-Xcode build stopped at its unaccepted license; no license or global toolchain setting was changed. The installed standalone Command Line Tools build succeeded with strict app/CLI signature verification. Hosted full CI was not dispatched.
