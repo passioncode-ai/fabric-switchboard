@@ -14,6 +14,12 @@ Pinned source: [realiti4/claude-swap@9aa6d029](https://github.com/realiti4/claud
 - Upstream claims macOS clients can take roughly 30 seconds to notice a changed Keychain item; file-backed clients notice on the next message. This is an upstream compatibility claim, **not measured acceptance** of Switchboard against a live provider. [switcher.py:7258](https://github.com/realiti4/claude-swap/blob/9aa6d0292736173e70d4c5d8e2026210fe39a9ee/src/claude_swap/switcher.py#L7258).
 - Usage must read a live isolated session's current credential generation without consuming its refresh token. The upstream adopts that generation after the session exits. [switcher.py:4815](https://github.com/realiti4/claude-swap/blob/9aa6d0292736173e70d4c5d8e2026210fe39a9ee/src/claude_swap/switcher.py#L4815).
 
+## Quota and switching comparison
+
+The same pinned Claude Swap source separates quota scheduling from switching. Its scheduler has a 180-second floor, active/inactive ceilings of 300/600 seconds, and an urgent 60-second path near a threshold ([poll_policy.py:72](https://github.com/realiti4/claude-swap/blob/9aa6d0292736173e70d4c5d8e2026210fe39a9ee/src/claude_swap/poll_policy.py#L72)). Its rotation ranks remaining headroom across binding windows and applies hysteresis/cooldown, freshness and quarantine ([autoswitch.py:1](https://github.com/realiti4/claude-swap/blob/9aa6d0292736173e70d4c5d8e2026210fe39a9ee/src/claude_swap/autoswitch.py#L1)).
+
+Switchboard adopts separate usage windows, explicit threshold/headroom/cooldown, fresh-data eligibility and visible hold reasons. Its own bounded scheduler uses normal 180-second checks and failure backoff; it does not reproduce Claude Swap's refresh/quarantine engine. This is a deliberate boundary: the official current CLI remains the refresh owner and inactive snapshots may expire. Partial response headers cannot establish full subscription capacity for automatic selection or indefinitely postpone the independent quota probe. [Policy](../crates/switchboard-core/src/rotation.rs), [monitor](../crates/switchboard-runtime/src/monitor.rs).
+
 ## Codex primary source
 
 Pinned source: [openai/codex@e72da2b5](https://github.com/openai/codex/tree/e72da2b53805894878023d01949a25a082e0a5cb).

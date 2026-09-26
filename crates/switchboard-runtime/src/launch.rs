@@ -39,6 +39,7 @@ const CONFLICTS: &[&str] = &[
     "CODEX_HOME",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CONFIG_PATH",
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "SWITCHBOARD_LOCAL_TOKEN",
 ];
@@ -361,6 +362,12 @@ pub fn capture_login(login: &Login) -> Result<Credential, String> {
         }
     };
     Credential::parse(login.provider, AuthKind::OAuth, &material)
+}
+pub fn capture_login_profile(login: &Login) -> Result<crate::external::CapturedProfile, String> {
+    if read_regular(&login.home.join(".completed"))? != "complete" {
+        return Err("Sign-in is not complete. Finish in Terminal, then try again.".into());
+    }
+    crate::external::capture_at(login.provider, &login.home)
 }
 pub fn cancel_login(login: &Login) -> Result<(), String> {
     ensure_idle(&login.home)

@@ -1,12 +1,54 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use serde_json::Value;
-use switchboard_core::{AuthKind, Provider};
+use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{default_root, Operation, Owner};
 use tauri::{Manager, State};
 
 #[tauri::command]
 async fn snapshot(state: State<'_, Owner>) -> Result<Value, String> {
     state.runtime.execute(Operation::Snapshot).await
+}
+#[tauri::command]
+async fn current_accounts(state: State<'_, Owner>) -> Result<Value, String> {
+    state.runtime.execute(Operation::CurrentAccounts).await
+}
+#[tauri::command]
+async fn capture_current(
+    provider: Provider,
+    label: Option<String>,
+    pool: String,
+    state: State<'_, Owner>,
+) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::CaptureCurrent {
+            provider,
+            label,
+            pool,
+        })
+        .await
+}
+#[tauri::command]
+async fn import_claude_swap(pool: String, state: State<'_, Owner>) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::ImportClaudeSwap { pool })
+        .await
+}
+#[tauri::command]
+async fn activate_native(id: String, state: State<'_, Owner>) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::ActivateNative { id })
+        .await
+}
+#[tauri::command]
+async fn set_policy(policy: RotationPolicy, state: State<'_, Owner>) -> Result<Value, String> {
+    state.runtime.execute(Operation::SetPolicy { policy }).await
+}
+#[tauri::command]
+async fn monitor_status(state: State<'_, Owner>) -> Result<Value, String> {
+    state.runtime.execute(Operation::MonitorStatus).await
 }
 #[tauri::command]
 async fn add_account(
@@ -121,6 +163,12 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             snapshot,
+            current_accounts,
+            capture_current,
+            import_claude_swap,
+            activate_native,
+            set_policy,
+            monitor_status,
             add_account,
             update_account,
             remove_account,

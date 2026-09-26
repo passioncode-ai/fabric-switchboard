@@ -1,6 +1,6 @@
 # switchboard CLI
 
-Version 0.2 adds a native CLI over the same account store, vault, request proxy and launcher used by the desktop. [CLI release plan](CLI-RELEASE-PLAN.md) fixes the behavior; [release evidence](evidence/release-0.2.md) records which hosts actually passed. This file is an operational contract, not a claim of real-provider acceptance.
+Version 0.3 extends a native CLI with current-account capture, Claude Swap import and quota rotation over the same account store, vault, request proxy and launcher used by the desktop. [CLI release plan](CLI-RELEASE-PLAN.md) fixes the behavior; [release evidence](evidence/release-0.2.md) records which hosts actually passed. This file is an operational contract, not a claim of real-provider acceptance.
 
 ## Install and first use
 
@@ -67,3 +67,19 @@ Without an ID, usage reads cached observations; an ID requests a provider check.
 `--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
 
 The local `control.json` contains a capability and is private runtime state. It is not an API discovery file to share. It does not grant authority on LAN: clients require exact loopback host/port, no redirects/proxies, bounded bodies and a per-runtime bearer. Browser Origins are refused. Same-user malicious processes are outside the protection boundary, just as for the official CLIs they could inspect.
+
+## Capture, import and automatic rotation
+
+```sh
+switchboard current
+switchboard accounts capture --provider claude --pool default
+switchboard accounts import-claude-swap --pool default
+switchboard accounts activate ACCOUNT_UUID
+switchboard rotation set --provider claude --pool default --target claude-cli --enabled true
+switchboard rotation status
+switchboard rotation set --provider claude --pool default --target claude-cli --enabled false
+```
+
+Capture reuses existing local authorization without another login. Import reads Claude Swap and reports imported/failed/skipped counts without credentials. Activate changes the ordinary Claude Code account with identity checks and compatible locks; only captured/imported Claude OAuth profiles qualify. Account selection for the proxy stays separate.
+
+Rotation targets are `managed` and `claude-cli` (serialized `claude_cli`). `--threshold` defaults to 90, `--hysteresis` to 10, `--cooldown` to 1800 seconds, `--max-age` to 300 seconds. Hysteresis is headroom below the threshold. Only one native Claude policy may be enabled across all pools because the ordinary native account is one shared target. Existing streams are never replayed. Configuration persists offline; status explicitly reports whether the owner/monitor runs. Full behavior and limitations: [account and rotation contract](ACCOUNTS-AND-ROTATION.md).

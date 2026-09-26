@@ -155,3 +155,56 @@ async fn separate_cli_process_mutates_live_owner_without_touching_native_vault()
     assert!(!output.status.success());
     assert_eq!(owner.runtime.store.snapshot().unwrap().accounts.len(), 1);
 }
+
+#[test]
+fn rotation_settings_persist_offline_and_report_stopped_monitor() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args([
+            "--json",
+            "rotation",
+            "set",
+            "--provider",
+            "claude",
+            "--enabled",
+            "true",
+            "--threshold",
+            "90",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["--json", "rotation", "status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["data"]["policies"][0]["enabled"], true);
+    assert_eq!(value["data"]["monitor"]["running"], false);
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args([
+            "--json",
+            "rotation",
+            "set",
+            "--provider",
+            "codex",
+            "--target",
+            "claude-cli",
+            "--enabled",
+            "true",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+}

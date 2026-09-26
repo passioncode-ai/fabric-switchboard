@@ -26,6 +26,8 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'Disable the existing Claude CLI rotation policy before enabling another pool.',
+  'Claude account lock was lost after credential write. Sign in through Claude before retrying.',
   'Provider CLI not found. Install the official CLI and retry.',
   'Sign-in is not complete. Finish in Terminal, then try again.',
   'Managed mode requires a selected account in this pool.',
@@ -72,7 +74,7 @@ const coreErrors: Record<string, string> = {
   'No Claude Swap profiles found.': 'No Claude Swap profiles found in the standard local location. Save a profile in Claude Swap, then retry.',
   'External sign-in unavailable or its files are unsafe.': 'The external profile could not be read safely. Check the CLI profile and storage permissions, then retry.',
   'Claude Swap account index is invalid.': 'The Claude Swap profile index could not be read. Check the source profiles, then retry.',
-  'Invalid rotation policy': 'Check the policy bounds. Minimum improvement must be less than the threshold; cooldown must be at most 604800 seconds and usage age from 1 to 86400 seconds.',
+  'Invalid rotation policy': 'Check the policy bounds. Headroom must be less than the threshold; cooldown must be at most 604800 seconds and usage age from 1 to 86400 seconds.',
   'Claude credential write needs Keychain access.': 'Claude activation needs Keychain access. Unlock Keychain and allow access, then retry.',
   'Claude credential rollback needs Keychain access.': 'Credential recovery needs Keychain access. Unlock Keychain and sign in through Claude before retrying.',
   'Storage unavailable. Check Keychain access and retry.': 'Storage unavailable. Check native credential storage access and retry.',

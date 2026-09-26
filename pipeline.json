@@ -1,1 +1,58 @@
-{"version":1,"kernel":{"scope":"This repository only; no operator credential mutation during tests","evidence":"docs/evidence/verification.md and pinned research sources","deps":"docs/PLAN.md and docs/CONTRACTS.md","resume":"docs/HANDOFF.md"},"stages":[{"id":0,"name":"Research and specification","skills":["task-pipeline","ux-scenarios"],"gate":{"type":"judgment","check":"Source-grounded spec and contracts; root review"}},{"id":1,"name":"Implementation","skills":["task-pipeline","sheleg-design","copywriting"],"gate":{"type":"auto","check":"cargo test --workspace; npm run build"}},{"id":2,"name":"Verification","skills":["task-pipeline"],"gate":{"type":"judgment","check":"Integrated tests and actual app inspection; limitations recorded"}},{"id":3,"name":"Git handoff","skills":["task-pipeline"],"gate":{"type":"auto","check":"pushed branch equals HEAD; fresh checkout entry resolves"}}]}
+{
+  "version": 1,
+  "kernel": {
+    "scope": "This repository only; no operator credential mutation during tests",
+    "evidence": "docs/ACCOUNTS-AND-ROTATION.md and per-release evidence",
+    "deps": "docs/PLAN-0.3.md and docs/CONTRACTS.md",
+    "resume": "docs/HANDOFF.md"
+  },
+  "stages": [
+    {
+      "id": 0,
+      "name": "Research and specification",
+      "skills": [
+        "task-pipeline",
+        "ux-scenarios"
+      ],
+      "gate": {
+        "type": "judgment",
+        "check": "Source-grounded spec and contracts; root review"
+      }
+    },
+    {
+      "id": 1,
+      "name": "Implementation",
+      "skills": [
+        "task-pipeline",
+        "sheleg-design",
+        "copywriting"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "cargo test --workspace; npm run build"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Verification",
+      "skills": [
+        "task-pipeline"
+      ],
+      "gate": {
+        "type": "judgment",
+        "check": "Integrated tests and actual app inspection; limitations recorded"
+      }
+    },
+    {
+      "id": 3,
+      "name": "Git handoff",
+      "skills": [
+        "task-pipeline"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "pushed branch equals HEAD; fresh checkout entry resolves"
+      }
+    }
+  ]
+}

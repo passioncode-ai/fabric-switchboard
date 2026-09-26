@@ -87,7 +87,7 @@ def main():
         'Run the NSIS setup for the desktop, or switchboard.exe --help for CLI.\n'
         'WebView2 is handled by the installer. Keep GUI or switchboard serve running for managed sessions.\n'
         'Cross-compiled with cargo-xwin and LLVM; native Windows tests and provider login have NOT run.\n'
-        'Windows binaries are NOT Authenticode signed. See docs/evidence/release-0.2.md.\n')
+        'Windows binaries are NOT Authenticode signed. See docs/evidence/release-0.3.md.\n')
     hashes = {p.name: sha(p) for p in sorted(folder.glob('*.exe'))}
     (folder / 'SHA256SUMS.txt').write_text(''.join(f'{value}  {name}\n' for name, value in hashes.items()))
     receipt = {

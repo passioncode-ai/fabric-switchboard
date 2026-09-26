@@ -1,6 +1,6 @@
 # Native build and signing
 
-This is the procedure for the 0.2 native artifacts. Actual execution receipts are in [release evidence](evidence/release-0.2.md); commands here are not by themselves evidence of completion.
+This is the procedure for the native artifacts. Current execution receipts are in [0.3 evidence](evidence/release-0.3.md); [0.2 evidence](evidence/release-0.2.md) is historical; commands here are not by themselves evidence of completion.
 
 ## macOS
 

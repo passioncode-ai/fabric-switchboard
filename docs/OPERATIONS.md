@@ -1,6 +1,6 @@
 # Operation and recovery
 
-This describes v0.2 implementation boundaries; [release evidence](evidence/release-0.2.md) records tested platforms. The source of truth is [launch.rs](../crates/switchboard-runtime/src/launch.rs), [shared runtime](../crates/switchboard-runtime/src/lib.rs), [native IPC](../src-tauri/src/main.rs) and the [store](../crates/switchboard-core/src/lib.rs).
+This describes v0.3 implementation boundaries; [release evidence](evidence/release-0.3.md) records tested platforms. The source of truth is [launch.rs](../crates/switchboard-runtime/src/launch.rs), [shared runtime](../crates/switchboard-runtime/src/lib.rs), [native IPC](../src-tauri/src/main.rs) and the [store](../crates/switchboard-core/src/lib.rs).
 
 ## Data locations and ownership
 
@@ -18,7 +18,7 @@ GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passionc
 | Claude staged OAuth (Windows) | private `.credentials.json` under the login staging home | captured into DPAPI vault; staging cleaned after Finish/Cancel |
 | CLI control capability | private `control.json`, separate loopback address and token | rotated when GUI/serve starts; removed on normal shutdown |
 
-No background token refresh exists. Reauthenticate before expiry; a provider may invalidate a snapshot sooner. No token is sent to Fabric or written to the event journal. A same-user process can read that user's runtime files; 0600 is access control, not file encryption.
+The owner polls quota in the background and can adopt the ordinary CLI’s refreshed credential generation for an already captured identity. It does not exchange refresh tokens itself. Inactive snapshots can expire; recapture/reimport or official sign-in is the recovery. A provider may invalidate a snapshot sooner. No token is sent to Fabric or written to the event journal. A same-user process can read that user's runtime files; 0600 is access control, not file encryption.
 
 Windows private filesystem operations use current-user DACLs, reject reparse points and multi-link files, and replace atomically with `MoveFileExW`. A sharing violation refuses the write while preserving the old file; there is no delete-then-rename fallback. DPAPI encrypts canonical credentials, while native CLI working copies remain private plaintext as required by the provider. Implementation and native fixtures: [windows.rs](../crates/switchboard-core/src/windows.rs).
 
@@ -49,3 +49,13 @@ On Windows the launcher uses a new PowerShell console, a UTF-8 BOM script and a 
 Do not hand-edit schema versions or replace corrupted metadata with an empty list. Quit the app and preserve the affected file privately for diagnosis; a clean previous backup is the recovery source. Startup currently emits a sanitized stderr error and exits (launch from Terminal to read it); graphical repair is not implemented.
 
 Backing up app data alone does not back up the Keychain credential items. Copying both across machines is not a supported migration flow. Encrypted export/import is deferred. Removing the `.app` does not purge profiles or Keychain; delete accounts through the app before removing it if you want their stored secrets deleted. App-owned managed histories are separate from account credential removal and may require explicit user cleanup. No updater or background launch agent is installed.
+
+## 0.3 native profiles and metadata
+
+The complete contract is [accounts and rotation](ACCOUNTS-AND-ROTATION.md). Metadata version 2 accepts version 1 with defaults, then writes version 2 on mutation. Do not downgrade to 0.2 against the same metadata after migration. No automatic destructive downgrade is provided.
+
+Current CLI observation reads the authorization visible to the running process, not arbitrary other shells. Run the CLI from the intended environment for custom `CLAUDE_CONFIG_DIR`/`CODEX_HOME`. A mismatched secure-storage override or unsupported Codex secrets backend reports unavailable. Official isolated login remains available.
+
+Native activation refuses locks held by Claude; wait for its login/refresh to finish and retry. A lock lost after credential write, or failed rollback, needs explicit official Claude sign-in before retrying; the app will not kill processes or overwrite another lock owner. The active identity should be re-read after any uncertain result. An activation success is a storage result, not proof of a provider response or instantaneous client cache reload.
+
+Automatic rotation is off by default. Disable the applicable policy to stop it. Native Claude has only one globally enabled policy; other pools must wait or use managed routes. Stale/failed quota, reset crossings, expired candidates and exhausted accounts hold the selection. Manual managed choice atomically starts its cooldown. Closing the owner stops polling/rotation. The CLI `rotation status` separates saved settings from a running monitor.

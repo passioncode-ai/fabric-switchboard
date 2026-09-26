@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
     process::ExitCode,
 };
-use switchboard_core::{AuthKind, Provider};
+use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{control, default_root, execute_offline, Operation, Owner};
 
 #[derive(Parser)]
@@ -40,6 +40,13 @@ enum Command {
     Events,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
+    /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
+    Current,
+    /// Configure quota-based switching while the desktop or serve is running.
+    Rotation {
+        #[command(subcommand)]
+        command: Rotation,
+    },
     /// Official isolated CLI sign-in; requires a running desktop app or serve.
     Login {
         #[command(subcommand)]
@@ -59,6 +66,24 @@ enum Command {
 #[derive(Subcommand)]
 enum Accounts {
     List,
+    /// Save the current CLI authorization; no new sign-in is started.
+    Capture {
+        #[arg(long, value_enum)]
+        provider: ProviderArg,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long, default_value = "default")]
+        pool: String,
+    },
+    /// Import existing Claude Swap backups into the native credential vault.
+    ImportClaudeSwap {
+        #[arg(long, default_value = "default")]
+        pool: String,
+    },
+    /// Activate a captured Claude OAuth profile in the ordinary Claude Code CLI.
+    Activate {
+        id: String,
+    },
     Add {
         #[arg(long, value_enum)]
         provider: ProviderArg,
@@ -89,6 +114,35 @@ enum Accounts {
         #[arg(long, default_value = "default")]
         pool: String,
     },
+}
+#[derive(Subcommand)]
+enum Rotation {
+    /// Show persisted policies and the scheduler's latest decisions.
+    Status,
+    /// Save a policy. Existing responses are never replayed or interrupted.
+    Set {
+        #[arg(long, value_enum)]
+        provider: ProviderArg,
+        #[arg(long, default_value = "default")]
+        pool: String,
+        #[arg(long, value_enum, default_value = "managed")]
+        target: RotationTarget,
+        #[arg(long, action = clap::ArgAction::Set)]
+        enabled: bool,
+        #[arg(long, default_value_t = 90.0)]
+        threshold: f64,
+        #[arg(long, default_value_t = 10.0)]
+        hysteresis: f64,
+        #[arg(long, default_value_t = 1800)]
+        cooldown: i64,
+        #[arg(long, default_value_t = 300)]
+        max_age: i64,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum RotationTarget {
+    Managed,
+    ClaudeCli,
 }
 #[derive(Subcommand)]
 enum Login {
@@ -173,6 +227,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     let operation = match &cli.command {
         Command::Accounts { command } => match command {
             Accounts::List => Operation::Snapshot,
+            Accounts::Capture {
+                provider,
+                label,
+                pool,
+            } => Operation::CaptureCurrent {
+                provider: (*provider).into(),
+                label: label.clone(),
+                pool: pool.clone(),
+            },
+            Accounts::ImportClaudeSwap { pool } => {
+                Operation::ImportClaudeSwap { pool: pool.clone() }
+            }
+            Accounts::Activate { id } => Operation::ActivateNative { id: id.clone() },
             Accounts::Add {
                 provider,
                 kind,
@@ -201,6 +268,39 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
+        Command::Current => Operation::CurrentAccounts,
+        Command::Rotation {
+            command: Rotation::Status,
+        } => Operation::Snapshot,
+        Command::Rotation {
+            command:
+                Rotation::Set {
+                    provider,
+                    pool,
+                    target,
+                    enabled,
+                    threshold,
+                    hysteresis,
+                    cooldown,
+                    max_age,
+                },
+        } => Operation::SetPolicy {
+            policy: RotationPolicy {
+                provider: (*provider).into(),
+                pool: pool.clone(),
+                target: match target {
+                    RotationTarget::Managed => "managed",
+                    RotationTarget::ClaudeCli => "claude_cli",
+                }
+                .into(),
+                enabled: *enabled,
+                threshold_percent: *threshold,
+                hysteresis_percent: *hysteresis,
+                cooldown_seconds: *cooldown,
+                max_age_seconds: *max_age,
+                last_switched_at: None,
+            },
+        },
         Command::Login { command } => match command {
             Login::Begin {
                 provider,
@@ -235,12 +335,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     };
     let value = match control::request(&root, &operation).await? {
         Some(value) => value,
-        None => execute_offline(root, operation).await?,
+        None => execute_offline(root.clone(), operation).await?,
     };
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
         Command::Events => Ok(value["events"].clone()),
-        Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"]})).collect())),
+        Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"], "usage_health":account["usage_health"]})).collect())),
+        Command::Rotation { command: Rotation::Status } => {
+            let monitor = match control::request(&root, &Operation::MonitorStatus).await? {
+                Some(status) => status,
+                None => json!({"running":false,"interval_seconds":180,"decisions":[]}),
+            };
+            Ok(json!({"policies":value["policies"],"monitor":monitor}))
+        },
         _ => Ok(value),
     }
 }
@@ -260,7 +367,7 @@ fn print_result(value: &Value, cli: &Cli) {
             };
             if accounts.is_empty() {
                 println!(
-                    "No accounts yet. Use 'switchboard accounts add' or 'switchboard login begin'."
+                    "No accounts yet. Use 'switchboard accounts capture --provider claude' or 'switchboard login begin'."
                 );
                 return;
             }

@@ -392,7 +392,7 @@ function renderPolicies(main: HTMLElement) {
   if (!policies.length) details.append(el('p', 'form-note', 'No rotation policies saved. Configure a provider and pool to begin.'));
   for (const policy of policies) {
     const row = el('div', 'policy-row');
-    const content = el('div'); content.append(el('strong', '', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)}`), el('p', 'usage-caption', `${policy.enabled ? 'Enabled' : 'Off'} · At ${policy.threshold_percent}% used · Improve by ${policy.hysteresis_percent} points · Cooldown ${policy.cooldown_seconds}s · Fresh within ${policy.max_age_seconds}s`));
+    const content = el('div'); content.append(el('strong', '', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)}`), el('p', 'usage-caption', `${policy.enabled ? 'Enabled' : 'Off'} · At ${policy.threshold_percent}% used · Headroom ${policy.hysteresis_percent} points · Cooldown ${policy.cooldown_seconds}s · Fresh within ${policy.max_age_seconds}s`));
     if (policy.last_switched_at) content.append(el('p', 'usage-caption', `Last switched ${date(policy.last_switched_at)}`));
     const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
     if (decision) content.append(el('p', 'usage-caption', decisionText(decision.reason)));
@@ -432,13 +432,13 @@ function policyDialog(existing?: RotationPolicy) {
   provider.value = existing?.provider ?? 'claude'; target.value = existing?.target ?? 'managed'; sync(); populate(existing);
   if (existing) for (const control of [provider, pool, target]) { control.disabled = true; control.dataset.locked = 'true'; }
   else { provider.addEventListener('change', sync); target.addEventListener('change', sync); pool.addEventListener('change', sync); }
-  const grid = el('div', 'form-grid'); grid.append(field('Provider', provider), field('Pool', pool), field('Target', target), field('Switch at usage (%)', threshold), field('Minimum improvement (points)', hysteresis, 'The candidate must have this much less usage.'), field('Cooldown (seconds)', cooldown), field('Maximum usage age (seconds)', freshness));
+  const grid = el('div', 'form-grid'); grid.append(field('Provider', provider), field('Pool', pool), field('Target', target), field('Switch at usage (%)', threshold), field('Headroom below threshold (points)', hysteresis, 'The candidate must stay this many points below the switching threshold.'), field('Cooldown (seconds)', cooldown), field('Maximum usage age (seconds)', freshness));
   const toggle = el('label', 'checkbox-field'); toggle.append(enabled, el('span', '', 'Enable automatic rotation'));
   context.body.append(grid, toggle, el('p', 'form-note', 'Claude Code rotation requires OAuth accounts with an external identity. Managed rotation affects the next request. A response already in progress keeps its account.'));
   context.actions.append(submit('Save policy'));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    hysteresis.setCustomValidity(Number(hysteresis.value) >= Number(threshold.value) ? 'Minimum improvement must be less than the usage threshold.' : '');
+    hysteresis.setCustomValidity(Number(hysteresis.value) >= Number(threshold.value) ? 'Headroom must be less than the usage threshold.' : '');
     if (!context.form.reportValidity()) return;
     const previous = snapshot?.policies?.find((policy) => policy.provider === provider.value && policy.pool === pool.value.trim() && policy.target === target.value);
     const policy: RotationPolicy = { provider: provider.value as Provider, pool: pool.value.trim(), target: target.value as RotationPolicy['target'], enabled: enabled.checked, threshold_percent: Number(threshold.value), hysteresis_percent: Number(hysteresis.value), cooldown_seconds: Number(cooldown.value), max_age_seconds: Number(freshness.value), last_switched_at: previous?.last_switched_at ?? null };

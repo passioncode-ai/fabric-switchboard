@@ -702,6 +702,20 @@ fn partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation() {
     store.observe(&candidate, partial.clone()).unwrap();
     assert_eq!(
         store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .iter()
+            .find(|a| a.id == candidate)
+            .unwrap()
+            .usage_health
+            .as_ref()
+            .unwrap()
+            .next_check_at,
+        time + 180
+    );
+    assert_eq!(
+        store
             .rotation_decision(&policy(), Some(&current), time + 1)
             .unwrap()
             .reason,

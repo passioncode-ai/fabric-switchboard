@@ -765,10 +765,21 @@ impl Store {
                 return Err("Credential changed during usage check".into());
             }
         }
+        // Inference response headers must not keep postponing the independent
+        // quota endpoint poll, especially when they contain only one window.
+        let next_check_at = if usage.source == "response_headers" {
+            a.usage_health
+                .as_ref()
+                .map(|h| h.next_check_at)
+                .unwrap_or(usage.observed_at)
+                .max(usage.observed_at)
+        } else {
+            usage.observed_at.saturating_add(180)
+        };
         a.usage_health = Some(UsageHealth {
             status: "ok".into(),
             checked_at: usage.observed_at,
-            next_check_at: usage.observed_at.saturating_add(180),
+            next_check_at,
         });
         a.usage = Some(usage);
         append_event(&mut candidate, "usage", Some(id), "observed");

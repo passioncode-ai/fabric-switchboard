@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "fabric-switchboard"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "switchboard-core",
@@ -3463,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -3490,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-proxy"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "chrono",
@@ -3506,14 +3506,16 @@ dependencies = [
 
 [[package]]
 name = "switchboard-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "dirs",
  "hmac",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "reqwest 0.12.28",
  "security-framework",
  "serde",
@@ -3525,8 +3527,10 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "toml 0.9.12+spec-1.1.0",
  "unicode-normalization",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
