@@ -125,8 +125,9 @@ def main():
     identity_hash, identity_name = match
     version = json.loads((ROOT/'package.json').read_text())['version']
     folder = ARTIFACTS / f'Fabric-Switchboard-{version}-macos-{args.arch}'
-    if folder.exists():
-        raise SystemExit('Output folder exists; preserve/rename it before rebuilding or resume its notarization receipt.')
+    outputs = (folder, Path(str(folder)+'.zip'), folder.parent/(folder.name+'-receipt.json'))
+    if any(path.exists() for path in outputs):
+        raise SystemExit('Output already exists; preserve folder, ZIP and receipt before rebuilding or resume notarization.')
     target = 'universal-apple-darwin' if args.arch == 'universal' else 'aarch64-apple-darwin'
     run(['npm', 'exec', 'tauri', 'build', '--', '--target', target, '--bundles', 'app', '--no-sign', '--ci', '--', '--locked'])
     folder.mkdir(parents=True)

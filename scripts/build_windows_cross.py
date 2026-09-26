@@ -53,15 +53,17 @@ def main():
     llvm = Path('/opt/homebrew/opt/llvm/bin')
     if llvm.is_dir():
         env['PATH'] = str(llvm) + os.pathsep + env.get('PATH', '')
-    for name in ('clang-cl', 'lld-link', 'llvm-rc', 'llvm-readobj', 'makensis', 'cargo-xwin'):
+    # cargo-xwin resolves its own linker (including Rust's bundled rust-lld).
+    for name in ('clang-cl', 'llvm-rc', 'llvm-readobj', 'makensis', 'cargo-xwin'):
         if not shutil.which(name, path=env.get('PATH')):
             raise SystemExit(f'Missing build tool: {name}. See docs/DISTRIBUTION.md.')
     env['XWIN_CACHE_DIR'] = str(ROOT / 'artifacts/xwin')
     env['XWIN_ARCH'] = 'x86_64'
     version = json.loads((ROOT / 'package.json').read_text())['version']
     folder = ROOT / 'artifacts' / f'Fabric-Switchboard-{version}-windows-x64'
-    if folder.exists():
-        raise SystemExit('Output folder exists; preserve/rename it before rebuilding.')
+    outputs = (folder, Path(str(folder) + '.zip'), folder.parent / (folder.name + '-receipt.json'))
+    if any(path.exists() for path in outputs):
+        raise SystemExit('Output already exists; preserve folder, ZIP and receipt before rebuilding.')
     run(['npm', 'exec', 'tauri', 'build', '--', '--runner', 'cargo-xwin', '--target', TARGET,
          '--bundles', 'nsis', '--no-sign', '--ci', '--', '--locked'], env)
     cli_env = env.copy()
