@@ -25,7 +25,7 @@ const safeErrors = new Set([
   'Managed mode requires a selected account in this pool.',
   'Usage unavailable for this credential type.',
   'Provider rejected the credential. Sign in again.',
-  'Storage unavailable. Check Keychain access and retry.',
+  'Storage unavailable. Check native credential storage access and retry.',
   'Select another account in this pool, or disable this account, before removing it.',
   'This account is disabled. Enable it before continuing.',
   'Enter valid credential JSON for the selected provider.',
@@ -40,6 +40,7 @@ const safeErrors = new Set([
   'Finish or close sign-in in Terminal before cancelling.',
 ]);
 const coreErrors: Record<string, string> = {
+  'Storage unavailable. Check Keychain access and retry.': 'Storage unavailable. Check native credential storage access and retry.',
   'Codex does not support setup tokens': 'Choose an API key, imported OAuth JSON, or official sign-in for Codex.',
   'Credential format is invalid': 'Check the credential format and enter it again.',
   'Credential input is empty or too large': 'Enter a credential within the supported size limit.',
@@ -55,7 +56,7 @@ const coreErrors: Record<string, string> = {
   'Select another account or disable this account before removing it': 'Select another account in this pool, or disable this account, before removing it.',
   'Account is disabled': 'This account is disabled. Enable it before continuing.',
   'Credential expired; reauthenticate this account': 'This credential has expired. Add an account through official sign-in again.',
-  'Credential storage unavailable; reauthenticate this account': 'The stored credential is unavailable. Check Keychain access or sign in again.',
+  'Credential storage unavailable; reauthenticate this account': 'The stored credential is unavailable. Check native credential storage access or sign in again.',
   'No account selected for this provider and pool': 'Select an account in this provider and pool before launching managed mode.',
   'Account is unavailable in this provider and pool': 'This account is unavailable in the chosen provider and pool. Refresh the account list.',
   'Selected account unavailable': 'The selected account is unavailable. Refresh and select an enabled account.',
@@ -67,12 +68,12 @@ const coreErrors: Record<string, string> = {
   'Unsupported account metadata version': 'This account metadata version is not supported. Open it with a compatible Switchboard version.',
   'Account metadata could not be saved': 'Account metadata could not be saved. Check storage access and retry.',
   'Storage failure; credential cleanup requires recovery': 'The account could not be saved and credential cleanup needs recovery. Check storage before retrying.',
-  'Native vault is not implemented on this platform': 'Native credential storage is not available on this platform. Use the macOS app.',
-  'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use the macOS app.',
+  'Native vault is not implemented on this platform': 'Native credential storage is not available on this platform. Use a supported native build.',
+  'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use a supported native build.',
 };
-for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check Keychain access and retry.';
+for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
 for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Account metadata exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
 export function safeError(error: unknown): string {
   const candidate = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
-  return safeErrors.has(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and Keychain access, then retry.';
+  return safeErrors.has(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and native credential storage access, then retry.';
 }

@@ -1,3 +1,4 @@
+import { isAbsoluteProjectPath } from './platform';
 import type { Account, Adapter, LoginInput, Snapshot } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
@@ -37,7 +38,7 @@ export function createDemoAdapter(): Adapter {
     async update(id, label, active) { await pause(); Object.assign(account(id), { label, enabled: active }); if (!active) for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; log('account.updated', id, active ? 'Enabled' : 'Disabled; route cleared'); },
     async remove(id) { await pause(); if (Object.values(state.routes).includes(id)) throw new Error('Select another account in this pool, or disable this account, before removing it.'); account(id); state.accounts = state.accounts.filter((item) => item.id !== id); log('account.removed', id, 'Synthetic account removed'); },
     async select(item) { await pause(); enabled(item.id); state.routes[`${item.provider}:${item.pool}`] = item.id; log('route.selected', item.id, 'Selected for next request'); },
-    async launch(id, mode, workingDirectory) { await pause(); if (!workingDirectory.startsWith('/') || /[\u0000-\u001f]/.test(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
+    async launch(id, mode, workingDirectory) { await pause(); if (!isAbsoluteProjectPath(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
     async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, input); return { login_id, message: 'Synthetic sign-in is ready to finish.' }; },
     async finishLogin(id) { const input = logins.get(id); if (!input) throw new Error('Sign-in is not complete. Finish in Terminal, then try again.'); const item = await this.add({ ...input, kind: 'oauth', secret: '{}' }); logins.delete(id); return item; },
     async cancelLogin(id) { await pause(); logins.delete(id); },

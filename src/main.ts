@@ -1,5 +1,6 @@
 import './tokens.css';
 import './style.css';
+import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError } from './adapter';
 import type { Account, Adapter, AuthKind, Provider, RuntimeStatus, Snapshot } from './types';
 
@@ -74,7 +75,7 @@ function render() {
   }
   sidebar.append(nav);
   const sidebarFoot = el('div', 'sidebar-foot');
-  sidebarFoot.append(el('span', 'eyebrow', 'LOCAL WORKBENCH'), el('p', '', demo ? 'Synthetic session' : 'Your accounts. Your machine.'), el('span', 'version', 'v0.1 · macOS'));
+  sidebarFoot.append(el('span', 'eyebrow', 'LOCAL WORKBENCH'), el('p', '', demo ? 'Synthetic session' : 'Your accounts. Your machine.'), el('span', 'version', `v0.2.0 · ${demo ? 'Browser demo' : platformLabel(runtime?.platform)}`));
   sidebar.append(sidebarFoot); shell.append(sidebar);
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));
@@ -184,7 +185,8 @@ function renderAbout(main: HTMLElement) {
     ['Managed launch', 'A session routed through the local HTTP/SSE proxy. Select an account for each provider and pool; the next request uses that selection. A response already in progress keeps its identity.'],
     ['Pools', 'Explicit routing boundaries, such as work and personal. Selection never silently falls back to a different pool.'],
     ['Usage', 'A timestamped provider observation. Unknown, stale, and unavailable are distinct from measured zero. API billing is separate from subscription quota.'],
-    ['Compatibility', 'macOS first; Windows is planned. Live provider acceptance is a separate check. Existing external CLI sessions and Codex Desktop are not controlled.'],
+    ['Build', demo ? 'Synthetic browser demo; no native platform is connected.' : `${platformLabel(runtime?.platform)} build. Native platform is reported by the running app.`],
+    ['Compatibility', 'macOS and Windows builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.'],
     ['Imported OAuth', 'A captured credential snapshot. On expiry, sign in again. There is no background refresh-token exchange.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); main.append(section);
@@ -268,7 +270,7 @@ function addDialog() {
     void adapter.beginLogin(base).then((result) => {
       loginId = result.login_id; context.setBusy(false);
       grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; node.dataset.locked = 'true'; });
-      credentialSlot.replaceChildren(el('div', 'login-pending', demo ? 'Synthetic sign-in ready. Choose Finish sign-in to add this demo account.' : 'Complete sign-in in Terminal, then choose Finish sign-in. If the provider opens a browser, finish that step first.'));
+      credentialSlot.replaceChildren(el('div', 'login-pending', demo ? 'Synthetic sign-in ready. Choose Finish sign-in to add this demo account.' : 'Complete sign-in in the terminal, then choose Finish sign-in. If the provider opens a browser, finish that step first.'));
       submitButton.textContent = 'Finish sign-in'; submitButton.focus();
     }).catch((error) => { context.error.textContent = safeError(error); context.setBusy(false); });
   });
@@ -276,15 +278,15 @@ function addDialog() {
 }
 function launchDialog(account: Account, mode: 'isolated' | 'managed') {
   const context = openDialog(`Launch ${mode}`, `${account.label} · ${providerName(account.provider)} · ${account.pool} pool`);
-  const directory = input(lastWorkingDirectory); directory.placeholder = '/Users/you/Projects/my-project';
-  context.body.append(field('Project directory', directory, 'Enter an absolute path to an existing folder. This is the session’s working directory; account credentials stay in its separate managed home.'));
-  context.body.append(el('p', 'form-note', demo ? 'Synthetic launch only. The demo validates an absolute path but does not inspect your filesystem or open Terminal.' : mode === 'managed' ? 'New requests will use the selected account in this pool. In-progress responses keep their account.' : 'A new official CLI session will use this account’s private home. Existing clients are not changed.'));
+  const directory = input(lastWorkingDirectory); directory.placeholder = projectPathExample(runtime?.platform);
+  context.body.append(field('Project directory', directory, 'Enter an absolute path to an existing folder. The native app checks that the folder exists before launching. Account credentials stay in their separate managed home.'));
+  context.body.append(el('p', 'form-note', demo ? 'Synthetic launch only. The demo validates an absolute path but does not inspect your filesystem or open a terminal.' : mode === 'managed' ? 'New requests will use the selected account in this pool. In-progress responses keep their account.' : 'A new official CLI session will use this account’s private home. Existing clients are not changed.'));
   context.actions.append(submit('Launch'));
   directory.addEventListener('input', () => directory.setCustomValidity(''));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const workingDirectory = directory.value.trim();
-    if (!workingDirectory.startsWith('/') || /[\u0000-\u001f]/.test(workingDirectory)) { directory.setCustomValidity('Enter an absolute project directory, starting with /.'); directory.reportValidity(); return; }
+    if (!isAbsoluteProjectPath(workingDirectory, runtime?.platform)) { directory.setCustomValidity(`Enter an absolute project directory, for example ${projectPathExample(runtime?.platform)}.`); directory.reportValidity(); return; }
     void dialogSave(context, async () => { await adapter.launch(account.id, mode, workingDirectory); lastWorkingDirectory = workingDirectory; }, demo ? `Synthetic ${mode} launch recorded. No terminal was opened.` : mode === 'managed' ? 'Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.' : 'Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.');
   });
   directory.focus();
