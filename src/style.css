@@ -167,3 +167,28 @@ h1:focus { outline: none; }
   .definitions dd { margin-bottom: var(--space-3); }
   .event-title { flex-direction: column; gap: var(--space-1); }
 }
+
+/* 0.3 extends the existing workbench tokens and controls. */
+.current-section { margin-top: var(--space-4); }
+.section-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-2); }
+.section-heading h2 { font-size: var(--t-label); font-weight: 600; }
+.current-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.current-card { min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.current-card > strong { font-size: var(--t-label); }
+.current-identity { overflow-wrap: anywhere; font-size: var(--t-label); }
+.current-card .usage-caption { overflow-wrap: anywhere; }
+.current-badge { color: var(--ink); border-color: var(--accent); background: var(--accent-weak); }
+.account-card.is-current .provider-icon { border-color: var(--accent); }
+.policy-panel { margin-top: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.policy-panel > summary { font-size: var(--t-label); font-weight: 600; cursor: pointer; }
+.policy-panel > .button { margin-top: var(--space-3); }
+.policy-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
+.policy-row strong { font-size: var(--t-label); }
+.policy-actions { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; }
+.quota-details { font-size: var(--t-chip); color: var(--muted); margin-top: var(--space-1); }
+.quota-details summary { cursor: pointer; padding: var(--space-1) 0; }
+.quota-window { margin-bottom: var(--space-2); }
+.quota-window strong { color: var(--ink); font-weight: 500; }
+.launch-actions, .management-actions, .header-actions { flex-wrap: wrap; }
+@media (max-width: 820px) { .current-grid { grid-template-columns: 1fr; } .policy-row { align-items: flex-start; } }
+@media (max-width: 590px) { .policy-row { flex-direction: column; } .policy-actions { flex-direction: row; gap: var(--space-4); } .header-actions .button { white-space: normal; } }

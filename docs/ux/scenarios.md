@@ -25,6 +25,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-015 | CLI with a running desktop or server | validated |
 | SCN-016 | CLI login and launch | validated |
 | SCN-017 | Install native builds | validated |
+| SCN-018 | Capture the current CLI account | validated |
+| SCN-019 | Import Claude Swap profiles | validated |
+| SCN-020 | Distinguish native identity and managed selection | validated |
+| SCN-021 | Inspect quota windows and failed checks | validated |
+| SCN-022 | Configure and stop automatic rotation | validated |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -328,5 +333,95 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; native execution and user outcomes are separate.
 **Coverage:** [0.2 execution evidence](../evidence/release-0.2.md): CLI/runtime fixtures and signed macOS smoke passed; Windows cross-build passed, native Windows/provider acceptance NOT_RUN.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-018 — Capture the current CLI account
+**Persona:** P-01
+**Goal:** Reuse an account already signed in without another login.
+**Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Choose Add account → Capture current CLI account is selected. Choose provider and pool, optionally enter a label, then capture → the account appears or its same-pool identity is updated.
+**Alt paths:** Choose official sign-in with another account → the existing isolated Terminal login flow remains available. Cancel before capture → no mutation.
+**Expected result:** The source CLI account stays active; a disabled stored account is not enabled by capture.
+**UI elements:** provider selector, authentication selector, optional account label, pool, capture button, current CLI cards.
+**States covered:** loading, missing account, error, success
+**Errors & recovery:** A missing, unreadable or incompatible source produces a sanitized recovery message. Choose official sign-in or correct native storage access, then retry.
+**Status:** validated
+**Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
+**Coverage:** Capture-first dialog and blank-label capture observed in the synthetic browser demo on 2026-09-26; native capture acceptance is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-019 — Import Claude Swap profiles
+**Persona:** P-01
+**Goal:** Reuse saved Claude Swap profiles in an explicit routing pool.
+**Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Choose Import Claude Swap, enter the pool, then Import profiles → native import reads the standard local source and reports imported, skipped and failed counts.
+**Alt paths:** Reimport → same identities update without duplicate accounts or enabling disabled rows. Cancel → no mutation.
+**Expected result:** Successful profiles remain available when other profiles fail; the user can correct the source and retry.
+**UI elements:** import button, pool input, import result notice, account list.
+**States covered:** empty source, loading, partial success, error, success
+**Errors & recovery:** Malformed profiles are counted as failed without raw source content in errors. Missing/unreadable source directs the user to check the local source before retrying.
+**Status:** validated
+**Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
+**Coverage:** Synthetic partial-import result (two imported, one skipped, one failed) observed in the browser on 2026-09-26; no real profile was read. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-020 — Distinguish native identity and managed selection
+**Persona:** P-01
+**Goal:** Know which account the local CLI has and deliberately activate another Claude account.
+**Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Open Accounts → current Claude Code and Codex CLI identities appear above stored accounts, with matches highlighted. Choose Activate in Claude Code on an enabled Claude OAuth account with external identity, review the effect, then activate → native identity refreshes.
+**Alt paths:** A current identity without a stored match says so and offers capture. Missing/unavailable source has a distinct state. Cancel activation → no mutation.
+**Expected result:** Current CLI identity remains visibly separate from Selected for next request. Activation does not assert that an existing session reloaded or that a provider response succeeded.
+**UI elements:** current CLI cards, account match badges, managed selection label, activation action and dialog.
+**States covered:** loading, missing identity, unmatched identity, unavailable, error, success
+**Errors & recovery:** Current-source changes, native locks or failed activation produce a sanitized message; refresh identity and retry after the external conflict is resolved.
+**Status:** validated
+**Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
+**Coverage:** Matched identities, separate managed selection, explicit activation dialog and synthetic success observed in browser on 2026-09-26; real CLI reload remains unobserved. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-021 — Inspect quota windows and failed checks
+**Persona:** P-01
+**Goal:** See measured usage, when it resets and whether it is fresh enough for rotation.
+**Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Expand Quota windows → each provider window shows usage and reset time, source and observation time. Check usage → the observation updates on success.
+**Alt paths:** Missing data reads Usage unknown; unavailable quota and failed checks are separate. A failed check preserves the last successful observation; old data is visibly stale.
+**Expected result:** Measured zero is distinct from unavailable, missing or stale quota. The last check and next retry are visible when supplied by the monitor.
+**UI elements:** quota summary, progress, window disclosure, reset timestamps, source, health status, Check usage.
+**States covered:** loading, unknown, unavailable, stale, failed, success
+**Errors & recovery:** A sanitized check failure preserves the last good result and marks ineligibility; retry manually or wait for the scheduled retry.
+**Status:** validated
+**Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
+**Coverage:** Window/reset disclosure, stale fixture and failed/unavailable quota states observed in browser on 2026-09-26. Fixture data is synthetic; authenticated provider evidence is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-022 — Configure and stop automatic rotation
+**Persona:** P-01
+**Goal:** Persist an explicit quota policy for one provider, pool and target.
+**Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Expand Automatic rotation, then Configure rotation → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
+**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop rotation → the saved policy is disabled in one action. Codex cannot select the native Claude target.
+**Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
+**UI elements:** monitor status, policy list, numeric fields, enabled checkbox, target selector, save/edit/stop actions, last switch and decision.
+**States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
+**Errors & recovery:** Invalid bounds or failed persistence keep the dialog open with a sanitized recovery message. A failed or stale quota check never implies spare capacity.
+**Status:** validated
+**Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
+**Coverage:** Save-enable and one-action stop observed using the synthetic browser fixture on 2026-09-26; demo never performs automatic switching. Runtime policy execution is separately tested. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
 **Product:** unobserved
 **Traces:** ST-001, FLW-01

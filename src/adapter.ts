@@ -5,6 +5,12 @@ export const native = isTauri();
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => invoke('snapshot'),
+  currentAccounts: () => invoke('current_accounts'),
+  captureCurrent: (input) => invoke('capture_current', { ...input }),
+  importClaudeSwap: (pool) => invoke('import_claude_swap', { pool }),
+  activateNative: (id) => invoke('activate_native', { id }),
+  setPolicy: (policy) => invoke('set_policy', { policy }),
+  monitorStatus: () => invoke('monitor_status'),
   runtime: () => invoke('runtime_status'),
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
@@ -38,8 +44,37 @@ const safeErrors = new Set([
   'Captured Codex login has no identity token. Sign in again or use managed mode.',
   'Account saved; isolated login cleanup needs attention.',
   'Finish or close sign-in in Terminal before cancelling.',
+  'Usage is available for OAuth profiles only.',
+  'Usage unavailable. Check sign-in or try again after the next scheduled check.',
+  'Native activation requires a Claude OAuth profile.',
+  'Capture or import this profile before native activation.',
+  'Current CLI account changed. Refresh before switching.',
+  'Keychain unavailable. Unlock it and allow access, then retry.',
+  'Claude secure storage points at another profile. Use a shell with matching Claude settings.',
+  'This Codex credential store cannot be imported. Use official sign-in to add a profile.',
+  'This Codex keyring backend cannot be imported yet. Use official sign-in to add a profile.',
+  'Current sign-in changed during capture. Try again.',
+  'Claude Swap profiles changed during import. Try again.',
+  'Capture this Claude profile again before native activation.',
+  'Current Claude account changed. Refresh the account list, then retry.',
+  'Current Claude credential is unavailable; activation was cancelled.',
+  'Current Claude account changed during activation. Try again.',
+  'Claude account lock was lost after credential write. Sign in through Claude before retrying.',
+  'Claude activation failed; previous account restored.',
+  'Claude activation failed and rollback needs attention. Sign in through Claude before retrying.',
+  'Open Claude Code once before activating a profile.',
+  'Claude is updating its account. Wait for login or refresh to finish, then retry.',
+
 ]);
 const coreErrors: Record<string, string> = {
+  'No current Claude sign-in found.': 'No current Claude sign-in found. Sign in with the official CLI, then capture again.',
+  'No current Codex sign-in found.': 'No current Codex sign-in found. Sign in with the official CLI, then capture again.',
+  'No Claude Swap profiles found.': 'No Claude Swap profiles found in the standard local location. Save a profile in Claude Swap, then retry.',
+  'External sign-in unavailable or its files are unsafe.': 'The external profile could not be read safely. Check the CLI profile and storage permissions, then retry.',
+  'Claude Swap account index is invalid.': 'The Claude Swap profile index could not be read. Check the source profiles, then retry.',
+  'Invalid rotation policy': 'Check the policy bounds. Minimum improvement must be less than the threshold; cooldown must be at most 604800 seconds and usage age from 1 to 86400 seconds.',
+  'Claude credential write needs Keychain access.': 'Claude activation needs Keychain access. Unlock Keychain and allow access, then retry.',
+  'Claude credential rollback needs Keychain access.': 'Credential recovery needs Keychain access. Unlock Keychain and sign in through Claude before retrying.',
   'Storage unavailable. Check Keychain access and retry.': 'Storage unavailable. Check native credential storage access and retry.',
   'Codex does not support setup tokens': 'Choose an API key, imported OAuth JSON, or official sign-in for Codex.',
   'Credential format is invalid': 'Check the credential format and enter it again.',
@@ -73,6 +108,8 @@ const coreErrors: Record<string, string> = {
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
 for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Account metadata exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
+for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';
 export function safeError(error: unknown): string {
   const candidate = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
   return safeErrors.has(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and native credential storage access, then retry.';
