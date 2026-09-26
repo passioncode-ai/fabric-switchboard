@@ -19,6 +19,7 @@ let loadError = '';
 let runtimeError = false;
 let notice = '';
 let noticeError = false;
+let lastWorkingDirectory = '';
 const usageErrors = new Map<string, string>();
 const providerName = (provider: Provider) => provider === 'claude' ? 'Claude Code' : 'Codex CLI';
 const kindName = (kind: AuthKind) => ({ api_key: 'API key', setup_token: 'Setup token', oauth: 'OAuth' })[kind];
@@ -42,7 +43,7 @@ async function reload() {
   loading = true; loadError = ''; render();
   const [data, status] = await Promise.allSettled([adapter.snapshot(), adapter.runtime()]);
   if (data.status === 'fulfilled') snapshot = data.value;
-  else { loadError = 'Accounts could not be loaded. Check Keychain access and retry.'; announce(loadError); }
+  else { loadError = safeError(data.reason); announce(loadError); }
   if (status.status === 'fulfilled') { runtime = status.value; runtimeError = false; }
   else { runtime = null; runtimeError = true; }
   loading = false; render();
@@ -154,8 +155,8 @@ function accountCard(account: Account) {
   card.append(route);
   const actions = el('div', 'account-actions');
   const launches = el('div', 'launch-actions');
-  const isolated = button('Launch isolated', () => void mutate(() => adapter.launch(account.id, 'isolated'), demo ? 'Synthetic isolated launch recorded. No terminal was opened.' : 'Terminal launch requested with this account’s private home. Provider acceptance is not yet observed.', `isolated-${account.id}`), 'text-button', `isolated-${account.id}`); isolated.disabled ||= !account.enabled;
-  const managed = button('Launch managed', () => void mutate(() => adapter.launch(account.id, 'managed'), demo ? 'Synthetic managed launch recorded. No terminal was opened.' : 'Terminal launch requested through the local proxy. Selection takes effect on the next request.', `managed-${account.id}`), 'text-button', `managed-${account.id}`); managed.disabled ||= !account.enabled || !active || runtimeError; managed.title = !active ? 'Select this account before launching a managed session.' : 'Launch through the local proxy.';
+  const isolated = button('Launch isolated', () => launchDialog(account, 'isolated'), 'text-button', `isolated-${account.id}`); isolated.disabled ||= !account.enabled;
+  const managed = button('Launch managed', () => launchDialog(account, 'managed'), 'text-button', `managed-${account.id}`); managed.disabled ||= !account.enabled || !active || runtimeError; managed.title = !active ? 'Select this account before launching a managed session.' : 'Launch through the local proxy.';
   launches.append(isolated, managed);
   const management = el('div', 'management-actions');
   const probe = button('Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `usage-${account.id}`, account.id), 'text-button', `usage-${account.id}`); probe.disabled ||= !account.enabled;
@@ -189,7 +190,7 @@ function renderAbout(main: HTMLElement) {
   section.append(definitions); main.append(section);
 }
 
-interface DialogContext { dialog: HTMLDialogElement; form: HTMLFormElement; body: HTMLElement; actions: HTMLElement; error: HTMLElement; close: () => void; setBusy: (value: boolean) => void }
+interface DialogContext { dialog: HTMLDialogElement; form: HTMLFormElement; body: HTMLElement; actions: HTMLElement; error: HTMLElement; close: () => void; setBusy: (value: boolean) => void; beforeCancel: (handler: () => Promise<void>) => void }
 function openDialog(title: string, intro: string): DialogContext {
   const trigger = (document.activeElement as HTMLElement | null)?.dataset.focus;
   const dialog = el('dialog', 'dialog'); dialog.setAttribute('aria-labelledby', 'dialog-title'); dialog.setAttribute('aria-describedby', 'dialog-description');
@@ -197,14 +198,22 @@ function openDialog(title: string, intro: string): DialogContext {
   const heading = el('h2', '', title); heading.id = 'dialog-title'; const description = el('p', '', intro); description.id = 'dialog-description'; header.append(heading, description);
   const body = el('div', 'dialog-body'); const error = el('p', 'dialog-error'); error.setAttribute('role', 'alert');
   const actions = el('div', 'dialog-actions'); let pending = false;
+  let cancelHandler: (() => Promise<void>) | undefined;
   const close = () => { if (!pending) dialog.close(); };
-  const cancel = button('Cancel', close, 'button'); actions.append(cancel);
+  const requestCancel = async () => {
+    if (pending) return;
+    if (!cancelHandler) { close(); return; }
+    error.textContent = ''; setBusy(true);
+    try { await cancelHandler(); setBusy(false); close(); }
+    catch (failure) { error.textContent = safeError(failure); setBusy(false); error.tabIndex = -1; error.focus(); }
+  };
+  const cancel = button('Cancel', () => void requestCancel(), 'button'); actions.append(cancel);
   form.append(header, body, error, actions); dialog.append(form); document.body.append(dialog);
-  dialog.addEventListener('cancel', (event) => { if (pending) event.preventDefault(); });
+  dialog.addEventListener('cancel', (event) => { event.preventDefault(); void requestCancel(); });
   dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); restoreFocus(trigger); });
   dialog.showModal();
-  const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value; }); };
-  return { dialog, form, body, actions, error, close, setBusy };
+  const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value || node.dataset.locked === 'true'; }); };
+  return { dialog, form, body, actions, error, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };
 }
 function field(label: string, input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, help = '') {
   const wrapper = el('label', 'field'); wrapper.append(el('span', 'field-label', label), input); if (help) wrapper.append(el('span', 'field-help', help)); return wrapper;
@@ -227,6 +236,9 @@ function addDialog() {
   const credentialSlot = el('div'); const submitButton = submit('Begin sign-in'); context.actions.append(submitButton); context.body.append(grid, credentialSlot);
   let secret: HTMLInputElement | HTMLTextAreaElement | null = null;
   let loginId: string | null = null;
+  context.beforeCancel(async () => {
+    if (loginId) await adapter.cancelLogin(loginId);
+  });
   const update = () => {
     if (secret) secret.value = ''; credentialSlot.replaceChildren(); secret = null;
     const setup = method.querySelector<HTMLOptionElement>('option[value="setup_token"]')!; setup.disabled = provider.value !== 'claude';
@@ -255,12 +267,27 @@ function addDialog() {
     context.error.textContent = ''; context.setBusy(true);
     void adapter.beginLogin(base).then((result) => {
       loginId = result.login_id; context.setBusy(false);
-      grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; });
+      grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; node.dataset.locked = 'true'; });
       credentialSlot.replaceChildren(el('div', 'login-pending', demo ? 'Synthetic sign-in ready. Choose Finish sign-in to add this demo account.' : 'Complete sign-in in Terminal, then choose Finish sign-in. If the provider opens a browser, finish that step first.'));
       submitButton.textContent = 'Finish sign-in'; submitButton.focus();
     }).catch((error) => { context.error.textContent = safeError(error); context.setBusy(false); });
   });
   provider.focus();
+}
+function launchDialog(account: Account, mode: 'isolated' | 'managed') {
+  const context = openDialog(`Launch ${mode}`, `${account.label} · ${providerName(account.provider)} · ${account.pool} pool`);
+  const directory = input(lastWorkingDirectory); directory.placeholder = '/Users/you/Projects/my-project';
+  context.body.append(field('Project directory', directory, 'Enter an absolute path to an existing folder. This is the session’s working directory; account credentials stay in its separate managed home.'));
+  context.body.append(el('p', 'form-note', demo ? 'Synthetic launch only. The demo validates an absolute path but does not inspect your filesystem or open Terminal.' : mode === 'managed' ? 'New requests will use the selected account in this pool. In-progress responses keep their account.' : 'A new official CLI session will use this account’s private home. Existing clients are not changed.'));
+  context.actions.append(submit('Launch'));
+  directory.addEventListener('input', () => directory.setCustomValidity(''));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const workingDirectory = directory.value.trim();
+    if (!workingDirectory.startsWith('/') || /[\u0000-\u001f]/.test(workingDirectory)) { directory.setCustomValidity('Enter an absolute project directory, starting with /.'); directory.reportValidity(); return; }
+    void dialogSave(context, async () => { await adapter.launch(account.id, mode, workingDirectory); lastWorkingDirectory = workingDirectory; }, demo ? `Synthetic ${mode} launch recorded. No terminal was opened.` : mode === 'managed' ? 'Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.' : 'Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.');
+  });
+  directory.focus();
 }
 function editDialog(account: Account) {
   const context = openDialog('Edit account', `${providerName(account.provider)} · ${account.pool} pool. To change credentials or pool, add a new account.`);

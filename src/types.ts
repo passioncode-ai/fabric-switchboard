@@ -17,8 +17,9 @@ export interface Adapter {
   update(id: string, label: string, enabled: boolean): Promise<void>;
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
-  launch(id: string, mode: 'isolated' | 'managed'): Promise<{ message: string }>;
+  launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string }>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   finishLogin(loginId: string): Promise<Account>;
+  cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
 }
