@@ -87,14 +87,18 @@ fn binary(provider: Provider) -> Result<PathBuf, String> {
         for extension in ["exe", "cmd", "ps1"] {
             let path = dir.join(format!("{name}.{extension}"));
             if path.is_file() {
-                return Ok(path);
+                return path
+                    .canonicalize()
+                    .map_err(|_| "Provider CLI path unavailable.".into());
             }
         }
         #[cfg(not(windows))]
         {
             let path = dir.join(name);
             if path.is_file() {
-                return Ok(path);
+                return path
+                    .canonicalize()
+                    .map_err(|_| "Provider CLI path unavailable.".into());
             }
         }
     }
@@ -506,7 +510,10 @@ pub fn launch(
     let working_directory = working_directory
         .canonicalize()
         .map_err(|_| "Choose an existing project directory.")?;
-    if !working_directory.is_dir() || working_directory.starts_with(root) {
+    let private_root = root
+        .canonicalize()
+        .map_err(|_| "Managed home unavailable.")?;
+    if !working_directory.is_dir() || working_directory.starts_with(&private_root) {
         return Err("Choose an existing project directory.".into());
     }
 
