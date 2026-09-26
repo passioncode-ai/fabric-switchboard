@@ -1,7 +1,7 @@
 //! Private, capability-authenticated CLI control channel, separate from inference.
 use crate::{Operation, Runtime};
 use axum::{
-    body::{to_bytes, Body},
+    body::{to_bytes, Body, Bytes},
     extract::State,
     http::{Request, StatusCode},
     response::{IntoResponse, Response},
@@ -9,6 +9,8 @@ use axum::{
     Json, Router,
 };
 use hmac::{Hmac, Mac};
+use http_body_util::{BodyExt, Full};
+use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
@@ -184,21 +186,9 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         Err(_) => return Err("Control metadata unavailable.".into()),
         Ok(_) => {}
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if std::fs::symlink_metadata(&path)
-            .map_err(|_| "Control metadata unavailable.")?
-            .permissions()
-            .mode()
-            & 0o077
-            != 0
-        {
-            return Err("Control capability permissions are unsafe. Restart its owner to rotate the capability.".into());
-        }
-    }
-    let descriptor: Descriptor = serde_json::from_slice(&private_fs::read_private(&path, 4096)?)
-        .map_err(|_| "Invalid control metadata. Do not bypass a running owner.".to_string())?;
+    let descriptor: Descriptor =
+        serde_json::from_slice(&private_fs::read_private_strict(&path, 4096)?)
+            .map_err(|_| "Invalid control metadata. Do not bypass a running owner.".to_string())?;
     if descriptor.protocol != 1
         || descriptor.address.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST)
         || descriptor.address.port() == 0
@@ -207,46 +197,94 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
     {
         return Err("Unsafe control metadata. Expected a private loopback capability.".into());
     }
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|_| "Control client unavailable.")?;
-    // A stale private descriptor can name a port that another service reused.
-    // Authenticate the listener before sending either bearer or credential bytes.
-    let nonce = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let mut hello = match client
-        .get(format!("http://{}/v1/hello", descriptor.address))
-        .header("x-switchboard-challenge", &nonce)
-        .send()
-        .await
+    let stream = match tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::TcpStream::connect(descriptor.address),
+    )
+    .await
     {
-        Ok(response) => response,
-        Err(e) if e.is_connect() => return Ok(None),
-        Err(_) => {
-            return Err(
-                "Control identity check did not complete. No operation was attempted.".into(),
-            )
-        }
+        Ok(Ok(stream)) => stream,
+        Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => return Ok(None),
+        _ => return Err("Control connection did not complete. No operation was attempted.".into()),
     };
+    match tokio::time::timeout(
+        Duration::from_secs(30),
+        request_on_connection(stream, descriptor, operation),
+    )
+    .await
+    {
+        Ok(result) => result.map(Some),
+        Err(_) => Err("Control request timed out. Check state before retrying a mutation.".into()),
+    }
+}
+
+struct ConnectionTask(JoinHandle<()>);
+impl Drop for ConnectionTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+async fn read_response(
+    mut response: hyper::Response<hyper::body::Incoming>,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    while let Some(frame) = response.body_mut().frame().await {
+        let frame =
+            frame.map_err(|_| "Control response interrupted. Check state before retrying.")?;
+        if let Ok(chunk) = frame.into_data() {
+            if bytes.len() + chunk.len() > limit {
+                return Err("Control response exceeds size limit.".into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+    }
+    Ok(bytes)
+}
+async fn request_on_connection(
+    stream: tokio::net::TcpStream,
+    descriptor: Descriptor,
+    operation: &Operation,
+) -> Result<Value, String> {
+    // One raw HTTP/1 connection, never a pooling client: a proved listener cannot
+    // be swapped for a rebound port by an implicit reconnect before the mutation.
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+        .await
+        .map_err(|_| "Control handshake failed. No operation was attempted.")?;
+    let _connection = ConnectionTask(tokio::spawn(async move {
+        let _ = connection.await;
+    }));
+    let nonce = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let hello_request = Request::builder()
+        .method("GET")
+        .uri("/v1/hello")
+        .header("host", descriptor.address.to_string())
+        .header("x-switchboard-challenge", &nonce)
+        .body(Full::new(Bytes::new()))
+        .map_err(|_| "Control request unavailable.")?;
+    let hello = sender
+        .send_request(hello_request)
+        .await
+        .map_err(|_| "Control identity check did not complete. No operation was attempted.")?;
     if !hello.status().is_success() {
         return Err("Control authentication refused. No offline operation was attempted.".into());
     }
-    let mut hello_bytes = Vec::new();
-    while let Some(chunk) = hello
-        .chunk()
-        .await
-        .map_err(|_| "Control identity response interrupted.")?
+    if hello
+        .headers()
+        .get("connection")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case("close"))
+        })
     {
-        if hello_bytes.len() + chunk.len() > 256 {
-            return Err("Invalid control identity response.".into());
-        }
-        hello_bytes.extend_from_slice(&chunk);
+        return Err(
+            "Control listener closed its proved connection. No operation was attempted.".into(),
+        );
     }
-    let hello: Hello =
-        serde_json::from_slice(&hello_bytes).map_err(|_| "Invalid control identity response.")?;
+    let hello: Hello = serde_json::from_slice(&read_response(hello, 256).await?)
+        .map_err(|_| "Invalid control identity response.")?;
     if !bool::from(
         hello
             .proof
@@ -255,41 +293,33 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
     ) {
         return Err("Control authentication refused. No offline operation was attempted.".into());
     }
-    let mut response = match client
-        .post(format!("http://{}/v1/control", descriptor.address))
-        .bearer_auth(descriptor.token)
-        .json(operation)
-        .send()
+    let bytes =
+        serde_json::to_vec(operation).map_err(|_| "Control request serialization failed.")?;
+    if bytes.len() > REQUEST_LIMIT {
+        return Err("Control request exceeds size limit.".into());
+    }
+    let mutation = Request::builder()
+        .method("POST")
+        .uri("/v1/control")
+        .header("host", descriptor.address.to_string())
+        .header("authorization", format!("Bearer {}", descriptor.token))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from(bytes)))
+        .map_err(|_| "Control request unavailable.")?;
+    let response = sender
+        .send_request(mutation)
         .await
-    {
-        Ok(response) => response,
-        Err(_) => {
-            return Err(
-                "Control request did not complete. Check state before retrying a mutation.".into(),
-            )
-        }
-    };
+        .map_err(|_| "Control request did not complete. Check state before retrying a mutation.")?;
     if response.status() == StatusCode::UNAUTHORIZED || response.status() == StatusCode::FORBIDDEN {
         return Err("Control authentication refused. No offline operation was attempted.".into());
     }
     if !response.status().is_success() {
         return Err("Control request refused. No offline operation was attempted.".into());
     }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| "Control response interrupted. Check state before retrying.")?
-    {
-        if bytes.len() + chunk.len() > RESPONSE_LIMIT {
-            return Err("Control response exceeds size limit.".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    match serde_json::from_slice::<Reply>(&bytes)
+    match serde_json::from_slice::<Reply>(&read_response(response, RESPONSE_LIMIT).await?)
         .map_err(|_| "Invalid control response. Check state before retrying.")?
     {
-        Reply::Ok { value } => Ok(Some(value)),
+        Reply::Ok { value } => Ok(value),
         Reply::Error { message } => Err(message),
     }
 }
@@ -489,6 +519,70 @@ mod tests {
         .await;
         assert!(result.unwrap_err().contains("authentication refused"));
         assert!(!leaked.load(Ordering::SeqCst));
+        task.abort();
+    }
+    #[tokio::test]
+    async fn proved_connection_close_never_reconnects_to_send_a_secret() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let tmp = tempfile::tempdir().unwrap();
+        let received_mutation = Arc::new(AtomicBool::new(false));
+        let observed = received_mutation.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let descriptor = Descriptor {
+            protocol: 1,
+            address: listener.local_addr().unwrap(),
+            token: "a".repeat(64),
+        };
+        private_fs::private_write(
+            &tmp.path().join(FILE),
+            &serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
+        let token = descriptor.token.clone();
+        let router = Router::new()
+            .route(
+                "/v1/hello",
+                get(move |request: Request<Body>| {
+                    let token = token.clone();
+                    async move {
+                        let nonce = request.headers()["x-switchboard-challenge"]
+                            .to_str()
+                            .unwrap();
+                        (
+                            [("connection", "close")],
+                            Json(Hello {
+                                proof: proof(&token, nonce),
+                            }),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/v1/control",
+                post(move || {
+                    let observed = observed.clone();
+                    async move {
+                        observed.store(true, Ordering::SeqCst);
+                        Json(Reply::Ok { value: Value::Null })
+                    }
+                }),
+            );
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let result = request(
+            tmp.path(),
+            &Operation::Add {
+                label: "Test".into(),
+                provider: Provider::Claude,
+                kind: AuthKind::ApiKey,
+                pool: "default".into(),
+                secret: "never-sent-after-close".into(),
+            },
+        )
+        .await;
+        assert!(result.unwrap_err().contains("closed its proved connection"));
+        assert!(!received_mutation.load(Ordering::SeqCst));
         task.abort();
     }
     #[cfg(unix)]

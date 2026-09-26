@@ -74,6 +74,7 @@ pub struct Runtime {
     pub proxy: ProxyHandle,
     pub root: PathBuf,
     logins: Mutex<HashMap<String, launch::Login>>,
+    mutations: tokio::sync::Mutex<()>,
 }
 impl Runtime {
     pub async fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Arc<Self>, String> {
@@ -84,9 +85,13 @@ impl Runtime {
             proxy,
             root,
             logins: Mutex::new(HashMap::new()),
+            mutations: tokio::sync::Mutex::new(()),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        // The Store mutex protects metadata, but launch and removal also mutate
+        // private homes. Keep the complete operation in one owner transaction.
+        let _mutation = self.mutations.lock().await;
         execute(self.store.clone(), &self.root, Some(self), operation).await
     }
     fn begin_login(
@@ -235,5 +240,48 @@ async fn execute(
             needs_owner()?.cancel_login(&login_id)?;
             Ok(Value::Null)
         }
+    }
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::*;
+    use switchboard_core::{private_fs, MemoryVault};
+    #[tokio::test]
+    async fn home_cleanup_waits_for_the_owners_launch_reservation() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = Runtime::open(root.path().to_owned(), Arc::new(MemoryVault::default()))
+            .await
+            .unwrap();
+        let account = runtime
+            .store
+            .add(
+                "Fixture".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "work".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "fixture-only").unwrap(),
+            )
+            .unwrap();
+        let home = root.path().join("homes").join(&account.id);
+        private_fs::private_dir(&home).unwrap();
+        // Model a launch that has entered the owner transaction but has not yet
+        // written its reservation. Removal must not inspect/delete this home.
+        let transaction = runtime.mutations.lock().await;
+        let removing = runtime.clone();
+        let id = account.id.clone();
+        let mut remove =
+            tokio::spawn(async move { removing.execute(Operation::Remove { id }).await });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut remove)
+                .await
+                .is_err()
+        );
+        assert!(home.is_dir());
+        private_fs::private_write(&home.join(".launch-pending"), b"fixture launch").unwrap();
+        drop(transaction);
+        assert!(remove.await.unwrap().is_err());
+        assert!(home.is_dir());
+        assert_eq!(runtime.store.snapshot().unwrap().accounts.len(), 1);
     }
 }
