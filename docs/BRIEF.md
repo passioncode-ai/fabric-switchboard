@@ -1,6 +1,6 @@
 # Brief — 2026-09-26
 Operator request: research three supplied account switchers plus a fourth comparable repository; specify and implement a new Fabric organization project, macOS first and Windows planned, with account onboarding, storage, management, and session switching.
-Working name: Fabric Switchboard. Organization awaiting explicit response; measured existing Fabric owner is passioncode-ai (fabric README and authenticated GitHub org metadata). Fourth provisional comparator: farion1231/cc-switch. “Cloud Swap” interpreted as linked realiti4/claude-swap, not a separate unnamed product.
+Working name: Fabric Switchboard. Organization chosen from measured existing Fabric ownership: passioncode-ai (fabric README and authenticated GitHub org metadata); the new private repository was created there. Fourth comparator chosen pending any operator correction: farion1231/cc-switch. “Cloud Swap” interpreted as linked realiti4/claude-swap, not a separate unnamed product.
 Autonomy: operator explicitly requested proceeding through specification to implementation. This is authorization for reversible design/build decisions, local tests, a new repository and Git delivery. It is not authorization to kill the operator's current sessions, replace existing credentials, buy signing certificates or claim unobserved integration results. Current model inherited; no model substitution requested.
 
 ## Requirements
