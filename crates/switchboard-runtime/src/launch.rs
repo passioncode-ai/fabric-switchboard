@@ -1,15 +1,16 @@
 use serde_json::json;
+#[cfg(any(target_os = "macos", test))]
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs::{self, OpenOptions},
-    io::Write,
+    fs,
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
 };
 use switchboard_core::{AuthKind, Credential, Provider, Store};
 use switchboard_proxy::ProxyHandle;
+#[cfg(any(target_os = "macos", test))]
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
@@ -42,48 +43,21 @@ const CONFLICTS: &[&str] = &[
     "SWITCHBOARD_LOCAL_TOKEN",
 ];
 fn private_dir(path: &Path) -> Result<(), String> {
-    if let Ok(meta) = fs::symlink_metadata(path) {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Unsafe managed home. Check app-data permissions.".into());
-        }
-    }
-    fs::create_dir_all(path).map_err(|_| "Managed home unavailable.")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|_| "Managed home permissions unavailable.")?;
-    }
-    Ok(())
+    switchboard_core::private_fs::private_dir(path)
 }
 fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Result<(), String> {
-    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err("Unsafe managed file.".into());
-    }
-    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    switchboard_core::private_fs::private_write(path, bytes)?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(if executable { 0o700 } else { 0o600 });
+    if executable {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|_| "Managed file permissions unavailable.")?;
     }
-    let result = (|| {
-        let mut f = options
-            .open(&temporary)
-            .map_err(|_| "Managed file unavailable.")?;
-        f.write_all(bytes)
-            .map_err(|_| "Managed file could not be written.")?;
-        f.sync_all()
-            .map_err(|_| "Managed file could not be saved.")?;
-        fs::rename(&temporary, path).map_err(|_| "Managed file could not be installed.")?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
+    #[cfg(not(unix))]
+    let _ = executable;
+    Ok(())
 }
+#[cfg(any(unix, test))]
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -99,14 +73,34 @@ fn binary(provider: Provider) -> Result<PathBuf, String> {
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ]);
+    #[cfg(windows)]
+    {
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            dirs.push(PathBuf::from(home).join(".local/bin"));
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("npm"));
+        }
+    }
     for dir in dirs {
-        let path = dir.join(name);
-        if path.is_file() {
-            return Ok(path);
+        #[cfg(windows)]
+        for extension in ["exe", "cmd", "ps1"] {
+            let path = dir.join(format!("{name}.{extension}"));
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let path = dir.join(name);
+            if path.is_file() {
+                return Ok(path);
+            }
         }
     }
     Err("Provider CLI not found. Install the official CLI and retry.".into())
 }
+#[cfg(not(windows))]
 fn script(
     home: &Path,
     program: &Path,
@@ -141,6 +135,58 @@ fn script(
     }
     result
 }
+#[cfg(any(windows, test))]
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+#[cfg(any(windows, test))]
+fn windows_script(
+    home: &Path,
+    program: &Path,
+    args: &[&str],
+    env: &BTreeMap<String, String>,
+    login: bool,
+    working_directory: &Path,
+) -> String {
+    let q = |p: &Path| powershell_quote(&p.to_string_lossy());
+    let mut result = String::from("$ErrorActionPreference = 'Stop'\nSet-PSDebug -Off\n");
+    for variable in CONFLICTS {
+        result.push_str(&format!(
+            "[Environment]::SetEnvironmentVariable({}, $null, 'Process')\n",
+            powershell_quote(variable)
+        ));
+    }
+    for (key, value) in env {
+        result.push_str(&format!(
+            "[Environment]::SetEnvironmentVariable({}, {}, 'Process')\n",
+            powershell_quote(key),
+            powershell_quote(value)
+        ));
+    }
+    result.push_str(&format!("$homePath = {}\n$marker = Join-Path $homePath '.session-process'\n$process = Get-Process -Id $PID\n@{{ pid = $PID; created = $process.StartTime.ToUniversalTime().ToFileTimeUtc() }} | ConvertTo-Json -Compress | Set-Content -LiteralPath $marker -Encoding ASCII\nRemove-Item -LiteralPath (Join-Path $homePath '.launch-pending') -Force\nSet-Location -LiteralPath {}\n",q(home),q(working_directory)));
+    let arguments = args
+        .iter()
+        .map(|a| powershell_quote(a))
+        .collect::<Vec<_>>()
+        .join(", ");
+    result.push_str(&format!("$arguments = @({arguments})\n$global:LASTEXITCODE = 0\n& {} @arguments\n$result = $LASTEXITCODE\n",q(program)));
+    if login {
+        result.push_str("if ($result -eq 0) { [IO.File]::WriteAllText((Join-Path $homePath '.completed'), 'complete') }\n");
+    }
+    result.push_str("exit $result\n");
+    result
+}
+#[cfg(windows)]
+fn script(
+    home: &Path,
+    program: &Path,
+    args: &[&str],
+    env: &BTreeMap<String, String>,
+    login: bool,
+    working_directory: &Path,
+) -> String {
+    windows_script(home, program, args, env, login, working_directory)
+}
 struct Reservation {
     path: PathBuf,
     committed: bool,
@@ -149,15 +195,7 @@ impl Reservation {
     fn new(home: &Path) -> Result<Self, String> {
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        options
-            .open(&path)
+        switchboard_core::private_fs::create_new(&path)
             .map_err(|_| "Close the existing session before changing its home.")?;
         Ok(Self {
             path,
@@ -173,7 +211,12 @@ impl Drop for Reservation {
     }
 }
 fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    let path = home.join("launch.ps1");
+    #[cfg(not(windows))]
     let path = home.join("launch.command");
+    #[cfg(windows)]
+    let content = format!("\u{feff}{content}"); // Windows PowerShell 5.1 needs a UTF-8 BOM for Unicode paths.
     private_write(&path, content.as_bytes(), true)?;
     #[cfg(target_os = "macos")]
     {
@@ -187,9 +230,33 @@ fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
         }
         Ok(())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
     {
-        Err("Terminal launch is currently supported on macOS only.".into())
+        use std::os::windows::process::CommandExt;
+        let shell = PathBuf::from(
+            std::env::var_os("SystemRoot").ok_or("Windows system directory unavailable.")?,
+        )
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let mut command = Command::new(shell);
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
+            .arg(path)
+            .creation_flags(0x00000010); // CREATE_NEW_CONSOLE; script waits for provider.
+        for variable in CONFLICTS {
+            command.env_remove(variable);
+        }
+        command.spawn().map_err(|_| "Terminal could not open.")?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        Err("Terminal launch is currently supported on macOS and Windows only.".into())
     }
 }
 fn validate_fields(label: &str, pool: &str) -> Result<(), String> {
@@ -229,7 +296,15 @@ pub fn begin_login(
     )]);
     let args = match provider {
         Provider::Claude => vec!["auth", "login"],
-        Provider::Codex => vec!["-c", "cli_auth_credentials_store=\"file\"", "login"],
+        Provider::Codex => {
+            // A private config file avoids shell-dependent quote handling of TOML CLI arguments.
+            private_write(
+                &home.join("config.toml"),
+                b"cli_auth_credentials_store = \"file\"\n",
+                false,
+            )?;
+            vec!["login"]
+        }
     };
     open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
     reservation.committed = true;
@@ -242,6 +317,7 @@ pub fn begin_login(
         home,
     })
 }
+#[cfg(any(target_os = "macos", test))]
 fn keychain_service(home: &Path) -> String {
     let raw: String = home.to_string_lossy().nfc().collect();
     format!(
@@ -250,12 +326,10 @@ fn keychain_service(home: &Path) -> String {
     )
 }
 fn read_regular(path: &Path) -> Result<String, String> {
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| "Sign-in is not complete. Finish in Terminal, then try again.")?;
-    if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 1024 * 1024 {
-        return Err("Sign-in credential is unsupported.".into());
-    }
-    fs::read_to_string(path).map_err(|_| "Sign-in credential is unavailable.".into())
+    let bytes = switchboard_core::private_fs::read_private(path, 1024 * 1024).map_err(|_| {
+        "Sign-in is not complete or its private file is unsafe. Finish in Terminal, then try again."
+    })?;
+    String::from_utf8(bytes).map_err(|_| "Sign-in credential is unsupported.".into())
 }
 pub fn capture_login(login: &Login) -> Result<Credential, String> {
     if read_regular(&login.home.join(".completed"))? != "complete" {
@@ -325,7 +399,26 @@ fn ensure_idle(home: &Path) -> Result<(), String> {
     if home.join(".launch-pending").exists() {
         return Err("Close the existing session before changing its home.".into());
     }
+    #[cfg(windows)]
+    {
+        let marker = home.join(".session-process");
+        if marker.exists() {
+            let value: serde_json::Value = serde_json::from_str(&read_regular(&marker)?)
+                .map_err(|_| "Session state invalid. Inspect the managed home.")?;
+            let pid = value["pid"]
+                .as_u64()
+                .and_then(|x| u32::try_from(x).ok())
+                .filter(|x| *x > 0)
+                .ok_or("Session state invalid.")?;
+            let created = value["created"].as_u64().ok_or("Session state invalid.")?;
+            if switchboard_core::windows::process_matches(pid, created)? {
+                return Err("Close the existing session before changing its home.".into());
+            }
+        }
+    }
+    #[cfg(unix)]
     let marker = home.join(".session-pid");
+    #[cfg(unix)]
     if marker.exists() {
         let text = read_regular(&marker)?;
         let pid = text
@@ -354,6 +447,7 @@ pub fn clean_account(root: &Path, id: &str) -> Result<(), String> {
     if home.exists() {
         ensure_idle(&home)?;
         let meta = fs::symlink_metadata(&home).map_err(|_| "Account home unavailable.")?;
+        switchboard_core::private_fs::check_path(&home)?;
         if meta.file_type().is_symlink() {
             return Err("Unsafe account home.".into());
         }
@@ -529,6 +623,49 @@ pub fn launch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn windows_native_script_scopes_env_and_completes_synthetic_login() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("O'Brien δοκιμή");
+        private_dir(&home).unwrap();
+        let provider = home.join("synthetic-provider.ps1");
+        private_write(&provider, b"if ($env:ANTHROPIC_API_KEY) { exit 9 }\nif ($env:CODEX_HOME -ne (Get-Location).Path) { exit 8 }\nexit 0\n", false).unwrap();
+        let env = BTreeMap::from([("CODEX_HOME".into(), home.to_string_lossy().into_owned())]);
+        let content = windows_script(&home, &provider, &[], &env, true, &home);
+        let script_path = home.join("test.ps1");
+        private_write(&script_path, format!("\u{feff}{content}").as_bytes(), false).unwrap();
+        let mut reservation = Reservation::new(&home).unwrap();
+        reservation.committed = true;
+        let status = Command::new("powershell.exe")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script_path)
+            .env("ANTHROPIC_API_KEY", "synthetic-conflicting-key")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(read_regular(&home.join(".completed")).unwrap(), "complete");
+        assert!(ensure_idle(&home).is_ok());
+    }
+    #[test]
+    fn windows_script_quotes_literals_and_tracks_process_incarnation() {
+        let env = BTreeMap::from([("CODEX_HOME".into(), r"C:\Users\O'Brien\δοκιμή".into())]);
+        let content = windows_script(
+            Path::new(r"C:\private"),
+            Path::new(r"C:\Program Files\codex.cmd"),
+            &["-c", "cli_auth_credentials_store=\"file\"", "login"],
+            &env,
+            true,
+            Path::new(r"C:\my project"),
+        );
+        assert!(content.contains("O''Brien"));
+        assert!(content.contains("ToFileTimeUtc()"));
+        assert!(content.contains("Set-Location -LiteralPath 'C:\\my project'"));
+        assert!(content.contains("'cli_auth_credentials_store=\"file\"'"));
+        assert!(content.contains("$null, 'Process'"));
+        assert!(!content.contains("Invoke-Expression"));
+        assert_eq!(powershell_quote("x'$()`;&"), "'x''$()`;&'");
+    }
     #[test]
     fn codex_export_preserves_native_auth_shape_without_refresh_lineage() {
         let credential = Credential::parse(
@@ -588,6 +725,7 @@ mod tests {
         assert!(!login.home.exists());
         clean_login(&login).unwrap();
     }
+    #[cfg(not(windows))]
     #[test]
     fn script_quotes_paths_and_clears_credentials() {
         let env = BTreeMap::from([("CODEX_HOME".into(), "/tmp/a'b".into())]);
@@ -613,6 +751,7 @@ mod tests {
         drop(hold);
         assert!(ensure_idle(root.path()).is_ok());
     }
+    #[cfg(not(windows))]
     #[test]
     fn launch_script_runs_project_without_changing_auth_home() {
         let env = BTreeMap::from([("CODEX_HOME".into(), "/tmp/private home".into())]);
