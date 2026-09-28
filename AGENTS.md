@@ -11,3 +11,16 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). The implementation contract is [doc
 - Hosted full checks run nightly at 23:00 Europe/Warsaw. Do not add push/PR full-suite triggers or dispatch the workflow after every push. Missing CI is not passing CI.
 - Keep lockfiles. Keep build output, node_modules, secrets and comparison clones untracked. Add commit-addressed evidence and update HANDOFF before delivery.
 - Preserve other sessions' changes; use bounded ownership/worktrees for simultaneous implementation. No force push or blind reset to make a handoff pass.
+
+## Organisation
+
+This repository is one of the `passioncode-ai` repositories. **The org map, the shared
+rules and onboarding live in [passioncode-ai/org-index](https://github.com/passioncode-ai/org-index)**
+(private; readable by every org member):
+
+- [README](https://github.com/passioncode-ai/org-index#repositories): which repository owns what, and how they connect
+- [RULES.md](https://github.com/passioncode-ai/org-index/blob/main/RULES.md): branches, commits, CI, leases, secrets, handoffs
+- [ONBOARDING.md](https://github.com/passioncode-ai/org-index/blob/main/ONBOARDING.md): setting up a new contributor's machine
+
+Where this file is stricter than RULES.md, this file wins. A change to this repository's
+role, dependencies or test command updates its row in `org-index/repositories.json` in the same change.
