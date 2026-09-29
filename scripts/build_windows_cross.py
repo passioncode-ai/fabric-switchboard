@@ -88,6 +88,9 @@ def main():
         'WebView2 is handled by the installer. Keep GUI or switchboard serve running for managed sessions.\n'
         'Cross-compiled with cargo-xwin and LLVM; native Windows tests and provider login have NOT run.\n'
         'Windows binaries are NOT Authenticode signed. See docs/evidence/release-0.3.md.\n')
+    # The license and the third-party notices travel with every binary archive.
+    for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+        shutil.copy2(ROOT / name, folder / name)
     hashes = {p.name: sha(p) for p in sorted(folder.glob('*.exe'))}
     (folder / 'SHA256SUMS.txt').write_text(''.join(f'{value}  {name}\n' for name, value in hashes.items()))
     receipt = {

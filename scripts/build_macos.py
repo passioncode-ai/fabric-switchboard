@@ -167,6 +167,9 @@ def main():
         run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=2', str(binary)])
     startup = verify_native_startup(app/'Contents/MacOS/fabric-switchboard', version)
     (folder/'README.txt').write_text(f'Fabric Switchboard {version}\nMove the app to Applications. CLI: ./switchboard --help\nKeep GUI or switchboard serve open for managed sessions. See repository docs/CLI.md.\nSignature and notarization differ; see the adjacent release receipt JSON.\n')
+    # The license and the third-party notices travel with every binary archive.
+    for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+        shutil.copy2(ROOT/name, folder/name)
     archive = Path(str(folder)+'.zip')
     archive_folder(folder, archive)
     verify_source(commit)

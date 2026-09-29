@@ -1,0 +1,2 @@
+# Canonical SPDX license texts are vendored byte-for-byte; keep their whitespace.
+scripts/licenses/*.txt -whitespace

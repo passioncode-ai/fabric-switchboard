@@ -1,36 +1,76 @@
-# Fabric Switchboard
+# Switchboard — by PassionCode.ai
 
-Локальный менеджер аккаунтов Claude Code и Codex CLI с desktop-интерфейсом и командой `switchboard`. Постоянные секреты защищены macOS Keychain или Windows DPAPI; рабочие и личные аккаунты разделены пулами. В управляемой сессии выбранный аккаунт меняется **со следующего запроса**: текущий поток ответа продолжает использовать прежний.
+**English** · [Русский](README.ru.md)
 
-**Статус: 0.3.1, beta.** Общая тёмная дизайн-система PassionCode и жёлтая S-иконка. Сборки готовы; публикация релиза выполняется отдельно. Добавлены сохранение текущей авторизации CLI, импорт Claude Swap, активный CLI-профиль, окна лимитов и фоновое автопереключение. Сохранены интерфейс, CLI, хранилище, HTTP/SSE-прокси и адаптеры macOS/Windows. [Контракт 0.3](docs/ACCOUNTS-AND-ROTATION.md) и [проверки/сборки 0.3.1](docs/evidence/release-0.3.1.md). Вход и inference через реальные аккаунты провайдеров ещё не проверены. [Протокол 0.2](docs/evidence/release-0.2.md) отдельно фиксирует тесты, полученные сборки, подпись и notarization; [историческая проверка 0.1](docs/evidence/verification.md) сохранена.
+Switchboard keeps your Claude Code and Codex CLI accounts in one local workbench. See
+reported usage, separate work from personal accounts, and choose what handles your next
+request. It is a desktop app plus the `switchboard` command-line tool, for macOS and
+Windows. Part of the [PassionCode.ai](https://passioncode.ai/) toolkit.
 
-- [Сайт и скачивание](https://passioncode.ai/switchboard/#download) · [релизы](https://github.com/passioncode-ai/fabric-switchboard/releases) · [установка готовых архивов](docs/INSTALL.md).
-- [Исследование четырёх решений](docs/research/README.md): исходники, архитектура, хранение и механика переключения; 69 ссылок на фиксированные коммиты.
-- [Спецификация](docs/SPEC.md): функции, оси совместимости, состояния, безопасность, протоколы, Windows и критерии приёмки.
-- [Карта решения на русском](docs/PRODUCT.ru.md): что построено, что заимствовано как идея, ограничения и очередность развития.
-- [Точка входа для следующего агента](docs/HANDOFF.md): проверки, решения и точная следующая задача.
-- [CLI](docs/CLI.md): команды, JSON, stdin и общий владелец сессий.
-- [Дистрибутивы](docs/DISTRIBUTION.md): macOS universal app/CLI, подпись и Windows installer/CLI.
+**Status: beta. [v0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1)
+is published** (prerelease, macOS universal + Windows x64); `main` carries 0.3.2 fixes that
+are not released yet. Real provider login and end-to-end requests with live accounts are
+not yet verified.
 
-## Запуск из исходников
+- **Download:** [macOS](https://passioncode.ai/switchboard/download/macos) ·
+  [Windows](https://passioncode.ai/switchboard/download/windows) ·
+  [product page](https://passioncode.ai/switchboard/) ·
+  [all releases](https://github.com/passioncode-ai/fabric-switchboard/releases) ·
+  [installation notes](docs/INSTALL.md)
+- **License:** source-available under PolyForm Noncommercial or Internal Use; commercial
+  license on request. See [License](#license).
 
-Для macOS нужны macOS 14+, Xcode Command Line Tools, Rust и Node.js. Для Windows — Rust MSVC, Visual Studio C++ Build Tools, Node.js и WebView2. Официальный `claude` или `codex` нужен только для входа/запуска сессии, но не для работы менеджера. Статус проверки каждой платформы указан в актуальном протоколе сборки.
+Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and personal
+accounts live in separate pools. In a managed session the selected account changes **from
+the next request**: a response already streaming keeps the identity it started with.
+
+Version 0.3.1 brings the shared PassionCode dark design system and the yellow S icon,
+explicit capture of the current CLI authorization, Claude Swap import, the active native CLI
+profile, quota windows and opt-in background rotation. The interface, CLI, vault, HTTP/SSE
+proxy and macOS/Windows adapters are kept. See the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md)
+and the [0.3.1 checks and builds](docs/evidence/release-0.3.1.md). The
+[0.2 report](docs/evidence/release-0.2.md) records tests, builds, signing and notarization
+separately; the [historical 0.1 verification](docs/evidence/verification.md) is kept.
+
+## Documentation
+
+- [Research on four existing tools](docs/research/README.md): sources, architecture,
+  storage and switching mechanics; 69 links to fixed commits.
+- [Specification](docs/SPEC.md): features, compatibility axes, states, security,
+  protocols, Windows and acceptance criteria.
+- [Product map (Russian)](docs/PRODUCT.ru.md): what was built, which ideas were borrowed,
+  limits and the order of further work.
+- [Entry point for the next contributor or agent](docs/HANDOFF.md): checks, decisions and
+  the exact next task.
+- [CLI](docs/CLI.md): commands, JSON, stdin and the shared session owner.
+- [Distribution](docs/DISTRIBUTION.md): macOS universal app/CLI, signing, Windows
+  installer/CLI.
+
+## Running from source
+
+macOS needs macOS 14+, Xcode Command Line Tools, Rust and Node.js. Windows needs Rust
+(MSVC), Visual Studio C++ Build Tools, Node.js and WebView2. The official `claude` or
+`codex` CLI is needed only to sign in or launch a session, not to run the manager. The
+verification status of each platform is in the current build report.
 
 ```sh
 npm ci
 npm run app:dev
 ```
 
-Создание локального приложения:
+Build a local app:
 
 ```sh
 npm run app:build
 open 'target/release/bundle/macos/Fabric Switchboard.app'
 ```
 
-Эта команда сама по себе не подтверждает Developer ID или notarization. Процедура подписи и отдельный Windows workflow описаны в инструкции дистрибуции. Бинарные файлы не хранятся в Git. Зависимости зафиксированы Cargo.lock и package-lock.json; побайтовая воспроизводимость не заявляется.
+That command alone does not establish Developer ID signing or notarization. The signing
+procedure and the separate Windows workflow are in the [distribution guide](docs/DISTRIBUTION.md).
+Binaries are not stored in Git. Dependencies are pinned by `Cargo.lock` and
+`package-lock.json`; byte-for-byte reproducibility is not claimed.
 
-CLI из исходников:
+CLI from source:
 
 ```sh
 cargo build --release --locked -p switchboard-cli
@@ -39,37 +79,71 @@ cargo build --release --locked -p switchboard-cli
 ./target/release/switchboard serve
 ```
 
-`serve` или открытое desktop-приложение владеет прокси и сессиями. Другие команды CLI автоматически обращаются к этому владельцу. При отсутствии владельца операции с метаданными выполняются под эксклюзивной блокировкой; login и launch требуют работающий runtime.
+`serve`, or an open desktop app, owns the proxy and the sessions. Other CLI commands talk
+to that owner automatically. Without an owner, metadata operations run under an exclusive
+lock; login and launch need a running runtime.
 
-Для просмотра интерфейса на синтетических данных: `npm run dev`, затем `http://127.0.0.1:1420/?demo=1`. Обычная веб-страница не подключается к хранилищу. В браузерном demo нет настоящих аккаунтов, запуска CLI или сетевых вызовов к провайдерам.
+To look at the interface with synthetic data: `npm run dev`, then
+`http://127.0.0.1:1420/?demo=1`. A plain web page does not connect to the vault. The browser
+demo has no real accounts, no CLI launch and no network calls to providers.
 
-## Как пользоваться
+## Using it
 
-1. **Add account** — официальный вход в отдельном профиле, API key, Claude setup token или явно импортированный OAuth JSON. Приложение не читает текущую глобальную авторизацию автоматически.
-2. Задайте label и pool, например `work` либо `personal`. Пул определяет границу маршрутизации; аккаунты разных провайдеров не взаимозаменяемы.
-3. **Select** — выбрать аккаунт для следующих управляемых запросов.
-4. **Launch managed** — выбрать каталог проекта и открыть CLI через локальный прокси. Приложение или `switchboard serve` должно оставаться открытым. На один provider/pool допускается один запущенный управляемый home.
-5. **Launch isolated** — отдельный home выбранного аккаунта и прямое соединение CLI с провайдером. Последующие Select на него не действуют.
-6. **Check usage** — явная проверка квоты OAuth. API key не выдаёт достоверную квоту подписки; неизвестная квота не превращается в ноль.
+1. **Add account** — official sign-in in a separate profile, an API key, a Claude setup
+   token, or explicitly imported OAuth JSON. The app does not read the current global
+   authorization on its own.
+2. Set a label and a pool, for example `work` or `personal`. The pool is the routing
+   boundary; accounts of different providers are not interchangeable.
+3. **Select** — choose the account for the next managed requests.
+4. **Launch managed** — pick a project folder and open the CLI through the local proxy.
+   The app or `switchboard serve` must stay open. One managed home may run per
+   provider/pool.
+5. **Launch isolated** — a separate home for the selected account and a direct CLI
+   connection to the provider. Later **Select** actions do not affect it.
+6. **Check usage** — an explicit OAuth quota check. An API key does not report a reliable
+   subscription quota; an unknown quota is never shown as zero.
 
-Постоянный credential находится в OS vault, но isolated-режим создаёт необходимую официальному CLI рабочую копию access token в приватном файле (0600 на macOS, user-only DACL на Windows). Refresh token туда не передаётся; по истечении срока нужен повторный вход. Подробности, восстановление после сбоя и удаление: [операционная инструкция](docs/OPERATIONS.md).
+The persistent credential stays in the OS vault, but isolated mode writes the working copy
+of the access token that the official CLI needs into a private file (0600 on macOS, a
+user-only DACL on Windows). The refresh token is not written there; when the token
+expires, sign in again. Details, recovery after a failure and removal:
+[operations guide](docs/OPERATIONS.md).
 
-## Проверки и структура
+## Checks and layout
 
 ```sh
 ./scripts/check.sh
-# Явно запрошенный тест создаёт и удаляет только случайный синтетический Keychain item:
+# The explicitly requested test creates and deletes only a random synthetic Keychain item:
 cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned_item -- --ignored --exact
 ```
 
-| Путь | Ответственность |
+| Path | Responsibility |
 |---|---|
-| `crates/switchboard-core` | аккаунты, Keychain/DPAPI, атомарные метаданные, route snapshot |
-| `crates/switchboard-proxy` | loopback-аутентификация, запросы, потоки, usage |
-| `crates/switchboard-runtime` | общий владелец, control API, официальный login и запуск CLI |
-| `crates/switchboard-cli` | команда `switchboard`, stdin и JSON |
-| `src-tauri` | нативное окно и IPC к общему runtime |
-| `src` | TypeScript-интерфейс и явно обозначенный demo |
-| `docs` | research, спецификация, сценарии, договорённости и evidence |
+| `crates/switchboard-core` | accounts, Keychain/DPAPI, atomic metadata, route snapshot |
+| `crates/switchboard-proxy` | loopback authentication, requests, streams, usage |
+| `crates/switchboard-runtime` | shared owner, control API, official login and CLI launch |
+| `crates/switchboard-cli` | the `switchboard` command, stdin and JSON |
+| `src-tauri` | native window and IPC to the shared runtime |
+| `src` | TypeScript interface and the clearly labelled demo |
+| `docs` | research, specification, scenarios, contracts and evidence |
 
-Полная hosted CI настроена на ночной запуск. Отдельная Windows-сборка запускается вручную для точного commit SHA; push/PR не запускают полный suite. Наличие workflow не означает успешное выполнение. Чужие исходники исследованы, но не включены как зависимости. [Лицензия](LICENSE) относится к нашей реализации.
+Full hosted CI runs nightly. The separate Windows build is started by hand for an exact
+commit SHA; push and pull requests do not run the full suite. A workflow existing does not
+mean it passed. Other projects' sources were studied but are not included as
+dependencies.
+
+## License
+
+Switchboard is source-available, not open source: you may use it under the
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+or the [PolyForm Internal Use License 1.0.0](https://polyformproject.org/licenses/internal-use/1.0.0),
+at your option. Commercial distribution, or building it into a product or service for
+others, needs a separate commercial license: contact@passioncode.ai. The full terms are in
+[LICENSE](LICENSE).
+
+Releases up to and including v0.3.1-beta.1, and commits up to and including `7c36f4a`,
+were released under the MIT License; those remain available under MIT.
+
+The built app and CLI include third-party components under their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are accepted under the
+[CLA](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).

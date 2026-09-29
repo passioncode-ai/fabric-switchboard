@@ -51,6 +51,7 @@ jobs:
           New-Item -ItemType Directory -Force artifacts | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/switchboard.exe artifacts/switchboard.exe
           Copy-Item target/release/bundle/nsis/*.exe artifacts/
+          Copy-Item LICENSE, THIRD_PARTY_NOTICES.md artifacts/
           & artifacts/switchboard.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem artifacts -Filter *.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content artifacts/SHA256SUMS.txt

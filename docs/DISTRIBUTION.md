@@ -29,7 +29,7 @@ The manual `Build Windows artifacts` workflow builds a specified exact commit on
 gh workflow run build-windows.yml --ref main -f expected_sha="$(git rev-parse HEAD)"
 ```
 
-This example targets `main` after the public-launch task creates it and makes it the default branch; do not dispatch before that integration. The input is compared to the checked-out SHA. No push or PR trigger is installed. Download the produced Actions artifact; it contains `switchboard.exe`, the NSIS installer and SHA256SUMS.txt. The installer uses current-user installation and official WebView2 bootstrapper handling; it does not require a system-wide credential store.
+This example targets `main` after the public-launch task creates it and makes it the default branch; do not dispatch before that integration. The input is compared to the checked-out SHA. No push or PR trigger is installed. Download the produced Actions artifact; it contains `switchboard.exe`, the NSIS installer, SHA256SUMS.txt, LICENSE and THIRD_PARTY_NOTICES.md. The installer uses current-user installation and official WebView2 bootstrapper handling; it does not require a system-wide credential store.
 
 Windows Authenticode signing is a separate prerequisite; an Apple Developer ID cannot sign Windows executables. Unless the receipt says otherwise, these Windows artifacts are unsigned. Native fixture success does not claim actual Claude/Codex login or Windows UI acceptance.
 

@@ -2,7 +2,8 @@
 name = "switchboard-core"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license-file.workspace = true
+publish.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
