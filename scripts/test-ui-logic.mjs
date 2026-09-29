@@ -73,4 +73,23 @@ check(() => {
   for (const message of ['Label, pool or identity is invalid', 'Account identity is ambiguous in this pool', 'Terminal could not open.', 'Sign-in cleanup needs Keychain access.', 'Rotation time precedes the last switch']) assert(source.includes(`  '${message}': '`), `mapped: ${message}`);
 });
 
-console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary.`);
+// Project rules: paused wins over expired; only active rules raise the Accounts strip.
+check(() => {
+  const now = 1_000_000;
+  assert.equal(logic.ruleState({ enabled: true, expires_at: null }, now), 'active');
+  assert.equal(logic.ruleState({ enabled: true, expires_at: now + 1 }, now), 'active');
+  assert.equal(logic.ruleState({ enabled: true, expires_at: now }, now), 'expired');
+  assert.equal(logic.ruleState({ enabled: false, expires_at: now - 10 }, now), 'paused');
+  assert.equal(logic.activeRules([{ enabled: true, expires_at: null }, { enabled: false, expires_at: null }, { enabled: true, expires_at: now - 1 }], now).length, 1);
+  assert.equal(logic.activeRules(undefined, now).length, 0);
+});
+check(() => {
+  const now = 1_000_000;
+  assert.equal(logic.expiryFrom('8', now), now + 8 * 3600);
+  for (const choice of ['', '0', '721', 'x', '1.5']) assert.equal(logic.expiryFrom(choice, now), null);
+  assert.deepEqual(logic.EXPIRY_CHOICES.map(([value]) => value), ['1', '8', '24', '168', '']);
+  assert.equal(logic.projectName('/srv/projects/alpha-web/'), 'alpha-web');
+  assert.equal(logic.projectName('C:\\Work\\beta-api'), 'beta-api');
+});
+
+console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules.`);

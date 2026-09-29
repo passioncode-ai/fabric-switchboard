@@ -4,8 +4,8 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, MutationClock, canProbe, monitorChecks, parseAppearance, resolveTheme, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, canProbe, expiryFrom, monitorChecks, parseAppearance, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import type { Account, Adapter, AgentSetup, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -31,7 +31,9 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-let page: 'accounts' | 'activity' | 'about' = 'accounts';
+let page: 'accounts' | 'projects' | 'agents' | 'activity' | 'about' = 'accounts';
+let agentSetup: AgentSetup | null = null;
+let agentSetupError = false;
 let filter: 'all' | Provider = 'all';
 let busy = false;
 let loading = true;
@@ -88,6 +90,7 @@ async function reload() {
   if (status.status === 'fulfilled') { runtime = status.value; runtimeError = false; }
   else { runtime = null; runtimeError = true; }
   loading = false; render();
+  void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
   void readContext().then((context) => {
@@ -128,10 +131,13 @@ function render(options: { background?: boolean } = {}): boolean {
   brand.append(mark, brandName);
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', 'Main navigation');
-  for (const [target, label, icon] of [['accounts', 'Accounts', '▦'], ['activity', 'Activity', '≋'], ['about', 'About', '○']] as const) {
+  const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
+  for (const [target, label, icon] of [['accounts', 'Accounts', '▦'], ['projects', 'Projects', '◫'], ['agents', 'Agents', '⌁'], ['activity', 'Activity', '≋'], ['about', 'About', '○']] as const) {
     const control = button('', () => { page = target; notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
-    control.append(symbol, el('span', '', label)); if (page === target) control.setAttribute('aria-current', 'page'); nav.append(control);
+    control.append(symbol, el('span', '', label));
+    if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', `${liveRules} active ${liveRules === 1 ? 'rule' : 'rules'}`); control.append(count); }
+    if (page === target) control.setAttribute('aria-current', 'page'); nav.append(control);
   }
   sidebar.append(nav);
   const sidebarFoot = el('div', 'sidebar-foot');
@@ -140,13 +146,14 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Choose who handles the next request.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', projects: 'Projects', agents: 'Agents', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Choose who handles the next request.', projects: 'Optional rules: a project folder starts on a chosen account.', agents: 'Let coding agents read usage and switch accounts.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? 'Loading…' : 'Refresh', () => void reload(), 'button quiet', 'refresh'));
     if (page === 'accounts') actions.append(button('Import Claude Swap', () => importDialog(), 'button', 'import-swap'), button('+ Add account', () => addDialog(), 'button primary', 'add-account'));
+    if (page === 'projects' && snapshot?.accounts.length) actions.append(button('+ Add rule', () => ruleDialog(), 'button primary', 'add-rule'));
     header.append(actions);
   }
   main.append(header);
@@ -157,15 +164,95 @@ function render(options: { background?: boolean } = {}): boolean {
   }
   if (notice) { const alert = el('div', `notice ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button('Dismiss', () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   if (page === 'about') renderAbout(main);
+  else if (page === 'agents') renderAgents(main);
   else if (loadError) {
     const state = emptyState('Unable to load accounts', loadError); state.classList.add('error-state'); state.append(button('Retry', () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
     const state = emptyState('Loading your workbench', 'Reading account metadata from the native app…'); state.setAttribute('role', 'status'); main.append(state);
   } else if (snapshot) {
     if (page === 'accounts') renderAccounts(main);
+    else if (page === 'projects') renderProjects(main);
     else renderActivity(main);
   }
   shell.append(main); return commit();
+}
+const ruleAccount = (rule: ProjectRule) => snapshot?.accounts.find((account) => account.id === rule.account_id);
+const ruleTarget = (rule: ProjectRule) => rule.target === 'managed' ? 'Managed sessions' : 'Claude Code login (all claude sessions)';
+/** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
+function rulesStrip(main: HTMLElement) {
+  const live = activeRules(snapshot?.rules, Date.now() / 1000);
+  if (!live.length) return;
+  const strip = el('section', 'notice rules-strip'); strip.setAttribute('aria-label', 'Active project rules');
+  const names = live.map((rule) => `${projectName(rule.path)} → ${ruleAccount(rule)?.label ?? 'missing account'}${rule.expires_at ? ` until ${date(rule.expires_at)}` : ''}`);
+  strip.append(el('span', '', `${live.length} project ${live.length === 1 ? 'rule is' : 'rules are'} active: ${names.join('; ')}. Rotation still moves off an exhausted account.`), button('Review rules', () => { page = 'projects'; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'review-rules'));
+  main.append(strip);
+}
+function renderProjects(main: HTMLElement) {
+  const rules = snapshot!.rules ?? [];
+  main.append(el('p', 'surface-note', 'Rules are optional. With none, Switchboard follows your selection and rotation in every project. A rule applies when an agent or switchboard project apply asks for it, only to that session, and never turns rotation off.'));
+  if (!rules.length) {
+    const empty = emptyState('No project rules', snapshot!.accounts.length ? 'Add a rule when one project should start on a specific account, for example a client project on its own subscription. Prefer an expiry.' : 'Add an account first; a rule names one of your accounts.');
+    if (snapshot!.accounts.length) empty.append(button('Add rule', () => ruleDialog(), 'button primary', 'empty-add-rule'));
+    main.append(empty); return;
+  }
+  const now = Date.now() / 1000;
+  const list = el('div', 'account-list'); list.setAttribute('aria-label', 'Project rules');
+  for (const rule of rules) {
+    const state = ruleState(rule, now); const account = ruleAccount(rule); const key = `${rule.provider}-${rule.path}`;
+    const card = el('article', `account-card ${state === 'active' ? 'is-selected' : 'is-disabled'}`); card.setAttribute('aria-label', `${projectName(rule.path)}, ${state}`);
+    const details = el('div', 'account-details'); const title = el('div', 'account-title');
+    title.append(el('h2', '', projectName(rule.path)), el('span', `badge ${state === 'active' ? 'current-badge' : 'muted'}`, { active: 'Active', paused: 'Paused', expired: 'Expired' }[state]));
+    const path = el('p', 'account-meta', rule.path); path.title = rule.path;
+    details.append(title, path, el('p', 'account-meta', `${providerName(rule.provider)} · ${account ? `${account.label} · ${account.pool}` : 'account missing'} · ${ruleTarget(rule)}`), el('p', 'usage-caption', rule.expires_at ? `${state === 'expired' ? 'Expired' : 'Until'} ${date(rule.expires_at)}` : 'No expiry'));
+    const actions = el('div', 'management-actions');
+    if (state === 'active') actions.append(button('Pause', () => void mutate(() => adapter.setProjectRule({ path: rule.path, accountId: rule.account_id, target: rule.target, enabled: false, expiresAt: rule.expires_at }), 'Rule paused. Selection and rotation are unchanged.', `pause-${key}`), 'text-button', `pause-${key}`));
+    else actions.append(button('Resume…', () => ruleDialog(rule), 'text-button', `resume-${key}`));
+    actions.append(button('Edit', () => ruleDialog(rule), 'text-button', `edit-${key}`), button('Remove', () => void mutate(() => adapter.removeProjectRule(rule.path, rule.provider), 'Rule removed.', 'add-rule'), 'text-button danger-text', `remove-${key}`));
+    card.append(details, actions); list.append(card);
+  }
+  main.append(list);
+}
+function ruleDialog(existing?: ProjectRule) {
+  const context = openDialog(existing ? 'Edit project rule' : 'Add project rule', 'Sessions in this folder and its subfolders start on the chosen account when the rule is applied. Rotation still runs.');
+  const path = input(existing?.path ?? lastWorkingDirectory); path.placeholder = projectPathExample(runtime?.platform);
+  if (existing) { path.disabled = true; path.dataset.locked = 'true'; }
+  const usable = snapshot!.accounts.filter((account) => account.enabled);
+  const account = select(usable.map((item) => [item.id, `${item.label} · ${providerName(item.provider)} · ${item.pool}`]));
+  if (existing) account.value = existing.account_id;
+  const target = select([['managed', 'Managed sessions (switch from the next request)'], ['claude_cli', 'Claude Code login (changes every claude session)']]);
+  target.value = existing?.target ?? 'managed';
+  const expiry = select(EXPIRY_CHOICES); expiry.value = existing && existing.expires_at === null ? '' : '8';
+  const sync = () => { const chosen = usable.find((item) => item.id === account.value); const option = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; option.disabled = !(chosen?.provider === 'claude' && chosen.kind === 'oauth' && chosen.external_identity); if (option.disabled && target.value === 'claude_cli') target.value = 'managed'; };
+  account.addEventListener('change', sync); sync();
+  const grid = el('div', 'form-grid'); grid.append(field('Project folder', path, 'An absolute path to an existing folder.'), field('Account', account), field('Applies to', target), field('Keep the rule', expiry, 'Pause or remove it any time on this screen.'));
+  context.body.append(grid); context.actions.append(submit(existing ? 'Save rule' : 'Add rule'));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const folder = path.value.trim();
+    if (!isAbsoluteProjectPath(folder, runtime?.platform)) { path.setCustomValidity(`Enter an absolute folder, for example ${projectPathExample(runtime?.platform)}.`); path.reportValidity(); path.addEventListener('input', () => path.setCustomValidity(''), { once: true }); return; }
+    void dialogSave(context, () => adapter.setProjectRule({ path: folder, accountId: account.value, target: target.value as ProjectRule['target'], enabled: true, expiresAt: expiryFrom(expiry.value, Math.floor(Date.now() / 1000)) }), 'Rule saved and active. It applies when an agent or switchboard project apply asks.');
+  });
+  (existing ? account : path).focus();
+}
+function copyable(label: string, command: string, key: string) {
+  const row = el('div', 'policy-row'); const content = el('div');
+  content.append(el('strong', 'block', label), el('code', 'address', command));
+  row.append(content, button('Copy', () => { void navigator.clipboard?.writeText(command).then(() => announce(`${label} command copied.`), () => announce('Copy is unavailable here. Select the command text instead.')); }, 'text-button', key));
+  return row;
+}
+function renderAgents(main: HTMLElement) {
+  const panel = el('section', 'about-panel');
+  panel.append(el('h2', '', 'What agents can do'), el('p', '', 'Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a project rule when they start work in a project. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.'));
+  panel.append(el('p', 'form-note', 'Sessions you launch from Switchboard get these tools automatically when the command-line tool is available. Isolated sessions get the read-only tools.'));
+  main.append(panel);
+  const setup = el('section', 'about-panel'); setup.append(el('h2', '', 'Connect an agent'));
+  if (agentSetupError || !agentSetup) setup.append(el('p', 'form-note', agentSetupError ? 'Agent setup is unavailable. Refresh to retry.' : 'Reading agent setup…'));
+  else {
+    setup.append(el('p', 'form-note', agentSetup.cli_path ? `Command-line tool: ${agentSetup.cli_path}` : 'The switchboard command-line tool was not found on PATH.'));
+    if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button('Link switchboard into ~/.local/bin', () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, 'The command-line tool is linked. Agents and plugins can now start switchboard mcp.', 'link-cli'), 'button primary', 'link-cli'));
+    setup.append(copyable('Claude Code', agentSetup.commands.claude_code, 'copy-claude'), copyable('Codex CLI', agentSetup.commands.codex, 'copy-codex'), copyable('PassionCode plugin (skill and tools)', agentSetup.commands.passioncode, 'copy-passioncode'));
+  }
+  main.append(setup);
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 function renderAccounts(main: HTMLElement) {
@@ -175,6 +262,7 @@ function renderAccounts(main: HTMLElement) {
   text.append(el('strong', '', demo ? 'Demo runtime' : runtimeError ? 'Proxy status unavailable' : 'Local proxy ready'), el('span', '', runtimeError ? 'Refresh to retry. Isolated launch is still available.' : `${runtime?.proxy_address ?? 'Checking…'} · ${demo ? 'No live requests' : 'HTTP / SSE'}`));
   status.append(indicator, text, el('span', 'runtime-caption', 'Selection applies to the next managed request.'));
   main.append(status);
+  rulesStrip(main);
   renderCurrent(main);
   renderPolicies(main);
   const toolbar = el('div', 'toolbar');
@@ -391,7 +479,9 @@ function launchDialog(account: Account, mode: 'isolated' | 'managed') {
     event.preventDefault();
     const workingDirectory = directory.value.trim();
     if (!isAbsoluteProjectPath(workingDirectory, runtime?.platform)) { directory.setCustomValidity(`Enter an absolute project directory, for example ${projectPathExample(runtime?.platform)}.`); directory.reportValidity(); return; }
-    void dialogSave(context, async () => { await adapter.launch(account.id, mode, workingDirectory); lastWorkingDirectory = workingDirectory; }, demo ? `Synthetic ${mode} launch recorded. No terminal was opened.` : mode === 'managed' ? 'Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.' : 'Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.');
+    let tools = true;
+    const noTools = ' Agents in this session have no Switchboard tools: link the command-line tool under Agents, then launch again.';
+    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; lastWorkingDirectory = workingDirectory; }, demo ? `Synthetic ${mode} launch recorded. No terminal was opened.` : mode === 'managed' ? 'Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.' : 'Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.').then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
   });
   directory.focus();
 }
@@ -493,7 +583,7 @@ function decisionText(reason: string) {
     disabled: 'Rotation is off.', cooldown: 'Waiting for the cooldown to end.', below_threshold: 'Current usage is below the threshold.',
     no_eligible_account: 'No eligible account. Holding the current account.',
     stale_usage: 'Waiting for fresh usage. Holding the current account.', usage_unavailable: 'Usage unavailable. Holding the current account.',
-    current_unavailable: 'Current account unavailable. Holding the current account.', threshold_reached: 'Threshold reached. An eligible account is available; a switch is not yet confirmed.', switched: 'The monitor recorded a switch.', activation_failed: 'Native activation failed. Check the current CLI identity and retry manually.',
+    current_unavailable: 'Current account unavailable. Holding the current account.', threshold_reached: 'Threshold reached. An eligible account is available; a switch is not yet confirmed.', switched: 'The monitor recorded a switch.', switch_failed: 'The switch failed. The current account stays selected; check Activity.', activation_failed: 'Native activation failed. Check the current CLI identity and retry manually.',
   };
   return labels[reason] || 'The monitor has evaluated this policy. Check Activity for recorded changes.';
 }

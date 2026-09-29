@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, Usage } from './types';
+import type { Account, ProjectRule, Usage } from './types';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -58,4 +58,25 @@ export class MutationClock {
   stamp(): number { return this.active > 0 ? -1 : this.generation; }
   /** True when no mutation began after the stamp and none is still running. */
   accepts(stamp: number): boolean { return stamp === this.generation && this.active === 0; }
+}
+
+export type RuleState = 'active' | 'paused' | 'expired';
+/** Same order as the core: a paused rule reads paused even after its expiry. */
+export function ruleState(rule: Pick<ProjectRule, 'enabled' | 'expires_at'>, nowSeconds: number): RuleState {
+  if (!rule.enabled) return 'paused';
+  return typeof rule.expires_at === 'number' && rule.expires_at <= nowSeconds ? 'expired' : 'active';
+}
+export function activeRules<T extends Pick<ProjectRule, 'enabled' | 'expires_at'>>(rules: T[] | undefined, nowSeconds: number): T[] {
+  return (rules ?? []).filter((rule) => ruleState(rule, nowSeconds) === 'active');
+}
+/** Hours offered for a rule's expiry; an empty value keeps the rule until it is paused or removed. */
+export const EXPIRY_CHOICES: [string, string][] = [['1', 'For 1 hour'], ['8', 'For 8 hours'], ['24', 'For 24 hours'], ['168', 'For 7 days'], ['', 'Until I pause it']];
+export function expiryFrom(choice: string, nowSeconds: number): number | null {
+  const hours = Number(choice);
+  return choice && Number.isInteger(hours) && hours > 0 && hours <= 720 ? nowSeconds + hours * 3600 : null;
+}
+/** The last path segment names a project in lists; the full path stays in the title. */
+export function projectName(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
 }

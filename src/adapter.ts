@@ -23,6 +23,10 @@ export const nativeAdapter: Adapter = {
   finishLogin: (loginId) => invoke('finish_login', { loginId }),
   cancelLogin: (loginId) => invoke('cancel_login', { loginId }),
   probe: (id) => invoke('probe_usage', { id }),
+  setProjectRule: (input) => invoke('set_project_rule', { ...input }),
+  removeProjectRule: (path, provider) => invoke('remove_project_rule', { path, provider }),
+  agentSetup: () => readWithDeadline(invoke('agent_setup')),
+  linkCli: () => invoke('link_cli'),
 };
 
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
@@ -72,6 +76,15 @@ const safeErrors = new Set([
   // Safety-critical: the rollback could not confirm which Claude account is active. Shown verbatim.
   'Claude rollback lost its account lock. Check the current Claude sign-in before retrying.',
   'Claude account lock is unavailable. Check permissions of the Claude config directory.',
+  'Choose an absolute project folder.',
+  'Choose an existing project folder.',
+  'Choose an expiry in the future.',
+  'Project rule not found.',
+  'This build has no bundled command-line tool.',
+  '~/.local/bin/switchboard already points elsewhere. Remove it first.',
+  '~/.local/bin/switchboard already exists and is not a link. Remove it first.',
+  'Could not create ~/.local/bin.',
+  'Keep switchboard.exe from the download folder, or add it to PATH.',
   'Finish an existing sign-in before starting another.',
 ]);
 const coreErrors: Record<string, string> = {
@@ -120,7 +133,7 @@ const coreErrors: Record<string, string> = {
   'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use a supported native build.',
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
-for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Account metadata exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Account metadata exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
 for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
 for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';
 export function safeError(error: unknown): string {

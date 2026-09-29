@@ -3,7 +3,7 @@ export type AuthKind = 'api_key' | 'setup_token' | 'oauth';
 export interface UsageWindow { name: string; used_percent: number; resets_at: number | null }
 export interface Usage { used_percent: number; observed_at: number; resets_at: number | null; source: string; windows?: UsageWindow[] }
 export interface ExternalIdentity { account_id: string | null; organization_id: string | null; email: string | null }
-export interface CurrentAccount { status: 'available' | 'missing' | 'unavailable'; identity: ExternalIdentity | null; account_id: string | null }
+export interface CurrentAccount { status: 'available' | 'missing' | 'unavailable'; identity: ExternalIdentity | null; account_id: string | null; account_ids?: string[] }
 export type CurrentAccounts = Record<Provider, CurrentAccount>;
 export interface UsageHealth { status: 'ok' | 'failed' | 'unavailable'; checked_at: number; next_check_at: number }
 export interface RotationPolicy {
@@ -20,7 +20,10 @@ export interface Account {
   enabled: boolean; created_at: number; identity: string | null; usage: Usage | null;
 }
 export interface Event { at: number; action: string; account_id: string | null; detail: string }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[] }
+export interface ProjectRule { path: string; provider: Provider; account_id: string; target: 'managed' | 'claude_cli'; enabled: boolean; created_at: number; expires_at: number | null }
+export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
+export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; commands: { claude_code: string; codex: string; passioncode: string } }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -37,9 +40,13 @@ export interface Adapter {
   update(id: string, label: string, enabled: boolean): Promise<void>;
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
-  launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string }>;
+  launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   finishLogin(loginId: string): Promise<Account>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
+  setProjectRule(input: ProjectRuleInput): Promise<unknown>;
+  removeProjectRule(path: string, provider: Provider): Promise<unknown>;
+  agentSetup(): Promise<AgentSetup>;
+  linkCli(): Promise<{ linked_cli: string }>;
 }

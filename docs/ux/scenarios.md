@@ -32,6 +32,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-022 | Configure and stop automatic rotation | validated |
 | SCN-023 | Recognize Switchboard across desktop surfaces | validated |
 | SCN-024 | Open the app and recover a delayed startup | validated |
+| SCN-025 | Keep an optional project rule in sight | draft |
+| SCN-026 | Connect a coding agent to Switchboard | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -470,3 +472,44 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** pending focused and native build checks in launch-repair evidence.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
+
+## SCN-025 — Keep an optional project rule in sight
+**Persona:** P-01
+**Goal:** Start one project on a chosen account without forgetting that the rule exists.
+**Preconditions:** At least one enabled account; rules are off unless saved (PLAN-0.4 D-2).
+**Entry point:** SCR-01 Accounts → strip “N project rules are active” → Projects; or Projects in navigation.
+**Steps:**
+1. Open Projects → without rules, an empty state explains that selection and rotation apply everywhere.
+2. Add rule → folder, account, target (managed sessions, or the Claude Code login for Claude OAuth profiles only), expiry (default 8 hours).
+3. Return to Accounts → the strip names each active rule, its account and expiry; navigation shows the count.
+4. Pause, Resume (asks for a new expiry), Edit or Remove a rule on Projects.
+**Alt paths:** An expired or paused rule stays listed with its state and never applies; removing an account removes its rules.
+**Expected result:** A rule applies only when an agent or `switchboard project apply` asks, only to that session, and never turns rotation off.
+**UI elements:** rules strip, nav count, rule cards, rule dialog.
+**States covered:** empty, active, paused, expired, error.
+**Errors & recovery:** Relative or missing folders, past expiry and ineligible targets are refused with the backend's fixed messages.
+**Status:** draft
+**Meaning:** operator decision D-2 (2026-09-29); not yet observed in the native app.
+**Coverage:** browser demo `docs/evidence/design-0.4/projects-dark-1280.png`; `crates/switchboard-core/tests/projects.rs`; `scripts/test-ui-logic.mjs` rule cases.
+**Product:** unobserved
+**Traces:** PLAN-0.4 REQ-1, REQ-6
+
+## SCN-026 — Connect a coding agent to Switchboard
+**Persona:** P-01
+**Goal:** Let a coding agent read remaining usage and switch accounts itself.
+**Preconditions:** The switchboard CLI is on PATH or bundled in the macOS app.
+**Entry point:** Agents in navigation.
+**Steps:**
+1. Open Agents → what agents can do, and the CLI location or “not found”.
+2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
+3. Copy the Claude Code, Codex or PassionCode plugin command and run it in a terminal.
+**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice.
+**Expected result:** The agent's `switchboard_status` names its session; switching a managed session takes effect from the next request; the global Claude Code login needs `global: true`.
+**UI elements:** capability panel, link button, command rows with Copy.
+**States covered:** loading, unavailable, CLI missing, linked.
+**Errors & recovery:** Link failures show fixed messages; Copy falls back to selectable text.
+**Status:** draft
+**Meaning:** operator request for agent self-switching (2026-09-29); live agent sessions not yet observed.
+**Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test; browser demo `docs/evidence/design-0.4/agents-1280.png`.
+**Product:** unobserved
+**Traces:** PLAN-0.4 REQ-3, REQ-5, REQ-6

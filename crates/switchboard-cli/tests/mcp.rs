@@ -262,7 +262,7 @@ async fn project_rules_are_optional_visible_and_applied_on_request() {
     );
 
     let (_, applied) = agent.tool("switchboard_project_apply", json!({}));
-    assert_eq!(applied["results"][0]["action"], "no_rule");
+    assert_eq!(applied["results"][0]["action"], "no_rule", "{applied}");
     assert_eq!(
         owner.runtime.store.snapshot().unwrap().routes["claude:work"],
         ids[0]
@@ -294,13 +294,16 @@ async fn project_rules_are_optional_visible_and_applied_on_request() {
     );
 
     let (_, applied) = agent.tool("switchboard_project_apply", json!({}));
-    assert_eq!(applied["results"][0]["action"], "selected");
+    assert_eq!(applied["results"][0]["action"], "selected", "{applied}");
     assert_eq!(
         owner.runtime.store.snapshot().unwrap().routes["claude:work"],
         ids[1]
     );
     let (_, applied) = agent.tool("switchboard_project_apply", json!({"path": alpha}));
-    assert_eq!(applied["results"][0]["action"], "already_in_effect");
+    assert_eq!(
+        applied["results"][0]["action"], "already_in_effect",
+        "{applied}"
+    );
 
     let (error, _) = agent.tool(
         "switchboard_project_set",
@@ -310,7 +313,7 @@ async fn project_rules_are_optional_visible_and_applied_on_request() {
     let (_, context) = agent.tool("switchboard_project_context", json!({"path": alpha}));
     assert_eq!(context["rules"][0]["nearest"]["state"], "paused");
     let (_, applied) = agent.tool("switchboard_project_apply", json!({}));
-    assert_eq!(applied["results"][0]["action"], "rule_paused");
+    assert_eq!(applied["results"][0]["action"], "rule_paused", "{applied}");
 
     let (error, _) = agent.tool(
         "switchboard_project_remove",

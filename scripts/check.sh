@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 node scripts/check-brand.mjs
 npm run build
 node scripts/test-read-deadline.mjs
+node scripts/test-ui-logic.mjs
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
