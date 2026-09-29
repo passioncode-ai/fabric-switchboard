@@ -202,6 +202,28 @@ fn usage_valid(u: &Usage) -> bool {
         )
 }
 
+fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
+    let mut windows = new.windows.clone();
+    for w in &old.windows {
+        if !windows.iter().any(|n| n.name == w.name)
+            && w.resets_at.is_none_or(|t| t >= new.observed_at)
+        {
+            windows.push(w.clone());
+        }
+    }
+    let worst = windows
+        .iter()
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))?;
+    let merged = Usage {
+        used_percent: worst.used_percent,
+        resets_at: worst.resets_at,
+        observed_at: new.observed_at,
+        source: new.source.clone(),
+        windows,
+    };
+    usage_valid(&merged).then_some(merged)
+}
+
 /// Fixed vocabulary prevents callers from accidentally persisting upstream error bodies.
 pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
     match action {
@@ -742,7 +764,7 @@ impl Store {
         &self,
         id: &str,
         expected: Option<&Credential>,
-        usage: Usage,
+        mut usage: Usage,
     ) -> Result<(), String> {
         if !usage_valid(&usage) || ahead(usage.observed_at) {
             return Err("Invalid usage observation".into());
@@ -787,8 +809,19 @@ impl Store {
             checked_at: usage.observed_at,
             next_check_at,
         });
+        let headers = usage.source == "response_headers";
+        if headers {
+            // Stored quota is cleared whenever the credential generation changes, so any
+            // stored windows belong to this generation. Headers carry only 5h/7d.
+            if let Some(merged) = a.usage.as_ref().and_then(|old| merge_windows(old, &usage)) {
+                usage = merged;
+            }
+        }
         a.usage = Some(usage);
-        append_event(&mut candidate, "usage", Some(id), "observed");
+        // Per-request header observations would evict account history from the ring.
+        if !headers {
+            append_event(&mut candidate, "usage", Some(id), "observed");
+        }
         self.publish(&mut state, candidate)
     }
     pub fn record(&self, action: &str, id: Option<&str>, detail: &str) -> Result<(), String> {

@@ -290,6 +290,66 @@ async fn rejection_is_never_replayed_and_events_contain_no_secrets() {
     up.abort();
 }
 #[tokio::test]
+async fn each_request_journals_one_outcome_and_keeps_account_history() {
+    let (_r, s) = store();
+    let a = add(&s, Provider::Claude, AuthKind::ApiKey, "a", "synthetic");
+    s.select(Provider::Claude, "default", &a.id).unwrap();
+    let limited = Arc::new(AtomicUsize::new(0));
+    let l = limited.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let l = l.clone();
+            async move {
+                let status = if l.fetch_add(1, Ordering::SeqCst) == 1 {
+                    StatusCode::TOO_MANY_REQUESTS
+                } else {
+                    StatusCode::OK
+                };
+                (
+                    status,
+                    [
+                        ("anthropic-ratelimit-unified-5h-utilization", "0.25"),
+                        ("anthropic-ratelimit-unified-7d-utilization", "0.5"),
+                    ],
+                    "data: complete\n\n",
+                )
+            }
+        }),
+    ))
+    .await;
+    let p = ProxyHandle::start_at(s.clone(), url.clone(), url.clone(), url)
+        .await
+        .unwrap();
+    let before = s.snapshot().unwrap().events.len();
+    assert!(request(&p, "claude")
+        .await
+        .text()
+        .await
+        .unwrap()
+        .contains("complete"));
+    let after_success = s.snapshot().unwrap();
+    assert_eq!(after_success.events.len(), before + 1);
+    assert_eq!(after_success.events.last().unwrap().action, "request");
+    assert_eq!(after_success.events.last().unwrap().detail, "success");
+    assert_eq!(
+        after_success.accounts[0]
+            .usage
+            .as_ref()
+            .unwrap()
+            .used_percent,
+        50.0
+    );
+    let response = request(&p, "claude").await;
+    assert_eq!(response.status(), 429);
+    response.text().await.unwrap();
+    let after_limit = s.snapshot().unwrap();
+    assert_eq!(after_limit.events.len(), before + 2);
+    assert_eq!(after_limit.events.last().unwrap().detail, "rate_limited");
+    p.shutdown().await;
+    up.abort();
+}
+#[tokio::test]
 async fn redirects_do_not_exfiltrate_credentials() {
     let (_r, s) = store();
     let a = add(&s, Provider::Claude, AuthKind::ApiKey, "a", "synthetic");

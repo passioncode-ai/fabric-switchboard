@@ -520,6 +520,73 @@ fn clock_set_back_after_observation_keeps_store_open_and_writable() {
 }
 
 #[test]
+fn header_usage_merges_into_stored_windows_and_is_not_journaled() {
+    use switchboard_core::UsageWindow;
+    let (_root, _vault, store) = setup();
+    let a = add(&store, "synthetic");
+    let t = now();
+    let window = |name: &str, used_percent: f64, resets_at: i64| UsageWindow {
+        name: name.into(),
+        used_percent,
+        resets_at: Some(resets_at),
+    };
+    store
+        .observe(
+            &a.id,
+            Usage {
+                windows: vec![
+                    window("five_hour", 20.0, t + 3600),
+                    window("seven_day", 30.0, t + 86_400),
+                    window("seven_day_opus", 70.0, t + 90_000),
+                    window("seven_day_sonnet", 90.0, t - 5),
+                ],
+                used_percent: 90.0,
+                observed_at: t - 10,
+                resets_at: Some(t - 5),
+                source: "claude_oauth".into(),
+            },
+        )
+        .unwrap();
+    let events = store.snapshot().unwrap().events.len();
+    store
+        .observe(
+            &a.id,
+            Usage {
+                windows: vec![
+                    window("five_hour", 50.0, t + 3000),
+                    window("seven_day", 35.0, t + 86_400),
+                ],
+                used_percent: 50.0,
+                observed_at: t,
+                resets_at: Some(t + 3000),
+                source: "response_headers".into(),
+            },
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let usage = snapshot.accounts[0].usage.as_ref().unwrap();
+    let windows: Vec<_> = usage
+        .windows
+        .iter()
+        .map(|w| (w.name.as_str(), w.used_percent, w.resets_at))
+        .collect();
+    // Header values replace same-named windows; a window whose reset passed is unknown now.
+    assert_eq!(
+        windows,
+        [
+            ("five_hour", 50.0, Some(t + 3000)),
+            ("seven_day", 35.0, Some(t + 86_400)),
+            ("seven_day_opus", 70.0, Some(t + 90_000)),
+        ]
+    );
+    assert_eq!(usage.used_percent, 70.0);
+    assert_eq!(usage.resets_at, Some(t + 90_000));
+    assert_eq!(usage.observed_at, t);
+    assert_eq!(usage.source, "response_headers");
+    assert_eq!(snapshot.events.len(), events);
+}
+
+#[test]
 fn events_are_allowlisted_bounded_and_persisted() {
     let (root, vault, store) = setup();
     let a = add(&store, "synthetic");
