@@ -1,4 +1,5 @@
 //! Headless account operations; credentials are accepted only from bounded stdin.
+mod mcp;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::{
@@ -7,7 +8,11 @@ use std::{
     process::ExitCode,
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
-use switchboard_runtime::{control, default_root, execute_offline, Operation, Owner};
+use switchboard_runtime::{
+    control, default_root, execute_offline,
+    projects::{detect_session, Session},
+    Operation, Owner,
+};
 
 #[derive(Parser)]
 #[command(
@@ -62,6 +67,64 @@ enum Command {
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C.
     Serve,
+    /// Optional project rules: a folder starts its sessions on a chosen account.
+    Project {
+        #[command(subcommand)]
+        command: Project,
+    },
+    /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
+    Mcp {
+        /// List only the tools that read: status, accounts, usage, project rules.
+        #[arg(long)]
+        read_only: bool,
+    },
+}
+#[derive(Subcommand)]
+enum Project {
+    /// Every saved rule with its state: active, paused or expired.
+    List,
+    /// The rule that applies to a folder (default: the current folder).
+    Show {
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Save a rule for a folder and its subfolders. Rules never stop rotation.
+    Set {
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(long)]
+        account: String,
+        #[arg(long, value_enum, default_value = "managed")]
+        target: RotationTarget,
+        /// Save the rule switched off.
+        #[arg(long)]
+        paused: bool,
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=720))]
+        expires_in_hours: Option<u32>,
+    },
+    Remove {
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(long, value_enum)]
+        provider: ProviderArg,
+    },
+    /// Apply the folder's rule to the session this command runs in.
+    Apply {
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Allow changing the ordinary Claude Code login for every claude session.
+        #[arg(long)]
+        global: bool,
+    },
+}
+fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
+    match path {
+        Some(path) if path.is_absolute() => Ok(path.clone()),
+        Some(_) => Err("--path must be an absolute folder.".into()),
+        None => {
+            std::env::current_dir().map_err(|_| "Current folder unavailable. Pass --path.".into())
+        }
+    }
 }
 #[derive(Subcommand)]
 enum Accounts {
@@ -214,6 +277,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
     }
+    if let Command::Mcp { read_only } = cli.command {
+        mcp::Server::new(root, read_only).serve().await?;
+        return Ok(Value::Null);
+    }
     if matches!(cli.command, Command::Serve) {
         let owner = Owner::native(root).await?;
         let status = owner.runtime.execute(Operation::Status).await?;
@@ -331,7 +398,46 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             .into(),
             working_directory: working_directory.clone(),
         },
-        Command::Serve => unreachable!(),
+        Command::Project { command } => match command {
+            Project::List => Operation::Snapshot,
+            Project::Show { path } => Operation::ResolveProject {
+                path: folder(path)?,
+            },
+            Project::Set {
+                path,
+                account,
+                target,
+                paused,
+                expires_in_hours,
+            } => Operation::SetProjectRule {
+                path: folder(path)?,
+                account_id: account.clone(),
+                target: match target {
+                    RotationTarget::Managed => "managed",
+                    RotationTarget::ClaudeCli => "claude_cli",
+                }
+                .into(),
+                enabled: !paused,
+                expires_at: expires_in_hours.map(|h| mcp::now() + i64::from(h) * 3600),
+            },
+            Project::Remove { path, provider } => Operation::RemoveProjectRule {
+                path: folder(path)?,
+                provider: (*provider).into(),
+            },
+            Project::Apply { path, global } => {
+                let proxy = control::request(&root, &Operation::Status)
+                    .await?
+                    .and_then(|s| s["proxy_address"].as_str().map(str::to_owned));
+                let session: Session =
+                    detect_session(|k| std::env::var(k).ok(), proxy.as_deref(), &root);
+                Operation::ApplyProject {
+                    path: folder(path)?,
+                    session,
+                    global: *global,
+                }
+            }
+        },
+        Command::Serve | Command::Mcp { .. } => unreachable!(),
     };
     let value = match control::request(&root, &operation).await? {
         Some(value) => value,
@@ -340,6 +446,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
         Command::Events => Ok(value["events"].clone()),
+        Command::Project { command: Project::List } => Ok(Value::Array(mcp::rule_views(&value, mcp::now()))),
         Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"], "usage_health":account["usage_health"]})).collect())),
         Command::Rotation { command: Rotation::Status } => {
             let monitor = match control::request(&root, &Operation::MonitorStatus).await? {
@@ -434,6 +541,44 @@ fn print_result(value: &Value, cli: &Cli) {
                 println!("{}  {}  {}", text(&a["id"]), text(&a["label"]), quota);
             }
         }
+        Command::Project {
+            command: Project::List,
+        } => {
+            let Some(rules) = value.as_array() else {
+                print_value(value, false);
+                return;
+            };
+            if rules.is_empty() {
+                println!(
+                    "No project rules. Switchboard follows your selection and rotation everywhere."
+                );
+            }
+            for rule in rules {
+                println!(
+                    "{:8}  {:7}  {}  {} · {}{}",
+                    text(&rule["state"]),
+                    text(&rule["provider"]),
+                    text(&rule["path"]),
+                    text(&rule["account"]["label"]),
+                    text(&rule["account"]["pool"]),
+                    rule["expires_at"]
+                        .as_str()
+                        .map(|t| format!(" · until {t}"))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        Command::Project {
+            command: Project::Apply { .. },
+        } => {
+            for result in value["results"].as_array().into_iter().flatten() {
+                println!(
+                    "{}: {}",
+                    text(&result["provider"]),
+                    text(&result["message"])
+                );
+            }
+        }
         Command::Status => println!(
             "Mode: {}\nPlatform: {}\nProxy: {}",
             text(&value["live_mode"]),
@@ -483,6 +628,7 @@ async fn main() -> ExitCode {
         }
     };
     match run(&cli).await {
+        Ok(_) if matches!(cli.command, Command::Mcp { .. }) => ExitCode::SUCCESS,
         Ok(value) => {
             print_result(&value, &cli);
             ExitCode::SUCCESS

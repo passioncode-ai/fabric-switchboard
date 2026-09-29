@@ -42,7 +42,85 @@ const CONFLICTS: &[&str] = &[
     "CLAUDE_SECURESTORAGE_CONFIG_DIR",
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "SWITCHBOARD_LOCAL_TOKEN",
+    "SWITCHBOARD_SESSION",
 ];
+#[cfg(windows)]
+const CLI_NAME: &str = "switchboard.exe";
+#[cfg(not(windows))]
+const CLI_NAME: &str = "switchboard";
+/// The executable that serves `switchboard mcp`: this process when it is the CLI, the
+/// copy bundled beside the desktop executable, or one on the user's PATH.
+pub fn agent_cli() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?.canonicalize().ok()?;
+    if current.file_name().is_some_and(|n| n == CLI_NAME) {
+        return Some(current);
+    }
+    let mut candidates = vec![current.parent()?.join(CLI_NAME)];
+    if let Some(path) = std::env::var_os("PATH") {
+        candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(CLI_NAME)));
+    }
+    if let Some(home) = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }) {
+        candidates.push(PathBuf::from(home).join(".local/bin").join(CLI_NAME));
+    }
+    candidates
+        .into_iter()
+        .filter(|p| p.is_absolute() && p.is_file())
+        .find_map(|p| p.canonicalize().ok())
+}
+/// What a launched session needs to reach Switchboard's tools: Claude reads an extra MCP
+/// file named on its command line; Codex reads `[mcp_servers]` from its private config.
+/// Isolated sessions get the read-only set, since a route change cannot reach them.
+struct AgentTools {
+    claude_config: Option<PathBuf>,
+    codex_section: String,
+}
+fn agent_tools(
+    cli: Option<&Path>,
+    root: &Path,
+    home: &Path,
+    provider: Provider,
+    session: &str,
+    read_only: bool,
+) -> Result<AgentTools, String> {
+    let Some(cli) = cli else {
+        return Ok(AgentTools {
+            claude_config: None,
+            codex_section: String::new(),
+        });
+    };
+    let mut args = vec![
+        "--data-dir".to_string(),
+        root.to_string_lossy().into_owned(),
+        "mcp".into(),
+    ];
+    if read_only {
+        args.push("--read-only".into());
+    }
+    let command = cli.to_string_lossy().into_owned();
+    match provider {
+        Provider::Claude => {
+            let path = home.join("switchboard-mcp.json");
+            let config = json!({"mcpServers": {"switchboard": {"type": "stdio", "command": command, "args": args, "env": {"SWITCHBOARD_SESSION": session}}}});
+            private_write(&path, config.to_string().as_bytes(), false)?;
+            Ok(AgentTools {
+                claude_config: Some(path),
+                codex_section: String::new(),
+            })
+        }
+        Provider::Codex => {
+            let quote = |v: &str| toml::Value::String(v.into()).to_string();
+            let args = args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(", ");
+            Ok(AgentTools {
+                claude_config: None,
+                codex_section: format!(
+                    "\n[mcp_servers.switchboard]\ncommand = {}\nargs = [{args}]\nenv = {{ SWITCHBOARD_SESSION = {} }}\n",
+                    quote(&command),
+                    quote(session)
+                ),
+            })
+        }
+    }
+}
 fn private_dir(path: &Path) -> Result<(), String> {
     switchboard_core::private_fs::private_dir(path)
 }
@@ -510,7 +588,7 @@ pub fn launch(
     id: &str,
     mode: &str,
     working_directory: &Path,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     if !working_directory.is_absolute() {
         return Err("Choose an existing project directory.".into());
     }
@@ -551,7 +629,21 @@ pub fn launch(
     let home = homes.join(name);
     private_dir(&home)?;
     let mut reservation = Reservation::new(&home)?;
-    let mut env = BTreeMap::new();
+    let session = if mode == "managed" {
+        format!("managed:{}:{}", account.provider.as_str(), account.pool)
+    } else {
+        format!("isolated:{}:{}", account.provider.as_str(), account.id)
+    };
+    let cli = agent_cli();
+    let tools = agent_tools(
+        cli.as_deref(),
+        root,
+        &home,
+        account.provider,
+        &session,
+        mode != "managed",
+    )?;
+    let mut env = BTreeMap::from([("SWITCHBOARD_SESSION".to_string(), session)]);
     env.insert(
         match account.provider {
             Provider::Claude => "CLAUDE_CONFIG_DIR",
@@ -579,7 +671,7 @@ pub fn launch(
             }
             Provider::Codex => {
                 env.insert("SWITCHBOARD_LOCAL_TOKEN".into(), proxy.token().into());
-                let config=format!("model_provider = \"switchboard\"\ncli_auth_credentials_store = \"file\"\n[model_providers.switchboard]\nname = \"Fabric Switchboard\"\nbase_url = \"{base}/v1\"\nenv_key = \"SWITCHBOARD_LOCAL_TOKEN\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n");
+                let config=format!("model_provider = \"switchboard\"\ncli_auth_credentials_store = \"file\"\n[model_providers.switchboard]\nname = \"Fabric Switchboard\"\nbase_url = \"{base}/v1\"\nenv_key = \"SWITCHBOARD_LOCAL_TOKEN\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n{}", tools.codex_section);
                 private_write(&home.join("config.toml"), config.as_bytes(), false)?;
             }
         }
@@ -620,23 +712,93 @@ pub fn launch(
                 )?;
                 private_write(
                     &home.join("config.toml"),
-                    b"cli_auth_credentials_store = \"file\"\n",
+                    format!(
+                        "cli_auth_credentials_store = \"file\"\n{}",
+                        tools.codex_section
+                    )
+                    .as_bytes(),
                     false,
                 )?;
             }
         }
     }
+    let config = tools
+        .claude_config
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
+    let args: Vec<&str> = match &config {
+        Some(path) => vec!["--mcp-config", path.as_str()],
+        None => Vec::new(),
+    };
     open_terminal(
         &home,
-        &script(&home, &program, &[], &env, false, &working_directory),
+        &script(&home, &program, &args, &env, false, &working_directory),
     )?;
     reservation.committed = true;
     store.record("launch", Some(id), mode)?;
-    Ok(())
+    Ok(cli.is_some())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn launched_sessions_get_switchboard_tools_with_exact_quoting() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        private_dir(&home).unwrap();
+        let cli = temp.path().join("O'Brien \"x\" \\ δ").join("switchboard");
+        let tools = agent_tools(
+            Some(&cli),
+            temp.path(),
+            &home,
+            Provider::Claude,
+            "managed:claude:work",
+            false,
+        )
+        .unwrap();
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(tools.claude_config.unwrap()).unwrap()).unwrap();
+        let server = &config["mcpServers"]["switchboard"];
+        assert_eq!(server["command"], cli.to_string_lossy().as_ref());
+        assert_eq!(
+            server["args"],
+            json!(["--data-dir", temp.path().to_string_lossy(), "mcp"])
+        );
+        assert_eq!(server["env"]["SWITCHBOARD_SESSION"], "managed:claude:work");
+
+        let tools = agent_tools(
+            Some(&cli),
+            temp.path(),
+            &home,
+            Provider::Codex,
+            "isolated:codex:x",
+            true,
+        )
+        .unwrap();
+        let parsed: toml::Value =
+            toml::from_str(&format!("model = \"x\"\n{}", tools.codex_section)).unwrap();
+        let server = &parsed["mcp_servers"]["switchboard"];
+        assert_eq!(server["command"].as_str().unwrap(), cli.to_string_lossy());
+        assert_eq!(
+            server["args"].as_array().unwrap().last().unwrap().as_str(),
+            Some("--read-only")
+        );
+        assert_eq!(
+            server["env"]["SWITCHBOARD_SESSION"].as_str(),
+            Some("isolated:codex:x")
+        );
+
+        let none = agent_tools(
+            None,
+            temp.path(),
+            &home,
+            Provider::Claude,
+            "managed:claude:work",
+            false,
+        )
+        .unwrap();
+        assert!(none.claude_config.is_none() && none.codex_section.is_empty());
+    }
     #[cfg(windows)]
     #[test]
     fn windows_native_script_scopes_env_and_completes_synthetic_login() {

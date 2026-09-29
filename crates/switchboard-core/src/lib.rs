@@ -2,12 +2,14 @@
 mod credential;
 mod persistence;
 pub mod private_fs;
+mod projects;
 mod rotation;
 mod vault;
 #[cfg(windows)]
 pub mod windows;
 
 pub use credential::Credential;
+pub use projects::{ProjectRule, RuleResolution};
 pub use rotation::{RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 
@@ -144,6 +146,8 @@ pub struct Snapshot {
     pub accounts: Vec<Account>,
     pub routes: BTreeMap<String, String>,
     pub events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<ProjectRule>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -224,6 +228,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
                 | "4xx"
                 | "5xx"
         ),
+        "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
         "launch" | "login" => matches!(
             detail,
             "started" | "completed" | "failed" | "cancelled" | "isolated" | "managed"
@@ -231,7 +236,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         _ => false,
     }
 }
-fn append_event(s: &mut Snapshot, action: &str, id: Option<&str>, detail: &str) {
+pub(crate) fn append_event(s: &mut Snapshot, action: &str, id: Option<&str>, detail: &str) {
     s.events.push(Event {
         at: now(),
         action: action.into(),
@@ -286,6 +291,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
             return Err("Duplicate rotation policy".into());
         }
     }
+    projects::validate_rules(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)
@@ -631,6 +637,7 @@ impl Store {
             .map_err(|_| "Credential storage unavailable")?;
         let mut candidate = state.clone();
         candidate.accounts.retain(|a| a.id != id);
+        candidate.rules.retain(|r| r.account_id != id);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)
     }

@@ -18,6 +18,15 @@ struct Disk {
     snapshot: Snapshot,
 }
 
+/// Version 3 only while project rules exist, so 0.3 builds keep opening rule-free files.
+fn schema_version(snapshot: &Snapshot) -> u32 {
+    if snapshot.rules.is_empty() {
+        2
+    } else {
+        3
+    }
+}
+
 fn error(_: impl std::fmt::Display) -> String {
     "Private account storage unavailable".into()
 }
@@ -99,7 +108,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1 | 2) {
+            if !matches!(disk.schema_version, 1..=3) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -124,7 +133,7 @@ pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
         Err(e) => return Err(error(e)),
     }
     let data = serde_json::to_vec(&Disk {
-        schema_version: 2,
+        schema_version: schema_version(snapshot),
         snapshot: snapshot.clone(),
     })
     .map_err(error)?;
@@ -182,7 +191,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1 | 2) {
+        if !matches!(disk.schema_version, 1..=3) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;
@@ -195,7 +204,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
 #[cfg(windows)]
 pub(crate) fn write(root: &Path, snapshot: &Snapshot) -> Result<(), String> {
     let data = serde_json::to_vec(&Disk {
-        schema_version: 2,
+        schema_version: schema_version(snapshot),
         snapshot: snapshot.clone(),
     })
     .map_err(error)?;

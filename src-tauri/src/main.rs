@@ -172,6 +172,45 @@ async fn cancel_login(login_id: String, state: State<'_, Owner>) -> Result<Value
 async fn probe_usage(id: String, state: State<'_, Owner>) -> Result<Value, String> {
     state.runtime.execute(Operation::Usage { id }).await
 }
+#[tauri::command]
+async fn set_project_rule(
+    path: std::path::PathBuf,
+    account_id: String,
+    target: String,
+    enabled: bool,
+    expires_at: Option<i64>,
+    state: State<'_, Owner>,
+) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::SetProjectRule {
+            path,
+            account_id,
+            target,
+            enabled,
+            expires_at,
+        })
+        .await
+}
+#[tauri::command]
+async fn remove_project_rule(
+    path: std::path::PathBuf,
+    provider: Provider,
+    state: State<'_, Owner>,
+) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::RemoveProjectRule { path, provider })
+        .await
+}
+#[tauri::command]
+fn agent_setup() -> Value {
+    switchboard_runtime::agents::setup()
+}
+#[tauri::command]
+fn link_cli() -> Result<Value, String> {
+    switchboard_runtime::agents::link_bundled_cli()
+}
 fn main() {
     let smoke = std::env::args().any(|argument| argument == "--smoke-test");
     let result = tauri::Builder::default()
@@ -217,7 +256,11 @@ fn main() {
             begin_login,
             finish_login,
             cancel_login,
-            probe_usage
+            probe_usage,
+            set_project_rule,
+            remove_project_rule,
+            agent_setup,
+            link_cli
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

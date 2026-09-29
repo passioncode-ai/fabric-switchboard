@@ -1,10 +1,12 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
+pub mod agents;
 pub mod control;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 pub mod launch;
 mod monitor;
+pub mod projects;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -89,6 +91,25 @@ pub enum Operation {
     CancelLogin {
         login_id: String,
     },
+    SetProjectRule {
+        path: PathBuf,
+        account_id: String,
+        target: String,
+        enabled: bool,
+        expires_at: Option<i64>,
+    },
+    RemoveProjectRule {
+        path: PathBuf,
+        provider: Provider,
+    },
+    ResolveProject {
+        path: PathBuf,
+    },
+    ApplyProject {
+        path: PathBuf,
+        session: projects::Session,
+        global: bool,
+    },
 }
 
 pub struct Runtime {
@@ -99,6 +120,8 @@ pub struct Runtime {
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<Option<(i64, Value)>>,
     monitor_decisions: Mutex<Vec<Value>>,
+    /// Only the native owner reads the ordinary CLIs' sign-in; synthetic owners never do.
+    native_sources: std::sync::atomic::AtomicBool,
 }
 impl Runtime {
     pub async fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Arc<Self>, String> {
@@ -112,6 +135,7 @@ impl Runtime {
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(None),
             monitor_decisions: Mutex::new(Vec::new()),
+            native_sources: std::sync::atomic::AtomicBool::new(false),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -119,7 +143,10 @@ impl Runtime {
         // Store snapshot has its own lock; these operations cannot change auth or homes.
         if matches!(
             operation,
-            Operation::Snapshot | Operation::Status | Operation::MonitorStatus
+            Operation::Snapshot
+                | Operation::Status
+                | Operation::MonitorStatus
+                | Operation::ResolveProject { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -191,6 +218,14 @@ impl Runtime {
         }
     }
     fn current_accounts(&self) -> Result<Value, String> {
+        if !self
+            .native_sources
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(
+                json!({"claude": {"status":"unavailable","identity":null,"account_id":null}, "codex": {"status":"unavailable","identity":null,"account_id":null}}),
+            );
+        }
         let mut cache = self
             .current_cache
             .lock()
@@ -223,6 +258,9 @@ impl Owner {
         native_sources: bool,
     ) -> Result<Self, String> {
         let runtime = Runtime::open(root, vault).await?;
+        runtime
+            .native_sources
+            .store(native_sources, std::sync::atomic::Ordering::Relaxed);
         let control = control::ControlHandle::start(runtime.clone()).await?;
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         Ok(Self {
@@ -360,9 +398,10 @@ async fn execute(
             working_directory,
         } => {
             let runtime = needs_owner()?;
-            launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;
+            let agent_tools =
+                launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;
             Ok(
-                json!({"message": "Terminal launch requested. Provider response is not yet verified."}),
+                json!({"message": "Terminal launch requested. Provider response is not yet verified.", "agent_tools": agent_tools}),
             )
         }
         Operation::BeginLogin {
@@ -375,6 +414,36 @@ async fn execute(
             needs_owner()?.cancel_login(&login_id)?;
             Ok(Value::Null)
         }
+        Operation::SetProjectRule {
+            path,
+            account_id,
+            target,
+            enabled,
+            expires_at,
+        } => {
+            let path = projects::project_dir(root, &path)?;
+            let rule = store.set_rule(&path, &account_id, &target, enabled, expires_at)?;
+            Ok(projects::rule_view(&store, &rule, monitor::now()))
+        }
+        Operation::RemoveProjectRule { path, provider } => {
+            let path = projects::rule_path(root, &path)?;
+            let rule = store.remove_rule(&path, provider)?;
+            Ok(projects::rule_view(&store, &rule, monitor::now()))
+        }
+        Operation::ResolveProject { path } => {
+            projects::resolve(&store, &projects::project_dir(root, &path)?, monitor::now())
+        }
+        Operation::ApplyProject {
+            path,
+            session,
+            global,
+        } => projects::apply(
+            &store,
+            runtime,
+            &projects::project_dir(root, &path)?,
+            &session,
+            global,
+        ),
     }
 }
 
