@@ -36,7 +36,7 @@ impl MonitorHandle {
                     && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
                 {
                     let _mutation = runtime.mutations.lock().await;
-                    sync_live_sources(&runtime.store);
+                    sync_live_sources(&runtime.store, runtime.native.current);
                     runtime.invalidate_current();
                     last_source_sync = time;
                 }
@@ -136,7 +136,10 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
 
 /// Adopt only a profile already captured by the operator. The ordinary client
 /// owns refresh; a new login never silently adds or enables an account.
-fn sync_live_sources(store: &Store) {
+fn sync_live_sources(
+    store: &Store,
+    current: fn(Provider) -> Result<external::CapturedProfile, String>,
+) {
     let Ok(snapshot) = store.snapshot() else {
         return;
     };
@@ -151,7 +154,7 @@ fn sync_live_sources(store: &Store) {
         if accounts.is_empty() {
             continue;
         }
-        let Ok(profile) = external::capture_current(provider) else {
+        let Ok(profile) = current(provider) else {
             continue;
         };
         for account in accounts {
@@ -196,7 +199,7 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                 .get(&format!("{}:{}", policy.provider.as_str(), policy.pool))
                 .cloned()
         } else if native_sources {
-            external::capture_current(Provider::Claude)
+            (runtime.native.current)(Provider::Claude)
                 .ok()
                 .and_then(|profile| {
                     runtime
@@ -219,7 +222,7 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     .store
                     .select_with_cooldown(policy.provider, &policy.pool, id, now())
             } else if native_sources {
-                crate::activate_native(&runtime.store, id, current.as_deref())
+                crate::activate_native(&runtime.store, id, current.as_deref(), runtime.native)
             } else {
                 Err("Native account source unavailable.".into())
             };

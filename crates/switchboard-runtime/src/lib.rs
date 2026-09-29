@@ -13,7 +13,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use switchboard_core::{
-    Account, AuthKind, Credential, NativeVault, Provider, RotationPolicy, Store, Vault,
+    Account, AuthKind, Credential, ExternalIdentity, NativeVault, Provider, RotationPolicy, Store,
+    Vault,
 };
 use switchboard_proxy::ProxyHandle;
 
@@ -91,6 +92,19 @@ pub enum Operation {
     },
 }
 
+/// The ordinary CLI sign-in: read by capture/current/rotation, written only by activation.
+/// Tests substitute synthetic sources so they never touch real Claude or Codex auth.
+#[derive(Clone, Copy)]
+pub(crate) struct NativeSources {
+    pub(crate) current: fn(Provider) -> Result<external::CapturedProfile, String>,
+    pub(crate) activate:
+        fn(&Credential, &ExternalIdentity, Option<&ExternalIdentity>) -> Result<(), String>,
+}
+pub(crate) const NATIVE: NativeSources = NativeSources {
+    current: external::capture_current,
+    activate: external::activate_claude,
+};
+
 pub struct Runtime {
     pub store: Arc<Store>,
     pub proxy: ProxyHandle,
@@ -99,9 +113,17 @@ pub struct Runtime {
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<Option<(i64, Value)>>,
     monitor_decisions: Mutex<Vec<Value>>,
+    native: NativeSources,
 }
 impl Runtime {
     pub async fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Arc<Self>, String> {
+        Self::open_with(root, vault, NATIVE).await
+    }
+    pub(crate) async fn open_with(
+        root: PathBuf,
+        vault: Arc<dyn Vault>,
+        native: NativeSources,
+    ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
         let proxy = ProxyHandle::start(store.clone()).await?;
         Ok(Arc::new(Self {
@@ -112,6 +134,7 @@ impl Runtime {
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(None),
             monitor_decisions: Mutex::new(Vec::new()),
+            native,
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -201,7 +224,7 @@ impl Runtime {
                 return Ok(value.clone());
             }
         }
-        let value = observe_current(&self.store);
+        let value = observe_current(&self.store, self.native.current);
         *cache = Some((now, value.clone()));
         Ok(value)
     }
@@ -246,6 +269,7 @@ async fn execute(
     runtime: Option<&Runtime>,
     operation: Operation,
 ) -> Result<Value, String> {
+    let native = runtime.map_or(NATIVE, |r| r.native);
     let needs_owner = || {
         runtime.ok_or_else(|| {
             "Start the desktop app or 'switchboard serve' before login or launch.".to_string()
@@ -260,14 +284,14 @@ async fn execute(
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
-            None => Ok(observe_current(&store)),
+            None => Ok(observe_current(&store, native.current)),
         },
         Operation::CaptureCurrent {
             provider,
             label,
             pool,
         } => {
-            let captured = external::capture_current(provider)?;
+            let captured = (native.current)(provider)?;
             let account = store.upsert(
                 label.unwrap_or(captured.label),
                 provider,
@@ -313,7 +337,7 @@ async fn execute(
             Ok(json!({"imported": imported, "failed": failed, "skipped": batch.skipped}))
         }
         Operation::ActivateNative { id } => {
-            activate_native(&store, &id, None)?;
+            activate_native(&store, &id, None, native)?;
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
@@ -378,10 +402,13 @@ async fn execute(
     }
 }
 
-fn observe_current(store: &Store) -> Value {
+fn observe_current(
+    store: &Store,
+    current: fn(Provider) -> Result<external::CapturedProfile, String>,
+) -> Value {
     let mut output = serde_json::Map::new();
     for provider in [Provider::Claude, Provider::Codex] {
-        let value = match external::capture_current(provider) {
+        let value = match current(provider) {
             Ok(profile) => match store.match_external(provider, "default", &profile.identity) {
                 Ok(account) => {
                     json!({"status":"available", "identity":profile.identity, "account_id":account.map(|a| a.id)})
@@ -397,7 +424,12 @@ fn observe_current(store: &Store) -> Value {
     Value::Object(output)
 }
 
-fn activate_native(store: &Store, id: &str, expected_id: Option<&str>) -> Result<(), String> {
+fn activate_native(
+    store: &Store,
+    id: &str,
+    expected_id: Option<&str>,
+    native: NativeSources,
+) -> Result<(), String> {
     let account = store
         .snapshot()?
         .accounts
@@ -412,7 +444,7 @@ fn activate_native(store: &Store, id: &str, expected_id: Option<&str>) -> Result
         .as_ref()
         .ok_or("Capture or import this profile before native activation.")?;
     let credential = store.credential(id)?;
-    let current = external::capture_current(Provider::Claude)?;
+    let current = (native.current)(Provider::Claude)?;
     let previous = store.match_external(Provider::Claude, &account.pool, &current.identity)?;
     if expected_id.is_some_and(|expected| previous.as_ref().is_none_or(|a| a.id != expected)) {
         return Err("Current CLI account changed. Refresh before switching.".into());
@@ -428,7 +460,7 @@ fn activate_native(store: &Store, id: &str, expected_id: Option<&str>) -> Result
             Some(current.identity.clone()),
         )?;
     }
-    external::activate_claude(&credential, identity, Some(&current.identity))?;
+    (native.activate)(&credential, identity, Some(&current.identity))?;
     if store.snapshot()?.policies.iter().any(|p| {
         p.provider == Provider::Claude && p.pool == account.pool && p.target == "claude_cli"
     }) {
