@@ -752,8 +752,13 @@ impl Locks {
         ];
         for path in paths {
             checked_path(&path)?;
-            fs::create_dir(&path).map_err(|_| {
-                "Claude is updating its account. Wait for login or refresh to finish, then retry."
+            // Only an existing lock means Claude holds it; stale-lock takeover is not attempted.
+            fs::create_dir(&path).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    "Claude is updating its account. Wait for login or refresh to finish, then retry."
+                } else {
+                    "Claude account lock is unavailable. Check permissions of the Claude config directory."
+                }
             })?;
             let identity = file_identity(&directory_file(&path)?)?;
             locks.paths.push(OwnedLock { path, identity });
@@ -1110,7 +1115,10 @@ mod tests {
         fs::create_dir(&c.home).unwrap();
         let existing = c.home.join(".oauth_refresh.lock");
         fs::create_dir(&existing).unwrap();
-        assert!(Locks::acquire(&c).is_err());
+        assert_eq!(
+            Locks::acquire(&c).err().unwrap(),
+            "Claude is updating its account. Wait for login or refresh to finish, then retry."
+        );
         assert!(existing.is_dir());
         fs::remove_dir(existing).unwrap();
         {
@@ -1118,6 +1126,24 @@ mod tests {
             assert!(c.home.join(".oauth_refresh.lock").is_dir());
         }
         assert!(!c.home.join(".oauth_refresh.lock").exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unwritable_lock_directory_is_not_reported_as_claude_updating() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let mut c = ctx();
+        c.home = root.join(".claude");
+        c.config = root.join(".claude.json");
+        fs::create_dir(&c.home).unwrap();
+        fs::set_permissions(&c.home, fs::Permissions::from_mode(0o500)).unwrap();
+        let error = Locks::acquire(&c).err();
+        fs::set_permissions(&c.home, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            error.unwrap(),
+            "Claude account lock is unavailable. Check permissions of the Claude config directory."
+        );
     }
     #[cfg(unix)]
     #[test]
