@@ -7,7 +7,7 @@ use std::{
     process::ExitCode,
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
-use switchboard_runtime::{control, default_root, execute_offline, Operation, Owner};
+use switchboard_runtime::{control, default_root, execute_offline, rfc3339, Operation, Owner};
 
 #[derive(Parser)]
 #[command(
@@ -119,7 +119,8 @@ enum Accounts {
 enum Rotation {
     /// Show persisted policies and the scheduler's latest decisions.
     Status,
-    /// Save a policy. Existing responses are never replayed or interrupted.
+    /// Save a policy; omitted flags keep the saved values (new policy: off, 90, 10, 1800, 300).
+    /// Existing responses are never replayed or interrupted.
     Set {
         #[arg(long, value_enum)]
         provider: ProviderArg,
@@ -128,15 +129,15 @@ enum Rotation {
         #[arg(long, value_enum, default_value = "managed")]
         target: RotationTarget,
         #[arg(long, action = clap::ArgAction::Set)]
-        enabled: bool,
-        #[arg(long, default_value_t = 90.0)]
-        threshold: f64,
-        #[arg(long, default_value_t = 10.0)]
-        hysteresis: f64,
-        #[arg(long, default_value_t = 1800)]
-        cooldown: i64,
-        #[arg(long, default_value_t = 300)]
-        max_age: i64,
+        enabled: Option<bool>,
+        #[arg(long)]
+        threshold: Option<f64>,
+        #[arg(long)]
+        hysteresis: Option<f64>,
+        #[arg(long)]
+        cooldown: Option<i64>,
+        #[arg(long)]
+        max_age: Option<i64>,
     },
 }
 #[derive(Clone, Copy, ValueEnum)]
@@ -284,23 +285,43 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     cooldown,
                     max_age,
                 },
-        } => Operation::SetPolicy {
-            policy: RotationPolicy {
-                provider: (*provider).into(),
+        } => {
+            let provider: Provider = (*provider).into();
+            let target = match target {
+                RotationTarget::Managed => "managed",
+                RotationTarget::ClaudeCli => "claude_cli",
+            };
+            // Merge with the saved policy so one flag never resets the others.
+            let saved = call(&root, Operation::Snapshot).await?["policies"]
+                .as_array()
+                .and_then(|policies| {
+                    policies.iter().find(|p| {
+                        p["provider"] == provider.as_str()
+                            && p["pool"] == pool.as_str()
+                            && p["target"] == target
+                    })
+                })
+                .map(|p| serde_json::from_value::<RotationPolicy>(p.clone()))
+                .transpose()
+                .map_err(|_| "Saved rotation policy is unreadable.")?;
+            let mut policy = saved.unwrap_or(RotationPolicy {
+                provider,
                 pool: pool.clone(),
-                target: match target {
-                    RotationTarget::Managed => "managed",
-                    RotationTarget::ClaudeCli => "claude_cli",
-                }
-                .into(),
-                enabled: *enabled,
-                threshold_percent: *threshold,
-                hysteresis_percent: *hysteresis,
-                cooldown_seconds: *cooldown,
-                max_age_seconds: *max_age,
+                target: target.into(),
+                enabled: false,
+                threshold_percent: 90.0,
+                hysteresis_percent: 10.0,
+                cooldown_seconds: 1800,
+                max_age_seconds: 300,
                 last_switched_at: None,
-            },
-        },
+            });
+            policy.enabled = enabled.unwrap_or(policy.enabled);
+            policy.threshold_percent = threshold.unwrap_or(policy.threshold_percent);
+            policy.hysteresis_percent = hysteresis.unwrap_or(policy.hysteresis_percent);
+            policy.cooldown_seconds = cooldown.unwrap_or(policy.cooldown_seconds);
+            policy.max_age_seconds = max_age.unwrap_or(policy.max_age_seconds);
+            Operation::SetPolicy { policy }
+        }
         Command::Login { command } => match command {
             Login::Begin {
                 provider,
@@ -333,10 +354,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Serve => unreachable!(),
     };
-    let value = match control::request(&root, &operation).await? {
-        Some(value) => value,
-        None => execute_offline(root.clone(), operation).await?,
-    };
+    let value = call(&root, operation).await?;
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
         Command::Events => Ok(value["events"].clone()),
@@ -350,6 +368,18 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         _ => Ok(value),
     }
+}
+async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
+    match control::request(root, &operation).await? {
+        Some(value) => Ok(value),
+        None => execute_offline(root.to_owned(), operation).await,
+    }
+}
+fn utc(value: &Value) -> String {
+    value
+        .as_i64()
+        .and_then(rfc3339)
+        .unwrap_or_else(|| "—".into())
 }
 fn print_result(value: &Value, cli: &Cli) {
     if cli.json {
@@ -406,7 +436,7 @@ fn print_result(value: &Value, cli: &Cli) {
             for event in events {
                 println!(
                     "{}  {}  {}  {}",
-                    event["at"],
+                    utc(&event["at"]),
                     text(&event["action"]),
                     text(&event["account_id"]),
                     text(&event["detail"])
@@ -421,17 +451,37 @@ fn print_result(value: &Value, cli: &Cli) {
             if accounts.is_empty() {
                 println!("No accounts yet.");
             }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |t| t.as_secs() as i64);
             for a in accounts {
                 let quota = a["usage"]["used_percent"]
                     .as_f64()
                     .map(|p| {
+                        let observed = &a["usage"]["observed_at"];
+                        // Matches the default rotation limit on observation age.
+                        let stale = observed.as_i64().is_none_or(|t| now - t > 300);
                         format!(
-                            "{p:.1}% used; observed {} UTC Unix seconds",
-                            a["usage"]["observed_at"]
+                            "{p:.1}% used; observed {}{}",
+                            utc(observed),
+                            if stale { " (stale)" } else { "" }
                         )
                     })
                     .unwrap_or_else(|| "usage unknown".into());
-                println!("{}  {}  {}", text(&a["id"]), text(&a["label"]), quota);
+                let health = match a["usage_health"]["status"].as_str() {
+                    Some(status) => format!(
+                        "health {status}; next check {}",
+                        utc(&a["usage_health"]["next_check_at"])
+                    ),
+                    None => "not checked".into(),
+                };
+                println!(
+                    "{}  {}  {}; {}",
+                    text(&a["id"]),
+                    text(&a["label"]),
+                    quota,
+                    health
+                );
             }
         }
         Command::Status => println!(

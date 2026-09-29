@@ -29,6 +29,14 @@ pub fn default_root() -> Result<PathBuf, String> {
     })
 }
 
+/// RFC 3339 UTC text for a stored Unix-seconds time; None outside the supported range.
+pub fn rfc3339(seconds: i64) -> Option<String> {
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()?
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
+}
+
 /// No credential retrieval operation exists. Never derive Debug on this type.
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -685,6 +693,14 @@ mod owner_tests {
     use super::*;
     use fixtures::*;
     use switchboard_core::{private_fs, MemoryVault};
+    #[test]
+    fn rfc3339_formats_utc_seconds() {
+        assert_eq!(
+            rfc3339(1_700_000_000).as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+        assert_eq!(rfc3339(i64::MAX), None);
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn failed_login_cleanup_releases_the_slot_after_the_account_is_saved() {
