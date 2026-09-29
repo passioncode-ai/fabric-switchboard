@@ -133,3 +133,22 @@ Packets run in parallel worktrees and integrate by merge; each owns its files.
 
 Carry-over ledger: stale-lock takeover (B-19 part), native Windows acceptance, live provider
 acceptance (PA-01), Windows signing — stay open with board ids in `docs/evidence/backlog.md`.
+
+## REQ status at park (2026-09-29)
+
+The run was parked by the operator before release; see the [handoff](handoffs/2026-09-29-switchboard-0.4.md).
+
+| REQ | Status | Evidence |
+|---|---|---|
+| REQ-1 | done | `crates/switchboard-core/tests/projects.rs` |
+| REQ-2 | done | runtime `projects::tests`, CLI `project_commands_work_offline_from_the_cli` |
+| REQ-3 | done; SB-07 flake open | `crates/switchboard-cli/tests/mcp.rs` |
+| REQ-4 | done | `sessions_are_detected_from_launch_labels_the_live_proxy_and_codex_homes` |
+| REQ-5 | done in code; macOS embedding not yet built; Windows installer has no CLI (SB-05) | `launched_sessions_get_switchboard_tools_with_exact_quoting` |
+| REQ-6 | done in the browser demo; native webview not observed | `docs/evidence/design-0.4/{projects-light,agents}-1280.png`, SCN-025/026 |
+| REQ-7 | 19 of 20 fixed; B-19 stale-lock part parked (SB-04) | backend: `clock_set_back_after_observation_keeps_store_open_and_writable`, `failed_login_cleanup_releases_the_slot_after_the_account_is_saved`, `current_accounts_do_not_wait_behind_a_mutation`, `header_usage_merges_into_stored_windows_and_is_not_journaled`, `rotation_set_changes_only_the_given_flags`, `automatic_managed_switch_is_journaled_as_rotation`, `failed_managed_switch_is_not_reported_as_native_activation`, `activation_after_claude_logout_proceeds_and_is_journaled`, `current_account_matches_across_pools`, `each_request_journals_one_outcome_and_keeps_account_history`, `human_usage_and_events_print_utc_times_and_health`, `unwritable_lock_directory_is_not_reported_as_claude_updating`, `journal_failure_after_terminal_opened_is_not_a_launch_failure`; desktop: `scripts/test-ui-logic.mjs`, [design-0.4](evidence/design-0.4.md) |
+| REQ-8 | done | `node scripts/check-brand.mjs`, [design-0.4](evidence/design-0.4.md) |
+| REQ-9 | plugin and skill done; launcher member open (needs the tag) | `python3 scripts/check_plugin.py`, `claude plugin validate ./plugins/switchboard --strict` |
+| REQ-10 | prepared on site branch `agent/switchboard-0.4-site` @ `1ead099`; not merged or deployed | site `npm run check` |
+| REQ-11 | not started (SB-09) | — |
+| REQ-12 | CONTRACTS, OPERATIONS, CLI, scenarios, board done; SPEC, release evidence and wiki open | `python3 scripts/check_docs.py` |
