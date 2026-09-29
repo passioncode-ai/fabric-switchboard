@@ -322,6 +322,17 @@ pub fn begin_login(
         home,
     })
 }
+#[cfg(test)]
+pub(crate) fn fixture_login(home: PathBuf, saved: switchboard_core::Account) -> Login {
+    Login {
+        id: Uuid::new_v4().to_string(),
+        provider: Provider::Codex,
+        label: saved.label.clone(),
+        pool: saved.pool.clone(),
+        saved: Some(saved),
+        home,
+    }
+}
 #[cfg(any(target_os = "macos", test))]
 fn keychain_service(home: &Path) -> String {
     let raw: String = home.to_string_lossy().nfc().collect();

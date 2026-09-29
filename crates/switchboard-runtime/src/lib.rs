@@ -110,6 +110,8 @@ pub struct Runtime {
     pub proxy: ProxyHandle,
     pub root: PathBuf,
     logins: Mutex<HashMap<String, launch::Login>>,
+    /// Saved sign-ins whose staging home could not be removed yet.
+    stale_logins: Mutex<Vec<launch::Login>>,
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
@@ -136,6 +138,7 @@ impl Runtime {
             proxy,
             root,
             logins: Mutex::new(HashMap::new()),
+            stale_logins: Mutex::new(Vec::new()),
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
@@ -167,6 +170,7 @@ impl Runtime {
         label: String,
         pool: String,
     ) -> Result<Value, String> {
+        self.retry_login_cleanup();
         let mut logins = self
             .logins
             .lock()
@@ -204,10 +208,22 @@ impl Runtime {
             login.saved = Some(account.clone());
             account
         };
-        launch::clean_login(login)?;
-        logins.remove(id);
+        let cleaned = launch::clean_login(login);
+        // The account is saved: the slot is released even when staging cleanup fails.
+        if let Some(login) = logins.remove(id) {
+            if cleaned.is_err() {
+                if let Ok(mut stale) = self.stale_logins.lock() {
+                    stale.push(login);
+                }
+            }
+        }
         self.invalidate_current();
-        Ok(account)
+        cleaned.map(|()| account)
+    }
+    fn retry_login_cleanup(&self) {
+        if let Ok(mut stale) = self.stale_logins.lock() {
+            stale.retain(|login| launch::clean_login(login).is_err());
+        }
     }
     fn cancel_login(&self, id: &str) -> Result<(), String> {
         let mut logins = self
@@ -669,6 +685,39 @@ mod owner_tests {
     use super::*;
     use fixtures::*;
     use switchboard_core::{private_fs, MemoryVault};
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_login_cleanup_releases_the_slot_after_the_account_is_saved() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let account = save(&runtime.store, "synthetic-a", "default");
+        let parent = root.path().join("staging");
+        let home = parent.join("login");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("auth.json"), "synthetic-test-file").unwrap();
+        let login = launch::fixture_login(home.clone(), account);
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        // The staging home cannot be removed from a read-only parent.
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = runtime
+            .execute(Operation::FinishLogin {
+                login_id: id.clone(),
+            })
+            .await;
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            result.unwrap_err(),
+            "Account saved; isolated login cleanup needs attention."
+        );
+        assert!(runtime.logins.lock().unwrap().is_empty());
+        assert!(home.exists());
+        // Cleanup is retried before the next sign-in starts.
+        runtime.retry_login_cleanup();
+        assert!(!home.exists());
+        assert!(runtime.stale_logins.lock().unwrap().is_empty());
+    }
     #[tokio::test]
     async fn current_accounts_do_not_wait_behind_a_mutation() {
         let root = tempfile::tempdir().unwrap();
