@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "switchboard": {
+      "type": "stdio",
+      "command": "switchboard",
+      "args": ["mcp"]
+    }
+  }
+}

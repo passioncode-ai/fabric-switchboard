@@ -83,3 +83,40 @@ switchboard rotation set --provider claude --pool default --target claude-cli --
 Capture reuses existing local authorization without another login. Import reads Claude Swap and reports imported/failed/skipped counts without credentials. Activate changes the ordinary Claude Code account with identity checks and compatible locks; only captured/imported Claude OAuth profiles qualify. Account selection for the proxy stays separate.
 
 Rotation targets are `managed` and `claude-cli` (serialized `claude_cli`). `--threshold` defaults to 90, `--hysteresis` to 10, `--cooldown` to 1800 seconds, `--max-age` to 300 seconds. Hysteresis is headroom below the threshold. Only one native Claude policy may be enabled across all pools because the ordinary native account is one shared target. Existing streams are never replayed. Configuration persists offline; status explicitly reports whether the owner/monitor runs. Full behavior and limitations: [account and rotation contract](ACCOUNTS-AND-ROTATION.md).
+
+## For agents
+
+Version 0.4 serves Switchboard to coding agents over the Model Context Protocol and adds optional project rules. The [MCP tool contract](PLAN-0.4.md#mcp-tool-contract-switchboard-mcp-server-name-switchboard) and the [server source](../crates/switchboard-cli/src/mcp.rs) define the tools; the [plugin](../plugins/switchboard/README.md) and its [skill](../plugins/switchboard/skills/switching-accounts/SKILL.md) tell an agent how to use them.
+
+```sh
+switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
+switchboard mcp --read-only   # only the four read tools
+switchboard --data-dir /path/to/app-data mcp
+```
+
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists `switchboard_status`, `switchboard_accounts`, `switchboard_usage` and `switchboard_project_context` only. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
+
+Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
+
+```sh
+switchboard project list
+switchboard project show --path /path/to/project
+switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8
+switchboard project set --path /path/to/project --account ACCOUNT_UUID --target claude-cli --paused
+switchboard project remove --path /path/to/project --provider claude
+switchboard project apply --path /path/to/project
+switchboard project apply --path /path/to/project --global
+```
+
+`--path` defaults to the current folder and must be absolute. `--target` is `managed` (default) or `claude-cli`; `--expires-in-hours` accepts 1 to 720; `--paused` saves the rule switched off. `apply` detects the calling session (managed, isolated or native) and reports one action per provider: `selected`, `activated`, `already_in_effect`, `no_rule`, `rule_paused`, `rule_expired`, `other_pool`, `other_session`, `needs_global` or `failed`. A `claude_cli` rule changes the ordinary Claude Code login only with `--global`.
+
+Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS the desktop app's Agents panel links the bundled CLI to `~/.local/bin/switchboard`, and on Windows keep `switchboard.exe` on `PATH`.
+
+| Agent | Command |
+|---|---|
+| Claude Code, plugin (server plus the `switching-accounts` skill) | `claude plugin marketplace add passioncode-ai/fabric-switchboard`, then `claude plugin install switchboard@switchboard` |
+| Claude Code, server only | `claude mcp add --scope user switchboard -- switchboard mcp` |
+| PassionCode launcher, once the plugin is released as a member | `npx @passioncode-ai/passioncode@latest update` |
+| Codex | `codex mcp add switchboard -- switchboard mcp` |
+
+Restart the agent after installing; it loads servers and skills at session start. The plugin is validated by `python3 scripts/check_plugin.py`, `python3 -m unittest scripts/test_check_plugin.py` and `claude plugin validate ./plugins/switchboard --strict` plus `claude plugin validate . --strict`.
