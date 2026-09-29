@@ -162,9 +162,17 @@ def main():
     expected_arch = {'arm64','x86_64'} if args.arch == 'universal' else {'arm64'}
     if any(set(value) != expected_arch for value in architectures.values()):
         raise SystemExit('Built architecture does not match requested target.')
+    # The CLI also travels inside the app, so the desktop can hand agents `switchboard mcp`
+    # and link it into ~/.local/bin. Nested code is signed before the bundle that seals it.
+    run(['/usr/bin/codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', identity_hash, str(cli)])
+    embedded = app/'Contents/MacOS/switchboard'
+    shutil.copy2(cli, embedded)
     for binary in (cli, app):
-        run(['/usr/bin/codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', identity_hash, str(binary)])
+        if binary == app:
+            run(['/usr/bin/codesign', '--force', '--options', 'runtime', '--timestamp', '--sign', identity_hash, str(binary)])
         run(['/usr/bin/codesign', '--verify', '--deep', '--strict', '--verbose=2', str(binary)])
+    if sha(embedded) != sha(cli):
+        raise SystemExit('Embedded CLI differs from the archived CLI.')
     startup = verify_native_startup(app/'Contents/MacOS/fabric-switchboard', version)
     (folder/'README.txt').write_text(f'Fabric Switchboard {version}\nMove the app to Applications. CLI: ./switchboard --help\nKeep GUI or switchboard serve open for managed sessions. See repository docs/CLI.md.\nSignature and notarization differ; see the adjacent release receipt JSON.\n')
     # The license and the third-party notices travel with every binary archive.

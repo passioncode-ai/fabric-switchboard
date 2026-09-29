@@ -75,8 +75,8 @@ lock; login and launch are not exposed.
 Annotations: read tools `readOnlyHint: true`; `switchboard_switch` and `…_apply`
 `destructiveHint: false, idempotentHint: true`; `--read-only` lists read tools only.
 
-Session detection (REQ-4), first match wins: `SWITCHBOARD_SESSION=<provider>:<pool>` (set by
-managed launch); `ANTHROPIC_BASE_URL` of the form `http://127.0.0.1:<port>/claude/<pool>`
+Session detection (REQ-4), first match wins: `SWITCHBOARD_SESSION=managed:<provider>:<pool>` or
+`isolated:<provider>:<account id>` (set by every launch); `ANTHROPIC_BASE_URL` of the form `http://127.0.0.1:<port>/claude/<pool>`
 where the port equals the running proxy; `CODEX_HOME` equal to `<app data>/runtimes/codex-<pool>`;
 otherwise `native`.
 

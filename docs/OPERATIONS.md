@@ -59,3 +59,10 @@ Current CLI observation reads the authorization visible to the running process, 
 Native activation refuses locks held by Claude; wait for its login/refresh to finish and retry. A lock lost after credential write, or failed rollback, needs explicit official Claude sign-in before retrying; the app will not kill processes or overwrite another lock owner. The active identity should be re-read after any uncertain result. An activation success is a storage result, not proof of a provider response or instantaneous client cache reload.
 
 Automatic rotation is off by default. Disable the applicable policy to stop it. Native Claude has only one globally enabled policy; other pools must wait or use managed routes. Stale/failed quota, reset crossings, expired candidates and exhausted accounts hold the selection. Manual managed choice atomically starts its cooldown. Closing the owner stops polling/rotation. The CLI `rotation status` separates saved settings from a running monitor.
+
+## 0.4 project rules and agents
+
+- **Rules are optional.** With none saved nothing changes: selection and rotation behave as in 0.3. List them with `switchboard project list` or the desktop Projects screen; pause with `switchboard project set --path <folder> --account <id> --paused` or remove with `switchboard project remove --path <folder> --provider claude`.
+- **Downgrade.** While any rule exists, `accounts.json` is schema 3 and a 0.3 build refuses to open it without changing it. Remove every rule with 0.4 (the file returns to schema 2), then open 0.3.
+- **Agents cannot reach the tools.** `switchboard --json status` must work in the agent's shell; the plugin runs `switchboard mcp` from PATH. On macOS the desktop's Agents panel links `~/.local/bin/switchboard` to the CLI inside the app. A managed session launched while no CLI was found has no tools; relaunch it after linking.
+- **An agent switched the wrong account.** The Activity screen shows `account_selected`/`project_rule applied`; select the right account or pause the rule. A global Claude Code change is recorded like a manual activation and is undone by activating the previous profile.
