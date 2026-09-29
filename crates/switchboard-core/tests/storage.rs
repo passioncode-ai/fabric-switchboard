@@ -599,6 +599,16 @@ fn events_are_allowlisted_bounded_and_persisted() {
     assert!(store
         .record("request", Some("synthetic-secret-id"), "success")
         .is_err());
+    for (action, detail) in [
+        ("activation", "completed"),
+        ("activation", "failed"),
+        ("rotation", "switched"),
+        ("rotation", "failed"),
+    ] {
+        store.record(action, Some(&a.id), detail).unwrap();
+    }
+    assert!(store.record("rotation", Some(&a.id), "held").is_err());
+    assert!(store.record("activation", Some(&a.id), "switched").is_err());
     for _ in 0..270 {
         store.record("request", Some(&a.id), "success").unwrap();
     }

@@ -249,6 +249,8 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
                 | "4xx"
                 | "5xx"
         ),
+        "activation" => matches!(detail, "completed" | "failed"),
+        "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
             detail,
             "started" | "completed" | "failed" | "cancelled" | "isolated" | "managed"
