@@ -1,5 +1,7 @@
 /* PassionCode roles adapted to the existing desktop component vocabulary.
-   Canonical bytes and immutable upstream receipt: brand/passioncode/manifest.json. */
+   Canonical bytes and immutable upstream receipt: brand/passioncode/manifest.json.
+   Theme: the vendored file sets color-scheme and every --pc-* value for
+   :root (dark) and :root[data-theme="light"]; main.ts sets data-theme. */
 @import "../brand/passioncode/tokens.css";
 :root {
   --bg: var(--pc-bg);
@@ -13,6 +15,11 @@
   --accent-hover: var(--pc-accent-hover);
   --accent-weak: var(--pc-accent-soft);
   --accent-ink: var(--pc-on-accent);
+  /* Gold used as ink or a thin line (selected label, active nav, meter, selection bar).
+     Dark: the gold itself; light: the canonical readable gold-brown link role. */
+  --accent-text: var(--pc-link);
+  --focus: var(--pc-focus);
+  --link: var(--pc-link);
   --ok: var(--pc-positive);
   --ok-weak: var(--pc-positive-soft);
   --warn: var(--pc-warning);
@@ -42,7 +49,6 @@
   --space-4: var(--pc-space-4);
   --space-5: var(--pc-space-5);
   --space-6: var(--pc-space-6);
-  color-scheme: dark;
   background-color: var(--bg);
   color: var(--ink);
 }

@@ -69,7 +69,10 @@ const safeErrors = new Set([
   'Claude activation failed and rollback needs attention. Sign in through Claude before retrying.',
   'Open Claude Code once before activating a profile.',
   'Claude is updating its account. Wait for login or refresh to finish, then retry.',
-
+  // Safety-critical: the rollback could not confirm which Claude account is active. Shown verbatim.
+  'Claude rollback lost its account lock. Check the current Claude sign-in before retrying.',
+  'Claude account lock is unavailable. Check permissions of the Claude config directory.',
+  'Finish an existing sign-in before starting another.',
 ]);
 const coreErrors: Record<string, string> = {
   'No current Claude sign-in found.': 'No current Claude sign-in found. Sign in with the official CLI, then capture again.',
@@ -90,6 +93,11 @@ const coreErrors: Record<string, string> = {
   'OAuth field type is invalid': 'The OAuth JSON contains an invalid field. Use a complete provider credential export.',
   'OAuth expiration is invalid': 'The OAuth expiration is invalid. Sign in again or import a complete credential.',
   'Label or pool is invalid': 'Enter a label and a pool using lowercase letters, numbers, hyphens, or underscores.',
+  'Label, pool or identity is invalid': 'Enter a label and a pool using lowercase letters, numbers, hyphens, or underscores.',
+  'Account identity is ambiguous in this pool': 'More than one account in this pool has this identity. Remove the duplicate, then retry.',
+  'Sign-in cleanup needs Keychain access.': 'Sign-in cleanup needs Keychain access. Unlock Keychain and allow access, then cancel again.',
+  'Terminal could not open.': 'Terminal could not open. Check that Terminal is available, then retry.',
+  'Rotation time precedes the last switch': 'The system clock is earlier than the last automatic switch. Check the date and time settings, then retry.',
   'Label is invalid': 'Enter a nonempty account label within the supported length limit.',
   'Account limit reached': 'The account limit has been reached. Remove an unused account before adding another.',
   'Account credential already exists in this pool': 'This credential already exists in this provider and pool. Use the existing account.',

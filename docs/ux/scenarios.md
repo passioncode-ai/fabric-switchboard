@@ -75,7 +75,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose provider, label and pool, start sign-in in an isolated home, then finish → Provider login is captured only from the new home.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. Once Begin sign-in succeeds, the dialog no longer offers Import Claude Swap; leaving is only through Cancel, which cleans the staged sign-in (0.4, B-02). A second sign-in while one is open reads “Finish an existing sign-in before starting another.”
 **Expected result:** Provider login is captured only from the new home.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -255,14 +255,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Navigate with keyboard, open/cancel dialog; resize window → Focus visible and restored; actions remain available.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
-**Expected result:** Focus visible and restored; actions remain available.
+2. Leave focus anywhere (navigation, heading, Retry, Stop rotation, a quota disclosure) while the 60-second background refresh runs → focus stays on the same control; when nothing changed the page is not re-rendered at all (0.4, B-15).
+3. From Add account choose Import Claude Swap, then close Import → focus returns to the control that opened Add account; each open dialog has its own title and description ids (0.4, B-16).
+**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
+**Expected result:** Focus visible and restored; actions remain available; the shown selection is the latest one the user made.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
 **Errors & recovery:** Screen reader verification is recorded separately from visual review.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
-**Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
+**Coverage:** [verification](../evidence/verification.md); 0.4 focus retention, unchanged-data skip, dialog handoff and mutation ordering in [design 0.4 evidence](../evidence/design-0.4.md) (browser demo + `scripts/test-ui-logic.mjs`); live-provider outcome and screen reader NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -399,14 +401,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts
 **Steps:**
 1. Expand Quota windows → each provider window shows usage and reset time, source and observation time. Check usage → the observation updates on success.
-**Alt paths:** Missing data reads Usage unknown; unavailable quota and failed checks are separate. A failed check preserves the last successful observation; old data is visibly stale.
-**Expected result:** Measured zero is distinct from unavailable, missing or stale quota. The last check and next retry are visible when supplied by the monitor.
+**Alt paths:** Missing data reads Usage unknown; unavailable quota and failed checks are separate. A failed check preserves the last successful observation; old data is visibly stale. Once any reported reset time has passed, the observation is stale and reads “Reset since check”; that window reads “usage unknown since reset” with the pre-reset figure as history (0.4, B-12). Accounts the monitor never polls — disabled, or not OAuth — read “Not checked automatically”; non-OAuth accounts offer no Check usage action because the provider has no quota endpoint for them (0.4, B-11).
+**Expected result:** Measured zero is distinct from unavailable, missing, stale or reset quota. The last check and next retry are visible only for accounts the monitor actually checks.
 **UI elements:** quota summary, progress, window disclosure, reset timestamps, source, health status, Check usage.
 **States covered:** loading, unknown, unavailable, stale, failed, success
 **Errors & recovery:** A sanitized check failure preserves the last good result and marks ineligibility; retry manually or wait for the scheduled retry.
 **Status:** validated
 **Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
-**Coverage:** Window/reset disclosure, stale fixture and failed/unavailable quota states observed in browser on 2026-09-26. Fixture data is synthetic; authenticated provider evidence is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Coverage:** Window/reset disclosure, stale fixture and failed/unavailable quota states observed in browser on 2026-09-26; reset-passed and not-monitored states observed on 2026-09-29 ([design 0.4 evidence](../evidence/design-0.4.md)), rules in `scripts/test-ui-logic.mjs`. Fixture data is synthetic; authenticated provider evidence is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -436,15 +438,17 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Switchboard → Yellow S on the dark app icon matches the sidebar; Switchboard and PassionCode are named.
 2. Read account states → Gold selection names the next managed request; blue “Current CLI account” names the separate local identity.
-3. Open a dialog, change navigation, or use a narrow window → Shared dark roles and visible keyboard focus persist.
-**Alt paths:** Unknown usage remains unknown; error and disabled states retain their words and actions.
-**Expected result:** The shared design system changes presentation without asserting an account was authenticated or changing routing behavior.
-**UI elements:** native icon, sidebar mark/name, role tokens, selection label, current-identity badge.
-**States covered:** populated, empty, error, dialog, keyboard focus; native rendering separately unverified.
+3. Open a dialog, change navigation, or use a narrow window → Shared roles and visible keyboard focus persist in the active theme.
+4. Open About → Appearance offers System (default; follows the operating system's light/dark setting live), Dark and Light; the choice applies at once and is saved on this machine. If it cannot be saved, it applies until restart and About says so.
+5. Read About → Version and license: the app version, “Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.”, the LICENSE and third-party notice addresses, and “Part of the PassionCode.ai toolkit” with https://passioncode.ai/switchboard/. In the native app the addresses are selectable text (no in-app browser opener exists); in the browser demo they are links opening a new tab.
+**Alt paths:** Unknown usage remains unknown; error and disabled states retain their words and actions. In Light, gold stays the action fill while gold-as-text (selection label, active navigation, selection bar, meter) and focus use the canonical gold-brown role.
+**Expected result:** The shared design system (PassionCode 1.1.0) changes presentation without asserting an account was authenticated or changing routing behavior; every text/state pair drawn meets 4.5:1 and focus/boundary pairs 3:1 in both themes, except the canonical dark strong border (reported).
+**UI elements:** native icon, sidebar mark/name, role tokens, selection label, current-identity badge, appearance radio group, version/license rows.
+**States covered:** populated, empty, error, dialog, keyboard focus, dark, light, system, appearance not saved; native rendering separately unverified.
 **Errors & recovery:** Visual identity never replaces textual state labels; Refresh/recovery actions retain their existing meanings.
 **Status:** validated
 **Meaning:** operator explicitly requested the dark/gold PassionCode system and S icon; observed product outcome remains separate.
-**Coverage:** [0.3.1 design evidence](../evidence/design-0.3.1.md); browser fixtures only; native/live acceptance NOT_RUN.
+**Coverage:** [0.3.1 design evidence](../evidence/design-0.3.1.md), [0.4 design evidence](../evidence/design-0.4.md); browser fixtures only; native rendering (WKWebView/WebView2), native link behaviour and live acceptance NOT_RUN.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
