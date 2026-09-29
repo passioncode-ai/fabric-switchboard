@@ -4,11 +4,28 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
+import { APPEARANCE_KEY, MutationClock, canProbe, monitorChecks, parseAppearance, resolveTheme, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
-document.documentElement.dataset.theme = 'dark';
+// Appearance: System follows prefers-color-scheme: light; Dark/Light are explicit.
+// Storage is a per-machine convenience; an unavailable store falls back to System.
+const systemLight = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: light)') : null;
+let appearance: Appearance = 'system';
+let appearanceSaveFailed = false;
+try { appearance = parseAppearance(localStorage.getItem(APPEARANCE_KEY)); } catch { appearance = 'system'; }
+function applyTheme() { document.documentElement.dataset.theme = resolveTheme(appearance, !!systemLight?.matches); }
+applyTheme();
+systemLight?.addEventListener('change', applyTheme);
+function setAppearance(value: Appearance) {
+  appearance = value; applyTheme();
+  try { localStorage.setItem(APPEARANCE_KEY, value); appearanceSaveFailed = false; } catch { appearanceSaveFailed = true; }
+}
+const clock = new MutationClock();
+let lastRendered = '';
+let dialogSequence = 0;
+const REPOSITORY = 'https://github.com/passioncode-ai/fabric-switchboard';
 let adapter: Adapter = nativeAdapter;
 let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
@@ -36,10 +53,18 @@ const currentMatch = (account: Account) => {
   const identity = account.external_identity;
   return !!identity?.account_id && identity.account_id === current.identity?.account_id && identity.organization_id === current.identity?.organization_id;
 };
-async function refreshContext() {
+interface Context { current: CurrentAccounts | null; monitor: MonitorStatus | null }
+async function readContext(): Promise<Context> {
   const [current, status] = await Promise.allSettled([adapter.currentAccounts(), adapter.monitorStatus()]);
-  currentAccounts = current.status === 'fulfilled' ? current.value : null;
-  monitor = status.status === 'fulfilled' ? status.value : null;
+  return { current: current.status === 'fulfilled' ? current.value : null, monitor: status.status === 'fulfilled' ? status.value : null };
+}
+function applyContext(context: Context) { currentAccounts = context.current; monitor = context.monitor; }
+async function refreshContext() { applyContext(await readContext()); }
+/** Background results apply only when no user mutation began after they were requested. */
+function backgroundRender() {
+  if (busy || loading || document.querySelector('dialog')) return;
+  const key = (document.activeElement as HTMLElement | null)?.dataset.focus;
+  if (render({ background: true })) restoreFocus(key);
 }
 const selected = (account: Account) => snapshot?.routes[`${account.provider}:${account.pool}`] === account.id;
 
@@ -64,18 +89,17 @@ async function reload() {
   else { runtime = null; runtimeError = true; }
   loading = false; render();
   // OS credential prompts must not hold the entire workbench in its loading state.
-  void refreshContext().then(() => {
-    if (!busy && !loading && !document.querySelector('dialog')) {
-      const key = (document.activeElement as HTMLElement)?.dataset.focus;
-      render(); restoreFocus(key);
-    }
-    if (native && data.status === 'fulfilled' && status.status === 'fulfilled' && currentAccounts && monitor) {
+  const stamp = clock.stamp();
+  void readContext().then((context) => {
+    // A mutation that started meanwhile has already read a newer context.
+    if (clock.accepts(stamp)) { applyContext(context); backgroundRender(); }
+    if (native && data.status === 'fulfilled' && status.status === 'fulfilled' && context.current && context.monitor) {
       void reportFrontendReady().catch(() => { /* Smoke runner owns the deadline. */ });
     }
   });
 }
 async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string) {
-  busy = true; notice = ''; render();
+  busy = true; notice = ''; clock.begin(); render();
   try {
     await action();
     await refreshContext();
@@ -84,13 +108,19 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = 'The action completed, but accounts could not be refreshed. Retry loading the account list.'; }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
-  finally { busy = false; render(); restoreFocus(focusKey); }
+  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
 }
 
-function render() {
+/** Returns false when a background render found nothing to change and left the DOM alone. */
+function render(options: { background?: boolean } = {}): boolean {
   const openDetails = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map((details) => details.querySelector<HTMLElement>('summary')?.dataset.focus));
-  root.replaceChildren();
   const shell = el('div', 'shell');
+  const commit = () => {
+    shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
+    const markup = shell.outerHTML;
+    if (options.background && markup === lastRendered) return false;
+    lastRendered = markup; root.replaceChildren(shell); return true;
+  };
   const sidebar = el('aside', 'sidebar');
   const brand = el('div', 'brand');
   const mark = el('img', 'brand-mark'); mark.src = switchboardMark; mark.alt = ''; mark.width = 40; mark.height = 40;
@@ -99,7 +129,7 @@ function render() {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', 'Main navigation');
   for (const [target, label, icon] of [['accounts', 'Accounts', '▦'], ['activity', 'Activity', '≋'], ['about', 'About', '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`);
+    const control = button('', () => { page = target; notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label)); if (page === target) control.setAttribute('aria-current', 'page'); nav.append(control);
   }
@@ -110,7 +140,7 @@ function render() {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1;
+  const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
   heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Choose who handles the next request.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
   header.append(heading);
   if (native || demo) {
@@ -123,20 +153,19 @@ function render() {
   if (busy) { const progress = el('p', 'operation-progress', 'Working…'); progress.setAttribute('role', 'status'); main.append(progress); }
   if (!native && !demo) {
     main.append(emptyState('Open the native app', 'Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.'));
-    shell.append(main); root.append(shell); return;
+    shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button('Dismiss', () => { notice = ''; render(); }, 'text-button')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button('Dismiss', () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   if (page === 'about') renderAbout(main);
   else if (loadError) {
-    const state = emptyState('Unable to load accounts', loadError); state.classList.add('error-state'); state.append(button('Retry', () => void reload(), 'button primary')); main.append(state);
+    const state = emptyState('Unable to load accounts', loadError); state.classList.add('error-state'); state.append(button('Retry', () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
     const state = emptyState('Loading your workbench', 'Reading account metadata from the native app…'); state.setAttribute('role', 'status'); main.append(state);
   } else if (snapshot) {
     if (page === 'accounts') renderAccounts(main);
     else renderActivity(main);
   }
-  shell.append(main); root.append(shell);
-  root.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
+  shell.append(main); return commit();
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 function renderAccounts(main: HTMLElement) {
@@ -190,8 +219,9 @@ function accountCard(account: Account) {
     activate.disabled ||= !account.enabled; launches.append(activate);
   }
   const management = el('div', 'management-actions');
-  const probe = button('Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `usage-${account.id}`, account.id), 'text-button', `usage-${account.id}`); probe.disabled ||= !account.enabled;
-  management.append(probe, button('Edit', () => editDialog(account), 'text-button', `edit-${account.id}`), button('Remove', () => removeDialog(account), 'text-button danger-text', `remove-${account.id}`));
+  // Non-OAuth kinds have no provider quota endpoint; the reason is shown in the usage panel.
+  if (canProbe(account)) { const probe = button('Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `usage-${account.id}`, account.id), 'text-button', `usage-${account.id}`); probe.disabled ||= !account.enabled; management.append(probe); }
+  management.append(button('Edit', () => editDialog(account), 'text-button', `edit-${account.id}`), button('Remove', () => removeDialog(account), 'text-button danger-text', `remove-${account.id}`));
   actions.append(launches, management); card.append(actions); return card;
 }
 function renderActivity(main: HTMLElement) {
@@ -221,15 +251,47 @@ function renderAbout(main: HTMLElement) {
     ['Native Claude activation', 'An explicit update of the local Claude Code account. CLI reload timing is not a guarantee that a running session has changed account.'],
     ['Automatic rotation', 'Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
-  section.append(definitions); main.append(section);
+  section.append(definitions); main.append(section, appearancePanel(), productPanel());
+}
+function appearancePanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'appearance-heading');
+  const heading = el('h2', '', 'Appearance'); heading.id = 'appearance-heading';
+  const group = el('fieldset', 'appearance-options'); group.append(el('legend', 'sr-only', 'Appearance'));
+  for (const [value, text] of [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']] as const) {
+    const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'appearance'; radio.value = value; radio.checked = appearance === value; radio.dataset.focus = `appearance-${value}`;
+    radio.addEventListener('change', () => { if (radio.checked) { setAppearance(value); render(); restoreFocus(`appearance-${value}`); announce(appearanceSaveFailed ? `${text} appearance applied. It could not be saved and resets when Switchboard restarts.` : `${text} appearance applied.`); } });
+    option.append(radio, el('span', '', text)); group.append(option);
+  }
+  panel.append(heading, group, el('p', 'form-note', appearanceSaveFailed ? 'This choice could not be saved on this machine. It applies until Switchboard restarts.' : 'System follows the light or dark setting of your operating system. The choice is saved on this machine.'));
+  return panel;
+}
+/** Tauri has no URL opener here, so native builds show a selectable address; the browser demo links it. */
+function address(url: string) {
+  if (native) { const text = el('code', 'address', url); return text; }
+  const link = el('a', 'address', url); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.dataset.focus = `link-${url}`; return link;
+}
+function productPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'product-heading');
+  const heading = el('h2', '', 'Version and license'); heading.id = 'product-heading';
+  const definitions = el('dl', 'definitions');
+  const row = (term: string, ...content: (Node | string)[]) => { const dd = el('dd'); dd.append(...content); definitions.append(el('dt', '', term), dd); };
+  row('Version', `Fabric Switchboard ${version}`);
+  row('License', el('span', 'block', 'Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.'), address(`${REPOSITORY}/blob/main/LICENSE`));
+  row('Third-party', el('span', 'block', 'The app includes third-party components under their own licenses.'), address(`${REPOSITORY}/blob/main/THIRD_PARTY_NOTICES.md`));
+  row('Toolkit', el('span', 'block', 'Part of the PassionCode.ai toolkit.'), address('https://passioncode.ai/switchboard/'));
+  panel.append(heading, definitions);
+  if (native) panel.append(el('p', 'form-note', 'Addresses are selectable text. Copy one into your browser to open it.'));
+  return panel;
 }
 
-interface DialogContext { dialog: HTMLDialogElement; form: HTMLFormElement; body: HTMLElement; actions: HTMLElement; error: HTMLElement; close: () => void; setBusy: (value: boolean) => void; beforeCancel: (handler: () => Promise<void>) => void }
-function openDialog(title: string, intro: string): DialogContext {
-  const trigger = (document.activeElement as HTMLElement | null)?.dataset.focus;
-  const dialog = el('dialog', 'dialog'); dialog.setAttribute('aria-labelledby', 'dialog-title'); dialog.setAttribute('aria-describedby', 'dialog-description');
+interface DialogContext { dialog: HTMLDialogElement; form: HTMLFormElement; body: HTMLElement; actions: HTMLElement; error: HTMLElement; trigger: string | undefined; close: () => void; setBusy: (value: boolean) => void; beforeCancel: (handler: () => Promise<void>) => void }
+/** `returnFocus` carries the original trigger when one dialog hands over to another. */
+function openDialog(title: string, intro: string, returnFocus?: string): DialogContext {
+  const trigger = returnFocus ?? (document.activeElement as HTMLElement | null)?.dataset.focus;
+  const id = `dialog-${++dialogSequence}`;
+  const dialog = el('dialog', 'dialog'); dialog.setAttribute('aria-labelledby', `${id}-title`); dialog.setAttribute('aria-describedby', `${id}-description`);
   const form = el('form'); const header = el('div', 'dialog-header');
-  const heading = el('h2', '', title); heading.id = 'dialog-title'; const description = el('p', '', intro); description.id = 'dialog-description'; header.append(heading, description);
+  const heading = el('h2', '', title); heading.id = `${id}-title`; const description = el('p', '', intro); description.id = `${id}-description`; header.append(heading, description);
   const body = el('div', 'dialog-body'); const error = el('p', 'dialog-error'); error.setAttribute('role', 'alert');
   const actions = el('div', 'dialog-actions'); let pending = false;
   let cancelHandler: (() => Promise<void>) | undefined;
@@ -244,10 +306,10 @@ function openDialog(title: string, intro: string): DialogContext {
   const cancel = button('Cancel', () => void requestCancel(), 'button'); actions.append(cancel);
   form.append(header, body, error, actions); dialog.append(form); document.body.append(dialog);
   dialog.addEventListener('cancel', (event) => { event.preventDefault(); void requestCancel(); });
-  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); restoreFocus(trigger); });
+  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); if (!document.querySelector('dialog[open]')) restoreFocus(trigger); });
   dialog.showModal();
   const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value || node.dataset.locked === 'true'; }); };
-  return { dialog, form, body, actions, error, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };
+  return { dialog, form, body, actions, error, trigger, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };
 }
 function field(label: string, input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, help = '') {
   const wrapper = el('label', 'field'); wrapper.append(el('span', 'field-label', label), input); if (help) wrapper.append(el('span', 'field-help', help)); return wrapper;
@@ -256,13 +318,16 @@ function input(value = '', type = 'text') { const node = el('input'); node.type 
 function select(options: [string, string][]) { const node = el('select'); options.forEach(([value, text]) => { const option = el('option', '', text); option.value = value; node.append(option); }); return node; }
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
 async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string) {
-  context.error.textContent = ''; context.setBusy(true);
+  context.error.textContent = ''; context.setBusy(true); clock.begin();
   try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'The action completed, but the list could not be refreshed. Retry loading accounts.'; } render(); context.setBusy(false); context.close(); }
   catch (error) { context.error.textContent = safeError(error); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
+  finally { clock.end(); }
 }
 function addDialog() {
   const context = openDialog('Add account', 'Capture an account already signed in to the CLI, or sign in with another account.');
-  context.body.append(button('Import Claude Swap', () => { context.close(); importDialog(); }, 'button'));
+  // Leaving for Import is offered only before a sign-in exists; afterwards Cancel owns cleanup.
+  const importSwap = button('Import Claude Swap', () => { if (loginId) return; context.close(); importDialog(context.trigger); }, 'button', 'dialog-import-swap');
+  context.body.append(importSwap);
   const provider = select([['claude', 'Claude Code'], ['codex', 'Codex CLI']]);
   const method = select([['capture', 'Capture current CLI account'], ['login', 'Official sign-in with another account'], ['api_key', 'API key'], ['setup_token', 'Claude setup token'], ['oauth', 'Import OAuth JSON']]);
   const label = input(); label.maxLength = 80; label.placeholder = 'e.g. Studio';
@@ -307,7 +372,7 @@ function addDialog() {
     }
     context.error.textContent = ''; context.setBusy(true);
     void adapter.beginLogin(base).then((result) => {
-      loginId = result.login_id; context.setBusy(false);
+      loginId = result.login_id; importSwap.dataset.locked = 'true'; importSwap.hidden = true; context.setBusy(false);
       grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; node.dataset.locked = 'true'; });
       credentialSlot.replaceChildren(el('div', 'login-pending', demo ? 'Synthetic sign-in ready. Choose Finish sign-in to add this demo account.' : 'Complete sign-in in the terminal, then choose Finish sign-in. If the provider opens a browser, finish that step first.'));
       submitButton.textContent = 'Finish sign-in'; submitButton.focus();
@@ -377,23 +442,29 @@ function usagePanel(account: Account) {
   if (observation) {
     const policies = snapshot?.policies?.filter((policy) => policy.provider === account.provider && policy.pool === account.pool && policy.enabled) ?? [];
     const maxAge = policies.length ? Math.min(...policies.map((policy) => policy.max_age_seconds)) : 300;
-    const stale = Date.now() / 1000 - observation.observed_at > maxAge;
-    const label = el('div', 'usage-label'); label.append(el('strong', '', `${Math.round(observation.used_percent)}% used`), el('span', stale ? 'stale' : '', `${stale ? 'Stale' : 'Observed'} · ${age(observation.observed_at)}`)); section.append(label);
+    const now = Date.now() / 1000;
+    const { stale, resetPassed } = usageFreshness(observation, maxAge, now);
+    const label = el('div', 'usage-label'); label.append(el('strong', '', `${Math.round(observation.used_percent)}% used${resetPassed ? ' before reset' : ''}`), el('span', stale ? 'stale' : '', `${resetPassed ? 'Reset since check' : stale ? 'Stale' : 'Observed'} · ${age(observation.observed_at)}`)); section.append(label);
     const meter = el('progress', 'usage-meter'); meter.max = 100; meter.value = observation.used_percent; meter.setAttribute('aria-label', `Highest quota used for ${account.label}`); section.append(meter);
     const details = el('details', 'quota-details'); const summary = el('summary', '', 'Quota windows'); summary.dataset.focus = `quota-${account.id}`; details.append(summary);
     const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
     for (const window of windows) {
-      const row = el('div', 'quota-window'); row.append(el('strong', '', `${window.name} · ${Math.round(window.used_percent)}% used`), el('span', 'usage-caption', window.resets_at ? `Resets ${date(window.resets_at)}` : 'Reset time unavailable')); details.append(row);
+      const reset = windowReset(window.resets_at, now);
+      const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`), el('span', 'usage-caption', reset ? `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before` : window.resets_at ? `Resets ${date(window.resets_at)}` : 'Reset time unavailable')); details.append(row);
     }
     details.append(el('p', 'usage-caption', `${observation.source} · Observed ${date(observation.observed_at)}`));
-    if (stale) details.append(el('p', 'usage-caption', 'Too old for automatic rotation. Waiting for a fresh quota check.'));
+    if (stale) details.append(el('p', 'usage-caption', resetPassed ? 'A quota window has reset since this check. Not used for automatic rotation until a fresh check.' : 'Too old for automatic rotation. Waiting for a fresh quota check.'));
     section.append(details);
   } else section.append(el('strong', 'usage-unknown', 'Usage unknown'), el('span', 'usage-caption', account.kind === 'api_key' ? 'API billing is separate' : 'No observation yet'));
+  // Non-OAuth kinds have no quota endpoint: one reason, no check history to report.
+  if (!canProbe(account)) { section.append(el('span', 'usage-caption', 'Not checked automatically · Quota checks need OAuth')); if (usageErrors.has(account.id)) section.append(el('p', 'usage-error', usageErrors.get(account.id)!)); return section; }
   if (health) {
     if (health.status === 'failed') section.append(el('p', 'usage-error', 'Last quota check failed. Not eligible for automatic rotation.'));
     else if (health.status === 'unavailable') section.append(el('p', 'usage-caption', 'Quota unavailable for this account.'));
-    section.append(el('span', 'usage-caption', `Checked ${age(health.checked_at)} · Next check ${date(health.next_check_at)}`));
   }
+  // The monitor polls enabled OAuth accounts only; never promise a check it will not run.
+  if (monitorChecks(account)) { if (health) section.append(el('span', 'usage-caption', `Checked ${age(health.checked_at)} · Next check ${date(health.next_check_at)}`)); }
+  else section.append(el('span', 'usage-caption', `${health ? `Checked ${age(health.checked_at)} · ` : ''}Not checked automatically while disabled`));
   if (usageErrors.has(account.id)) section.append(el('p', 'usage-error', usageErrors.get(account.id)!));
   return section;
 }
@@ -412,7 +483,7 @@ function renderPolicies(main: HTMLElement) {
     if (decision) content.append(el('p', 'usage-caption', decisionText(decision.reason)));
     const actions = el('div', 'policy-actions');
     actions.append(button('Edit policy', () => policyDialog(policy), 'text-button', `policy-${policy.provider}-${policy.pool}-${policy.target}`));
-    if (policy.enabled) actions.append(button('Stop rotation', () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), 'Automatic rotation stopped for this provider, pool and target.', 'policies'), 'text-button'));
+    if (policy.enabled) actions.append(button('Stop rotation', () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), 'Automatic rotation stopped for this provider, pool and target.', 'policies'), 'text-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
     row.append(content, actions); details.append(row);
   }
   details.append(button('Configure rotation', () => policyDialog(), 'button', 'configure-policy')); main.append(details);
@@ -461,21 +532,21 @@ function policyDialog(existing?: RotationPolicy) {
   hysteresis.addEventListener('input', () => hysteresis.setCustomValidity('')); threshold.addEventListener('input', () => hysteresis.setCustomValidity(''));
   (existing ? threshold : provider).focus();
 }
-function importDialog() {
-  const context = openDialog('Import Claude Swap', 'Read Claude Swap profiles from their standard local location. Existing identities in this pool are updated; disabled accounts remain disabled.');
+function importDialog(returnFocus?: string) {
+  const context = openDialog('Import Claude Swap', 'Read Claude Swap profiles from their standard local location. Existing identities in this pool are updated; disabled accounts remain disabled.', returnFocus);
   const pool = input('default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+';
   context.body.append(field('Pool', pool, 'All imported profiles are placed in this routing pool.'));
   if (demo) context.body.append(el('p', 'form-note', 'Synthetic fixture: two profiles import, one fails, and one is skipped.'));
   context.actions.append(submit('Import profiles'));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault(); if (!context.form.reportValidity()) return;
-    context.setBusy(true); context.error.textContent = '';
+    context.setBusy(true); context.error.textContent = ''; clock.begin();
     void adapter.importClaudeSwap(pool.value.trim()).then(async (result) => {
       await refreshContext();
       try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'; }
       showNotice(`${result.imported.length} profiles imported or updated · ${result.skipped} skipped · ${result.failed} failed. ${result.failed ? 'Check the source profiles and retry; imported accounts remain available.' : 'Select an account when you are ready.'}`, result.failed > 0);
       render(); context.setBusy(false); context.close();
-    }).catch((failure) => { context.error.textContent = safeError(failure); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); });
+    }).catch((failure) => { context.error.textContent = safeError(failure); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }).finally(() => clock.end());
   }); pool.focus();
 }
 function activateDialog(account: Account) {
@@ -492,10 +563,10 @@ void reload();
 let refreshing = false;
 setInterval(() => {
   if ((!native && !demo) || refreshing || document.hidden || document.querySelector('dialog') || busy || loading) return;
-  refreshing = true;
-  void Promise.all([adapter.snapshot(), refreshContext()]).then(([data]) => {
-    if (document.querySelector('dialog') || busy || loading) return;
-    snapshot = data; const key = (document.activeElement as HTMLElement)?.dataset.focus;
-    render(); restoreFocus(key);
+  refreshing = true; const stamp = clock.stamp();
+  void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
+    // A read issued before a user mutation may predate it; applying it would revert the change.
+    if (!clock.accepts(stamp)) return;
+    snapshot = data; applyContext(context); backgroundRender();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
 }, 60_000);

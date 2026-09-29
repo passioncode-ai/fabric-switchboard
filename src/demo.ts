@@ -17,7 +17,7 @@ export function createDemoAdapter(): Adapter {
       { id: 'demo-codex-work', label: 'Engineering', provider: 'codex', kind: 'oauth', pool: 'work', enabled: true, created_at: now(), identity: null, usage: { used_percent: 68, observed_at: now() - 140, resets_at: now() + 7200, source: 'Synthetic fixture' } },
       { id: 'demo-claude-personal', label: 'Personal', provider: 'claude', kind: 'setup_token', pool: 'personal', enabled: true, created_at: now(), identity: null, usage: null },
       { id: 'demo-codex-lab', label: 'Experiments', provider: 'codex', kind: 'api_key', pool: 'personal', enabled: true, created_at: now(), identity: null, usage: null },
-      { id: 'demo-claude-archive', label: 'Previous workspace', provider: 'claude', kind: 'oauth', pool: 'work', enabled: false, created_at: now(), identity: null, usage: { used_percent: 86, observed_at: now() - 7200, resets_at: null, source: 'Synthetic fixture' } },
+      { id: 'demo-claude-archive', label: 'Previous workspace', provider: 'claude', kind: 'oauth', pool: 'work', enabled: false, created_at: now(), identity: null, usage: { used_percent: 86, observed_at: now() - 7200, resets_at: now() - 600, source: 'Synthetic fixture' } },
     ],
     policies: [{ provider: 'claude', pool: 'work', target: 'managed', enabled: false, threshold_percent: 90, hysteresis_percent: 10, cooldown_seconds: 1800, max_age_seconds: 300, last_switched_at: null }],
     routes: { 'claude:work': 'demo-claude-work', 'codex:work': 'demo-codex-work' },
