@@ -642,8 +642,12 @@ pub fn launch(
         &script(&home, &program, &[], &env, false, &working_directory),
     )?;
     reservation.committed = true;
-    store.record("launch", Some(id), mode)?;
+    journal_launch(store, id, mode);
     Ok(())
+}
+/// Terminal is already open: a journal failure must not report the launch as failed.
+fn journal_launch(store: &Store, id: &str, mode: &str) {
+    let _ = store.record("launch", Some(id), mode);
 }
 #[cfg(test)]
 mod tests {
@@ -799,6 +803,23 @@ mod tests {
             keychain_service(Path::new("/tmp/example")),
             format!("Claude Code-credentials-{}", &digest[..8])
         );
+    }
+    #[test]
+    fn journal_failure_after_terminal_opened_is_not_a_launch_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap();
+        let id = Uuid::new_v4().to_string();
+        journal_launch(&store, &id, "managed");
+        assert_eq!(store.snapshot().unwrap().events.len(), 1);
+        let metadata = root.path().join("accounts.json");
+        fs::remove_file(&metadata).unwrap();
+        fs::create_dir(&metadata).unwrap();
+        let (): () = journal_launch(&store, &id, "isolated");
+        assert_eq!(store.snapshot().unwrap().events.len(), 1);
     }
     #[test]
     fn rejects_invalid_fields() {
