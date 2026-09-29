@@ -147,16 +147,18 @@ impl futures_util::Stream for AuditedStream {
     ) -> std::task::Poll<Option<Self::Item>> {
         let poll = self.inner.as_mut().poll_next(cx);
         match &poll {
+            // One outcome per request: a non-success status was journaled at headers.
             std::task::Poll::Ready(None) => {
                 self.finished = true;
-                let _ = self.store.record("proxy", Some(&self.id), "completed");
                 if self.success {
                     let _ = self.store.record("request", Some(&self.id), "success");
                 }
             }
             std::task::Poll::Ready(Some(Err(_))) => {
                 self.finished = true;
-                let _ = self.store.record("proxy", Some(&self.id), "aborted");
+                if self.success {
+                    let _ = self.store.record("proxy", Some(&self.id), "aborted");
+                }
             }
             _ => {}
         }
@@ -165,7 +167,7 @@ impl futures_util::Stream for AuditedStream {
 }
 impl Drop for AuditedStream {
     fn drop(&mut self) {
-        if !self.finished {
+        if !self.finished && self.success {
             let _ = self.store.record("proxy", Some(&self.id), "aborted");
         }
     }
@@ -352,9 +354,7 @@ async fn relay(
         429 => "rate_limited",
         _ => "upstream_error",
     };
-    if status.is_success() {
-        let _ = g.store.record("proxy", Some(&account.id), "started");
-    } else {
+    if !status.is_success() {
         let _ = g.store.record("request", Some(&account.id), detail);
     }
     if provider == Provider::Claude {

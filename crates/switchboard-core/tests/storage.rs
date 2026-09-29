@@ -460,6 +460,133 @@ fn usage_validates_bounds_and_preserves_previous_observation() {
 }
 
 #[test]
+fn clock_set_back_after_observation_keeps_store_open_and_writable() {
+    use switchboard_core::RotationPolicy;
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-a");
+    let b = add(&store, "synthetic-b");
+    let usage = |at: i64| Usage {
+        windows: vec![],
+        used_percent: 40.0,
+        observed_at: at,
+        resets_at: Some(at + 7200),
+        source: "claude_oauth".into(),
+    };
+    store.observe(&a.id, usage(now())).unwrap();
+    store
+        .set_policy(RotationPolicy {
+            provider: Provider::Claude,
+            pool: "default".into(),
+            target: "managed".into(),
+            enabled: false,
+            threshold_percent: 90.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 1800,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        })
+        .unwrap();
+    drop(store);
+    // Model the wall clock moving back one hour: every stored time is now ahead of it.
+    let path = root.path().join("accounts.json");
+    let mut disk: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let ahead = now() + 3600;
+    let account = &mut disk["snapshot"]["accounts"][0];
+    account["usage"]["observed_at"] = ahead.into();
+    account["usage"]["resets_at"] = (ahead + 7200).into();
+    account["usage_health"]["checked_at"] = ahead.into();
+    account["usage_health"]["next_check_at"] = (ahead + 180).into();
+    disk["snapshot"]["policies"][0]["last_switched_at"] = ahead.into();
+    fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
+
+    let store = Store::open(root.path().into(), vault).unwrap();
+    store.select(Provider::Claude, "default", &b.id).unwrap();
+    store
+        .select_with_cooldown(Provider::Claude, "default", &a.id, now())
+        .unwrap();
+    add(&store, "synthetic-c");
+    store
+        .usage_health(&a.id, "failed", now(), now() + 180)
+        .unwrap();
+    store.observe(&a.id, usage(now())).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.accounts[0].usage.as_ref().unwrap().observed_at <= now());
+    assert!(snapshot.policies[0].last_switched_at.unwrap() <= now());
+    // New input from the future is still refused.
+    assert!(store.observe(&b.id, usage(now() + 3600)).is_err());
+    assert!(store
+        .usage_health(&b.id, "ok", now() + 3600, now() + 3780)
+        .is_err());
+}
+
+#[test]
+fn header_usage_merges_into_stored_windows_and_is_not_journaled() {
+    use switchboard_core::UsageWindow;
+    let (_root, _vault, store) = setup();
+    let a = add(&store, "synthetic");
+    let t = now();
+    let window = |name: &str, used_percent: f64, resets_at: i64| UsageWindow {
+        name: name.into(),
+        used_percent,
+        resets_at: Some(resets_at),
+    };
+    store
+        .observe(
+            &a.id,
+            Usage {
+                windows: vec![
+                    window("five_hour", 20.0, t + 3600),
+                    window("seven_day", 30.0, t + 86_400),
+                    window("seven_day_opus", 70.0, t + 90_000),
+                    window("seven_day_sonnet", 90.0, t - 5),
+                ],
+                used_percent: 90.0,
+                observed_at: t - 10,
+                resets_at: Some(t - 5),
+                source: "claude_oauth".into(),
+            },
+        )
+        .unwrap();
+    let events = store.snapshot().unwrap().events.len();
+    store
+        .observe(
+            &a.id,
+            Usage {
+                windows: vec![
+                    window("five_hour", 50.0, t + 3000),
+                    window("seven_day", 35.0, t + 86_400),
+                ],
+                used_percent: 50.0,
+                observed_at: t,
+                resets_at: Some(t + 3000),
+                source: "response_headers".into(),
+            },
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let usage = snapshot.accounts[0].usage.as_ref().unwrap();
+    let windows: Vec<_> = usage
+        .windows
+        .iter()
+        .map(|w| (w.name.as_str(), w.used_percent, w.resets_at))
+        .collect();
+    // Header values replace same-named windows; a window whose reset passed is unknown now.
+    assert_eq!(
+        windows,
+        [
+            ("five_hour", 50.0, Some(t + 3000)),
+            ("seven_day", 35.0, Some(t + 86_400)),
+            ("seven_day_opus", 70.0, Some(t + 90_000)),
+        ]
+    );
+    assert_eq!(usage.used_percent, 70.0);
+    assert_eq!(usage.resets_at, Some(t + 90_000));
+    assert_eq!(usage.observed_at, t);
+    assert_eq!(usage.source, "response_headers");
+    assert_eq!(snapshot.events.len(), events);
+}
+
+#[test]
 fn events_are_allowlisted_bounded_and_persisted() {
     let (root, vault, store) = setup();
     let a = add(&store, "synthetic");
@@ -472,6 +599,16 @@ fn events_are_allowlisted_bounded_and_persisted() {
     assert!(store
         .record("request", Some("synthetic-secret-id"), "success")
         .is_err());
+    for (action, detail) in [
+        ("activation", "completed"),
+        ("activation", "failed"),
+        ("rotation", "switched"),
+        ("rotation", "failed"),
+    ] {
+        store.record(action, Some(&a.id), detail).unwrap();
+    }
+    assert!(store.record("rotation", Some(&a.id), "held").is_err());
+    assert!(store.record("activation", Some(&a.id), "switched").is_err());
     for _ in 0..270 {
         store.record("request", Some(&a.id), "success").unwrap();
     }

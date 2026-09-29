@@ -1,6 +1,6 @@
 //! Project rules at the runtime boundary: canonical folders, and applying a rule to the
 //! session that asked. A rule never replaces rotation; it names a starting account.
-use crate::{activate_native, external, monitor, Runtime};
+use crate::{activate_native, monitor, NativeSources, Runtime, NATIVE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -204,6 +204,7 @@ pub(crate) fn apply(
     global: bool,
 ) -> Result<Value, String> {
     let now = monitor::now();
+    let native = runtime.map_or(NATIVE, |r| r.native);
     let snapshot = store.snapshot()?;
     let mut results = Vec::new();
     for RuleResolution {
@@ -278,12 +279,12 @@ pub(crate) fn apply(
                 "This rule changes the ordinary Claude Code login, and this session runs through Switchboard's proxy. Nothing was changed.".into(),
             ),
             (_, Session::Native { .. }) => {
-                if native_matches(store, account) {
+                if native_matches(store, account, native) {
                     outcome(provider, "already_in_effect", Some(account), format!("Claude Code already signs in as {}.", account.label))
                 } else if !global {
                     outcome(provider, "needs_global", Some(account), "This rule changes the Claude Code login for every ordinary claude session on this machine. Call again with global: true to apply it.".into())
                 } else {
-                    match activate_native(store, &account.id, None) {
+                    match activate_native(store, &account.id, None, native) {
                         Ok(()) => {
                             if let Some(runtime) = runtime {
                                 runtime.invalidate_current();
@@ -301,8 +302,8 @@ pub(crate) fn apply(
     Ok(json!({"path": path, "session": session, "results": results}))
 }
 
-fn native_matches(store: &Store, account: &Account) -> bool {
-    external::capture_current(Provider::Claude)
+fn native_matches(store: &Store, account: &Account, native: NativeSources) -> bool {
+    (native.current)(Provider::Claude)
         .ok()
         .and_then(|current| {
             store

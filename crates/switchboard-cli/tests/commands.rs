@@ -208,3 +208,128 @@ fn rotation_settings_persist_offline_and_report_stopped_monitor() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
 }
+
+fn rotation(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let output = binary()
+        .arg("--data-dir")
+        .arg(root)
+        .args(["--json", "rotation"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+#[test]
+fn rotation_set_changes_only_the_given_flags() {
+    let tmp = tempfile::tempdir().unwrap();
+    rotation(
+        tmp.path(),
+        &[
+            "set",
+            "--provider",
+            "claude",
+            "--enabled",
+            "true",
+            "--threshold",
+            "80",
+            "--hysteresis",
+            "5",
+            "--cooldown",
+            "600",
+            "--max-age",
+            "120",
+        ],
+    );
+    rotation(
+        tmp.path(),
+        &["set", "--provider", "claude", "--enabled", "false"],
+    );
+    rotation(
+        tmp.path(),
+        &["set", "--provider", "claude", "--cooldown", "900"],
+    );
+    rotation(
+        tmp.path(),
+        &["set", "--provider", "codex", "--enabled", "true"],
+    );
+    let status = rotation(tmp.path(), &["status"]);
+    let policies = status["data"]["policies"].as_array().unwrap();
+    let claude = policies.iter().find(|p| p["provider"] == "claude").unwrap();
+    assert_eq!(claude["enabled"], false);
+    assert_eq!(claude["threshold_percent"], 80.0);
+    assert_eq!(claude["hysteresis_percent"], 5.0);
+    assert_eq!(claude["cooldown_seconds"], 900);
+    assert_eq!(claude["max_age_seconds"], 120);
+    let codex = policies.iter().find(|p| p["provider"] == "codex").unwrap();
+    assert_eq!(codex["enabled"], true);
+    assert_eq!(codex["threshold_percent"], 90.0);
+    assert_eq!(codex["hysteresis_percent"], 10.0);
+    assert_eq!(codex["cooldown_seconds"], 1800);
+    assert_eq!(codex["max_age_seconds"], 300);
+}
+#[test]
+fn human_usage_and_events_print_utc_times_and_health() {
+    use switchboard_core::{AuthKind, Credential, Provider, Store, Usage};
+    let tmp = tempfile::tempdir().unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    {
+        let store = Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let account = store
+            .add(
+                "Fixture".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "fixture-only").unwrap(),
+            )
+            .unwrap();
+        store
+            .observe(
+                &account.id,
+                Usage {
+                    windows: vec![],
+                    used_percent: 42.0,
+                    observed_at: 1_700_000_000,
+                    resets_at: None,
+                    source: "provider".into(),
+                },
+            )
+            .unwrap();
+        store
+            .usage_health(&account.id, "failed", now, now + 180)
+            .unwrap();
+    }
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let usage = run(&["usage"]);
+    assert!(usage.contains("42.0% used"), "{usage}");
+    assert!(usage.contains("observed 2023-11-14T22:13:20Z"), "{usage}");
+    assert!(usage.contains("stale"), "{usage}");
+    assert!(usage.contains("health failed"), "{usage}");
+    assert!(!usage.contains("Unix seconds"), "{usage}");
+    let events = run(&["events"]);
+    assert!(
+        events
+            .lines()
+            .all(|line| line.contains('T') && line.contains("Z  ")),
+        "{events}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&run(&["--json", "events"])).unwrap();
+    assert!(json["data"][0]["at"].is_i64());
+}

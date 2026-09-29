@@ -95,7 +95,6 @@ impl UsageHealth {
     fn valid(&self) -> bool {
         matches!(self.status.as_str(), "ok" | "failed" | "unavailable")
             && self.checked_at > 0
-            && self.checked_at <= now() + 60
             && self.next_check_at >= self.checked_at
     }
 }
@@ -164,6 +163,11 @@ pub(crate) fn now() -> i64 {
         .map(|t| t.as_secs() as i64)
         .unwrap_or(0)
 }
+/// Future bounds apply to new input only. Stored times ahead of a clock that was set
+/// back are superseded by new writes instead of making the store unreadable.
+pub(crate) fn ahead(time: i64) -> bool {
+    time > now() + 60
+}
 fn label_valid(s: &str) -> bool {
     !s.trim().is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
 }
@@ -195,12 +199,33 @@ fn usage_valid(u: &Usage) -> bool {
         && u.used_percent.is_finite()
         && (0.0..=100.0).contains(&u.used_percent)
         && u.observed_at > 0
-        && u.observed_at <= now() + 60
         && u.resets_at.is_none_or(|t| t >= u.observed_at)
         && matches!(
             u.source.as_str(),
             "claude_oauth" | "codex_oauth" | "response_headers" | "provider"
         )
+}
+
+fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
+    let mut windows = new.windows.clone();
+    for w in &old.windows {
+        if !windows.iter().any(|n| n.name == w.name)
+            && w.resets_at.is_none_or(|t| t >= new.observed_at)
+        {
+            windows.push(w.clone());
+        }
+    }
+    let worst = windows
+        .iter()
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))?;
+    let merged = Usage {
+        used_percent: worst.used_percent,
+        resets_at: worst.resets_at,
+        observed_at: new.observed_at,
+        source: new.source.clone(),
+        windows,
+    };
+    usage_valid(&merged).then_some(merged)
 }
 
 /// Fixed vocabulary prevents callers from accidentally persisting upstream error bodies.
@@ -229,6 +254,8 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
                 | "5xx"
         ),
         "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
+        "activation" => matches!(detail, "completed" | "failed"),
+        "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
             detail,
             "started" | "completed" | "failed" | "cancelled" | "isolated" | "managed"
@@ -570,7 +597,7 @@ impl Store {
             checked_at,
             next_check_at,
         };
-        if !health.valid() {
+        if !health.valid() || ahead(checked_at) {
             return Err("Invalid usage health".into());
         }
         let mut state = self.lock()?;
@@ -582,10 +609,10 @@ impl Store {
             .ok_or("Account not found")?;
         if a.usage_health
             .as_ref()
-            .is_some_and(|old| old.checked_at > checked_at)
+            .is_some_and(|old| old.checked_at > checked_at && !ahead(old.checked_at))
             || a.usage
                 .as_ref()
-                .is_some_and(|old| old.observed_at > checked_at)
+                .is_some_and(|old| old.observed_at > checked_at && !ahead(old.observed_at))
         {
             return Err("Usage health is older than the stored observation".into());
         }
@@ -681,7 +708,10 @@ impl Store {
                 .iter_mut()
                 .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
             {
-                if policy.last_switched_at.is_some_and(|last| last > time) {
+                if policy
+                    .last_switched_at
+                    .is_some_and(|last| last > time && !ahead(last))
+                {
                     return Err("Rotation time precedes the last switch".into());
                 }
                 policy.last_switched_at = Some(time);
@@ -743,9 +773,9 @@ impl Store {
         &self,
         id: &str,
         expected: Option<&Credential>,
-        usage: Usage,
+        mut usage: Usage,
     ) -> Result<(), String> {
-        if !usage_valid(&usage) {
+        if !usage_valid(&usage) || ahead(usage.observed_at) {
             return Err("Invalid usage observation".into());
         }
         let mut state = self.lock()?;
@@ -757,7 +787,7 @@ impl Store {
             .ok_or("Account not found")?;
         if a.usage
             .as_ref()
-            .is_some_and(|old| old.observed_at > usage.observed_at)
+            .is_some_and(|old| old.observed_at > usage.observed_at && !ahead(old.observed_at))
         {
             return Err("Usage observation is older than the stored observation".into());
         }
@@ -788,8 +818,19 @@ impl Store {
             checked_at: usage.observed_at,
             next_check_at,
         });
+        let headers = usage.source == "response_headers";
+        if headers {
+            // Stored quota is cleared whenever the credential generation changes, so any
+            // stored windows belong to this generation. Headers carry only 5h/7d.
+            if let Some(merged) = a.usage.as_ref().and_then(|old| merge_windows(old, &usage)) {
+                usage = merged;
+            }
+        }
         a.usage = Some(usage);
-        append_event(&mut candidate, "usage", Some(id), "observed");
+        // Per-request header observations would evict account history from the ring.
+        if !headers {
+            append_event(&mut candidate, "usage", Some(id), "observed");
+        }
         self.publish(&mut state, candidate)
     }
     pub fn record(&self, action: &str, id: Option<&str>, detail: &str) -> Result<(), String> {
