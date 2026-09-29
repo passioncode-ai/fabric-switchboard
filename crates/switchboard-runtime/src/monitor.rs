@@ -229,9 +229,17 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
             if result.is_ok() {
                 runtime.invalidate_current();
                 reason = "switched".into();
-            } else {
+            } else if policy.target == "claude_cli" {
                 reason = "activation_failed".into();
+            } else {
+                reason = "switch_failed".into();
             }
+            // Journal after the outcome is fixed; a write failure cannot undo a switch.
+            let _ = runtime.store.record(
+                "rotation",
+                Some(id),
+                if result.is_ok() { "switched" } else { "failed" },
+            );
         }
         decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":decision.candidate_id}));
     }
@@ -269,6 +277,120 @@ mod tests {
         assert!(!due(&account(time, time + 180), time));
         assert!(due(&account(time - 200, time - 20), time));
         assert!(due(&account(time + 3600, time + 3780), time));
+    }
+    fn quota(store: &Store, id: &str, used: f64) {
+        let time = now();
+        store
+            .observe(
+                id,
+                Usage {
+                    used_percent: used,
+                    observed_at: time,
+                    resets_at: None,
+                    source: "provider".into(),
+                    windows: vec![],
+                },
+            )
+            .unwrap();
+    }
+    fn policy(target: &str) -> switchboard_core::RotationPolicy {
+        switchboard_core::RotationPolicy {
+            provider: Provider::Claude,
+            pool: "default".into(),
+            target: target.into(),
+            enabled: true,
+            threshold_percent: 90.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 1800,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        }
+    }
+    fn reason(runtime: &Runtime) -> String {
+        runtime.monitor_decisions.lock().unwrap()[0]["reason"]
+            .as_str()
+            .unwrap()
+            .into()
+    }
+    #[tokio::test]
+    async fn automatic_managed_switch_is_journaled_as_rotation() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+        assert_eq!(
+            events(&runtime.store, "rotation"),
+            [(Some(b.id), "switched".to_string())]
+        );
+    }
+    #[tokio::test]
+    async fn failed_managed_switch_is_not_reported_as_native_activation() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        // Metadata publication fails: the selection cannot be written.
+        let metadata = root.path().join("accounts.json");
+        std::fs::remove_file(&metadata).unwrap();
+        std::fs::create_dir(&metadata).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "switch_failed");
+        assert_eq!(
+            runtime.store.snapshot().unwrap().routes["claude:default"],
+            a.id
+        );
+    }
+    #[tokio::test]
+    async fn automatic_native_switch_journals_activation_and_rotation() {
+        use crate::fixtures::*;
+        for (activate, expected) in [
+            (
+                activates as fn(_: &_, _: &_, _: Option<&_>) -> _,
+                "switched",
+            ),
+            (fails, "activation_failed"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = crate::fixtures::runtime(root.path(), signed_in, activate).await;
+            let a = save(&runtime.store, "synthetic-a", "default");
+            let b = save(&runtime.store, "synthetic-b", "default");
+            quota(&runtime.store, &a.id, 95.0);
+            quota(&runtime.store, &b.id, 10.0);
+            runtime.store.set_policy(policy("claude_cli")).unwrap();
+            rotate(&runtime, true).unwrap();
+            assert_eq!(reason(&runtime), expected);
+            let detail = if expected == "switched" {
+                ("completed", "switched")
+            } else {
+                ("failed", "failed")
+            };
+            assert_eq!(
+                events(&runtime.store, "activation"),
+                [(Some(b.id.clone()), detail.0.to_string())]
+            );
+            assert_eq!(
+                events(&runtime.store, "rotation"),
+                [(Some(b.id), detail.1.to_string())]
+            );
+        }
     }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {
