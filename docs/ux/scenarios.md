@@ -490,7 +490,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** Relative or missing folders, past expiry and ineligible targets are refused with the backend's fixed messages.
 **Status:** draft
 **Meaning:** operator decision D-2 (2026-09-29); not yet observed in the native app.
-**Coverage:** browser demo `docs/evidence/design-0.4/projects-dark-1280.png`; `crates/switchboard-core/tests/projects.rs`; `scripts/test-ui-logic.mjs` rule cases.
+**Coverage:** browser demo `docs/evidence/design-0.4/projects-light-1280.png`; `crates/switchboard-core/tests/projects.rs`; `scripts/test-ui-logic.mjs` rule cases.
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-1, REQ-6
 
