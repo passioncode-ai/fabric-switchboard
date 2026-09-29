@@ -1,8 +1,8 @@
-# Switchboard — PassionCode.ai
+# Fabric Switchboard — PassionCode.ai
 
 [English](README.md) · **Русский**
 
-Локальный менеджер аккаунтов Claude Code и Codex CLI с desktop-интерфейсом и командой `switchboard`. Постоянные секреты защищены macOS Keychain или Windows DPAPI; рабочие и личные аккаунты разделены пулами. В управляемой сессии выбранный аккаунт меняется **со следующего запроса**: текущий поток ответа продолжает использовать прежний.
+Fabric Switchboard — локальный менеджер аккаунтов Claude Code и Codex CLI с desktop-интерфейсом и командой `switchboard`: инструмент Fabric, который работает и сам по себе. Постоянные секреты защищены macOS Keychain или Windows DPAPI; рабочие и личные аккаунты разделены пулами. В управляемой сессии выбранный аккаунт меняется **со следующего запроса**: текущий поток ответа продолжает использовать прежний.
 
 **Статус: beta.** Общая тёмная дизайн-система PassionCode и жёлтая S-иконка. Опубликован [v0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1) (prerelease, macOS + Windows); `main` содержит исправления 0.3.2, ещё не выпущенные. Добавлены сохранение текущей авторизации CLI, импорт Claude Swap, активный CLI-профиль, окна лимитов и фоновое автопереключение. Сохранены интерфейс, CLI, хранилище, HTTP/SSE-прокси и адаптеры macOS/Windows. [Контракт 0.3](docs/ACCOUNTS-AND-ROTATION.md) и [проверки/сборки 0.3.1](docs/evidence/release-0.3.1.md). Вход и inference через реальные аккаунты провайдеров ещё не проверены. [Протокол 0.2](docs/evidence/release-0.2.md) отдельно фиксирует тесты, полученные сборки, подпись и notarization; [историческая проверка 0.1](docs/evidence/verification.md) сохранена.
 
