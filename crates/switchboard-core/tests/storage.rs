@@ -460,6 +460,66 @@ fn usage_validates_bounds_and_preserves_previous_observation() {
 }
 
 #[test]
+fn clock_set_back_after_observation_keeps_store_open_and_writable() {
+    use switchboard_core::RotationPolicy;
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-a");
+    let b = add(&store, "synthetic-b");
+    let usage = |at: i64| Usage {
+        windows: vec![],
+        used_percent: 40.0,
+        observed_at: at,
+        resets_at: Some(at + 7200),
+        source: "claude_oauth".into(),
+    };
+    store.observe(&a.id, usage(now())).unwrap();
+    store
+        .set_policy(RotationPolicy {
+            provider: Provider::Claude,
+            pool: "default".into(),
+            target: "managed".into(),
+            enabled: false,
+            threshold_percent: 90.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 1800,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        })
+        .unwrap();
+    drop(store);
+    // Model the wall clock moving back one hour: every stored time is now ahead of it.
+    let path = root.path().join("accounts.json");
+    let mut disk: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    let ahead = now() + 3600;
+    let account = &mut disk["snapshot"]["accounts"][0];
+    account["usage"]["observed_at"] = ahead.into();
+    account["usage"]["resets_at"] = (ahead + 7200).into();
+    account["usage_health"]["checked_at"] = ahead.into();
+    account["usage_health"]["next_check_at"] = (ahead + 180).into();
+    disk["snapshot"]["policies"][0]["last_switched_at"] = ahead.into();
+    fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
+
+    let store = Store::open(root.path().into(), vault).unwrap();
+    store.select(Provider::Claude, "default", &b.id).unwrap();
+    store
+        .select_with_cooldown(Provider::Claude, "default", &a.id, now())
+        .unwrap();
+    add(&store, "synthetic-c");
+    store
+        .usage_health(&a.id, "failed", now(), now() + 180)
+        .unwrap();
+    store.observe(&a.id, usage(now())).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.accounts[0].usage.as_ref().unwrap().observed_at <= now());
+    assert!(snapshot.policies[0].last_switched_at.unwrap() <= now());
+    // New input from the future is still refused.
+    assert!(store.observe(&b.id, usage(now() + 3600)).is_err());
+    assert!(store
+        .usage_health(&b.id, "ok", now() + 3600, now() + 3780)
+        .is_err());
+}
+
+#[test]
 fn events_are_allowlisted_bounded_and_persisted() {
     let (root, vault, store) = setup();
     let a = add(&store, "synthetic");

@@ -1,4 +1,4 @@
-use crate::{pool_valid, Account, AuthKind, Provider, Store};
+use crate::{ahead, pool_valid, Account, AuthKind, Provider, Store};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ impl Store {
             .iter_mut()
             .find(|p| p.provider == provider && p.pool == pool && p.target == target)
             .ok_or("Rotation policy not found")?;
-        if p.last_switched_at.is_some_and(|t| t > now) {
+        if p.last_switched_at.is_some_and(|t| t > now && !ahead(t)) {
             return Err("Rotation time precedes the last switch".into());
         }
         p.last_switched_at = Some(now);

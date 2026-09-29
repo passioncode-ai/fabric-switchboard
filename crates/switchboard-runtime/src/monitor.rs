@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use switchboard_core::{AuthKind, Provider, Store, Usage};
+use switchboard_core::{Account, AuthKind, Provider, Store, Usage};
 use tokio::task::JoinHandle;
 
 pub const INTERVAL_SECONDS: i64 = 180;
@@ -46,13 +46,7 @@ impl MonitorHandle {
                 let mut due: Vec<_> = snapshot
                     .accounts
                     .into_iter()
-                    .filter(|a| {
-                        a.enabled
-                            && a.kind == AuthKind::OAuth
-                            && a.usage_health
-                                .as_ref()
-                                .is_none_or(|h| h.next_check_at <= time)
-                    })
+                    .filter(|a| due(a, time))
                     .collect();
                 // Oldest due first: a failing first row cannot starve another account.
                 due.sort_by_key(|a| {
@@ -74,6 +68,15 @@ impl Drop for MonitorHandle {
     fn drop(&mut self) {
         self.0.abort();
     }
+}
+
+/// A schedule stamped ahead of a clock that was set back would otherwise stall probes.
+fn due(a: &Account, time: i64) -> bool {
+    a.enabled
+        && a.kind == AuthKind::OAuth
+        && a.usage_health
+            .as_ref()
+            .is_none_or(|h| h.next_check_at <= time || h.checked_at > time + 60)
 }
 
 fn backoff(previous: Option<(i64, i64)>) -> i64 {
@@ -240,6 +243,30 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
 mod tests {
     use super::*;
     use switchboard_core::{Credential, MemoryVault};
+    #[test]
+    fn schedule_written_before_the_clock_moved_back_is_due_now() {
+        let account = |checked_at: i64, next_check_at: i64| switchboard_core::Account {
+            id: uuid::Uuid::new_v4().to_string(),
+            label: "Fixture".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: Some(switchboard_core::UsageHealth {
+                status: "ok".into(),
+                checked_at,
+                next_check_at,
+            }),
+        };
+        let time = now();
+        assert!(!due(&account(time, time + 180), time));
+        assert!(due(&account(time - 200, time - 20), time));
+        assert!(due(&account(time + 3600, time + 3780), time));
+    }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {
         assert_eq!(backoff(None), 180);

@@ -93,7 +93,6 @@ impl UsageHealth {
     fn valid(&self) -> bool {
         matches!(self.status.as_str(), "ok" | "failed" | "unavailable")
             && self.checked_at > 0
-            && self.checked_at <= now() + 60
             && self.next_check_at >= self.checked_at
     }
 }
@@ -160,6 +159,11 @@ pub(crate) fn now() -> i64 {
         .map(|t| t.as_secs() as i64)
         .unwrap_or(0)
 }
+/// Future bounds apply to new input only. Stored times ahead of a clock that was set
+/// back are superseded by new writes instead of making the store unreadable.
+pub(crate) fn ahead(time: i64) -> bool {
+    time > now() + 60
+}
 fn label_valid(s: &str) -> bool {
     !s.trim().is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
 }
@@ -191,7 +195,6 @@ fn usage_valid(u: &Usage) -> bool {
         && u.used_percent.is_finite()
         && (0.0..=100.0).contains(&u.used_percent)
         && u.observed_at > 0
-        && u.observed_at <= now() + 60
         && u.resets_at.is_none_or(|t| t >= u.observed_at)
         && matches!(
             u.source.as_str(),
@@ -564,7 +567,7 @@ impl Store {
             checked_at,
             next_check_at,
         };
-        if !health.valid() {
+        if !health.valid() || ahead(checked_at) {
             return Err("Invalid usage health".into());
         }
         let mut state = self.lock()?;
@@ -576,10 +579,10 @@ impl Store {
             .ok_or("Account not found")?;
         if a.usage_health
             .as_ref()
-            .is_some_and(|old| old.checked_at > checked_at)
+            .is_some_and(|old| old.checked_at > checked_at && !ahead(old.checked_at))
             || a.usage
                 .as_ref()
-                .is_some_and(|old| old.observed_at > checked_at)
+                .is_some_and(|old| old.observed_at > checked_at && !ahead(old.observed_at))
         {
             return Err("Usage health is older than the stored observation".into());
         }
@@ -674,7 +677,10 @@ impl Store {
                 .iter_mut()
                 .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
             {
-                if policy.last_switched_at.is_some_and(|last| last > time) {
+                if policy
+                    .last_switched_at
+                    .is_some_and(|last| last > time && !ahead(last))
+                {
                     return Err("Rotation time precedes the last switch".into());
                 }
                 policy.last_switched_at = Some(time);
@@ -738,7 +744,7 @@ impl Store {
         expected: Option<&Credential>,
         usage: Usage,
     ) -> Result<(), String> {
-        if !usage_valid(&usage) {
+        if !usage_valid(&usage) || ahead(usage.observed_at) {
             return Err("Invalid usage observation".into());
         }
         let mut state = self.lock()?;
@@ -750,7 +756,7 @@ impl Store {
             .ok_or("Account not found")?;
         if a.usage
             .as_ref()
-            .is_some_and(|old| old.observed_at > usage.observed_at)
+            .is_some_and(|old| old.observed_at > usage.observed_at && !ahead(old.observed_at))
         {
             return Err("Usage observation is older than the stored observation".into());
         }
