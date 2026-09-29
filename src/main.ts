@@ -250,7 +250,7 @@ function renderAgents(main: HTMLElement) {
   else {
     setup.append(el('p', 'form-note', agentSetup.cli_path ? `Command-line tool: ${agentSetup.cli_path}` : 'The switchboard command-line tool was not found on PATH.'));
     if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button('Link switchboard into ~/.local/bin', () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, 'The command-line tool is linked. Agents and plugins can now start switchboard mcp.', 'link-cli'), 'button primary', 'link-cli'));
-    setup.append(copyable('Claude Code', agentSetup.commands.claude_code, 'copy-claude'), copyable('Codex CLI', agentSetup.commands.codex, 'copy-codex'), copyable('PassionCode plugin (skill and tools)', agentSetup.commands.passioncode, 'copy-passioncode'));
+    setup.append(copyable('Claude Code', agentSetup.commands.claude_code, 'copy-claude'), copyable('Codex CLI', agentSetup.commands.codex, 'copy-codex'), copyable('Claude Code plugin (tools and the switching-accounts skill)', agentSetup.commands.claude_plugin, 'copy-plugin'));
   }
   main.append(setup);
 }

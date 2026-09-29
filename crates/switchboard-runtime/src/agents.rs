@@ -47,7 +47,7 @@ pub fn setup() -> Value {
         "commands": {
             "claude_code": format!("claude mcp add --scope user switchboard -- {command} mcp"),
             "codex": format!("codex mcp add switchboard -- {command} mcp"),
-            "passioncode": "npx @passioncode-ai/passioncode@latest update",
+            "claude_plugin": "claude plugin marketplace add passioncode-ai/fabric-switchboard && claude plugin install switchboard@switchboard",
         },
     })
 }

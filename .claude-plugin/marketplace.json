@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "switchboard",
+  "owner": {
+    "name": "PassionCode.ai",
+    "url": "https://passioncode.ai/"
+  },
+  "description": "Fabric Switchboard for coding agents: read which Claude Code or Codex account serves a session, report remaining quota honestly, switch accounts, and apply optional project rules through the switchboard MCP server.",
+  "plugins": [
+    {
+      "name": "switchboard",
+      "displayName": "Switchboard",
+      "source": "./plugins/switchboard",
+      "description": "Connects a coding agent to Fabric Switchboard: the switchboard MCP server plus the switching-accounts skill for reading status and remaining usage, switching the account of a managed session, and applying optional project rules, with the ordinary Claude Code login changed only on the operator's explicit OK.",
+      "version": "0.4.0",
+      "author": {
+        "name": "PassionCode.ai",
+        "url": "https://passioncode.ai/"
+      },
+      "homepage": "https://passioncode.ai/switchboard/",
+      "repository": "https://github.com/passioncode-ai/fabric-switchboard",
+      "license": "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0",
+      "keywords": [
+        "switchboard",
+        "claude-code",
+        "codex",
+        "accounts",
+        "usage",
+        "quota",
+        "rotation",
+        "mcp"
+      ],
+      "category": "development"
+    }
+  ]
+}

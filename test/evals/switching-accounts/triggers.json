@@ -1,0 +1,27 @@
+{
+  "skill": "switching-accounts",
+  "queries": [
+    {"query": "Переключи аккаунт Claude на рабочий, этот почти исчерпан.", "shouldTrigger": true},
+    {"query": "Сколько осталось лимита на моих аккаунтах Claude и Codex?", "shouldTrigger": true},
+    {"query": "Какой аккаунт у этого проекта в Switchboard?", "shouldTrigger": true},
+    {"query": "Лимит кончился — перекинь сессию на другой аккаунт в том же пуле.", "shouldTrigger": true},
+    {"query": "На каком аккаунте сейчас работает эта сессия?", "shouldTrigger": true},
+    {"query": "Примени правило проекта для /path/to/project.", "shouldTrigger": true},
+    {"query": "Switch this session to the Work account from the next request.", "shouldTrigger": true},
+    {"query": "How much quota is left before the five-hour window resets?", "shouldTrigger": true},
+    {"query": "We hit the rate limit, move to another account.", "shouldTrigger": true},
+    {"query": "Which account is this session on, and is rotation enabled for the pool?", "shouldTrigger": true},
+    {"query": "Make this repository always start on my personal Codex account for the next two days.", "shouldTrigger": true},
+    {"query": "Change the ordinary Claude Code login to the Team account.", "shouldTrigger": true},
+    {"query": "Install Fabric Switchboard on this Mac and set up the desktop app.", "shouldTrigger": false},
+    {"query": "How much does the Claude Max plan cost per month, and can I get a refund?", "shouldTrigger": false},
+    {"query": "Add a new MCP server entry to ~/.claude.json by hand.", "shouldTrigger": false},
+    {"query": "Сколько стоит подписка Codex Pro и как поменять карту оплаты?", "shouldTrigger": false},
+    {"query": "Fix the failing Rust test in switchboard-core.", "shouldTrigger": false},
+    {"query": "Переключи ветку на main и подтяни изменения.", "shouldTrigger": false},
+    {"query": "Switch the Kubernetes context to the staging cluster.", "shouldTrigger": false},
+    {"query": "Rotate the Stripe API key and record the leak.", "shouldTrigger": false},
+    {"query": "Write a landing page section about account rotation for the Switchboard website.", "shouldTrigger": false},
+    {"query": "Log in to GitHub with a different account in the gh CLI.", "shouldTrigger": false}
+  ]
+}

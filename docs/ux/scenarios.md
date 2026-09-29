@@ -502,7 +502,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Agents → what agents can do, and the CLI location or “not found”.
 2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
-3. Copy the Claude Code, Codex or PassionCode plugin command and run it in a terminal.
+3. Copy the Claude Code, Codex or Claude Code plugin command and run it in a terminal.
 **Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice.
 **Expected result:** The agent's `switchboard_status` names its session; switching a managed session takes effect from the next request; the global Claude Code login needs `global: true`.
 **UI elements:** capability panel, link button, command rows with Copy.
