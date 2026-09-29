@@ -1,11 +1,12 @@
-# Switchboard — by PassionCode.ai
+# Fabric Switchboard — by PassionCode.ai
 
 **English** · [Русский](README.ru.md)
 
-Switchboard keeps your Claude Code and Codex CLI accounts in one local workbench. See
+Fabric Switchboard keeps your Claude Code and Codex CLI accounts in one local workbench. See
 reported usage, separate work from personal accounts, and choose what handles your next
 request. It is a desktop app plus the `switchboard` command-line tool, for macOS and
-Windows. Part of the [PassionCode.ai](https://passioncode.ai/) toolkit.
+Windows. It is Fabric's account tool and works on its own; part of the
+[PassionCode.ai](https://passioncode.ai/) toolkit.
 
 **Status: beta. [v0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1)
 is published** (prerelease, macOS universal + Windows x64); `main` carries 0.3.2 fixes that
