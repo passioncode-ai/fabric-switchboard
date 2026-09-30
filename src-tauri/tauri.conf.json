@@ -31,10 +31,10 @@
     "publisher": "PassionCode.ai",
     "copyright": "Copyright © 2026 Siarhei Sheleh · PassionCode.ai",
     "homepage": "https://passioncode.ai/switchboard/",
-    "license": "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0",
+    "license": "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial",
     "licenseFile": "../LICENSE",
     "shortDescription": "Local account switching for Claude Code and Codex CLI",
-    "longDescription": "Fabric Switchboard keeps several Claude Code and Codex CLI accounts on one machine, stores their credentials in the native vault and lets you choose which account handles the next request, launch isolated or managed sessions and watch quota. Source-available under PolyForm Noncommercial or Internal Use; commercial license on request. Part of the PassionCode.ai toolkit.",
+    "longDescription": "Fabric Switchboard keeps several Claude Code and Codex CLI accounts on one machine, stores their credentials in the native vault and lets you choose which account handles the next request, launch isolated or managed sessions and watch quota. Open source under the GNU AGPL-3.0; a commercial license is available. Part of the PassionCode.ai toolkit.",
     "icon": [
       "icons/icon.icns",
       "icons/icon.ico",

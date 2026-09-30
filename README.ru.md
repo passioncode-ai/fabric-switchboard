@@ -78,4 +78,4 @@ cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned
 
 ## Лицензия
 
-Source-available: PolyForm Noncommercial 1.0.0 или PolyForm Internal Use 1.0.0 на выбор; коммерческая лицензия по запросу (contact@passioncode.ai). Текст — [LICENSE](LICENSE). Релизы до v0.3.1-beta.1 включительно и коммиты до `7c36f4a` включительно были выпущены под MIT и остаются доступны под MIT. Лицензии сторонних компонентов в собранных программах — [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Вклад принимается по [CLA](CLA.md), см. [CONTRIBUTING.md](CONTRIBUTING.md).
+Открытый исходный код под [GNU AGPL-3.0](LICENSE). Для использования, которое не выполняет условия AGPL, доступна [коммерческая лицензия](COMMERCIAL-LICENSE.md) — contact@passioncode.ai. Версии до v0.4.0-beta.1 включительно выпущены под PolyForm Noncommercial или Internal Use (v0.4.0-beta.1) и под MIT (v0.3.1-beta.1 и раньше, коммиты до `7c36f4a` включительно) и сохраняют свою лицензию. Лицензии сторонних компонентов в собранных программах — [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Вклад принимается по [CLA](CLA.md), см. [CONTRIBUTING.md](CONTRIBUTING.md).

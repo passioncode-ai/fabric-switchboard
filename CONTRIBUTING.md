@@ -9,11 +9,12 @@ Thank you for helping. Issues and pull requests are welcome at
 
 ## License and CLA
 
-Fabric Switchboard is source-available under PolyForm Noncommercial or Internal Use; commercial
-license on request. See [LICENSE](LICENSE).
+Fabric Switchboard is open source under the [GNU AGPL-3.0](LICENSE); a
+[commercial license](COMMERCIAL-LICENSE.md) is available from PassionCode.ai.
 
 Contributions are accepted under the [Contributor License Agreement](CLA.md). By opening a
-pull request you agree to it; the pull request template asks you to confirm this with a
+pull request you agree to it — it is what lets every contribution be offered under the
+commercial license too; the pull request template asks you to confirm this with a
 checkbox. Pull requests without that confirmation are not merged.
 
 ## Before you open a pull request

@@ -364,7 +364,7 @@ function productPanel() {
   const definitions = el('dl', 'definitions');
   const row = (term: string, ...content: (Node | string)[]) => { const dd = el('dd'); dd.append(...content); definitions.append(el('dt', '', term), dd); };
   row('Version', `Fabric Switchboard ${version}`);
-  row('License', el('span', 'block', 'Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.'), address(`${REPOSITORY}/blob/main/LICENSE`));
+  row('License', el('span', 'block', 'Open source under the GNU AGPL-3.0; a commercial license is available — contact@passioncode.ai.'), address(`${REPOSITORY}/blob/main/LICENSE`));
   row('Third-party', el('span', 'block', 'The app includes third-party components under their own licenses.'), address(`${REPOSITORY}/blob/main/THIRD_PARTY_NOTICES.md`));
   row('Toolkit', el('span', 'block', 'Part of the PassionCode.ai toolkit.'), address('https://passioncode.ai/switchboard/'));
   panel.append(heading, definitions);
