@@ -2,7 +2,7 @@
 
 Installing a downloaded ZIP? Start with [INSTALL.md](INSTALL.md). This document is for building and signing artifacts.
 
-This is the procedure for the native artifacts. Current execution receipts are in [0.3.1 evidence](evidence/release-0.3.1.md); [0.2 evidence](evidence/release-0.2.md) is historical; commands here are not by themselves evidence of completion.
+This is the procedure for the native artifacts. Current execution receipts are in [0.4.0 evidence](evidence/release-0.4.md), the first release run with `--notary-profile` (submission Accepted, stapled, Gatekeeper accepted); [0.3.1](evidence/release-0.3.1.md) and [0.2](evidence/release-0.2.md) evidence are historical; commands here are not by themselves evidence of completion.
 
 ## macOS
 

@@ -8,10 +8,9 @@ request. It is a desktop app plus the `switchboard` command-line tool, for macOS
 Windows. It is Fabric's account tool and works on its own; part of the
 [PassionCode.ai](https://passioncode.ai/) toolkit.
 
-**Status: beta. [v0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1)
-is published** (prerelease, macOS universal + Windows x64); `main` carries 0.3.2 fixes that
-are not released yet. Real provider login and end-to-end requests with live accounts are
-not yet verified.
+**Status: beta. [v0.4.0-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.0-beta.1)
+is published** (prerelease, macOS universal notarized by Apple + Windows x64 unsigned). Real
+provider login and end-to-end requests with live accounts are not yet verified.
 
 - **Download:** [macOS](https://passioncode.ai/switchboard/download/macos) ·
   [Windows](https://passioncode.ai/switchboard/download/windows) ·
@@ -25,34 +24,37 @@ Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and per
 accounts live in separate pools. In a managed session the selected account changes **from
 the next request**: a response already streaming keeps the identity it started with.
 
-Version 0.3.1 brings the shared PassionCode dark design system and the yellow S icon,
-explicit capture of the current CLI authorization, Claude Swap import, the active native CLI
-profile, quota windows and opt-in background rotation. The interface, CLI, vault, HTTP/SSE
-proxy and macOS/Windows adapters are kept. See the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md)
-and the [0.3.1 checks and builds](docs/evidence/release-0.3.1.md). The
-[0.2 report](docs/evidence/release-0.2.md) records tests, builds, signing and notarization
-separately; the [historical 0.1 verification](docs/evidence/verification.md) is kept.
+Version 0.4.0 lets coding agents read remaining usage and switch the account of their
+managed session over MCP (`switchboard mcp`, 8 tools; the ordinary Claude Code login changes
+only with an explicit `global: true`), adds optional project rules and the Projects and Agents
+screens, ships the `switchboard` Claude Code plugin, and is the first notarized macOS build.
+It keeps 0.3's current-account capture, Claude Swap import, quota windows and opt-in rotation.
+See the [0.4 plan and decisions](docs/PLAN-0.4.md), the [0.4.0 release record](docs/evidence/release-0.4.md)
+and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
+[0.3.1](docs/evidence/release-0.3.1.md), [0.2](docs/evidence/release-0.2.md) and the
+[historical 0.1 verification](docs/evidence/verification.md).
 
 ## Quick start for a new teammate
 
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
-   (redirects to the GitHub release), check it against `SHA256SUMS-0.3.1.txt` from the
-   release, then follow [docs/INSTALL.md](docs/INSTALL.md). The 0.3.1 archive is Developer ID
-   signed but **not notarized**, so Gatekeeper rejects the app on first launch
-   (`spctl -a -t install` → `Unnotarized Developer ID`); the CLI beside it runs
-   (`./switchboard --version` → `switchboard 0.3.1`).
+   (redirects to the [v0.4.0-beta.1 release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.0-beta.1)),
+   check it against `SHA256SUMS-0.4.0.txt` from the release
+   (`shasum -a 256 -c SHA256SUMS-0.4.0.txt --ignore-missing` → `OK`), then follow
+   [docs/INSTALL.md](docs/INSTALL.md). The app is Developer ID signed, notarized and stapled
+   (`spctl -a -vv "Fabric Switchboard.app"` → `accepted, source=Notarized Developer ID`); the
+   CLI beside it runs (`./switchboard --version` → `switchboard 0.4.0`).
 2. **Configure:** nothing to set before first run. Accounts are added in the app or with
    `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
    sign-in and go to the OS vault, never into an environment variable or an argument.
    `--data-dir <absolute dir>` points the CLI at a separate, disposable app-data directory.
-3. **MCP:** `switchboard mcp` is on `main` (0.4, **not released yet**; the 0.3.1 CLI answers
-   `Invalid arguments`). Build it from source (below), put it on `PATH`, then either
-   `claude plugin marketplace add passioncode-ai/fabric-switchboard` and
-   `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
+3. **MCP:** put the `switchboard` CLI from the archive on `PATH` (for example copy it to
+   `~/.local/bin`), then either `claude plugin marketplace add passioncode-ai/fabric-switchboard`
+   and `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
    skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
    then shows `switchboard … ✔ Connected`; a first call is the read-only
    `switchboard_accounts` tool (an empty vault answers `{"accounts":[]}`). All agents and
-   tools: [docs/CLI.md](docs/CLI.md).
+   tools: [docs/CLI.md](docs/CLI.md). Measured from the published archive:
+   [0.4.0 release record](docs/evidence/release-0.4.md#newcomer-path-from-the-published-release).
 4. **Develop:** `npm ci`, then `./scripts/check.sh` (the gate) and `npm run app:dev`; the CLI is
    `cargo build --release --locked -p switchboard-cli` → `target/release/switchboard`. Start at
    [docs/HANDOFF.md](docs/HANDOFF.md), [AGENTS.md](AGENTS.md) and the layout table in
