@@ -1,14 +1,14 @@
 # Applied route and skills
 
-The operator-supplied `/Users/sshlg/DATA/project-observatory/AGENTS.md` supplied the router and Git handoff rules at task start. The new project owns its artifacts; Observatory was not edited. `npx sshlg-skills toolkit --for ...` measured 587 reachable skills for its reported claude host; actual chosen sources were read separately. `npx sshlg-skills pack design` was inspected before the visual layer. These are tooling-selection observations, not project quality grades.
+The operator-supplied `$HOME/DATA/project-observatory/AGENTS.md` supplied the router and Git handoff rules at task start. The new project owns its artifacts; Observatory was not edited. `npx sshlg-skills toolkit --for ...` measured 587 reachable skills for its reported claude host; actual chosen sources were read separately. `npx sshlg-skills pack design` was inspected before the visual layer. These are tooling-selection observations, not project quality grades.
 
 Applied skill sources on this machine:
 
-- `/Users/sshlg/.codex/plugins/cache/task-pipeline/task-pipeline/1.87.0/skills/task-pipeline/SKILL.md`: research/spec/build/verify/handoff route and bounded parallel implementation packets.
-- `/Users/sshlg/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/ux-scenarios/SKILL.md`: scenarios, foundation and evidence separation.
-- `/Users/sshlg/.codex/plugins/cache/sheleg-design-skill/sheleg-design/1.61.0/skills/sheleg-design/SKILL.md`: Workbench tokens and visual review.
-- `/Users/sshlg/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/brand-voice/SKILL.md`: operator-brief voice decision and brand contract.
-- `/Users/sshlg/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/copywriting/SKILL.md`: action/result/recovery wording, no unsupported verified state.
+- `$HOME/.codex/plugins/cache/task-pipeline/task-pipeline/1.87.0/skills/task-pipeline/SKILL.md`: research/spec/build/verify/handoff route and bounded parallel implementation packets.
+- `$HOME/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/ux-scenarios/SKILL.md`: scenarios, foundation and evidence separation.
+- `$HOME/.codex/plugins/cache/sheleg-design-skill/sheleg-design/1.61.0/skills/sheleg-design/SKILL.md`: Workbench tokens and visual review.
+- `$HOME/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/brand-voice/SKILL.md`: operator-brief voice decision and brand contract.
+- `$HOME/.codex/plugins/cache/super-ux/super-ux/0.56.2/skills/copywriting/SKILL.md`: action/result/recovery wording, no unsupported verified state.
 
 The user authorized carrying the work through implementation, so routine reapproval gates were not reintroduced. Task-pipeline's build delegation guidance supplied the bounded subagent work: source research, core and UI, separate worktrees. Root owned proxy, launcher, integration, source checks and final delivery. No foreign skill replaced a router. `agent-sync` was not used in this new repository: no shared guarded registries/config were present.
 
@@ -16,4 +16,4 @@ Router standing evidence-docs doctrine was applied through commit-addressed rece
 
 Report header/footer were obtained with `npx sshlg-skills signature --used ...`. These machine-local skill paths explain the work process; they are not build prerequisites and are intentionally plain text rather than broken fresh-checkout links.
 
-For the 0.2 extension, toolkit measurement again returned 587. Reused task-pipeline and ux-scenarios Update; copywriting source was `/Users/sshlg/.agents/skills/copywriting/SKILL.md` against the existing brand pack. No visual redesign route was needed. Bounded separate worktrees owned CLI/shared runtime, Windows core/launcher and platform labels; root owned packaging/docs/integration. Additional seam review found and repaired home cleanup/launch concurrency, authenticated-connection reuse and strict Windows capability ACL checks. No signing key was exported and no real account credential was read.
+For the 0.2 extension, toolkit measurement again returned 587. Reused task-pipeline and ux-scenarios Update; copywriting source was `$HOME/.agents/skills/copywriting/SKILL.md` against the existing brand pack. No visual redesign route was needed. Bounded separate worktrees owned CLI/shared runtime, Windows core/launcher and platform labels; root owned packaging/docs/integration. Additional seam review found and repaired home cleanup/launch concurrency, authenticated-connection reuse and strict Windows capability ACL checks. No signing key was exported and no real account credential was read.
