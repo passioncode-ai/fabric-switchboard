@@ -33,6 +33,31 @@ and the [0.3.1 checks and builds](docs/evidence/release-0.3.1.md). The
 [0.2 report](docs/evidence/release-0.2.md) records tests, builds, signing and notarization
 separately; the [historical 0.1 verification](docs/evidence/verification.md) is kept.
 
+## Quick start for a new teammate
+
+1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
+   (redirects to the GitHub release), check it against `SHA256SUMS-0.3.1.txt` from the
+   release, then follow [docs/INSTALL.md](docs/INSTALL.md). The 0.3.1 archive is Developer ID
+   signed but **not notarized**, so Gatekeeper rejects the app on first launch
+   (`spctl -a -t install` → `Unnotarized Developer ID`); the CLI beside it runs
+   (`./switchboard --version` → `switchboard 0.3.1`).
+2. **Configure:** nothing to set before first run. Accounts are added in the app or with
+   `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
+   sign-in and go to the OS vault, never into an environment variable or an argument.
+   `--data-dir <absolute dir>` points the CLI at a separate, disposable app-data directory.
+3. **MCP:** `switchboard mcp` is on `main` (0.4, **not released yet**; the 0.3.1 CLI answers
+   `Invalid arguments`). Build it from source (below), put it on `PATH`, then either
+   `claude plugin marketplace add passioncode-ai/fabric-switchboard` and
+   `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
+   skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
+   then shows `switchboard … ✔ Connected`; a first call is the read-only
+   `switchboard_accounts` tool (an empty vault answers `{"accounts":[]}`). All agents and
+   tools: [docs/CLI.md](docs/CLI.md).
+4. **Develop:** `npm ci`, then `./scripts/check.sh` (the gate) and `npm run app:dev`; the CLI is
+   `cargo build --release --locked -p switchboard-cli` → `target/release/switchboard`. Start at
+   [docs/HANDOFF.md](docs/HANDOFF.md), [AGENTS.md](AGENTS.md) and the layout table in
+   [Checks and layout](#checks-and-layout); tests use synthetic fixtures only.
+
 ## Documentation
 
 - [Research on four existing tools](docs/research/README.md): sources, architecture,
