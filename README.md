@@ -1,12 +1,12 @@
-# Fabric Switchboard — by PassionCode.ai
+# Fabric Switchboard
 
 **English** · [Русский](README.ru.md)
 
 Fabric Switchboard keeps your Claude Code and Codex CLI accounts in one local workbench. See
 reported usage, separate work from personal accounts, and choose what handles your next
 request. It is a desktop app plus the `switchboard` command-line tool, for macOS and
-Windows. It is Fabric's account tool and works on its own; part of the
-[PassionCode.ai](https://passioncode.ai/) toolkit.
+Windows. It is Fabric's account tool and works on its own; built by
+[PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
 
 **Status: beta. [v0.4.0-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.0-beta.1)
 is published** (prerelease, macOS universal notarized by Apple + Windows x64 unsigned). Real
@@ -17,8 +17,8 @@ provider login and end-to-end requests with live accounts are not yet verified.
   [product page](https://passioncode.ai/switchboard/) ·
   [all releases](https://github.com/passioncode-ai/fabric-switchboard/releases) ·
   [installation notes](docs/INSTALL.md)
-- **License:** source-available under PolyForm Noncommercial or Internal Use; commercial
-  license on request. See [License](#license).
+- **License:** open source under the GNU AGPL-3.0; a commercial license is available.
+  See [License](#license).
 
 Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and personal
 accounts live in separate pools. In a managed session the selected account changes **from
@@ -52,7 +52,12 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
    and `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
    skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
    then shows `switchboard … ✔ Connected`; a first call is the read-only
-   `switchboard_accounts` tool (an empty vault answers `{"accounts":[]}`). All agents and
+   `switchboard_accounts` tool (an empty vault answers `{"accounts":[]}`). To prove it with a
+   real client without touching your agent config or accounts, write a temporary
+   `mcp.json` with `{"mcpServers":{"switchboard":{"command":"switchboard","args":["--data-dir","<absolute empty dir>","mcp","--read-only"]}}}`
+   and run `claude -p "Call the switchboard_accounts tool once and reply with exactly its JSON result." --strict-mcp-config --mcp-config mcp.json --allowedTools mcp__switchboard__switchboard_accounts --max-turns 3`
+   → `{"accounts":[]}` (run 2026-09-30 with the published 0.4.0 CLI:
+   [handoff](docs/handoffs/2026-09-30-agpl-standard.md#mcp-proof)). All agents and
    tools: [docs/CLI.md](docs/CLI.md). Measured from the published archive:
    [0.4.0 release record](docs/evidence/release-0.4.md#newcomer-path-from-the-published-release).
 4. **Develop:** `npm ci`, then `./scripts/check.sh` (the gate) and `npm run app:dev`; the CLI is
@@ -162,16 +167,10 @@ dependencies.
 
 ## License
 
-Switchboard is source-available, not open source: you may use it under the
-[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
-or the [PolyForm Internal Use License 1.0.0](https://polyformproject.org/licenses/internal-use/1.0.0),
-at your option. Commercial distribution, or building it into a product or service for
-others, needs a separate commercial license: contact@passioncode.ai. The full terms are in
-[LICENSE](LICENSE).
-
-Releases up to and including v0.3.1-beta.1, and commits up to and including `7c36f4a`,
-were released under the MIT License; those remain available under MIT.
+Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
+available for use that does not meet the AGPL's terms — contact@passioncode.ai.
+Versions up to and including v0.4.0-beta.1 were released under PolyForm Noncommercial or Internal Use (v0.4.0-beta.1) and the MIT License (v0.3.1-beta.1 and earlier, commits up to and including `7c36f4a`); those releases keep their licence.
 
 The built app and CLI include third-party components under their own licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are accepted under the
-[CLA](CLA.md); see [CONTRIBUTING.md](CONTRIBUTING.md).
+[CLA](CLA.md), which allows this dual licence; see [CONTRIBUTING.md](CONTRIBUTING.md).

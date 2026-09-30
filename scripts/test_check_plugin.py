@@ -102,7 +102,7 @@ class PlantedDefects(Fixture):
         self.assertFlags("not a plain semver")
 
     def test_license_expression_must_be_exact(self):
-        self.edit(SKILL, "license: PolyForm-Noncommercial-1.0.0 OR", "license: PolyForm-Noncommercial-1.0.0 AND")
+        self.edit(SKILL, "license: AGPL-3.0-only OR", "license: AGPL-3.0-only AND")
         self.assertFlags("license must be exactly")
 
     def test_unquoted_colon_in_front_matter(self):

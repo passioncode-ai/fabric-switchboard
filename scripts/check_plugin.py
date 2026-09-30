@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 PLUGIN_NAME = "switchboard"
-LICENSE_SPDX = "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0"
+LICENSE_SPDX = "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial"
 AUTHOR = "PassionCode.ai"
 MCP_SOURCE = "crates/switchboard-cli/src/mcp.rs"
 APPLY_SOURCE = "crates/switchboard-runtime/src/projects.rs"

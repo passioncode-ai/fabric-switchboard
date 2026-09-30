@@ -12,7 +12,7 @@ description: >-
   login only on the operator's explicit OK. Uses the switchboard MCP server, else the
   switchboard CLI. NOT for installing Switchboard itself, provider billing or plan
   questions, or editing Claude or Codex configuration by hand.
-license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
+license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; the one provider call is an explicit usage refresh.
 metadata:
   author: PassionCode.ai
