@@ -1,11 +1,15 @@
-# Contributing to Switchboard
+# Contributing to Fabric Switchboard
+
+This file adds to the organization's default
+[CONTRIBUTING.md](https://github.com/passioncode-ai/.github/blob/main/CONTRIBUTING.md); where the
+two differ, this file wins.
 
 Thank you for helping. Issues and pull requests are welcome at
 <https://github.com/passioncode-ai/fabric-switchboard>.
 
 ## License and CLA
 
-Switchboard is source-available under PolyForm Noncommercial or Internal Use; commercial
+Fabric Switchboard is source-available under PolyForm Noncommercial or Internal Use; commercial
 license on request. See [LICENSE](LICENSE).
 
 Contributions are accepted under the [Contributor License Agreement](CLA.md). By opening a
