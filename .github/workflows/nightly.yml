@@ -12,13 +12,24 @@ concurrency:
 jobs:
   clock:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       run: ${{ steps.clock.outputs.run }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/nightly_clock.py
+          sparse-checkout-cone-mode: false
+      # GitHub starts scheduled runs late (issue #5), so the start hour proves nothing: the
+      # planned slot of the line that fired decides, one full run per Warsaw date.
       - id: clock
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
         run: |
-          if [ '${{ github.event_name }}' = workflow_dispatch ] || [ "$(TZ=Europe/Warsaw date +%H)" = 23 ]; then
-            echo 'run=true' >> "$GITHUB_OUTPUT"
+          python3 scripts/nightly_clock.py "$SCHEDULE" > clock.out
+          cat clock.out >> "$GITHUB_OUTPUT"
+          if grep -qx 'run=false' clock.out; then
+            echo "::notice title=Nightly checks skipped::this cron line is tonight's daylight-saving duplicate; the other line runs the full checks"
           fi
   checks:
     needs: clock
