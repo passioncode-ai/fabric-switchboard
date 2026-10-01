@@ -32,6 +32,11 @@ COPIED = (
     check_plugin.APPLY_SOURCE,
 )
 SKILL = "plugins/switchboard/skills/switching-accounts/SKILL.md"
+# The shipped version, read rather than written down, so a release bump does not turn the
+# planted defects below into no-ops or fixture drift.
+VERSION = json.loads((ROOT / "plugins/switchboard/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+_MAJOR, _MINOR, _PATCH = (int(part) for part in VERSION.split("."))
+NEXT_PATCH = "%d.%d.%d" % (_MAJOR, _MINOR, _PATCH + 1)
 
 
 class Fixture(unittest.TestCase):
@@ -76,19 +81,19 @@ class CleanTree(Fixture):
 
 class PlantedDefects(Fixture):
     def test_marketplace_version_drift(self):
-        self.edit_json(".claude-plugin/marketplace.json", lambda d: d["plugins"][0].update(version="0.4.1"))
+        self.edit_json(".claude-plugin/marketplace.json", lambda d: d["plugins"][0].update(version=NEXT_PATCH))
         self.assertFlags("differs from plugin.json")
 
     def test_skill_metadata_version_drift(self):
-        self.edit(SKILL, 'version: "0.4.0"', 'version: "0.3.9"')
+        self.edit(SKILL, 'version: "%s"' % VERSION, 'version: "0.3.9"')
         self.assertFlags("metadata.version")
 
     def test_package_version_checked_once_it_reaches_0_4(self):
-        self.edit_json("package.json", lambda d: d.update(version="0.4.1"))
+        self.edit_json("package.json", lambda d: d.update(version=NEXT_PATCH))
         self.assertFlags("does not match plugin")
 
     def test_package_prerelease_core_matches(self):
-        self.edit_json("package.json", lambda d: d.update(version="0.4.0-beta.1"))
+        self.edit_json("package.json", lambda d: d.update(version=VERSION + "-beta.1"))
         self.assertEqual(check_plugin.check(self.root), [])
 
     def test_package_below_0_4_is_not_compared(self):
@@ -97,8 +102,8 @@ class PlantedDefects(Fixture):
 
     def test_prerelease_plugin_version_rejected(self):
         for rel in (".claude-plugin/marketplace.json",):
-            self.edit_json(rel, lambda d: d["plugins"][0].update(version="0.4.0-beta.1"))
-        self.edit_json("plugins/switchboard/.claude-plugin/plugin.json", lambda d: d.update(version="0.4.0-beta.1"))
+            self.edit_json(rel, lambda d: d["plugins"][0].update(version=VERSION + "-beta.1"))
+        self.edit_json("plugins/switchboard/.claude-plugin/plugin.json", lambda d: d.update(version=VERSION + "-beta.1"))
         self.assertFlags("not a plain semver")
 
     def test_license_expression_must_be_exact(self):

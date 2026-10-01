@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; the one provider call is an explicit usage refresh.
 metadata:
   author: PassionCode.ai
-  version: "0.4.0"
+  version: "0.4.1"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
