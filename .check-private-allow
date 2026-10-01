@@ -1,0 +1,7 @@
+# Reviewed synthetic findings for org-index scripts/check_private.py (fingerprint = rule:file:sha256(match)[:16]).
+# Authors' addresses in third-party licence notices: the licences require the attribution (ADR-0092 keeps third-party notices unchanged).
+# Reviewed 2026-10-01. A denylist term (P1) can never be listed here.
+P2:THIRD_PARTY_NOTICES.md:106a6c8669149a63
+P2:THIRD_PARTY_NOTICES.md:21f58c77640f84fe
+P2:THIRD_PARTY_NOTICES.md:324f68c589a5253e
+P2:THIRD_PARTY_NOTICES.md:83c3dc39aed4dcee
