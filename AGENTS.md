@@ -39,6 +39,15 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). The implementation contract is [doc
 - Hosted full checks run nightly at 23:00 Europe/Warsaw. Do not add push/PR full-suite triggers or dispatch the workflow after every push. Missing CI is not passing CI.
 - Keep lockfiles. Keep build output, node_modules, secrets and comparison clones untracked. Add commit-addressed evidence and update HANDOFF before delivery.
 - Preserve other sessions' changes; use bounded ownership/worktrees for simultaneous implementation. No force push or blind reset to make a handoff pass.
+- **Shared registers are edited under a lease.** [docs/AGENT_SYNC.md](docs/AGENT_SYNC.md)
+  (generated from `.claude/agent-sync.json` by `agent_sync.py setup`; never edited by hand) lists
+  the guarded files and the gate. Run `agent_sync.py acquire <file>` before editing one and
+  `agent_sync.py release <file>` after, on every path including failure. The lease is a ref under
+  `refs/agent-sync/leases/` on `origin`, so another contributor's agent sees it
+  (`git ls-remote origin 'refs/agent-sync/leases/*'`); the record plane is local (`fs`), and
+  `.agent-sync/` is git-ignored. No register here carries a "Next free ID" line, so nothing is
+  reserved yet; a register that gains one is declared under `idRegisters` and taken with
+  `agent_sync.py reserve <REG>`.
 
 ## Organisation
 
