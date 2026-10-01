@@ -3,6 +3,8 @@ name = "switchboard-core"
 version = "0.1.0"
 edition = "2021"
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 publish.workspace = true
 
 [dependencies]

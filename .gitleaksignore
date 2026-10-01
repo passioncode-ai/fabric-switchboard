@@ -1,0 +1,7 @@
+# gitleaks false positives, reviewed 2026-10-01 (run from the repository root:
+# `gitleaks detect --no-git --source .`). Each line is a fingerprint, not a secret.
+# SHA-256 digests of tracked source files in a dated design record:
+docs/evidence/design-0.3.1-visual.json:generic-api-key:34
+docs/evidence/design-0.3.1-visual.json:generic-api-key:35
+# A synthetic Codex OAuth fixture in a unit test ("synthetic-access", "synthetic-refresh-…"):
+crates/switchboard-runtime/src/launch.rs:generic-api-key:865

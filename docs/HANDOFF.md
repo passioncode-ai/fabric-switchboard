@@ -1,3 +1,36 @@
+# Final check — 2026-10-01
+
+Organization-wide final pass (README, licence wording, versions, links, manifests, AGENTS.md,
+gate, private-data and secret scans, open issues) on a fresh `--recurse-submodules` clone of
+`1edde0e`. Found and fixed in one change:
+
+- **Issue #5 / SB-11, nightly clock gate.** The `clock` job compared the *start* hour with 23 in
+  Warsaw, and GitHub starts scheduled runs late, so `checks` was skipped on every scheduled run
+  (still true on 2026-10-01: runs `36795099207`, `36798441752`). Now
+  [`scripts/nightly_clock.py`](../scripts/nightly_clock.py) takes the cron line that fired
+  (`github.event.schedule`), finds the slot it was planned for and runs when that slot is 23:00
+  Warsaw — one full run per date, DST-correct; the duplicate line leaves a `::notice`.
+  [`scripts/test_nightly_clock.py`](../scripts/test_nightly_clock.py) (6 tests, in
+  `./scripts/check.sh`) was watched failing against the old start-hour rule (3 failures).
+  **Not yet proven hosted:** issue #5 stays open until a scheduled run shows `checks` running.
+- **Manifests:** the Cargo workspace and every crate now carry `repository` and `homepage`, and
+  `package.json` names the repository and homepage.
+- **`.gitleaksignore`:** three reviewed false positives (SHA-256 digests in a dated design record,
+  a synthetic OAuth test fixture), so `gitleaks detect --no-git --source .` over the tracked tree
+  exits 0.
+
+Verified without change: README quick start — the installed `/Applications/Fabric Switchboard.app`
+CLI (`switchboard 0.4.0`, `Contents/MacOS/switchboard`) answered `initialize`, `tools/list` (4
+read-only tools) and `switchboard_accounts` → `{"accounts":[]}` over stdio with a throwaway
+`--data-dir`, and the README's `claude -p … --strict-mcp-config` proof returned the same; versions
+match `v0.4.0-beta.1`; every relative link and anchor resolves; licence wording is AGPL with the
+PolyForm/MIT history kept. **Open for the organization:** org-index `check_private.py` P2 flags five
+third-party authors' addresses inside the copyright notices of `THIRD_PARTY_NOTICES.md`; those
+notices are kept verbatim (ADR-0092 point 4), so the exemption belongs in the checker.
+**Exact next task:** unchanged — SB-10, the launcher member (below).
+
+---
+
 # Licence — AGPL-3.0 or commercial (2026-09-30)
 
 **Start here for the licence change:** [handoffs/2026-09-30-agpl-standard.md](handoffs/2026-09-30-agpl-standard.md). From 2026-09-30 Switchboard is `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` (Fabric ADR-0092): [LICENSE](../LICENSE) is the AGPL-3.0 text, [COMMERCIAL-LICENSE.md](../COMMERCIAL-LICENSE.md) the commercial offer, every manifest carries the SPDX expression, and About says so. v0.4.0-beta.1 keeps PolyForm and v0.3.1-beta.1 and earlier keep MIT. No release was cut; the next release is the first AGPL one. The repository now follows the organization's repository standard (org-index `check_format.py` 0 findings). **Exact next task:** unchanged — SB-10, the launcher member (below).

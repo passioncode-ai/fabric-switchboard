@@ -3,6 +3,11 @@
   "version": "0.4.0",
   "private": true,
   "license": "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial",
+  "homepage": "https://passioncode.ai/switchboard/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/passioncode-ai/fabric-switchboard.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",

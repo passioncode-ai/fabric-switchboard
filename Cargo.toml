@@ -5,6 +5,8 @@ resolver = "2"
 version = "0.4.0"
 edition = "2021"
 license = "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial"
+repository = "https://github.com/passioncode-ai/fabric-switchboard"
+homepage = "https://passioncode.ai/switchboard/"
 publish = false
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
