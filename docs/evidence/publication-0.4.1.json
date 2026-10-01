@@ -1,0 +1,37 @@
+{
+  "checked_at": "2026-10-01T09:18:05.131908+00:00",
+  "anonymous": true,
+  "repository_private": false,
+  "default_branch": "main",
+  "release_url": "https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1",
+  "release_id": 400808288,
+  "prerelease": true,
+  "draft": false,
+  "tag": "v0.4.1-beta.1",
+  "tag_sha": "15851e31e69bc40322c42c48f726dad7798eae73",
+  "assets": [
+    "Fabric-Switchboard-0.4.1-macos-universal-receipt.json",
+    "Fabric-Switchboard-0.4.1-macos-universal.zip",
+    "Fabric-Switchboard-0.4.1-windows-x64-receipt.json",
+    "Fabric-Switchboard-0.4.1-windows-x64.zip",
+    "SHA256SUMS-0.4.1.txt"
+  ],
+  "downloads": [
+    {
+      "name": "Fabric-Switchboard-0.4.1-macos-universal.zip",
+      "url": "https://github.com/passioncode-ai/fabric-switchboard/releases/download/v0.4.1-beta.1/Fabric-Switchboard-0.4.1-macos-universal.zip",
+      "bytes": 25057577,
+      "asset_size": 25057577,
+      "sha256": "d5c4352359d4d1d5ae4e0e9618c6f239edbf1fe7c75012d7c83f516530e67007",
+      "matches_SHA256SUMS": true
+    },
+    {
+      "name": "Fabric-Switchboard-0.4.1-windows-x64.zip",
+      "url": "https://github.com/passioncode-ai/fabric-switchboard/releases/download/v0.4.1-beta.1/Fabric-Switchboard-0.4.1-windows-x64.zip",
+      "bytes": 6720475,
+      "asset_size": 6720475,
+      "sha256": "f6719bdddb8ab46ed0bf03ff148fa37ee7fa9b3742b9398a62cb8d335b111bd3",
+      "matches_SHA256SUMS": true
+    }
+  ]
+}

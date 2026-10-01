@@ -131,6 +131,15 @@ Install the release, open the app once, then `security dump-keychain -a
 `ai.passioncode.fabric-switchboard.shared` with both `ai.passioncode.fabric-switchboard` and
 `switchboard` requirements, and `switchboard mcp` from an agent shows no dialog.
 
+**Run 2026-10-01 with v0.4.1-beta.1** ([release record](evidence/release-0.4.1.md#local-installation-and-keychain-acceptance-sb-12)):
+before the first launch 6 items under the legacy service, trusting two `cdhash` builds and the
+team-signed app but not the CLI; after it 0 legacy items and 11 under `….shared` (the 6 moved plus
+5 accounts added in the app meanwhile), every one trusting both the team-signed
+`ai.passioncode.fabric-switchboard` and `switchboard` requirements. The installed CLI's `status`,
+`usage`, `current`, `accounts list` and a `switchboard mcp --read-only` round trip ran with no
+`SecurityAgent` process. Whether the move showed a dialog on screen is the operator's observation;
+the legacy items already trusted the app, so step 1 predicts none.
+
 ## Sources (fetched 2026-10-01)
 
 - [TN3137: On Mac keychain APIs and implementations](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) (revision history to 2026-09-24)

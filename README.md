@@ -8,7 +8,7 @@ request. It is a desktop app plus the `switchboard` command-line tool, for macOS
 Windows. It is Fabric's account tool and works on its own; built by
 [PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
 
-**Status: beta. [v0.4.0-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.0-beta.1)
+**Status: beta. [v0.4.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1)
 is published** (prerelease, macOS universal notarized by Apple + Windows x64 unsigned). Real
 provider login and end-to-end requests with live accounts are not yet verified.
 
@@ -24,7 +24,11 @@ Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and per
 accounts live in separate pools. In a managed session the selected account changes **from
 the next request**: a response already streaming keeps the identity it started with.
 
-Version 0.4.0 lets coding agents read remaining usage and switch the account of their
+Version 0.4.1 stops the repeated macOS Keychain dialogs: saved accounts move once, in the
+app, to `ai.passioncode.fabric-switchboard.shared` with an access list that trusts the app and
+its bundled CLI, and the CLI and MCP server never show a Keychain dialog
+([KEYCHAIN.md](docs/KEYCHAIN.md), [0.4.1 release record](docs/evidence/release-0.4.1.md)). It is
+the first release under the AGPL. Version 0.4.0 lets coding agents read remaining usage and switch the account of their
 managed session over MCP (`switchboard mcp`, 8 tools; the ordinary Claude Code login changes
 only with an explicit `global: true`), adds optional project rules and the Projects and Agents
 screens, ships the `switchboard` Claude Code plugin, and is the first notarized macOS build.
@@ -37,12 +41,14 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
 ## Quick start for a new teammate
 
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
-   (redirects to the [v0.4.0-beta.1 release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.0-beta.1)),
-   check it against `SHA256SUMS-0.4.0.txt` from the release
-   (`shasum -a 256 -c SHA256SUMS-0.4.0.txt --ignore-missing` → `OK`), then follow
+   (redirects to the [v0.4.1-beta.1 release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1)),
+   check it against `SHA256SUMS-0.4.1.txt` from the release
+   (`shasum -a 256 -c SHA256SUMS-0.4.1.txt --ignore-missing` → `OK`), then follow
    [docs/INSTALL.md](docs/INSTALL.md). The app is Developer ID signed, notarized and stapled
    (`spctl -a -vv "Fabric Switchboard.app"` → `accepted, source=Notarized Developer ID`); the
-   CLI beside it runs (`./switchboard --version` → `switchboard 0.4.0`).
+   CLI beside it runs (`./switchboard --version` → `switchboard 0.4.1`). Open the app once
+   after installing: it moves accounts saved by earlier versions, and macOS may ask at most
+   once per account during that move.
 2. **Configure:** nothing to set before first run. Accounts are added in the app or with
    `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
    sign-in and go to the OS vault, never into an environment variable or an argument.
@@ -53,13 +59,18 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
    skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
    then shows `switchboard … ✔ Connected`; a first call is the read-only
    `switchboard_accounts` tool (an empty vault answers `{"accounts":[]}`). To prove it with a
-   real client without touching your agent config or accounts, write a temporary
+   real client without changing your agent config or saved accounts, write a temporary
    `mcp.json` with `{"mcpServers":{"switchboard":{"command":"switchboard","args":["--data-dir","<absolute empty dir>","mcp","--read-only"]}}}`
    and run `claude -p "Call the switchboard_accounts tool once and reply with exactly its JSON result." --strict-mcp-config --mcp-config mcp.json --allowedTools mcp__switchboard__switchboard_accounts --max-turns 3`
    → `{"accounts":[]}` (run 2026-09-30 with the published 0.4.0 CLI:
-   [handoff](docs/handoffs/2026-09-30-agpl-standard.md#mcp-proof)). All agents and
+   [handoff](docs/handoffs/2026-09-30-agpl-standard.md#mcp-proof)). Even with `--read-only` and
+   an empty data dir, `switchboard_accounts` reads the current Claude Code and Codex sign-in
+   (on macOS the Claude Code Keychain item, through `security find-generic-password`) to report
+   which saved account is signed in; it writes, switches and prints nothing from it. 0.4.1
+   does not change this read: its Keychain change covers Switchboard's own items. All agents and
    tools: [docs/CLI.md](docs/CLI.md). Measured from the published archive:
-   [0.4.0 release record](docs/evidence/release-0.4.md#newcomer-path-from-the-published-release).
+   [0.4.0 release record](docs/evidence/release-0.4.md#newcomer-path-from-the-published-release);
+   0.4.1 from the published archive: [0.4.1 release record](docs/evidence/release-0.4.1.md#from-the-published-release).
 4. **Develop:** `npm ci`, then `./scripts/check.sh` (the gate) and `npm run app:dev`; the CLI is
    `cargo build --release --locked -p switchboard-cli` → `target/release/switchboard`. Start at
    [docs/HANDOFF.md](docs/HANDOFF.md), [AGENTS.md](AGENTS.md) and the layout table in
@@ -169,7 +180,7 @@ dependencies.
 
 Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
 available for use that does not meet the AGPL's terms — contact@passioncode.ai.
-Versions up to and including v0.4.0-beta.1 were released under PolyForm Noncommercial or Internal Use (v0.4.0-beta.1) and the MIT License (v0.3.1-beta.1 and earlier, commits up to and including `7c36f4a`); those releases keep their licence.
+v0.4.1-beta.1 is the first release under the AGPL. Versions up to and including v0.4.0-beta.1 were released under PolyForm Noncommercial or Internal Use (v0.4.0-beta.1) and the MIT License (v0.3.1-beta.1 and earlier, commits up to and including `7c36f4a`); those releases keep their licence.
 
 The built app and CLI include third-party components under their own licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are accepted under the

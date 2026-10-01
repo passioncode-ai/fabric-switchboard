@@ -6,7 +6,7 @@ managed sessions through a local proxy and rotates off an exhausted account.
 
 | Field | Value |
 |---|---|
-| Version | `0.4.0` (Switchboard 0.4.0-beta.1) |
+| Version | `0.4.1` (Switchboard 0.4.1-beta.1) |
 | Ships | `.mcp.json` (server `switchboard`, runs `switchboard mcp` over stdio) and the skill `switching-accounts` |
 | Skill purpose | read status and remaining usage honestly, switch a managed session's account, apply optional project rules and report them, change the ordinary Claude Code login only on the operator's explicit OK |
 | Mutations | only through Switchboard's own tools; nothing in the plugin writes files |
