@@ -1,4 +1,4 @@
-use crate::Credential;
+use crate::{keychain::Consent, Credential};
 use std::{collections::HashMap, sync::Mutex};
 
 pub trait Vault: Send + Sync {
@@ -37,20 +37,51 @@ impl Vault for MemoryVault {
     }
 }
 
-pub struct NativeVault;
+/// The platform vault: Keychain on macOS (see `keychain.rs`), DPAPI on Windows.
+pub struct NativeVault {
+    #[cfg(target_os = "macos")]
+    policy: crate::keychain::Policy<crate::keychain_macos::MacKeychain>,
+}
 impl Default for NativeVault {
     fn default() -> Self {
         Self::new()
     }
 }
 impl NativeVault {
+    /// For the CLI, the MCP server and `serve`: never shows a Keychain dialog.
     pub fn new() -> Self {
-        Self
+        Self::with_consent(Consent::Never)
+    }
+    /// For the desktop app: may ask once per item saved by an earlier version while moving
+    /// it to shared storage.
+    pub fn desktop() -> Self {
+        Self::with_consent(Consent::Desktop)
+    }
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    fn with_consent(consent: Consent) -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            let (build, backend) = crate::keychain_macos::MacKeychain::detect();
+            Self {
+                policy: crate::keychain::Policy::new(backend, build, consent),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        Self {}
     }
 }
 
-#[cfg(target_os = "macos")]
-const SERVICE: &str = "ai.passioncode.fabric-switchboard";
+/// A vault error as the store may show it: actionable Keychain messages pass through,
+/// anything else becomes `fallback`.
+pub(crate) fn surface(fallback: &'static str) -> impl Fn(String) -> String {
+    move |error| {
+        if crate::keychain::ACTIONABLE.contains(&error.as_str()) {
+            error
+        } else {
+            fallback.into()
+        }
+    }
+}
 
 #[cfg(target_os = "macos")]
 impl Vault for NativeVault {
@@ -58,8 +89,7 @@ impl Vault for NativeVault {
         if !crate::uuid_valid(id) {
             return Err("Invalid credential identifier".into());
         }
-        let data = security_framework::passwords::get_generic_password(SERVICE, id)
-            .map_err(|_| "Native credential storage unavailable")?;
+        let data = self.policy.get(id)?;
         if data.len() > 64 * 1024 {
             return Err("Stored credential is invalid".into());
         }
@@ -73,18 +103,13 @@ impl Vault for NativeVault {
         if data.len() > 64 * 1024 {
             return Err("Stored credential is too large".into());
         }
-        security_framework::passwords::set_generic_password(SERVICE, id, &data)
-            .map_err(|_| "Native credential storage unavailable".into())
+        self.policy.put(id, &data)
     }
     fn delete(&self, id: &str) -> Result<(), String> {
         if !crate::uuid_valid(id) {
             return Err("Invalid credential identifier".into());
         }
-        match security_framework::passwords::delete_generic_password(SERVICE, id) {
-            Ok(()) => Ok(()),
-            Err(e) if e.code() == -25300 => Ok(()), // errSecItemNotFound: retry-safe removal
-            Err(_) => Err("Native credential storage unavailable".into()),
-        }
+        self.policy.delete(id)
     }
 }
 #[cfg(not(any(target_os = "macos", windows)))]

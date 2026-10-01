@@ -34,6 +34,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-024 | Open the app and recover a delayed startup | validated |
 | SCN-025 | Keep an optional project rule in sight | draft |
 | SCN-026 | Connect a coding agent to Switchboard | draft |
+| SCN-027 | Keep saved accounts readable without repeated Keychain dialogs | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -513,3 +514,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test; browser demo `docs/evidence/design-0.4/agents-1280.png`.
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-3, REQ-5, REQ-6
+
+## SCN-027 — Keep saved accounts readable without repeated Keychain dialogs
+**Persona:** P-01
+**Goal:** Use the app and agents (`switchboard mcp`) on the same accounts without macOS asking for Keychain access again and again.
+**Preconditions:** macOS, the signed app in Applications; accounts saved by this or an earlier version.
+**Entry point:** opening the app; an agent calling the bundled CLI.
+**Steps:**
+1. Save or sign in to an account in the app → the CLI and later signed updates read it with no dialog.
+2. Open the app after updating from 0.4 or earlier → each account saved by an earlier version moves to shared storage; macOS asks at most once per account, and not at all for accounts the installed app could already read.
+3. An agent uses the CLI before the app has moved an account → the CLI shows no dialog and says to open the app once.
+**Alt paths:** Deny in the dialog → the account stays where it was and the app does not ask again until restart. A development build never reads the user's accounts.
+**Expected result:** After the move, no Keychain dialog during ordinary use by the app or the CLI.
+**UI elements:** macOS Keychain dialog (app only), status/error message.
+**States covered:** moved silently, moved after one consent, declined, CLI before the move, development build.
+**Errors & recovery:** Every refusal names the next step ([operations](../OPERATIONS.md)); a failed or unverified copy keeps the original.
+**Status:** draft
+**Meaning:** operator report of repeated Keychain dialogs (2026-10-01); design in [KEYCHAIN.md](../KEYCHAIN.md).
+**Coverage:** `crates/switchboard-core/src/keychain.rs` tests (fake Keychain), `keychain_macos.rs` throwaway-keychain tests, manual signed-bundle acceptance in KEYCHAIN.md; the operator's real items after the next release NOT_RUN.
+**Product:** unobserved
+**Traces:** REQ-004

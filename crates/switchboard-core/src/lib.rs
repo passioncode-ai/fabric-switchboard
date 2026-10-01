@@ -1,5 +1,9 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
 mod credential;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod keychain;
+#[cfg(target_os = "macos")]
+mod keychain_macos;
 mod persistence;
 pub mod private_fs;
 mod projects;
@@ -441,7 +445,7 @@ impl Store {
             let token_match = if !upsert || !both_known {
                 self.vault
                     .get(&a.id)
-                    .map_err(|_| "Credential storage unavailable")?
+                    .map_err(vault::surface("Credential storage unavailable"))?
                     .access_token
                     == credential.access_token
             } else {
@@ -461,7 +465,7 @@ impl Store {
             let old = self
                 .vault
                 .get(&account.id)
-                .map_err(|_| "Credential storage unavailable")?;
+                .map_err(vault::surface("Credential storage unavailable"))?;
             account.label = label.trim().into();
             account.kind = kind;
             account.identity = credential.account_id.clone();
@@ -514,7 +518,7 @@ impl Store {
         validate_snapshot(&candidate)?;
         self.vault
             .put(&account.id, &credential)
-            .map_err(|_| "Credential storage unavailable")?;
+            .map_err(vault::surface("Credential storage unavailable"))?;
         if self.publish(&mut state, candidate).is_err() {
             let restored = if let Some(old) = old_credential {
                 self.vault.put(&account.id, &old)
@@ -560,7 +564,7 @@ impl Store {
         let credential = self
             .vault
             .get(id)
-            .map_err(|_| "Credential storage unavailable")?;
+            .map_err(vault::surface("Credential storage unavailable"))?;
         credential.validate(a.provider, a.kind)?;
         Ok(credential)
     }
@@ -620,7 +624,7 @@ impl Store {
             let current = self
                 .vault
                 .get(id)
-                .map_err(|_| "Credential storage unavailable")?;
+                .map_err(vault::surface("Credential storage unavailable"))?;
             if current.access_token != expected.access_token
                 || current.expires_at != expected.expires_at
             {
@@ -661,7 +665,7 @@ impl Store {
         }
         self.vault
             .delete(id)
-            .map_err(|_| "Credential storage unavailable")?;
+            .map_err(vault::surface("Credential storage unavailable"))?;
         let mut candidate = state.clone();
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
@@ -724,10 +728,9 @@ impl Store {
         if !a.enabled {
             return Err("Account is disabled".into());
         }
-        let c = self
-            .vault
-            .get(&a.id)
-            .map_err(|_| "Credential storage unavailable; reauthenticate this account")?;
+        let c = self.vault.get(&a.id).map_err(vault::surface(
+            "Credential storage unavailable; reauthenticate this account",
+        ))?;
         c.validate(a.provider, a.kind)?;
         if c.expires_at.is_some_and(|t| t <= now()) {
             return Err("Credential expired; reauthenticate this account".into());
@@ -795,7 +798,7 @@ impl Store {
             let current = self
                 .vault
                 .get(id)
-                .map_err(|_| "Credential storage unavailable")?;
+                .map_err(vault::surface("Credential storage unavailable"))?;
             if current.access_token != expected.access_token
                 || current.expires_at != expected.expires_at
             {

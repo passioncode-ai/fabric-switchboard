@@ -231,7 +231,7 @@ fn main() {
                 ))
             } else {
                 let root = default_root().map_err(std::io::Error::other)?;
-                tauri::async_runtime::block_on(Owner::native(root))
+                tauri::async_runtime::block_on(Owner::desktop(root))
             }
             .map_err(std::io::Error::other)?;
             app.manage(owner);
