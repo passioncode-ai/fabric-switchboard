@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/passioncode-ai/fabric-switchboard",
+  "sources": [
+    {
+      "path": "docs/evidence/backlog.md",
+      "goal": "workflow-control",
+      "kind": "tasks",
+      "format": "table",
+      "idColumn": "ID",
+      "titleColumn": "Item",
+      "statusColumn": "Status"
+    }
+  ]
+}

@@ -10,7 +10,9 @@
   "guardedFiles": [
     "docs/evidence/backlog.md",
     "docs/evidence/verification.md",
-    "docs/HANDOFF.md"
+    "docs/HANDOFF.md",
+    "docs/backlog-sources.json",
+    "docs/backlog.md"
   ],
   "claimTags": {},
   "gates": [

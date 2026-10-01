@@ -1,4 +1,4 @@
-<!-- agent-sync:generated source=fabric-switchboard@12f9f06 cfg=168e8c617e19 at=2026-09-30T23:50:30Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
+<!-- agent-sync:generated source=fabric-switchboard@e317d6c cfg=28cf78799c8a at=2026-10-01T15:52:10Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
 
 # How documentation and coordination work in fabric-switchboard
 
@@ -30,6 +30,8 @@ None declared here. Ids live in the parent repository; reserve them there.
 - `docs/evidence/backlog.md`
 - `docs/evidence/verification.md`
 - `docs/HANDOFF.md`
+- `docs/backlog-sources.json`
+- `docs/backlog.md`
 
 ### Gates run before a change is considered done
 
