@@ -3480,9 +3480,11 @@ name = "switchboard-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "core-foundation",
  "fs2",
  "libc",
  "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "tempfile",

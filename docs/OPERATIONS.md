@@ -8,7 +8,7 @@ GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passionc
 
 | Data | Location and protection | Lifetime |
 |---|---|---|
-| Canonical credential | Keychain service `ai.passioncode.fabric-switchboard`, UUID account | until explicit account removal |
+| Canonical credential (macOS) | login keychain, service `ai.passioncode.fabric-switchboard.shared`, UUID account; access list trusts the app and its bundled CLI by signature ([KEYCHAIN.md](KEYCHAIN.md)). Development builds use `….development`. Items under the 0.4 service `ai.passioncode.fabric-switchboard` are moved on first read | until explicit account removal |
 | Windows canonical credential | `vault/<UUID>.dpapi`, DPAPI CurrentUser encrypted, user-only protected DACL | until explicit account removal; bound to Windows user/machine context |
 | Account metadata/routes/events | atomic JSON beneath app data, private files | persisted; bounded event history |
 | Isolated CLI working copy | `homes/<account UUID>/`, 0700 directory, 0600 auth/settings | retained for history; removed by account removal while idle |
@@ -25,7 +25,7 @@ Windows private filesystem operations use current-user DACLs, reject reparse poi
 ## Ordinary failures
 
 - Missing CLI: install the official provider CLI, make it available in PATH, `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin`, then retry. This app never installs it automatically.
-- Keychain refused: grant access through normal macOS controls and retry. There is no plaintext vault fallback.
+- Keychain refused: the app and the CLI never ask during ordinary use; they return a message instead. "Saved by an earlier Switchboard" → open the app once; it moves each such account, asking at most once per account, and not again after Deny until it restarts. "This copy of Switchboard" → unlock the login keychain or use the app from Applications. "Development build" → that build sees only what it saved itself; use the signed app. There is no plaintext vault fallback. Design and evidence: [KEYCHAIN.md](KEYCHAIN.md).
 - Windows vault refused: use the original Windows user context and verify profile access. Copying a DPAPI blob to another user is not an account migration method; reauthenticate instead.
 - Control capability refused: stop its GUI/serve owner, then restart it to rotate the capability. Do not bypass a live owner with manual file edits. An uncertain mutation result requires inspecting state before retrying.
 - Selected account removal refused: select another in the same provider/pool, or disable this one first. Removal is local, never a provider-side revocation.

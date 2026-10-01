@@ -330,8 +330,14 @@ impl Owner {
             _monitor: monitor,
         })
     }
+    /// `switchboard serve`: native sources, and a vault that never shows a Keychain dialog.
     pub async fn native(root: PathBuf) -> Result<Self, String> {
         Self::start_with_sources(root, Arc::new(NativeVault::new()), true).await
+    }
+    /// The desktop app: as `native`, and the vault may ask once per item saved by an
+    /// earlier version while moving it to shared storage (docs/KEYCHAIN.md).
+    pub async fn desktop(root: PathBuf) -> Result<Self, String> {
+        Self::start_with_sources(root, Arc::new(NativeVault::desktop()), true).await
     }
 }
 
