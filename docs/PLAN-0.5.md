@@ -175,3 +175,20 @@ line goes to argv as hex, exactly as Claude Code does; no prompt-free alternativ
 | Usage-probe `Retry-After` (report #14) | done in this run (REQ-40), board SB-18 closed |
 | Release 0.5.1-beta.1 | in progress → board SB-19 |
 | Live acceptance of 0.5.1 on the operator's Mac beside a running Claude Swap | open → board SB-15 (extended) |
+
+## 0.5.2 — the last rows of the comparison
+
+Report rows #16 and #19–#22 were in the working gap table but missing from the published one
+(correction in the report). Two are code; three are recorded decisions.
+
+| REQ | Requirement (report row) | Verified by |
+|---|---|---|
+| REQ-49 | `invalid_client` from the token endpoint holds every renewal for an hour, blames no account (no dead lineage, no backoff), then one grant tests the client again; `MonitorStatus.renewal_blocked` and a caption on the Automatic switching bar say so (#16) | `a_refused_client_holds_every_renewal_without_blaming_an_account`, `a_refused_client_after_the_hold_is_tried_once_more` (mutation: classifying it as transient fails both) |
+| REQ-50 | A `~/.claude.json` a switch creates from nothing carries `hasCompletedOnboarding: true`; an existing config is never given it (#20) | `a_config_created_by_a_switch_skips_onboarding_and_an_existing_one_is_kept` |
+
+Recorded, not built:
+- **#19** isolated homes stay minimal by contract (SPEC §8). Sharing user-scope settings, skills
+  or MCP servers into them is the operator's decision: board SB-20.
+- **#21** the adoption delay is a live measurement: board SB-06.
+- **#22** a `.prev` copy is declined. Backups keep ten generations, and kept successors cover the
+  renewal gap.

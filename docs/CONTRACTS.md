@@ -85,3 +85,8 @@ Behaviour: [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md); decisions and REQ 
 - `switchboard_proxy::probe_usage_detailed -> Result<Usage, ProbeFailure { message, rate_limited }>`; `rate_limited` is `Some(Some(seconds))` for a 429 with a numeric `Retry-After`, `Some(None)` without one. `probe_usage` keeps its `Result<Usage, String>` shape.
 - `<data>/renewal-state.json` keeps fingerprints of rejected refresh lineages (SHA-256, never the token) so a restart does not retry them.
 - Backups (0.5) go to `SWITCHBOARD_BACKUP_DIR` when absolute, else `Fabric Switchboard Backups` beside the data folder (`~/Library/Application Support` on macOS, `%APPDATA%` on Windows), so removing the data folder keeps them (`backup_dir`).
+
+## 0.5.2 additions
+
+- `MonitorStatus` adds `renewal_blocked: bool` — true for an hour after the token endpoint answered `invalid_client`; no renewal is attempted meanwhile. Nothing new is journaled, so a 0.5.1 binary still opens the store.
+- A `~/.claude.json` created by a native switch carries `hasCompletedOnboarding: true`.
