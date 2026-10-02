@@ -148,3 +148,7 @@ the legacy items already trusted the app, so step 1 predicts none.
 - [keychain-access-groups entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/keychain-access-groups)
 - [SecAccessCreate](<https://developer.apple.com/documentation/security/secaccesscreate(_:_:_:)>), [SecTrustedApplicationCreateFromPath](<https://developer.apple.com/documentation/security/sectrustedapplicationcreatefrompath(_:_:)>), [kSecAttrAccess](https://developer.apple.com/documentation/security/ksecattraccess)
 - [SecKeychainSetUserInteractionAllowed](<https://developer.apple.com/documentation/security/seckeychainsetuserinteractionallowed(_:)>), [kSecUseDataProtectionKeychain](https://developer.apple.com/documentation/security/ksecusedataprotectionkeychain)
+
+## Related items added in 0.5
+
+Not account storage, and outside the design above: the backup key `ai.passioncode.fabric-switchboard.backup-key` / `v1` and Claude Code's own `Claude Code-credentials` items are reached only through `/usr/bin/security`, so they trust that executable rather than the app ([PLAN-0.5](PLAN-0.5.md), [OPERATIONS](OPERATIONS.md)).

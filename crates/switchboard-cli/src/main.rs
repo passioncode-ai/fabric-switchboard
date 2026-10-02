@@ -72,6 +72,11 @@ enum Command {
         #[command(subcommand)]
         command: Project,
     },
+    /// Encrypted account backups in ~/Documents/Fabric Switchboard Backups (this machine's key).
+    Backup {
+        #[command(subcommand)]
+        command: Backup,
+    },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
         /// List only the tools that read: status, accounts, usage, project rules.
@@ -209,6 +214,15 @@ enum RotationTarget {
     ClaudeCli,
 }
 #[derive(Subcommand)]
+enum Backup {
+    /// The backup folder and the backups in it, newest first.
+    List,
+    /// Write a backup now.
+    Now,
+    /// Add the accounts of one backup that this store does not hold; never replaces newer ones.
+    Restore { file: String },
+}
+#[derive(Subcommand)]
 enum Login {
     Begin {
         #[arg(long, value_enum)]
@@ -342,6 +356,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Current => Operation::CurrentAccounts,
+        Command::Backup { command } => match command {
+            Backup::List => Operation::Backups,
+            Backup::Now => Operation::BackupNow,
+            Backup::Restore { file } => Operation::RestoreBackup { file: file.clone() },
+        },
         Command::Rotation {
             command: Rotation::Status,
         } => Operation::Snapshot,
@@ -503,6 +522,26 @@ fn print_result(value: &Value, cli: &Cli) {
     }
     let text = |v: &Value| v.as_str().unwrap_or("—").to_string();
     match &cli.command {
+        Command::Backup {
+            command: Backup::List,
+        } => {
+            println!("Folder: {}", text(&value["directory"]));
+            if let Some(error) = value["last_error"].as_str() {
+                println!("Last automatic backup failed: {error}");
+            }
+            let backups = value["backups"].as_array().cloned().unwrap_or_default();
+            if backups.is_empty() {
+                println!("No backups yet. Run 'switchboard backup now'.");
+            }
+            for b in backups {
+                println!(
+                    "{}  {}  {} accounts",
+                    text(&b["file"]),
+                    utc(&b["created_at"]),
+                    b["accounts"]
+                );
+            }
+        }
         Command::Accounts {
             command: Accounts::List,
         } => {

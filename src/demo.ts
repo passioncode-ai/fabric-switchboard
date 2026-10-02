@@ -47,9 +47,10 @@ export function createDemoAdapter(): Adapter {
   const logins = new Map<string, LoginInput & { started: number }>();
   let signIns = 0;
   const signInRequired = new Set(['demo-claude-meadow']);
+  const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];
   return {
     async currentAccounts() { return structuredClone(current); },
-    async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired] }; },
+    async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired], limited: [{ account_id: 'demo-claude-east', until: now() + 5400, source: 'claude_code' }] }; },
     async captureCurrent(input) {
       await pause();
       const source = current[input.provider];
@@ -133,6 +134,9 @@ export function createDemoAdapter(): Adapter {
     },
     async removeProjectRule(path, provider) { await pause(); const before = state.rules!.length; state.rules = state.rules!.filter((rule) => !(rule.path === path && rule.provider === provider)); if (state.rules.length === before) throw new Error('Project rule not found.'); log('project_rule', '', 'removed'); },
     async agentSetup() { return structuredClone(setup); },
+    async backups() { return { directory: '~/Documents/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },
+    async backupNow() { await pause(); const info = { file: `switchboard-backup-${now()}.json`, created_at: now(), accounts: state.accounts.length }; backups.unshift(info); backups.splice(10); return structuredClone(info); },
+    async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
     async probe(id) { await pause(); const item = enabled(id); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage.observed', id, 'Synthetic usage observation'); return structuredClone(usage); },
   };

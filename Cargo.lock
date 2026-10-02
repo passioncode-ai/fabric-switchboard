@@ -3483,6 +3483,7 @@ dependencies = [
  "core-foundation",
  "fs2",
  "libc",
+ "ring",
  "security-framework",
  "security-framework-sys",
  "serde",

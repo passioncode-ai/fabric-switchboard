@@ -11,7 +11,10 @@ export interface RotationPolicy {
   threshold_percent: number; hysteresis_percent: number; cooldown_seconds: number;
   max_age_seconds: number; last_switched_at: number | null;
 }
-export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
+export interface AccountLimit { account_id: string; until: number; source: 'managed' | 'claude_code' }
+export interface BackupInfo { file: string; created_at: number; accounts: number }
+export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null }
+export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number }
 export interface Account {
@@ -49,5 +52,8 @@ export interface Adapter {
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;
   removeProjectRule(path: string, provider: Provider): Promise<unknown>;
   agentSetup(): Promise<AgentSetup>;
+  backups(): Promise<BackupStatus>;
+  backupNow(): Promise<BackupInfo | null>;
+  restoreBackup(file: string): Promise<{ added: number; skipped: number; failed: number }>;
   linkCli(): Promise<{ linked_cli: string }>;
 }

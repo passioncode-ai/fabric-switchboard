@@ -1,4 +1,5 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
+pub mod backup;
 mod credential;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod keychain;
@@ -161,6 +162,8 @@ pub struct Store {
     _lock: File,
     vault: Arc<dyn Vault>,
     state: Mutex<Snapshot>,
+    /// Counts changes a backup must capture: credentials, accounts and policies — not quota.
+    changes: std::sync::atomic::AtomicU64,
 }
 
 pub(crate) fn now() -> i64 {
@@ -351,6 +354,7 @@ impl Store {
             _lock: lock,
             vault,
             state: Mutex::new(state),
+            changes: Default::default(),
         })
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
@@ -366,6 +370,28 @@ impl Store {
     }
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         Ok(self.lock()?.clone())
+    }
+    /// Increases whenever a backup would differ: a credential, account or policy changed.
+    pub fn changes(&self) -> u64 {
+        self.changes.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    pub(crate) fn changed(&self) {
+        self.changes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// Metadata plus every credential that can be read, for a backup. Never serialize this
+    /// pair anywhere but into the sealed backup payload.
+    pub fn export(&self) -> Result<(Snapshot, BTreeMap<String, Credential>), String> {
+        let snapshot = self.snapshot()?;
+        let mut credentials = BTreeMap::new();
+        for a in &snapshot.accounts {
+            if let Ok(credential) = self.vault.get(&a.id) {
+                if credential.validate(a.provider, a.kind).is_ok() {
+                    credentials.insert(a.id.clone(), credential);
+                }
+            }
+        }
+        Ok((snapshot, credentials))
     }
     pub fn add(
         &self,
@@ -530,6 +556,7 @@ impl Store {
             restored.map_err(|_| "Storage failure; credential cleanup requires recovery")?;
             return Err("Account metadata could not be saved".into());
         }
+        self.changed();
         Ok(account)
     }
     pub fn match_external(
@@ -614,6 +641,7 @@ impl Store {
         if updated.is_empty() {
             return Err("Credential changed during refresh".into());
         }
+        self.changed();
         Ok(updated)
     }
     pub fn usage_health(
@@ -699,7 +727,9 @@ impl Store {
             candidate.routes.retain(|_, value| value != id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
-        self.publish(&mut state, candidate)
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// Vault deletion precedes metadata publication. On disk failure the visible account
     /// remains, but its missing credential prevents use. Retrying removal is safe.
@@ -718,7 +748,9 @@ impl Store {
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
         append_event(&mut candidate, "account_removed", Some(id), "success");
-        self.publish(&mut state, candidate)
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     pub fn select(&self, provider: Provider, pool: &str, id: &str) -> Result<(), String> {
         self.select_transaction(provider, pool, id, None)

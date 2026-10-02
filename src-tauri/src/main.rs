@@ -169,6 +169,21 @@ async fn login_status(login_id: String, state: State<'_, Owner>) -> Result<Value
         .await
 }
 #[tauri::command]
+async fn backups(state: State<'_, Owner>) -> Result<Value, String> {
+    state.runtime.execute(Operation::Backups).await
+}
+#[tauri::command]
+async fn backup_now(state: State<'_, Owner>) -> Result<Value, String> {
+    state.runtime.execute(Operation::BackupNow).await
+}
+#[tauri::command]
+async fn restore_backup(file: String, state: State<'_, Owner>) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::RestoreBackup { file })
+        .await
+}
+#[tauri::command]
 async fn cancel_login(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
     state
         .runtime
@@ -263,6 +278,9 @@ fn main() {
             begin_login,
             finish_login,
             login_status,
+            backups,
+            backup_now,
+            restore_backup,
             cancel_login,
             probe_usage,
             set_project_rule,
