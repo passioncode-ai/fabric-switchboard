@@ -4,6 +4,12 @@
 
 Written by `agent_sync.py merge`. Entries newer than 7 days keep their detail; older ones are compacted to one line each on the next write. Read it before starting work: it is the shortest answer to *what landed while I was on my branch*.
 
+### 2026-10-02T23:16:14Z · `switchboard-0.5.1` · agent/switchboard-0.5.1 → main · `af1211d`
+- run: r-47aaa5aa6
+- files: 41 (41 files changed, 5065 insertions(+), 280 deletions(-))
+- conflicts: none
+- summary: 0.5.1: Claude Swap parity (MCP keys, outgoing generation under locks, lineage, cancellation-safe grants, owner routing, Claude Swap coexistence, stale locks, idle live renewal) and review fixes; PR #20
+
 ### 2026-10-02T22:01:42Z · `switchboard-0.5.0-record` · agent/switchboard-0.5.0-record → main · `8ce6c9e`
 - run: r-47aaa5aa6
 - files: 8 (8 files changed, 157 insertions(+), 7 deletions(-))
