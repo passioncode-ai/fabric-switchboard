@@ -575,7 +575,11 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
                     CAP,
                 )?
                 .ok_or("Backup config missing.")?;
-            let profile = claude_profile(&secret, &cfg, Some(label))?;
+            // A `cswap run` profile can hold a newer generation than the backup (Claude Swap
+            // `session.py:272-286`); the one that expires later is the live lineage.
+            let newest = session_credential(reader, root, slot, mac)
+                .filter(|session| expires(session) > expires(&secret));
+            let profile = claude_profile(newest.as_deref().unwrap_or(&secret), &cfg, Some(label))?;
             if profile.identity.email.as_deref() != Some(email)
                 || text(row, "organizationUuid")
                     .as_ref()
@@ -642,6 +646,41 @@ fn running_swap_line(line: &str) -> bool {
             || word == "claude_swap"
             || word.ends_with("claude_swap/__main__.py")
     })
+}
+/// `claudeAiOauth.expiresAt` of a credential, 0 when absent.
+fn expires(auth: &[u8]) -> i64 {
+    parse(auth)
+        .ok()
+        .and_then(|v| {
+            v.pointer("/claudeAiOauth/expiresAt")
+                .and_then(Value::as_i64)
+        })
+        .unwrap_or(0)
+}
+/// The credential of Claude Swap's session profile for `slot` (`sessions/<slot>-<slug>/`): its
+/// plaintext seed or, once Claude Code took it over, the Keychain item for that config dir.
+fn session_credential(reader: &dyn Reader, root: &Path, slot: &str, mac: bool) -> Option<Vec<u8>> {
+    let sessions = root.join("sessions");
+    let entries = fs::read_dir(&sessions).ok()?;
+    let prefix = format!("{slot}-");
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(&prefix) || !segment(&name) {
+            continue;
+        }
+        let home = sessions.join(&name);
+        if mac {
+            if let Ok(Some(bytes)) =
+                reader.keychain(&service(&home.to_string_lossy()), &username().ok()?)
+            {
+                return Some(bytes);
+            }
+        }
+        if let Ok(Some(bytes)) = reader.read(&home.join(".credentials.json"), SECRET_CAP) {
+            return Some(bytes);
+        }
+    }
+    None
 }
 pub fn read_claude_swap() -> Result<ImportBatch, String> {
     let root = dirs::home_dir()
@@ -1089,6 +1128,45 @@ fn refuse_own_home(home: &Path) -> Result<(), String> {
         return Err("This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.".into());
     }
     Ok(())
+}
+/// Claude Code's own credential locks, held for a renewal of the account it is signed in to
+/// while it is idle — the only way two refreshers of the live lineage cannot race (Claude Swap
+/// refreshes the active account the same way, `switcher.py:4072-4300`).
+pub struct LiveLock {
+    context: Context,
+    locks: Locks,
+}
+/// The access and refresh token of a Claude credential item.
+pub fn claude_auth_tokens(auth: &[u8]) -> Option<(String, Option<String>)> {
+    let value = parse(auth).ok()?;
+    let oauth = value.get("claudeAiOauth")?;
+    Some((
+        oauth.get("accessToken")?.as_str()?.to_owned(),
+        oauth
+            .get("refreshToken")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    ))
+}
+pub fn lock_live() -> Result<LiveLock, String> {
+    let context = context(Provider::Claude, None)?;
+    checked_path(&context.home)?;
+    refuse_own_home(&context.home)?;
+    let locks = Locks::acquire(&context)?;
+    Ok(LiveLock { context, locks })
+}
+impl LiveLock {
+    /// The live credential item, read under the locks.
+    pub fn read(&self) -> Result<Option<Vec<u8>>, String> {
+        self.locks.ensure()?;
+        current_auth(&Native, &self.context)
+    }
+    /// Replaces the live item; only while every lock is still held.
+    pub fn write(&self, auth: &[u8]) -> Result<(), String> {
+        self.locks.ensure()?;
+        Native.auth_write(&self.context, Some(auth))?;
+        self.locks.ensure()
+    }
 }
 pub fn activate_claude(
     credential: &Credential,
@@ -1635,6 +1713,46 @@ mod tests {
         assert!(!running_swap_line(
             "/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard"
         ));
+    }
+    #[test]
+    fn a_newer_session_profile_generation_wins_over_the_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let f = Fixture::new();
+        f.put(
+            &root.join("sequence.json"),
+            br#"{"accounts":{"8":{"email":"a@example.test"}}}"#,
+        );
+        let older = serde_json::to_vec(&json!({"claudeAiOauth":{"accessToken":"backup","refreshToken":"backup-r","expiresAt":1000i64}})).unwrap();
+        let newer = serde_json::to_vec(&json!({"claudeAiOauth":{"accessToken":"session","refreshToken":"session-r","expiresAt":2000i64}})).unwrap();
+        f.put(
+            &root.join("credentials/.creds-8-a@example.test.enc"),
+            STANDARD.encode(&older).as_bytes(),
+        );
+        f.put(
+            &root.join("configs/.claude-config-8-a@example.test.json"),
+            &config("a@example.test"),
+        );
+        // The session folder must exist on disk for discovery; its file lives in the fixture.
+        let session = root.join("sessions/8-a_example.test");
+        fs::create_dir_all(&session).unwrap();
+        f.put(&session.join(".credentials.json"), &newer);
+        let batch = import(&f, root, false).unwrap();
+        assert_eq!(batch.profiles[0].credential.access_token, "session");
+        // An older session copy never replaces a newer backup.
+        f.put(
+            &session.join(".credentials.json"),
+            &serde_json::to_vec(
+                &json!({"claudeAiOauth":{"accessToken":"stale","expiresAt":10i64}}),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            import(&f, root, false).unwrap().profiles[0]
+                .credential
+                .access_token,
+            "backup"
+        );
     }
     #[test]
     fn backup_file_precedes_keychain() {

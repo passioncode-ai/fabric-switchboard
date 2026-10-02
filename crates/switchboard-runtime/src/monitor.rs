@@ -50,6 +50,14 @@ impl MonitorHandle {
                         .then(|| crate::external::read_claude_swap().ok().map(|b| b.profiles))
                         .flatten();
                     let _mutation = runtime.mutations.lock().await;
+                    // Claude Code left its token expired: renew it under Claude Code's locks so
+                    // managed sessions and quota checks on that account keep working.
+                    crate::refresh::renew_idle_live(
+                        &runtime.store,
+                        runtime.native,
+                        &runtime.refresh,
+                    )
+                    .await;
                     crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
                     sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();

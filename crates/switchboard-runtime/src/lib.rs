@@ -208,6 +208,8 @@ impl Runtime {
     ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
         let proxy = ProxyHandle::start(store.clone()).await?;
+        let refresh = refresh::RefreshState::default();
+        refresh.remember_in(root.join("renewal-state.json"));
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -218,7 +220,7 @@ impl Runtime {
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
             native,
-            refresh: refresh::RefreshState::default(),
+            refresh,
             limits: limits::LimitState::default(),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -637,7 +639,18 @@ async fn execute(
         } => {
             let runtime = needs_owner()?;
             if mode == "isolated" {
-                refresh::ensure_fresh(&store, native, refresh_state, &id, false).await;
+                // An isolated session holds an access token only and is never renewed while it
+                // runs: start it with hours left, not minutes (report §P2-10).
+                refresh::learn_live_owner(&store, native, refresh_state).await;
+                let short = store
+                    .stored_credential(&id)
+                    .is_ok_and(|c| short_lived(&c, monitor::now()));
+                if refresh::ensure_fresh(&store, native, refresh_state, &id, short).await
+                    == refresh::Outcome::Active
+                {
+                    // The account Claude Code is on: its live token is the newest one.
+                    adopt_live(&store, native, refresh_state, &id);
+                }
             }
             let agent_tools =
                 launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;
@@ -827,6 +840,40 @@ fn activate_native(
         },
     );
     result
+}
+/// An isolated launch starts with at least this much token life (seconds).
+const ISOLATED_MIN_LIFE: i64 = 4 * 3600;
+fn short_lived(credential: &Credential, now: i64) -> bool {
+    credential
+        .expires_at
+        .is_some_and(|t| t - now < ISOLATED_MIN_LIFE)
+}
+/// Files the ordinary Claude Code's live credential under `id` when it is that account's own
+/// lineage — for launching the account Claude Code is on, whose stored copy may lag.
+fn adopt_live(store: &Store, native: NativeSources, state: &refresh::RefreshState, id: &str) {
+    let Ok(live) = (native.current)(Provider::Claude) else {
+        return;
+    };
+    let Some(account) = store
+        .snapshot()
+        .ok()
+        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
+    else {
+        return;
+    };
+    if account.external_identity.as_ref() != Some(&live.identity)
+        || refresh::lineage(store, state, &live.identity, &live.credential) != refresh::Lineage::Own
+    {
+        return;
+    }
+    let _ = store.upsert(
+        account.label,
+        account.provider,
+        account.kind,
+        account.pool,
+        live.credential,
+        Some(live.identity),
+    );
 }
 pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
 fn replace_native(
@@ -1366,6 +1413,19 @@ mod owner_tests {
             .execute(Operation::ActivateNative { id: a.id })
             .await
             .unwrap();
+    }
+    #[test]
+    fn an_isolated_launch_wants_hours_of_token_life() {
+        let mut c = credential("synthetic-a");
+        c.expires_at = Some(10_000 + 3 * 3600);
+        assert!(short_lived(&c, 10_000));
+        c.expires_at = Some(10_000 + 5 * 3600);
+        assert!(!short_lived(&c, 10_000));
+        c.expires_at = None;
+        assert!(
+            !short_lived(&c, 10_000),
+            "no expiry known: nothing to renew"
+        );
     }
     #[tokio::test]
     async fn workbench_metadata_stays_available_during_a_reserved_mutation() {
