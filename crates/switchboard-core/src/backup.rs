@@ -35,6 +35,15 @@ pub struct Info {
     pub file: String,
     pub created_at: i64,
     pub accounts: usize,
+    /// Accounts whose credential could not be read when this backup was made.
+    #[serde(default)]
+    pub missing: usize,
+    /// Written by this store (the same data folder); only these are ever pruned.
+    #[serde(default)]
+    pub own: bool,
+    /// Sealed under this machine's key: Restore can open it.
+    #[serde(default)]
+    pub openable: bool,
 }
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Restored {
@@ -50,6 +59,11 @@ struct Envelope {
     version: u32,
     created_at: i64,
     accounts: usize,
+    missing: usize,
+    /// The writing store's id: pruning is per store, never across stores or machines.
+    store: String,
+    /// First 16 hex digits of SHA-256 of the key: a cheap "can this machine open it".
+    key: String,
     nonce: String,
     data: String,
 }
@@ -61,7 +75,7 @@ struct Payload {
     credentials: BTreeMap<String, Credential>,
 }
 
-fn key(keys: &dyn BackupKey, create: bool) -> Result<LessSafeKey, String> {
+fn key(keys: &dyn BackupKey, create: bool) -> Result<(LessSafeKey, String), String> {
     let bytes = match keys.load()? {
         Some(bytes) => bytes,
         None if !create => return Err(FOREIGN.into()),
@@ -77,12 +91,21 @@ fn key(keys: &dyn BackupKey, create: bool) -> Result<LessSafeKey, String> {
             }
         }
     };
-    Ok(LessSafeKey::new(
-        UnboundKey::new(&AES_256_GCM, &bytes).map_err(|_| UNAVAILABLE)?,
+    Ok((
+        LessSafeKey::new(UnboundKey::new(&AES_256_GCM, &bytes).map_err(|_| UNAVAILABLE)?),
+        key_id(&bytes),
     ))
 }
-fn aad(created_at: i64) -> Vec<u8> {
-    format!("{FORMAT}:v{VERSION}:{created_at}").into_bytes()
+fn key_id(bytes: &[u8; 32]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, bytes)
+        .as_ref()
+        .iter()
+        .take(8)
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+fn aad(created_at: i64, store: &str, accounts: usize, missing: usize) -> Vec<u8> {
+    format!("{FORMAT}:v{VERSION}:{created_at}:{store}:{accounts}:{missing}").into_bytes()
 }
 fn file_name(created_at: i64) -> String {
     format!("{PREFIX}{created_at}.json")
@@ -105,6 +128,8 @@ pub fn write(
     if credentials.is_empty() {
         return Ok(None);
     }
+    let missing = snapshot.accounts.len() - credentials.len();
+    let store_id = store.backup_id()?;
     let accounts: Vec<Account> = snapshot
         .accounts
         .into_iter()
@@ -117,7 +142,7 @@ pub fn write(
         credentials,
     })
     .map_err(|_| UNAVAILABLE)?;
-    let key = key(keys, true)?;
+    let (key, key_id) = key(keys, true)?;
     let mut nonce = [0u8; NONCE_LEN];
     SystemRandom::new()
         .fill(&mut nonce)
@@ -125,7 +150,7 @@ pub fn write(
     let mut sealed = payload;
     key.seal_in_place_append_tag(
         Nonce::assume_unique_for_key(nonce),
-        Aad::from(aad(now)),
+        Aad::from(aad(now, &store_id, count, missing)),
         &mut sealed,
     )
     .map_err(|_| UNAVAILABLE)?;
@@ -134,25 +159,47 @@ pub fn write(
         version: VERSION,
         created_at: now,
         accounts: count,
+        missing,
+        store: store_id.clone(),
+        key: key_id.clone(),
         nonce: STANDARD.encode(nonce),
         data: STANDARD.encode(&sealed),
     };
     let bytes = serde_json::to_vec_pretty(&envelope).map_err(|_| UNAVAILABLE)?;
     private_fs::private_write(&dir.join(file_name(now)), &bytes)?;
-    prune(dir, KEEP);
+    prune(dir, &store_id, KEEP);
     Ok(Some(Info {
         file: file_name(now),
         created_at: now,
         accounts: count,
+        missing,
+        own: true,
+        openable: true,
     }))
 }
 
-/// Backups in `dir`, newest first; unreadable files are left out, never deleted.
-pub fn list(dir: &Path) -> Vec<Info> {
+/// Backups in `dir`, newest first, marked as this store's and as openable with this
+/// machine's key; unreadable files are left out, never deleted. A missing key is not created.
+pub fn list(dir: &Path, store: &Store, keys: &dyn BackupKey) -> Vec<Info> {
+    let own = store.backup_id().ok();
+    let key = keys.load().ok().flatten().map(|k| key_id(&k));
+    envelopes(dir)
+        .into_iter()
+        .map(|(name, e)| Info {
+            file: name,
+            created_at: e.created_at,
+            accounts: e.accounts,
+            missing: e.missing,
+            own: own.as_deref() == Some(e.store.as_str()),
+            openable: key.as_deref() == Some(e.key.as_str()),
+        })
+        .collect()
+}
+fn envelopes(dir: &Path) -> Vec<(String, Envelope)> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return vec![];
     };
-    let mut found: Vec<Info> = entries
+    let mut found: Vec<(String, Envelope)> = entries
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().to_str()?.to_owned();
@@ -161,20 +208,34 @@ pub fn list(dir: &Path) -> Vec<Info> {
             }
             let bytes = private_fs::read_private(&entry.path(), MAX_FILE).ok()?;
             let envelope: Envelope = serde_json::from_slice(&bytes).ok()?;
-            (envelope.format == FORMAT && envelope.version == VERSION).then_some(Info {
-                file: name,
-                created_at: envelope.created_at,
-                accounts: envelope.accounts,
-            })
+            (envelope.format == FORMAT && envelope.version == VERSION).then_some((name, envelope))
         })
         .collect();
-    found.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    found.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
     found
 }
 
-fn prune(dir: &Path, keep: usize) {
-    for old in list(dir).into_iter().skip(keep) {
-        let _ = std::fs::remove_file(dir.join(old.file));
+/// Keeps this store's newest `keep`, and always its most complete one: a run of partial
+/// backups (an account unreadable for a while) never pushes out the last complete copy.
+/// Other stores' and other machines' files are never touched.
+fn prune(dir: &Path, store: &str, keep: usize) {
+    let own: Vec<(String, Envelope)> = envelopes(dir)
+        .into_iter()
+        .filter(|(_, e)| e.store == store)
+        .collect();
+    let best = own
+        .iter()
+        .max_by(|a, b| {
+            a.1.accounts
+                .cmp(&b.1.accounts)
+                .then(b.1.missing.cmp(&a.1.missing))
+                .then(a.1.created_at.cmp(&b.1.created_at))
+        })
+        .map(|(name, _)| name.clone());
+    for (name, _) in own.into_iter().skip(keep) {
+        if Some(&name) != best.as_ref() {
+            let _ = std::fs::remove_file(dir.join(name));
+        }
     }
 }
 
@@ -206,9 +267,15 @@ pub fn restore(
         .decode(&envelope.data)
         .map_err(|_| "This file is not a Switchboard backup.")?;
     let plain = key(keys, false)?
+        .0
         .open_in_place(
             Nonce::assume_unique_for_key(nonce),
-            Aad::from(aad(envelope.created_at)),
+            Aad::from(aad(
+                envelope.created_at,
+                &envelope.store,
+                envelope.accounts,
+                envelope.missing,
+            )),
             &mut sealed,
         )
         .map_err(|_| FOREIGN)?;
@@ -221,6 +288,12 @@ pub fn restore(
     };
     let existing = store.snapshot()?;
     for account in payload.accounts {
+        let token = payload
+            .credentials
+            .get(&account.id)
+            .map(|c| c.access_token.as_str());
+        // Same rule as `upsert` when identities are unknown: the same token in the same
+        // provider and pool is the same account, so a second restore changes nothing.
         let known = existing.accounts.iter().any(|a| a.id == account.id)
             || account.external_identity.as_ref().is_some_and(|identity| {
                 store
@@ -228,6 +301,15 @@ pub fn restore(
                     .ok()
                     .flatten()
                     .is_some()
+            })
+            || existing.accounts.iter().any(|a| {
+                a.provider == account.provider
+                    && a.pool == account.pool
+                    && token.is_some_and(|t| {
+                        store
+                            .stored_credential(&a.id)
+                            .is_ok_and(|c| c.access_token == t)
+                    })
             });
         if known {
             result.skipped += 1;
@@ -331,20 +413,21 @@ fn decode_key(text: &[u8]) -> Option<[u8; 32]> {
     Some(key)
 }
 
-/// The platform's key, when this platform has one.
-pub fn platform_key() -> Option<std::sync::Arc<dyn BackupKey>> {
+/// The platform's key, when this platform has one. On Windows the DPAPI-sealed key sits in
+/// the backup folder itself, outside the app's data folder, so reinstalling keeps it.
+pub fn platform_key(dir: &Path) -> Option<std::sync::Arc<dyn BackupKey>> {
     #[cfg(target_os = "macos")]
     {
+        let _ = dir;
         Some(std::sync::Arc::new(KeychainKey))
     }
     #[cfg(windows)]
     {
-        let root = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
-            .join("ai.passioncode.fabric-switchboard");
-        Some(std::sync::Arc::new(DpapiKey(root.join("backup.key.dpapi"))))
+        Some(std::sync::Arc::new(DpapiKey(dir.join(".backup-key.dpapi"))))
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
+        let _ = dir;
         None
     }
 }
@@ -357,6 +440,9 @@ mod tests {
 
     #[derive(Default, Clone)]
     struct Keys(Arc<Mutex<Option<[u8; 32]>>>);
+    fn names(dir: &Path, store: &Store, keys: &Keys) -> Vec<Info> {
+        list(dir, store, keys)
+    }
     impl BackupKey for Keys {
         fn load(&self) -> Result<Option<[u8; 32]>, String> {
             Ok(*self.0.lock().unwrap())
@@ -414,7 +500,7 @@ mod tests {
         assert_eq!(info.accounts, 2);
         let text = std::fs::read_to_string(backups.join(&info.file)).unwrap();
         assert!(!text.contains("token-a-secret") && !text.contains("synthetic-a@"));
-        assert_eq!(list(&backups), vec![info.clone()]);
+        assert_eq!(names(&backups, &original, &keys), vec![info.clone()]);
         // Reinstall: an empty store on the same machine.
         let fresh = store(&temp.path().join("two"));
         let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
@@ -507,7 +593,7 @@ mod tests {
         for at in 1..=12 {
             write(&store, &backups, &keys, at * 100).unwrap();
         }
-        let kept = list(&backups);
+        let kept = names(&backups, &store, &keys);
         assert_eq!(kept.len(), KEEP);
         assert_eq!(kept[0].created_at, 1200);
         assert_eq!(kept[KEEP - 1].created_at, 300);
@@ -517,6 +603,94 @@ mod tests {
             backups.join("notes.txt").exists(),
             "foreign files are never touched"
         );
+    }
+    #[test]
+    fn stores_sharing_a_folder_never_prune_each_other() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let one = store(&temp.path().join("one"));
+        let two = super::tests::store(&temp.path().join("two"));
+        save(&one, "synthetic-a", "token-a");
+        save(&two, "synthetic-b", "token-b");
+        for at in 1..=12 {
+            write(&one, &backups, &keys, at * 10).unwrap();
+            write(&two, &backups, &keys, at * 10 + 1).unwrap();
+        }
+        let all = list(&backups, &one, &keys);
+        assert_eq!(all.iter().filter(|i| i.own).count(), KEEP);
+        assert_eq!(
+            all.iter().filter(|i| !i.own).count(),
+            KEEP,
+            "the other store kept its ten"
+        );
+        assert!(all.iter().all(|i| i.openable));
+        // Another machine's key: listed, never openable.
+        let other = Keys(Arc::new(Mutex::new(Some([5u8; 32]))));
+        assert!(list(&backups, &one, &other).iter().all(|i| !i.openable));
+    }
+    #[test]
+    fn partial_backups_never_push_out_the_last_complete_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open(temp.path().join("one"), vault.clone()).unwrap();
+        save(&store, "synthetic-a", "token-a");
+        let b = save(&store, "synthetic-b", "token-b");
+        let complete = write(&store, &backups, &keys, 100).unwrap().unwrap();
+        assert_eq!((complete.accounts, complete.missing), (2, 0));
+        // b's credential becomes unreadable for a while (a locked or refused Keychain item).
+        use crate::Vault;
+        vault.delete(&b.id).unwrap();
+        for at in 2..=15 {
+            let partial = write(&store, &backups, &keys, at * 100).unwrap().unwrap();
+            assert_eq!((partial.accounts, partial.missing), (1, 1));
+        }
+        let kept = list(&backups, &store, &keys);
+        assert!(
+            kept.iter().any(|i| i.file == complete.file),
+            "the complete backup survives"
+        );
+        assert!(kept.len() <= KEEP + 1);
+    }
+    #[test]
+    fn restoring_twice_changes_nothing_for_accounts_without_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let key_account = original
+            .add(
+                "Old label".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-api-key").unwrap(),
+            )
+            .unwrap();
+        original
+            .update(&key_account.id, "Old label".into(), false)
+            .unwrap();
+        let info = write(&original, &backups, &keys, 100).unwrap().unwrap();
+        let fresh = super::tests::store(&temp.path().join("two"));
+        assert_eq!(
+            restore(&fresh, &backups, &info.file, &keys).unwrap().added,
+            1
+        );
+        let restored = fresh.snapshot().unwrap().accounts.remove(0);
+        fresh.update(&restored.id, "Renamed".into(), true).unwrap();
+        let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(
+            again,
+            Restored {
+                added: 0,
+                skipped: 1,
+                failed: 0
+            }
+        );
+        let after = fresh.snapshot().unwrap().accounts.remove(0);
+        assert_eq!((after.label.as_str(), after.enabled), ("Renamed", true));
     }
     #[test]
     fn key_text_is_exactly_64_hex_characters() {

@@ -174,13 +174,16 @@ pub(crate) struct BackupState {
     pub(crate) written_changes: Option<u64>,
     pub(crate) written_at: i64,
     pub(crate) last_error: Option<String>,
+    pub(crate) writing: bool,
 }
-/// `SWITCHBOARD_BACKUP_DIR` (absolute) or `~/Documents/Fabric Switchboard Backups`.
+/// `SWITCHBOARD_BACKUP_DIR` (absolute), else `Fabric Switchboard Backups` beside — not inside —
+/// the app's data folder: `~/Library/Application Support` on macOS (no privacy prompt, unlike
+/// Documents), `%APPDATA%` on Windows. Removing the app's data folder leaves it.
 pub fn backup_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("SWITCHBOARD_BACKUP_DIR").map(PathBuf::from) {
         return dir.is_absolute().then_some(dir);
     }
-    dirs::document_dir().map(|d| d.join("Fabric Switchboard Backups"))
+    dirs::data_dir().map(|d| d.join("Fabric Switchboard Backups"))
 }
 #[derive(Default)]
 struct CurrentCache {
@@ -338,41 +341,57 @@ impl Runtime {
     fn backup_key(&self) -> Option<Arc<dyn switchboard_core::backup::BackupKey>> {
         self.backup_key.lock().ok().and_then(|k| k.clone())
     }
-    /// Writes a backup when accounts changed (at most once a minute) or once a day.
+    /// Writes a backup when accounts changed (at most once a minute) or once a day. The state
+    /// lock is held only to decide and to record: the write reads every credential, and the
+    /// About panel's listing must not wait behind it.
     pub(crate) fn maybe_backup(
         &self,
         time: i64,
         force: bool,
     ) -> Result<Option<switchboard_core::backup::Info>, String> {
-        let key = self
-            .backup_key()
-            .ok_or("Backups are written by the desktop app or switchboard serve.")?;
-        let dir = self
-            .backup_folder()
-            .ok_or("The Documents folder is unavailable for backups.")?;
+        let (Some(key), Some(dir)) = (self.backup_key(), self.backup_folder()) else {
+            return if force {
+                Err("Backups are written by the desktop app or switchboard serve.".into())
+            } else {
+                Ok(None)
+            };
+        };
         let changes = self.store.changes();
+        {
+            let mut state = self
+                .backup_state
+                .lock()
+                .map_err(|_| "Backup state unavailable.")?;
+            let changed = state.written_changes != Some(changes);
+            let due = force
+                || (changed && time - state.written_at >= 60)
+                || time - state.written_at >= 86_400
+                || time < state.written_at;
+            if !due || state.writing {
+                return Ok(None);
+            }
+            state.writing = true;
+        }
+        let result = switchboard_core::backup::write(&self.store, &dir, key.as_ref(), time);
         let mut state = self
             .backup_state
             .lock()
             .map_err(|_| "Backup state unavailable.")?;
-        let changed = state.written_changes != Some(changes);
-        let due = force
-            || (changed && time - state.written_at >= 60)
-            || time - state.written_at >= 86_400
-            || time < state.written_at;
-        if !due {
-            return Ok(None);
-        }
-        match switchboard_core::backup::write(&self.store, &dir, key.as_ref(), time) {
+        state.writing = false;
+        // Success or not, the next attempt waits a minute, not a tick.
+        state.written_at = time;
+        match result {
             Ok(info) => {
                 state.written_changes = Some(changes);
-                state.written_at = time;
-                state.last_error = None;
+                state.last_error = info.as_ref().filter(|i| i.missing > 0).map(|i| {
+                    format!(
+                        "{} of the accounts could not be read and are missing from the latest backup.",
+                        i.missing
+                    )
+                });
                 Ok(info)
             }
             Err(error) => {
-                // Retry in a minute, not every tick.
-                state.written_at = time;
                 state.last_error = Some(error.clone());
                 Err(error)
             }
@@ -430,8 +449,12 @@ impl Owner {
         let sources = if native_sources { NATIVE } else { UNAVAILABLE };
         let runtime = Runtime::open_with(root, vault, sources).await?;
         let control = control::ControlHandle::start(runtime.clone()).await?;
-        if native_sources {
-            runtime.enable_backups(switchboard_core::backup::platform_key(), backup_dir());
+        // Only the real data folder is backed up: a `--data-dir` scratch store must never
+        // write into the operator's backup folder with the operator's key.
+        if native_sources && default_root().ok().as_deref() == Some(runtime.root.as_path()) {
+            if let Some(dir) = backup_dir() {
+                runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
+            }
         }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         Ok(Self {
@@ -639,57 +662,47 @@ async fn execute(
             Ok(projects::rule_view(&store, &rule, monitor::now()))
         }
         Operation::Backups => {
-            let dir = runtime.map_or_else(backup_dir, |r| r.backup_folder());
-            let (enabled, last_error, written_at) = match runtime {
-                Some(r) => (
-                    r.backup_key().is_some(),
+            let enabled_dir = runtime.and_then(|r| r.backup_folder());
+            let dir = enabled_dir.clone().or_else(backup_dir);
+            let key = runtime.and_then(|r| r.backup_key()).or_else(|| {
+                dir.as_deref()
+                    .and_then(switchboard_core::backup::platform_key)
+            });
+            let (last_error, written_at) = runtime
+                .and_then(|r| {
                     r.backup_state
                         .lock()
                         .ok()
-                        .and_then(|s| s.last_error.clone()),
-                    r.backup_state
-                        .lock()
-                        .ok()
-                        .map(|s| s.written_at)
-                        .filter(|t| *t > 0),
-                ),
-                None => (
-                    switchboard_core::backup::platform_key().is_some(),
-                    None,
-                    None,
-                ),
+                        .map(|s| (s.last_error.clone(), s.written_at))
+                })
+                .unwrap_or((None, 0));
+            let enabled =
+                enabled_dir.is_some() && runtime.is_some_and(|r| r.backup_key().is_some());
+            let backups = match (dir.as_deref(), key) {
+                (Some(dir), Some(key)) => switchboard_core::backup::list(dir, &store, key.as_ref()),
+                _ => vec![],
             };
             Ok(json!({
                 "directory": dir.as_ref().map(|d| d.to_string_lossy().into_owned()),
                 "enabled": enabled,
-                "backups": dir.as_deref().map(switchboard_core::backup::list).unwrap_or_default(),
+                "backups": backups,
                 "last_error": last_error,
-                "last_written_at": written_at,
+                "last_written_at": (written_at > 0).then_some(written_at),
             }))
         }
         Operation::BackupNow => match runtime {
             Some(runtime) => Ok(json!(runtime.maybe_backup(monitor::now(), true)?)),
-            None => {
-                let key = switchboard_core::backup::platform_key()
-                    .ok_or("Backups are not available on this platform.")?;
-                let dir = backup_dir().ok_or("The Documents folder is unavailable for backups.")?;
-                Ok(json!(switchboard_core::backup::write(
-                    &store,
-                    &dir,
-                    key.as_ref(),
-                    monitor::now()
-                )?))
-            }
+            None => Err("Backups are written by the desktop app or switchboard serve.".into()),
         },
         Operation::RestoreBackup { file } => {
-            let key = match runtime {
-                Some(r) => r.backup_key(),
-                None => switchboard_core::backup::platform_key(),
-            }
-            .ok_or("Backups are restored by the desktop app or switchboard serve.")?;
             let dir = runtime
-                .map_or_else(backup_dir, |r| r.backup_folder())
-                .ok_or("The Documents folder is unavailable for backups.")?;
+                .and_then(|r| r.backup_folder())
+                .or_else(backup_dir)
+                .ok_or("The backup folder is unavailable.")?;
+            let key = runtime
+                .and_then(|r| r.backup_key())
+                .or_else(|| switchboard_core::backup::platform_key(&dir))
+                .ok_or("Backups are not available on this platform.")?;
             let restored = switchboard_core::backup::restore(&store, &dir, &file, key.as_ref())?;
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();

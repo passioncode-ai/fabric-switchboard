@@ -11,6 +11,7 @@ PassionCode set ([manifest](../../brand/passioncode/manifest.json)).
 | [accounts-1280.png](design-0.5/accounts-1280.png) | 1280×720, light: In use now (Claude saved, Codex unsaved with Add to Switchboard), Automatic switching bar with Turn on for Claude Code, first rows of the Claude Code group |
 | [accounts-1280-full.png](design-0.5/accounts-1280-full.png) | the whole page: provider groups, pool sub-groups, one row per account with badges, quota cell and one primary action; Sign in again, Disabled/Enable, API billing and No quota check states |
 | [signin-pending.png](design-0.5/signin-pending.png) | the sign-in banner that replaced the login dialog |
+| [about-backups.png](design-0.5/about-backups.png) | About → Backups: folder, the no-passphrase limit, list with Restore, Back up now; Restore over existing accounts → “0 accounts restored · 12 already here.” A row with a limit shows “Limit reached · until …” |
 | [accounts-740-dark.png](design-0.5/accounts-740-dark.png) | 740×560, dark: the quota cell moves to a second line; `document.documentElement.scrollWidth` = 740 = `innerWidth` (no horizontal scroll) |
 
 Interaction checks, run in the page with `evaluate_script` on 2026-10-02 (results verbatim):

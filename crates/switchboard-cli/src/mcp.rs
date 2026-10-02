@@ -186,6 +186,7 @@ impl Server {
             "routes": routes,
             "rules": {"active": active, "total": rules.len(), "for_this_folder": here},
             "rotation": rotation,
+            "limited": monitor.as_ref().and_then(|m| m.get("limited").cloned()).unwrap_or_else(|| json!([])),
         }))
     }
     async fn accounts(&self, args: &Map<String, Value>) -> Result<Value, String> {

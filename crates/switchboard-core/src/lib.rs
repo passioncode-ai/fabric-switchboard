@@ -371,6 +371,21 @@ impl Store {
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         Ok(self.lock()?.clone())
     }
+    /// A random id kept in this data folder, so backups of different stores in one folder
+    /// never prune each other. Created on first use.
+    pub fn backup_id(&self) -> Result<String, String> {
+        let path = self.root.join("backup-id");
+        if let Ok(bytes) = private_fs::read_private(&path, 64) {
+            if let Ok(text) = String::from_utf8(bytes) {
+                if uuid_valid(text.trim()) {
+                    return Ok(text.trim().to_owned());
+                }
+            }
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        private_fs::private_write(&path, id.as_bytes())?;
+        Ok(id)
+    }
     /// Increases whenever a backup would differ: a credential, account or policy changed.
     pub fn changes(&self) -> u64 {
         self.changes.load(std::sync::atomic::Ordering::SeqCst)

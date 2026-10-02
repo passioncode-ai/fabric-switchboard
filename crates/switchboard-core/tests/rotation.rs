@@ -782,4 +782,11 @@ fn a_limit_error_switches_despite_spare_quota_and_skips_limited_candidates() {
         .unwrap();
     assert_eq!(decision.reason, "threshold_reached");
     assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+    // A limited account in use takes any account with room, even above the usual headroom.
+    observe(&store, &c, 92., now);
+    let limited: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
 }

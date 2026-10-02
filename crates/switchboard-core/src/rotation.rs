@@ -158,8 +158,14 @@ impl Store {
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
             .filter(|(a, used)| {
-                *used < policy.threshold_percent - policy.hysteresis_percent
-                    && self.rotation_credential_eligible(a, policy, now)
+                // An account in use that fails every request is worse than any account with
+                // room left; otherwise the usual headroom applies.
+                let limit = if current_limited {
+                    100.0
+                } else {
+                    policy.threshold_percent - policy.hysteresis_percent
+                };
+                *used < limit && self.rotation_credential_eligible(a, policy, now)
             })
             .min_by(|(a, x), (b, y)| {
                 x.total_cmp(y)

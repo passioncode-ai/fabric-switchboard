@@ -99,7 +99,8 @@ const safeErrors = new Set([
   'This backup is damaged and cannot be restored.',
   'Backups are written by the desktop app or switchboard serve.',
   'Backups are restored by the desktop app or switchboard serve.',
-  'The Documents folder is unavailable for backups.',
+  'The backup folder is unavailable.',
+  'Backups are not available on this platform.',
   'Backup storage unavailable. Check the backup folder and Keychain access.',
 ]);
 const coreErrors: Record<string, string> = {

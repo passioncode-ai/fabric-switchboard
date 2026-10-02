@@ -134,7 +134,7 @@ export function createDemoAdapter(): Adapter {
     },
     async removeProjectRule(path, provider) { await pause(); const before = state.rules!.length; state.rules = state.rules!.filter((rule) => !(rule.path === path && rule.provider === provider)); if (state.rules.length === before) throw new Error('Project rule not found.'); log('project_rule', '', 'removed'); },
     async agentSetup() { return structuredClone(setup); },
-    async backups() { return { directory: '~/Documents/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },
+    async backups() { return { directory: '~/Library/Application Support/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },
     async backupNow() { await pause(); const info = { file: `switchboard-backup-${now()}.json`, created_at: now(), accounts: state.accounts.length }; backups.unshift(info); backups.splice(10); return structuredClone(info); },
     async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },

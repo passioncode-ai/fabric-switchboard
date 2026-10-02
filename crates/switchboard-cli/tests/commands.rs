@@ -333,3 +333,35 @@ fn human_usage_and_events_print_utc_times_and_health() {
     let json: serde_json::Value = serde_json::from_str(&run(&["--json", "events"])).unwrap();
     assert!(json["data"][0]["at"].is_i64());
 }
+#[test]
+fn offline_backup_never_writes_and_restore_takes_only_backup_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("backups");
+    let output = binary()
+        .env("SWITCHBOARD_BACKUP_DIR", &folder)
+        .arg("--data-dir")
+        .arg(tmp.path().join("data"))
+        .args(["--json", "backup", "now"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!([output.stdout.clone(), output.stderr.clone()]
+        .concat()
+        .escape_ascii()
+        .to_string()
+        .contains("Backups are written by the desktop app or switchboard serve."));
+    assert!(!folder.exists(), "nothing was written");
+    let output = binary()
+        .env("SWITCHBOARD_BACKUP_DIR", &folder)
+        .arg("--data-dir")
+        .arg(tmp.path().join("data"))
+        .args(["--json", "backup", "restore", "../accounts.json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!([output.stdout.clone(), output.stderr.clone()]
+        .concat()
+        .escape_ascii()
+        .to_string()
+        .contains("Choose a backup from the backup folder."));
+}

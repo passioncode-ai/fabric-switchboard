@@ -583,7 +583,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the desktop app has run with accounts saved; the Keychain of this Mac is intact.
 **Entry point:** About → Backups; CLI `switchboard backup`.
 **Steps:**
-1. Use Switchboard as usual → an encrypted backup appears in `~/Documents/Fabric Switchboard Backups` after changes and daily; About lists the newest five.
+1. Use Switchboard as usual → an encrypted backup appears in `~/Library/Application Support/Fabric Switchboard Backups` after changes and daily; About lists the newest five.
 2. After a reinstall, open About → Backups → Restore on the newest → the missing accounts come back; the notice says how many were restored and how many were already here.
 **Alt paths:** Back up now writes one at once. A backup from another Mac or after the Keychain was erased reads “This backup was made with another key and cannot be opened on this machine.” A restored account whose sign-in has since rotated shows Sign in again.
 **Expected result:** Accounts and policies are back; nothing newer is overwritten; policies return switched off.

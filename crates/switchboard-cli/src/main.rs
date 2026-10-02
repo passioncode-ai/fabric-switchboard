@@ -72,7 +72,7 @@ enum Command {
         #[command(subcommand)]
         command: Project,
     },
-    /// Encrypted account backups in ~/Documents/Fabric Switchboard Backups (this machine's key).
+    /// Encrypted account backups in ~/Library/Application Support/Fabric Switchboard Backups (this machine's key).
     Backup {
         #[command(subcommand)]
         command: Backup,
