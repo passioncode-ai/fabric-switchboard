@@ -667,6 +667,7 @@ mod tests {
         let native = crate::NativeSources {
             current: signed_in,
             activate: activates,
+            live: crate::no_live,
         };
         let lock = tokio::sync::Mutex::new(());
         assert_eq!(

@@ -1168,21 +1168,27 @@ pub fn claude_auth_tokens(auth: &[u8]) -> Option<(String, Option<String>)> {
             .map(str::to_owned),
     ))
 }
-pub fn lock_live() -> Result<LiveLock, String> {
+/// The live Claude credential item while Claude Code's locks are held. A trait so that
+/// synthetic owners never reach the real sign-in.
+pub trait LiveItem: Send {
+    /// The live credential item, read under the locks.
+    fn read(&self) -> Result<Option<Vec<u8>>, String>;
+    /// Replaces the live item; only while every lock is still held.
+    fn write(&self, auth: &[u8]) -> Result<(), String>;
+}
+pub fn lock_live() -> Result<Box<dyn LiveItem>, String> {
     let context = context(Provider::Claude, None)?;
     checked_path(&context.home)?;
     refuse_own_home(&context.home)?;
     let locks = Locks::acquire(&context)?;
-    Ok(LiveLock { context, locks })
+    Ok(Box::new(LiveLock { context, locks }))
 }
-impl LiveLock {
-    /// The live credential item, read under the locks.
-    pub fn read(&self) -> Result<Option<Vec<u8>>, String> {
+impl LiveItem for LiveLock {
+    fn read(&self) -> Result<Option<Vec<u8>>, String> {
         self.locks.ensure()?;
         current_auth(&Native, &self.context)
     }
-    /// Replaces the live item; only while every lock is still held.
-    pub fn write(&self, auth: &[u8]) -> Result<(), String> {
+    fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;
         Native.auth_write(&self.context, Some(auth))?;
         self.locks.ensure()

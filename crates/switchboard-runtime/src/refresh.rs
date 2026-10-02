@@ -510,7 +510,7 @@ pub(crate) async fn renew_idle_live(
     if copies.is_empty() {
         return Outcome::NotNeeded;
     }
-    let Ok(lock) = crate::external::lock_live() else {
+    let Ok(lock) = (native.live)() else {
         return Outcome::Transient;
     };
     let Ok(Some(before)) = lock.read() else {
@@ -526,12 +526,32 @@ pub(crate) async fn renew_idle_live(
     let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
     match grant(&endpoint, &live.credential).await {
         Ok((refreshed, owner)) => {
-            if owner.is_some_and(|o| live.identity.account_id.as_deref() != Some(o.as_str())) {
-                return Outcome::Transient;
-            }
             let Some(item) = renewed_item(&before, &refreshed) else {
                 return Outcome::Transient;
             };
+            let foreign = owner
+                .as_deref()
+                .filter(|o| live.identity.account_id.as_deref() != Some(*o))
+                .map(str::to_owned);
+            if let Some(owner) = foreign {
+                // The grant spent the live token, so its successor goes back to Claude Code
+                // whoever owns it — dropping it would sign Claude Code out. It is never filed
+                // under the account named in the config, and is remembered as foreign.
+                let _ = lock.write(&item);
+                if let (Some(token), Ok(mut owners)) =
+                    (refreshed.refresh_token.as_ref(), state.owners.lock())
+                {
+                    owners.insert(
+                        fingerprint(token),
+                        ExternalIdentity {
+                            account_id: Some(owner),
+                            organization_id: None,
+                            email: None,
+                        },
+                    );
+                }
+                return Outcome::Transient;
+            }
             if lock.write(&item).is_err() {
                 // The grant spent the live token: keep the successor for every copy.
                 for copy in &copies {
@@ -834,14 +854,17 @@ mod tests {
     const SIGNED_IN_A: NativeSources = NativeSources {
         current: signed_in,
         activate: activates,
+        live: crate::no_live,
     };
     const SIGNED_OUT: NativeSources = NativeSources {
         current: signed_out,
         activate: activates,
+        live: crate::no_live,
     };
     const UNREADABLE: NativeSources = NativeSources {
         current: unreadable,
         activate: activates,
+        live: crate::no_live,
     };
 
     #[tokio::test]
@@ -1048,6 +1071,7 @@ mod tests {
         let native = NativeSources {
             current: signed_in,
             activate: never,
+            live: crate::no_live,
         };
         assert_eq!(
             crate::activate_native(&store, &b, None, native, Some(&state)).unwrap_err(),
@@ -1274,6 +1298,151 @@ mod tests {
             renew_idle_live(&store, SIGNED_IN_A, &state).await,
             Outcome::NotNeeded
         );
+    }
+    thread_local! {
+        static LIVE: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
+        static WRITE_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    /// Claude Code's live item on this test's thread (`#[tokio::test]` is single-threaded).
+    struct FakeLive;
+    impl crate::external::LiveItem for FakeLive {
+        fn read(&self) -> Result<Option<Vec<u8>>, String> {
+            Ok(LIVE.with(|l| l.borrow().clone()))
+        }
+        fn write(&self, auth: &[u8]) -> Result<(), String> {
+            if WRITE_FAILS.with(|f| f.get()) {
+                return Err("Keychain write failed.".into());
+            }
+            LIVE.with(|l| *l.borrow_mut() = Some(auth.to_vec()));
+            Ok(())
+        }
+    }
+    fn fake_live() -> Result<Box<dyn crate::external::LiveItem>, String> {
+        Ok(Box::new(FakeLive))
+    }
+    /// Claude Code is signed in as synthetic-a and left its access token expired.
+    fn idle_a(provider: Provider) -> Result<crate::external::CapturedProfile, String> {
+        let mut live = signed_in(provider)?;
+        live.credential.expires_at = Some(EXPIRED);
+        Ok(live)
+    }
+    const IDLE_A: NativeSources = NativeSources {
+        current: idle_a,
+        activate: activates,
+        live: fake_live,
+    };
+    fn idle_setup(item: Value) -> (tempfile::TempDir, Arc<Store>) {
+        LIVE.with(|l| *l.borrow_mut() = Some(serde_json::to_vec(&item).unwrap()));
+        WRITE_FAILS.with(|f| f.set(false));
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[("synthetic-a", "default"), ("synthetic-a", "work")],
+        );
+        (root, store)
+    }
+    fn live_item() -> Value {
+        LIVE.with(|l| serde_json::from_slice(l.borrow().as_deref().unwrap()).unwrap())
+    }
+    const IDLE_ITEM: fn() -> Value = || json!({"claudeAiOauth":{"accessToken":"synthetic-a-token","refreshToken":"synthetic-a-refresh","expiresAt":EXPIRED*1000},"mcpOAuth":{"keep":true}});
+    #[tokio::test]
+    async fn an_idle_live_account_is_renewed_in_claude_code_and_every_copy() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh","account":{"uuid":"synthetic-a"}}),
+        ))
+        .await;
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let item = live_item();
+        assert_eq!(item["claudeAiOauth"]["accessToken"], "fresh-access");
+        assert_eq!(item["claudeAiOauth"]["refreshToken"], "fresh-refresh");
+        assert_eq!(item["mcpOAuth"], json!({"keep":true}), "other keys kept");
+        for pool in ["default", "work"] {
+            let c = store
+                .stored_credential(&id_of(&store, "synthetic-a", pool))
+                .unwrap();
+            assert_eq!(c.refresh_token.as_deref(), Some("fresh-refresh"));
+        }
+    }
+    #[tokio::test]
+    async fn an_idle_renewal_issued_to_another_account_stays_with_claude_code_only() {
+        let (url, _) = endpoint((
+            200,
+            json!({"access_token":"other-access","expires_in":28800,"refresh_token":"other-refresh","account":{"uuid":"someone-else"}}),
+        ))
+        .await;
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::Transient
+        );
+        // The spent token's successor reached Claude Code, so it stays signed in.
+        assert_eq!(
+            live_item()["claudeAiOauth"]["refreshToken"],
+            "other-refresh"
+        );
+        let a = id_of(&store, "synthetic-a", "default");
+        assert_eq!(
+            store.stored_credential(&a).unwrap().access_token,
+            "synthetic-a-token",
+            "nothing foreign was filed under synthetic-a"
+        );
+        let mut renewed = idle_a(Provider::Claude).unwrap();
+        renewed.credential.refresh_token = Some("other-refresh".into());
+        assert_eq!(
+            lineage(&store, &state, &renewed.identity, &renewed.credential),
+            Lineage::Foreign
+        );
+    }
+    #[tokio::test]
+    async fn an_idle_renewal_that_cannot_be_written_is_stashed() {
+        let (url, _) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh"}),
+        ))
+        .await;
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        WRITE_FAILS.with(|f| f.set(true));
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::Transient
+        );
+        for pool in ["default", "work"] {
+            assert!(has_stash(&state, &id_of(&store, "synthetic-a", pool)));
+        }
+    }
+    #[tokio::test]
+    async fn an_idle_live_item_that_changed_is_left_alone() {
+        let (url, calls) = endpoint((200, json!({"access_token":"x","expires_in":60}))).await;
+        // Claude Code renewed it between the read and the lock.
+        let (_root, store) = idle_setup(
+            json!({"claudeAiOauth":{"accessToken":"newer","refreshToken":"newer-r","expiresAt":EXPIRED*1000}}),
+        );
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::NotNeeded
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    #[tokio::test]
+    async fn an_idle_live_lineage_rejected_by_the_provider_is_dead() {
+        let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::SignInRequired
+        );
+        assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
     }
     #[test]
     fn malformed_grant_responses_are_rejected() {

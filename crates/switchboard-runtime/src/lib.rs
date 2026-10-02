@@ -139,6 +139,8 @@ pub(crate) struct NativeSources {
     /// Writes the target under Claude Code's locks; `preserve` receives the outgoing live
     /// credential under those same locks, before anything is written.
     pub(crate) activate: Activate,
+    /// Claude Code's live credential item under its locks, for renewing it while idle.
+    pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -152,10 +154,16 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     activate: |_, _, _, _| {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
+    live: no_live,
 };
+/// The live sign-in of a synthetic owner: never reachable.
+pub(crate) fn no_live() -> Result<Box<dyn external::LiveItem>, String> {
+    Err("External sign-in unavailable or its files are unsafe.".into())
+}
 pub(crate) const NATIVE: NativeSources = NativeSources {
     current: external::capture_current,
     activate: external::activate_claude,
+    live: external::lock_live,
 };
 
 pub struct Runtime {
@@ -1080,7 +1088,11 @@ pub(crate) mod fixtures {
         Runtime::open_with(
             root.to_owned(),
             Arc::new(MemoryVault::default()),
-            NativeSources { current, activate },
+            NativeSources {
+                current,
+                activate,
+                live: no_live,
+            },
         )
         .await
         .unwrap()
