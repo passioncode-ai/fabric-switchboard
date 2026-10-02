@@ -1,6 +1,6 @@
-# In progress — Switchboard 0.5 (2026-10-02, branch `agent/switchboard-0.5`)
+# Released — Switchboard v0.5.0-beta.1 (2026-10-02)
 
-**Start here:** [handoffs/2026-10-02-switchboard-0.5.md](handoffs/2026-10-02-switchboard-0.5.md). On top of 0.4.1's shared-trust vault ([KEYCHAIN.md](KEYCHAIN.md), unchanged): Claude Code's `Claude Code-credentials` item and an official sign-in's staged item go only through `/usr/bin/security`, the executable Claude Code uses; inactive Claude tokens are renewed so automatic switching keeps working; adding and switching accounts is one click on a compact grouped list. Plan and decisions: [PLAN-0.5](PLAN-0.5.md); checks: [release-0.5](evidence/release-0.5.md). **Exact next task:** release 0.5.0-beta.1 (SB-17), then operator acceptance (SB-15). The sections below are earlier history.
+**Start here:** [handoffs/2026-10-02-switchboard-0.5.md](handoffs/2026-10-02-switchboard-0.5.md). [v0.5.0-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.0-beta.1) is published from `e6c5e54`: macOS universal notarized (`0b19c796-…` Accepted) and stapled, Windows x64 unsigned cross-build, `SHA256SUMS-0.5.0.txt`. The site selects it (`a7e5a8b`). `/Applications` holds 0.5.0, 0.4.1 kept for rollback. On top of 0.4.1's vault ([KEYCHAIN.md](KEYCHAIN.md), unchanged): Claude Code's item only through `/usr/bin/security`, renewal of inactive Claude accounts, switching on provider limit errors, automatic encrypted backups, one-click accounts. First live switch on the operator's Mac: new session `ok`, 0 `SecurityAgent`. Record: [release-0.5.md](evidence/release-0.5.md). **Exact next task:** SB-15 — a day of use with automatic switching on, then confirm renewal and a limit switch from the journal.
 
 ---
 

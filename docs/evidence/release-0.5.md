@@ -74,3 +74,28 @@ two within five minutes a limit; a limited account in use takes any account belo
 write no longer holds the lock the About listing reads; project rules start the switch grace;
 MCP `switchboard_status` reports `limited`. Holds live in memory and are re-read from the
 15-minute transcript window after a restart.
+
+## Release v0.5.0-beta.1 (2026-10-02)
+
+| Step | Result |
+|---|---|
+| Source | `main` `e6c5e54` (merges of [#18](https://github.com/passioncode-ai/fabric-switchboard/pull/18), [#19](https://github.com/passioncode-ai/fabric-switchboard/pull/19)); versions 0.5.0 in step (`check-brand.mjs` → `version 0.5.0 verified`, `check_plugin.py` 0 errors, `claude plugin validate --strict` passed for marketplace and plugin) |
+| Gate | `./scripts/check.sh` exit 0; 175 Rust tests passed, 2 opt-in Keychain tests ignored. No hosted dispatch (nightly policy) |
+| macOS | `build_macos.py --arch universal --notary-profile …` exit 0, [receipt](build-0.5.0-macos-universal.json): app and CLI `x86_64 arm64`, clean source `e6c5e54`, notary `0b19c796-9e4c-4d2c-a394-9d55846fd10b` **Accepted**, ZIP stapled (`stapler validate` worked), `spctl` accepted / Notarized Developer ID |
+| Windows | `build_windows_cross.py` exit 0, [receipt](build-0.5.0-windows-x64.json); unsigned, native run NOT_RUN |
+| GitHub | tag `v0.5.0-beta.1` = `e6c5e54`, [prerelease](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.0-beta.1) with 2 ZIPs, 2 receipts, `SHA256SUMS-0.5.0.txt`; [publication receipt](publication-0.5.0.json) |
+| Anonymous download | no token: both archives `OK` against the sums; quarantined app `accepted, source=Notarized Developer ID`; CLI `switchboard 0.5.0` |
+| Website | `passioncode-ai.github.io` `a7e5a8b` ([PR #27](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/27), check passed), deployed (Worker version `9f72c…`); `/switchboard/download/macos` and `/windows` → 302 to the 0.5.0 archives, fetched hashes equal; page and JSON-LD `0.5.0-beta.1` |
+| Local install | 0.4.1 quit, kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.4.1-2026-10-02/` (rollback: move it back); 0.5.0 from the verified published ZIP; `CFBundleShortVersionString` 0.5.0, `spctl` accepted |
+
+### On the operator's Mac, with the operator's accounts (2026-10-02, after install)
+
+| Check | Result |
+|---|---|
+| First launch | automatic backup written within a minute: `switchboard-backup-1790978340.json`, 15 accounts, 0 missing, own, openable; folder mode 0700, file 0600 |
+| Switch Claude Code | `switchboard accounts activate` (through the running app) to the freest account (17% used) from the one in use (79%): `~/.claude.json` `oauthAccount.accountUuid` changed to the target's, `switchboard current` names the target |
+| New Claude Code session | `claude -p` after the switch → `is_error: false`, `result: "ok"` |
+| Keychain dialogs | `log show --predicate 'process == "SecurityAgent"'` since launch and since the switch: **0** entries |
+| Running sessions | the Claude Code session that ran these checks kept working; whether it moved to the new account is not observable from outside it (board SB-06) |
+
+Not observed yet: a renewal of an inactive account and a switch on a limit error with live accounts (SB-15), Windows (SB-02).

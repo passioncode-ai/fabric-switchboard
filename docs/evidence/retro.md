@@ -11,12 +11,17 @@
 2. **Fetch and read the remote integration branch's HANDOFF before the grill.** A local `main`
    is a snapshot; a parallel run may have released since. Source: run 2026-10-02. Retire after
    three runs whose stage-0 fetch found no unread remote commits.
+3. **A path every store, machine or account shares is a seam, not a detail.** A folder, a Keychain
+   item or a log read by more than one store or machine gets an owner field and a rule for what
+   each owner may delete, written in the spec before building. Source: run 2026-10-02 (backups).
+   Retire after two runs adding shared paths pass the seam tier with no finding of this class.
 
 ## Run stamps
 
 | Date | Run | Commit | Diverged |
 |---|---|---|---|
-| 2026-10-02 | PLAN-0.5 prompt-free switching | `2cf0088` | yes — entry below |
+| 2026-10-02 | PLAN-0.5 prompt-free switching | `2cf0088` | yes — entries below |
+| 2026-10-02 | PLAN-0.5 backups and limit errors, release v0.5.0-beta.1 | `e6c5e54` | yes — entry below |
 
 ## Recent log
 
@@ -49,3 +54,16 @@
   taken as current.
 - **Fix (grade: procedural):** rebased onto `1cfc793`, withdrew the file vault, kept KEYCHAIN.md.
 - **Check next time:** standing instruction 2.
+
+### 2026-10-02 — shared backup folder and partial copies, again past a green gate
+
+- **Symptom:** 175 green tests, yet seam review 2 found that stores shared one backup folder and
+  pruned each other, partial backups pushed out the complete one, a second restore changed
+  accounts without identity, and a restart charged the previous account's limit to the new one
+  ([release-0.5](release-0.5.md#backups-and-limit-errors-second-operator-request-2026-10-02)).
+- **Surfaced at:** stage 5 review. **Owned by:** stage 3 spec — the folder, the key and the
+  transcripts were specified as if one store and one account existed.
+- **Fix (grade: structural):** owner (store and key) in every backup, prune only own files and keep
+  the most complete, token matching on restore, journal-dated attribution; each with a test
+  watched failing against the planted defect.
+- **Check next time:** standing instruction 3.

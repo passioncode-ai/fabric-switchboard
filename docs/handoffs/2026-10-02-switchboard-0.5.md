@@ -1,6 +1,6 @@
 # Handoff — Switchboard 0.5: prompt-free switching, renewal, one-click accounts — 2026-10-02
 
-**State: implemented on branch `agent/switchboard-0.5`, not released.** Objective (operator, Russian,
+**State: released as v0.5.0-beta.1 (`e6c5e54`) and installed.** Objective (operator, Russian,
 paraphrased): no extra Keychain or other confirmations when switching accounts, an automatic
 switcher that keeps working, the active console account added with one button and no extra windows,
 a compact grouped account list, every core feature rechecked. Brief, decisions D-1…D-4, root causes
@@ -33,6 +33,14 @@ Switchboard (stated in the tool description and skill).
 - **SB-16** Codex renewal. Earlier rows unchanged.
 - Windows compile of runtime/CLI was not run here (`ring` needs MSVC headers); the Windows build is the proof.
 
+## Second request (same day): backups and limit errors
+
+Automatic encrypted backups (D-5, no passphrase, key on this Mac) and switching on provider limit
+errors (D-6) landed through [#19](https://github.com/passioncode-ai/fabric-switchboard/pull/19)
+after a second seam review (four breaks fixed). SCN-030, SCN-031; REQ-14…REQ-17.
+
 ## Exact next task
 
-Finish SB-17 by the 0.4.1 release path, then SB-15 with the operator present.
+SB-15: with the operator, turn on automatic switching for Claude Code (Accounts → Turn on for
+Claude Code), use it for a day, then read the journal and About → Backups for a renewal, a
+`switched_on_limit` decision and the backups; record them in release-0.5.md.
