@@ -136,13 +136,20 @@ pub enum Operation {
 #[derive(Clone, Copy)]
 pub(crate) struct NativeSources {
     pub(crate) current: fn(Provider) -> Result<external::CapturedProfile, String>,
-    pub(crate) activate:
-        fn(&Credential, &ExternalIdentity, Option<&ExternalIdentity>) -> Result<(), String>,
+    /// Writes the target under Claude Code's locks; `preserve` receives the outgoing live
+    /// credential under those same locks, before anything is written.
+    pub(crate) activate: Activate,
 }
+pub(crate) type Activate = fn(
+    &Credential,
+    &ExternalIdentity,
+    Option<&ExternalIdentity>,
+    &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
+) -> Result<(), String>;
 /// Synthetic owners (tests, the packaged smoke check) never read or write real sign-in.
 pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     current: |_| Err("External sign-in unavailable or its files are unsafe.".into()),
-    activate: |_, _, _| {
+    activate: |_, _, _, _| {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
 };
@@ -552,12 +559,15 @@ async fn execute(
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
-            Ok(json!({"imported": imported, "failed": failed, "skipped": batch.skipped}))
+            Ok(
+                json!({"imported": imported, "failed": failed, "skipped": batch.skipped, "claude_swap_running": external::claude_swap_running()}),
+            )
         }
         Operation::ActivateNative { id } => {
             // The target is inactive by definition; an expired token is renewed first so
             // Claude Code starts on a live one. A failed refresh still activates: Claude
             // Code renews from the refresh token itself.
+            refresh::learn_live_owner(&store, native, refresh_state).await;
             if refresh::ensure_fresh(&store, native, refresh_state, &id, false).await
                 == refresh::Outcome::SignInRequired
             {
@@ -588,6 +598,7 @@ async fn execute(
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
             "sign_in_required": refresh_state.sign_in_required(&store),
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
+            "claude_swap_accounts": refresh::swap_held(refresh_state),
         })),
         Operation::Add {
             label,
@@ -817,6 +828,7 @@ fn activate_native(
     );
     result
 }
+pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
 fn replace_native(
     store: &Store,
     account: &Account,
@@ -828,6 +840,15 @@ fn replace_native(
     if !account.enabled {
         return Err("Account is disabled".into());
     }
+    // A renewed generation that could not be stored yet is the only valid one.
+    if let Some(state) = refresh {
+        if refresh::adopt_stash(store, state, &account.id) == Some(false) {
+            return Err(
+                "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute."
+                    .into(),
+            );
+        }
+    }
     // An expired access token is fine while a refresh token remains: Claude Code renews it
     // on first use, exactly as after its own idle expiry (PLAN-0.5 C-5).
     let credential = store.stored_credential(&account.id)?;
@@ -836,7 +857,7 @@ fn replace_native(
     {
         return Err("Credential expired; reauthenticate this account".into());
     }
-    // After `claude logout` there is no current identity; the adapter handles that state.
+    // After `claude logout`, or once Claude Code wiped an ended sign-in, nothing is current.
     let current = match (native.current)(Provider::Claude) {
         Ok(current) => Some(current),
         Err(error) if error.starts_with("No current ") => None,
@@ -852,26 +873,56 @@ fn replace_native(
         return Err("Current CLI account changed. Refresh before switching.".into());
     }
     let expected = current.as_ref().map(|c| c.identity.clone());
-    // The account being switched away from stays "recently active" for renewal purposes.
-    if let (Some(state), Some(current)) = (refresh, current.as_ref()) {
+    let offline_state = refresh::RefreshState::default();
+    let state = refresh.unwrap_or(&offline_state);
+    let mut copies = Vec::new();
+    if let Some(current) = &current {
+        // The account being switched away from stays "recently active" for renewal purposes.
         state.note_active(&current.identity);
-    }
-    if let Some(current) = current {
-        // Preserve the live client's newest refresh generation in every stored copy of
-        // that identity, in every pool: a copy left behind would hold a refresh token
-        // Claude Code has already rotated away (PLAN-0.5 C-6).
-        for copy in matching_accounts(store, Provider::Claude, &current.identity)? {
-            store.upsert(
-                copy.label,
-                copy.provider,
-                copy.kind,
-                copy.pool,
-                current.credential.clone(),
-                Some(current.identity.clone()),
-            )?;
+        // Already the account in use: writing its stored copy would replace Claude Code's
+        // newer live generation with an older one. Nothing to do.
+        if current.identity.account_id == identity.account_id
+            && current.identity.organization_id == identity.organization_id
+        {
+            return Ok(());
+        }
+        copies = matching_accounts(store, Provider::Claude, &current.identity)?;
+        if copies.is_empty() {
+            return Err(UNSAVED_CURRENT.into());
+        }
+        // Another stored account's lineage under this account's name is never filed here.
+        if refresh::lineage(store, state, &current.identity, &current.credential)
+            == refresh::Lineage::Foreign
+        {
+            return Err(refresh::FOREIGN_LIVE.into());
         }
     }
-    (native.activate)(&credential, identity, expected.as_ref())?;
+    let mut preserve = |outgoing: &external::Outgoing<'_>| -> Result<(), String> {
+        let live = external::profile_of(outgoing)?;
+        if expected.as_ref().is_some_and(|e| e != &live.identity) {
+            return Err("Current Claude account changed during activation. Try again.".into());
+        }
+        // The bytes read under the locks are the newest generation; Claude Code may have
+        // refreshed since the check above, and a different lineage now is not this account's.
+        if refresh::lineage(store, state, &live.identity, &live.credential)
+            == refresh::Lineage::Foreign
+        {
+            return Err(refresh::FOREIGN_LIVE.into());
+        }
+        // Every stored copy of that identity, in every pool (PLAN-0.5 C-6).
+        for copy in &copies {
+            store.upsert(
+                copy.label.clone(),
+                copy.provider,
+                copy.kind,
+                copy.pool.clone(),
+                live.credential.clone(),
+                Some(live.identity.clone()),
+            )?;
+        }
+        Ok(())
+    };
+    (native.activate)(&credential, identity, expected.as_ref(), &mut preserve)?;
     if store.snapshot()?.policies.iter().any(|p| {
         p.provider == Provider::Claude && p.pool == account.pool && p.target == "claude_cli"
     }) {
@@ -901,7 +952,7 @@ pub(crate) mod fixtures {
         let mut credential = Credential::parse(
             Provider::Claude,
             AuthKind::OAuth,
-            &json!({"claudeAiOauth":{"accessToken":format!("{account}-token"),"refreshToken":"synthetic-refresh","expiresAt":EXPIRES*1000}}).to_string(),
+            &json!({"claudeAiOauth":{"accessToken":format!("{account}-token"),"refreshToken":format!("{account}-refresh"),"expiresAt":EXPIRES*1000}}).to_string(),
         )
         .unwrap();
         credential.native_context = Some(
@@ -947,28 +998,37 @@ pub(crate) mod fixtures {
     pub(crate) fn unreadable(_: Provider) -> Result<external::CapturedProfile, String> {
         Err("External sign-in unavailable or its files are unsafe.".into())
     }
+    /// Behaves like the real adapter: when an account is signed in (`signed_in` is
+    /// `synthetic-a`), its live credential reaches `preserve` before anything is written.
     pub(crate) fn activates(
         _: &Credential,
         _: &ExternalIdentity,
-        _: Option<&ExternalIdentity>,
+        expected: Option<&ExternalIdentity>,
+        preserve: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
     ) -> Result<(), String> {
+        if let Some(current) = expected {
+            let account = current.account_id.clone().unwrap_or_default();
+            let auth = json!({"claudeAiOauth":{"accessToken":format!("{account}-token"),"refreshToken":format!("{account}-refresh"),"expiresAt":EXPIRES*1000}}).to_string();
+            let config = json!({"oauthAccount":{"accountUuid":account,"organizationUuid":current.organization_id,"emailAddress":current.email}}).to_string();
+            preserve(&external::Outgoing {
+                auth: auth.as_bytes(),
+                config: config.as_bytes(),
+            })?;
+        }
         Ok(())
     }
     pub(crate) fn fails(
         _: &Credential,
         _: &ExternalIdentity,
         _: Option<&ExternalIdentity>,
+        _: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
     ) -> Result<(), String> {
         Err("Claude activation failed; previous account restored.".into())
     }
     pub(crate) async fn runtime(
         root: &Path,
         current: fn(Provider) -> Result<external::CapturedProfile, String>,
-        activate: fn(
-            &Credential,
-            &ExternalIdentity,
-            Option<&ExternalIdentity>,
-        ) -> Result<(), String>,
+        activate: Activate,
     ) -> Arc<Runtime> {
         Runtime::open_with(
             root.to_owned(),
@@ -1145,7 +1205,7 @@ mod owner_tests {
                 "pool {}",
                 copy.pool
             );
-            assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-refresh"));
+            assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-a-refresh"));
         }
     }
     #[tokio::test]
@@ -1248,6 +1308,64 @@ mod owner_tests {
             .unwrap();
         assert_eq!(restored["added"], 2);
         assert_eq!(fresh.store.snapshot().unwrap().accounts.len(), 2);
+    }
+    /// The ordinary Claude Code names synthetic-a but holds synthetic-b's lineage — what an
+    /// interrupted switch or a half-finished `/login` leaves behind.
+    fn a_named_b_held(_: Provider) -> Result<external::CapturedProfile, String> {
+        let mut credential = credential("synthetic-b");
+        credential.native_context = Some(
+            json!({"auth":{"claudeAiOauth":{"accessToken":"synthetic-b-token"}},"oauth_account":{"accountUuid":"synthetic-a"}}),
+        );
+        Ok(external::CapturedProfile {
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            credential,
+            identity: identity("synthetic-a"),
+            label: "synthetic-a".into(),
+        })
+    }
+    #[tokio::test]
+    async fn a_foreign_lineage_under_this_name_is_never_filed_or_switched_from() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), a_named_b_held, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative { id: c.id.clone() })
+                .await
+                .unwrap_err(),
+            refresh::FOREIGN_LIVE
+        );
+        // A's copy keeps its own lineage; B's is untouched.
+        assert_eq!(
+            runtime.store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-token"
+        );
+        assert_eq!(
+            runtime.store.stored_credential(&b.id).unwrap().access_token,
+            "synthetic-b-token"
+        );
+    }
+    #[tokio::test]
+    async fn switching_away_from_an_unsaved_account_is_refused_and_the_account_in_use_is_a_no_op() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, fails).await;
+        let b = save(&runtime.store, "synthetic-b", "default");
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative { id: b.id.clone() })
+                .await
+                .unwrap_err(),
+            UNSAVED_CURRENT
+        );
+        // Activating the account Claude Code already uses writes nothing (the fixture would fail).
+        let a = save(&runtime.store, "synthetic-a", "work");
+        runtime
+            .execute(Operation::ActivateNative { id: a.id })
+            .await
+            .unwrap();
     }
     #[tokio::test]
     async fn workbench_metadata_stays_available_during_a_reserved_mutation() {

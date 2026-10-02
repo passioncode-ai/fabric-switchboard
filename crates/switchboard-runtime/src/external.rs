@@ -10,6 +10,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
 use switchboard_core::{AuthKind, Credential, ExternalIdentity, Provider};
 use unicode_normalization::UnicodeNormalization;
@@ -449,6 +450,11 @@ fn capture(
         .read(&c.config, CAP)?
         .ok_or("No current Claude sign-in found.")?;
     let auth = current_auth(reader, c)?.ok_or("No current Claude sign-in found.")?;
+    // Claude Code empties its tokens after `invalid_grant`: that is a signed-out state, not a
+    // credential to store or to block a switch away from.
+    if wiped(&auth) {
+        return Err("No current Claude sign-in found.".into());
+    }
     let result = claude_profile(&auth, &config, None)?;
     if reader.read(&c.config, CAP)?.as_deref() != Some(config.as_slice())
         || current_auth(reader, c)?.as_deref() != Some(auth.as_slice())
@@ -602,6 +608,41 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
     }
     Ok(batch)
 }
+/// Claude Swap is running (its TUI, `cswap auto` or its menu-bar agent) and so renews the
+/// accounts it holds. Two renewers of one lineage spend each other's refresh token.
+pub fn claude_swap_running() -> bool {
+    let agent = dirs::home_dir()
+        .map(|h| h.join("Library/LaunchAgents/com.cswap.menubar.plist"))
+        .is_some_and(|p| p.exists());
+    if agent {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        std::process::Command::new("/bin/ps")
+            .args(["-axo", "args="])
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|out| out.lines().any(running_swap_line))
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+/// A process line that is Claude Swap itself, not something merely mentioning it.
+fn running_swap_line(line: &str) -> bool {
+    // The program and its script or `-m` module: never a word later on the command line.
+    line.split_whitespace().take(3).any(|word| {
+        let name = word.rsplit('/').next().unwrap_or(word);
+        name == "cswap"
+            || name == "claude-swap"
+            || word == "claude_swap"
+            || word.ends_with("claude_swap/__main__.py")
+    })
+}
 pub fn read_claude_swap() -> Result<ImportBatch, String> {
     let root = dirs::home_dir()
         .ok_or("User home unavailable.")?
@@ -745,16 +786,13 @@ impl Locks {
                 c.config.file_name().ok_or(UNAVAILABLE)?.to_string_lossy()
             )),
         ];
-        for path in paths {
+        for (index, path) in paths.into_iter().enumerate() {
             checked_path(&path)?;
-            // Only an existing lock means Claude holds it; stale-lock takeover is not attempted.
-            fs::create_dir(&path).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::AlreadyExists {
-                    "Claude is updating its account. Wait for login or refresh to finish, then retry."
-                } else {
-                    "Claude account lock is unavailable. Check permissions of the Claude config directory."
-                }
-            })?;
+            // Claude Code's proper-lockfile protocol (Claude Swap `claude_locks.py:46-129`,
+            // against the 2.1.218 bundle): credential locks are stale after 60 s, the config
+            // lock after 10 s; holders refresh their mtime, so an older one has no holder.
+            let stale = Duration::from_secs(if index == 2 { 10 } else { 60 });
+            acquire_lock(&path, stale, LOCK_WAIT)?;
             let identity = file_identity(&directory_file(&path)?)?;
             locks.paths.push(OwnedLock { path, identity });
         }
@@ -789,6 +827,41 @@ impl Locks {
         Ok(())
     }
 }
+/// How long a live holder is waited for; tests do not sit out the full nine seconds.
+const LOCK_WAIT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(9)
+};
+/// Creates one lock directory, waiting up to `wait` for a live holder and taking over one whose
+/// last heartbeat is older than `stale`. Only one process can win the re-creation.
+fn acquire_lock(path: &Path, stale: Duration, wait: Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match fs::create_dir(path) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let age = fs::symlink_metadata(path)
+                    .ok()
+                    .filter(|m| m.is_dir() && !m.file_type().is_symlink())
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok());
+                if age.is_some_and(|age| age > stale) {
+                    // A crashed holder: remove only the empty directory, then race to create.
+                    let _ = fs::remove_dir(path);
+                    continue;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err("Claude is updating its account. Wait for login or refresh to finish, then retry.".into());
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            Err(_) => {
+                return Err("Claude account lock is unavailable. Check permissions of the Claude config directory.".into())
+            }
+        }
+    }
+}
 impl Drop for Locks {
     fn drop(&mut self) {
         if let Some(stop) = self.stop.take() {
@@ -804,12 +877,45 @@ impl Drop for Locks {
         }
     }
 }
+/// Credential keys Claude Code shares across every account on the machine: MCP-server and plugin
+/// OAuth. They rotate on their own, so on a switch the live copy wins — presence and absence
+/// alike — and the target's snapshot of them is discarded (Claude Swap `credentials.py:191-267`).
+/// Every other key, `trustedDeviceToken` included, belongs to the account and stays the target's.
+const SHARED_KEYS: [&str; 5] = [
+    "mcpOAuth",
+    "mcpOAuthClientConfig",
+    "mcpXaaIdp",
+    "mcpXaaIdpConfig",
+    "pluginSecrets",
+];
+/// `claudeAiOauth` emptied by Claude Code after `invalid_grant`: the sign-in has ended.
+fn wiped(auth: &[u8]) -> bool {
+    parse(auth).is_ok_and(|v| {
+        v.get("claudeAiOauth").is_some_and(|o| {
+            o.get("accessToken")
+                .and_then(Value::as_str)
+                .is_none_or(str::is_empty)
+        })
+    })
+}
+/// The live credential and config read under Claude Code's locks, handed to the caller before
+/// anything is written so it can keep the outgoing account's newest generation.
+pub struct Outgoing<'a> {
+    pub auth: &'a [u8],
+    pub config: &'a [u8],
+}
+/// A capture of exactly the bytes read under the locks (for the outgoing account).
+pub fn profile_of(outgoing: &Outgoing<'_>) -> Result<CapturedProfile, String> {
+    claude_profile(outgoing.auth, outgoing.config, None)
+}
+#[allow(clippy::too_many_arguments)]
 fn activate(
     writer: &dyn Writer,
     c: &Context,
     credential: &Credential,
     target: &ExternalIdentity,
     expected: Option<&ExternalIdentity>,
+    preserve: &mut dyn FnMut(&Outgoing<'_>) -> Result<(), String>,
     ensure_lock: impl Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let native = credential
@@ -823,11 +929,11 @@ fn activate(
     if !same_identity(&declared, target) {
         return Err("Stored Claude identity differs from its native profile.".into());
     }
-    let mut auth = native
+    let mut target_auth = native
         .get("auth")
         .cloned()
         .ok_or("Claude native credential is missing.")?;
-    let tokens = auth
+    let tokens = target_auth
         .get_mut("claudeAiOauth")
         .and_then(Value::as_object_mut)
         .ok_or("Claude native credential is invalid.")?;
@@ -837,18 +943,15 @@ fn activate(
     } else {
         tokens.remove("refreshToken");
     }
-    if let Some(expiry) = credential.expires_at {
-        tokens.insert("expiresAt".into(), json!(expiry.saturating_mul(1000)));
+    // A captured expiry must never sit next to a different access token.
+    match credential.expires_at {
+        Some(expiry) => {
+            tokens.insert("expiresAt".into(), json!(expiry.saturating_mul(1000)));
+        }
+        None => {
+            tokens.remove("expiresAt");
+        }
     }
-    let new_auth = serde_json::to_vec(&auth).map_err(|_| UNAVAILABLE)?;
-    if new_auth.len() > SECRET_CAP {
-        return Err("Claude credential exceeds size limit.".into());
-    }
-    Credential::parse(
-        Provider::Claude,
-        AuthKind::OAuth,
-        std::str::from_utf8(&new_auth).map_err(|_| UNAVAILABLE)?,
-    )?;
     let old_config = writer.read(&c.config, CAP)?;
     let mut config = old_config
         .as_deref()
@@ -860,26 +963,59 @@ fn activate(
     } else {
         None
     };
-    if match (expected, current.as_ref()) {
-        (Some(a), Some(b)) => !same_identity(a, b),
-        (None, None) => false,
-        _ => true,
-    } {
-        return Err("Current Claude account changed. Refresh the account list, then retry.".into());
-    }
     let old_auth = if c.mac {
         writer.keychain(&c.service, &c.user)?
     } else {
         writer.read(&c.home.join(".credentials.json"), SECRET_CAP)?
     };
+    let ended = old_auth.as_deref().is_some_and(wiped);
+    if match (expected, current.as_ref()) {
+        (Some(a), Some(b)) => !same_identity(a, b),
+        (None, None) => false,
+        // Claude Code still names an account whose sign-in it has wiped: signed out.
+        (None, Some(_)) => !ended,
+        (Some(_), None) => true,
+    } {
+        return Err("Current Claude account changed. Refresh the account list, then retry.".into());
+    }
     // An existing config with no readable credential must not be overwritten.
     if current.is_some() && old_auth.is_none() {
         return Err("Current Claude credential is unavailable; activation was cancelled.".into());
     }
-    config
+    let live = old_auth
+        .as_deref()
+        .map(parse)
+        .transpose()?
+        .filter(Value::is_object);
+    let composed = target_auth
         .as_object_mut()
-        .ok_or("Claude config format is invalid.")?
-        .insert("oauthAccount".into(), oauth.clone());
+        .ok_or("Claude native credential is invalid.")?;
+    for key in SHARED_KEYS {
+        match live.as_ref().and_then(|l| l.get(key)) {
+            Some(value) => {
+                composed.insert(key.into(), value.clone());
+            }
+            None => {
+                composed.remove(key);
+            }
+        }
+    }
+    let new_auth = serde_json::to_vec(&target_auth).map_err(|_| UNAVAILABLE)?;
+    if new_auth.len() > SECRET_CAP {
+        return Err("Claude credential exceeds size limit.".into());
+    }
+    Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        std::str::from_utf8(&new_auth).map_err(|_| UNAVAILABLE)?,
+    )?;
+    let object = config
+        .as_object_mut()
+        .ok_or("Claude config format is invalid.")?;
+    object.insert("oauthAccount".into(), oauth.clone());
+    // A managed API key would keep billing per token over the OAuth sign-in (Claude Swap
+    // `credentials.py:797-937`); the whole old config comes back on rollback.
+    object.remove("primaryApiKey");
     let new_config = serde_json::to_vec_pretty(&config).map_err(|_| UNAVAILABLE)?;
     if new_config.len() > CAP {
         return Err("Claude config exceeds size limit.".into());
@@ -894,20 +1030,63 @@ fn activate(
         return Err("Current Claude account changed during activation. Try again.".into());
     }
     ensure_lock()?;
-    writer.auth_write(c, Some(&new_auth))?;
+    // The outgoing account's newest generation is kept before the first write, under the
+    // same locks Claude Code refreshes under; failing to keep it cancels the switch.
+    if let (Some(auth), Some(config), false) = (old_auth.as_deref(), old_config.as_deref(), ended) {
+        preserve(&Outgoing { auth, config })?;
+    }
+    ensure_lock()?;
+    // A stale plaintext copy on macOS would hand the old account back if the Keychain ever
+    // became unreadable; rewrite it when, and only when, it already exists.
+    let shadow = c.home.join(".credentials.json");
+    let old_shadow = if c.mac {
+        writer.read(&shadow, SECRET_CAP)?
+    } else {
+        None
+    };
+    let rollback = |writer: &dyn Writer| -> bool {
+        let auth = writer.auth_write(c, old_auth.as_deref()).is_ok();
+        let shadow = old_shadow
+            .as_deref()
+            .is_none_or(|bytes| writer.config_write(&shadow, Some(bytes)).is_ok());
+        let config = writer
+            .config_write(&c.config, old_config.as_deref())
+            .is_ok();
+        auth && shadow && config
+    };
+    if writer.auth_write(c, Some(&new_auth)).is_err() {
+        // A timed-out write may already have committed: put the old item back.
+        ensure_lock().map_err(|_| "Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
+        return Err(if writer.auth_write(c, old_auth.as_deref()).is_ok() {
+            "Claude activation failed; previous account restored."
+        } else {
+            "Claude activation failed and rollback needs attention. Sign in through Claude before retrying."
+        }
+        .into());
+    }
     // Losing ownership forbids both continuation and rollback: another writer
     // may now own the live generation. Surface the partial result explicitly.
     ensure_lock().map_err(|_|"Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
-    if writer.config_write(&c.config, Some(&new_config)).is_err() {
+    let shadow_written =
+        old_shadow.is_none() || writer.config_write(&shadow, Some(&new_auth)).is_ok();
+    if !shadow_written || writer.config_write(&c.config, Some(&new_config)).is_err() {
         ensure_lock().map_err(|_| "Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
-        let auth_restored = writer.auth_write(c, old_auth.as_deref()).is_ok();
+        let restored = rollback(writer);
         ensure_lock().map_err(|_| "Claude rollback lost its account lock. Check the current Claude sign-in before retrying.")?;
-        // Atomic config writes leave the old file intact on failure; restore as
-        // well for writer backends where the failure can occur after commit.
-        let config_restored = writer
-            .config_write(&c.config, old_config.as_deref())
-            .is_ok();
-        return Err(if auth_restored && config_restored { "Claude activation failed; previous account restored." } else { "Claude activation failed and rollback needs attention. Sign in through Claude before retrying." }.into());
+        return Err(if restored { "Claude activation failed; previous account restored." } else { "Claude activation failed and rollback needs attention. Sign in through Claude before retrying." }.into());
+    }
+    Ok(())
+}
+/// Switchboard's own homes are never the ordinary Claude Code (Claude Swap
+/// `switcher.py:6661-6690`): a session Switchboard launched must not switch "the" account.
+fn refuse_own_home(home: &Path) -> Result<(), String> {
+    let inside = crate::default_root().ok().is_some_and(|root| {
+        let root = root.canonicalize().unwrap_or(root);
+        let home = home.canonicalize().unwrap_or_else(|_| home.to_owned());
+        home.starts_with(root)
+    });
+    if inside {
+        return Err("This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.".into());
     }
     Ok(())
 }
@@ -915,16 +1094,24 @@ pub fn activate_claude(
     credential: &Credential,
     identity: &ExternalIdentity,
     expected_current: Option<&ExternalIdentity>,
+    preserve: &mut dyn FnMut(&Outgoing<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
     let c = context(Provider::Claude, None)?;
     checked_path(&c.home)?;
+    refuse_own_home(&c.home)?;
     if !c.home.is_dir() {
         return Err("Open Claude Code once before activating a profile.".into());
     }
     let locks = Locks::acquire(&c)?;
-    activate(&Native, &c, credential, identity, expected_current, || {
-        locks.ensure()
-    })
+    activate(
+        &Native,
+        &c,
+        credential,
+        identity,
+        expected_current,
+        preserve,
+        || locks.ensure(),
+    )
 }
 
 #[cfg(test)]
@@ -938,6 +1125,8 @@ mod tests {
         files: RefCell<BTreeMap<PathBuf, Vec<u8>>>,
         keys: RefCell<BTreeMap<(String, String), Vec<u8>>>,
         fail_config: Cell<bool>,
+        /// The next credential write commits, then reports failure (a `security` timeout).
+        fail_auth_after_commit: Cell<bool>,
     }
     impl Fixture {
         fn new() -> Self {
@@ -945,6 +1134,7 @@ mod tests {
                 files: RefCell::new(BTreeMap::new()),
                 keys: RefCell::new(BTreeMap::new()),
                 fail_config: Cell::new(false),
+                fail_auth_after_commit: Cell::new(false),
             }
         }
         fn put(&self, path: &Path, bytes: &[u8]) {
@@ -965,11 +1155,22 @@ mod tests {
     }
     impl Writer for Fixture {
         fn auth_write(&self, c: &Context, v: Option<&[u8]>) -> Result<(), String> {
-            let mut files = self.files.borrow_mut();
-            if let Some(v) = v {
-                files.insert(c.home.join(".credentials.json"), v.into());
+            if c.mac {
+                let key = (c.service.clone(), c.user.clone());
+                match v {
+                    Some(v) => self.keys.borrow_mut().insert(key, v.into()),
+                    None => self.keys.borrow_mut().remove(&key),
+                };
             } else {
-                files.remove(&c.home.join(".credentials.json"));
+                let mut files = self.files.borrow_mut();
+                if let Some(v) = v {
+                    files.insert(c.home.join(".credentials.json"), v.into());
+                } else {
+                    files.remove(&c.home.join(".credentials.json"));
+                }
+            }
+            if self.fail_auth_after_commit.replace(false) {
+                return Err("fixture timeout after commit".into());
             }
             Ok(())
         }
@@ -1046,7 +1247,16 @@ mod tests {
         let old = capture(&f, Provider::Claude, &c).unwrap();
         let new = claude_profile(&auth("new-token"), &config("new@example.test"), None).unwrap();
         let before = f.files.borrow().clone();
-        assert!(activate(&f, &c, &new.credential, &new.identity, None, || Ok(())).is_err());
+        assert!(activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| Ok(()),
+            || Ok(())
+        )
+        .is_err());
         assert_eq!(*f.files.borrow(), before);
         f.fail_config.set(true);
         assert!(activate(
@@ -1055,6 +1265,7 @@ mod tests {
             &new.credential,
             &new.identity,
             Some(&old.identity),
+            &mut |_| Ok(()),
             || Ok(())
         )
         .unwrap_err()
@@ -1066,12 +1277,364 @@ mod tests {
             &new.credential,
             &new.identity,
             Some(&old.identity),
+            &mut |_| Ok(()),
             || Ok(()),
         )
         .unwrap();
         let cfg = parse(&f.files.borrow()[&c.config]).unwrap();
         assert_eq!(cfg["projects"]["keep"], true);
         assert_eq!(cfg["oauthAccount"]["emailAddress"], "new@example.test");
+    }
+    fn mac_ctx() -> Context {
+        Context { mac: true, ..ctx() }
+    }
+    fn live(f: &Fixture, c: &Context) -> Value {
+        let key = (c.service.clone(), c.user.clone());
+        parse(&f.keys.borrow()[&key]).unwrap()
+    }
+    fn put_live(f: &Fixture, c: &Context, value: Value) {
+        f.keys.borrow_mut().insert(
+            (c.service.clone(), c.user.clone()),
+            serde_json::to_vec(&value).unwrap(),
+        );
+    }
+    fn target(token: &str, extra: Value) -> CapturedProfile {
+        let mut auth = json!({"claudeAiOauth":{"accessToken":token,"refreshToken":format!("{token}-refresh"),"expiresAt":4102444800000i64}});
+        for (k, v) in extra.as_object().unwrap() {
+            auth[k] = v.clone();
+        }
+        claude_profile(
+            &serde_json::to_vec(&auth).unwrap(),
+            &config("new@example.test"),
+            None,
+        )
+        .unwrap()
+    }
+    #[test]
+    fn shared_keys_come_from_the_live_item_and_account_keys_from_the_target() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"},"mcpOAuth":{"live":1},"pluginSecrets":{"live":2},"trustedDeviceToken":"old-device"}),
+        );
+        let new = target(
+            "new",
+            json!({"mcpOAuth":{"stale":1},"mcpXaaIdp":{"stale":3},"trustedDeviceToken":"new-device"}),
+        );
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let item = live(&f, &c);
+        assert_eq!(item["claudeAiOauth"]["accessToken"], "new");
+        assert_eq!(
+            item["mcpOAuth"],
+            json!({"live":1}),
+            "live MCP OAuth survives the switch"
+        );
+        assert_eq!(item["pluginSecrets"], json!({"live":2}));
+        assert!(
+            item.get("mcpXaaIdp").is_none(),
+            "a shared key the machine lacks is not resurrected"
+        );
+        assert_eq!(
+            item["trustedDeviceToken"], "new-device",
+            "account-bound keys stay the target's"
+        );
+    }
+    #[test]
+    fn the_outgoing_generation_is_preserved_under_the_lock_before_any_write() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old-newest","refreshToken":"old-newest-r"}}),
+        );
+        let new = target("new", json!({}));
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        let locked = Cell::new(false);
+        let mut seen = Vec::new();
+        let mut preserve = |out: &Outgoing<'_>| {
+            assert!(locked.get(), "preserve runs under the locks");
+            seen.push(profile_of(out).unwrap().credential.refresh_token.unwrap());
+            Ok(())
+        };
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut preserve,
+            || {
+                locked.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, ["old-newest-r"]);
+        // A failure to keep it cancels the switch with nothing written.
+        let f = Fixture::new();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+        );
+        let before = (f.files.borrow().clone(), f.keys.borrow().clone());
+        let error = activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Err("vault refused".into()),
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error, "vault refused");
+        assert_eq!((f.files.borrow().clone(), f.keys.borrow().clone()), before);
+    }
+    #[test]
+    fn a_credential_write_that_fails_after_committing_is_rolled_back() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+        );
+        let before = f.keys.borrow().clone();
+        let new = target("new", json!({}));
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        f.fail_auth_after_commit.set(true);
+        let error = activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Claude activation failed; previous account restored."
+        );
+        assert_eq!(*f.keys.borrow(), before);
+    }
+    #[test]
+    fn a_wiped_live_sign_in_is_signed_out_and_does_not_block_a_switch() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"","refreshToken":""}}),
+        );
+        assert_eq!(
+            capture(&f, Provider::Claude, &c).err().unwrap(),
+            "No current Claude sign-in found."
+        );
+        let new = target("new", json!({}));
+        let mut called = false;
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| {
+                called = true;
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(!called, "a wiped item is not a generation to keep");
+        assert_eq!(live(&f, &c)["claudeAiOauth"]["accessToken"], "new");
+        // An absent item under a named account is still refused: it may be unreadable.
+        let f = Fixture::new();
+        f.put(&c.config, &config("old@example.test"));
+        assert!(activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| Ok(()),
+            || Ok(())
+        )
+        .is_err());
+    }
+    #[test]
+    fn a_managed_api_key_is_removed_and_returns_on_rollback() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        let mut cfg = parse(&config("old@example.test")).unwrap();
+        cfg["primaryApiKey"] = json!("sk-ant-api-fixture");
+        f.put(&c.config, &serde_json::to_vec(&cfg).unwrap());
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+        );
+        let new = target("new", json!({}));
+        let old = identity(&cfg).unwrap();
+        f.fail_config.set(true);
+        assert!(activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(())
+        )
+        .is_err());
+        assert_eq!(
+            parse(&f.files.borrow()[&c.config]).unwrap()["primaryApiKey"],
+            "sk-ant-api-fixture"
+        );
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(parse(&f.files.borrow()[&c.config])
+            .unwrap()
+            .get("primaryApiKey")
+            .is_none());
+    }
+    #[test]
+    fn a_plaintext_copy_on_macos_is_rewritten_only_when_it_exists() {
+        let c = mac_ctx();
+        let new = target("new", json!({}));
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        let shadow = c.home.join(".credentials.json");
+        for exists in [false, true] {
+            let f = Fixture::new();
+            f.put(&c.config, &config("old@example.test"));
+            put_live(
+                &f,
+                &c,
+                json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+            );
+            if exists {
+                f.put(&shadow, &auth("old"));
+            }
+            activate(
+                &f,
+                &c,
+                &new.credential,
+                &new.identity,
+                Some(&old),
+                &mut |_| Ok(()),
+                || Ok(()),
+            )
+            .unwrap();
+            let file = f.files.borrow().get(&shadow).cloned();
+            if exists {
+                assert_eq!(
+                    parse(&file.unwrap()).unwrap()["claudeAiOauth"]["accessToken"],
+                    "new"
+                );
+            } else {
+                assert!(file.is_none(), "never created");
+            }
+        }
+    }
+    #[test]
+    fn a_captured_expiry_never_outlives_its_access_token() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+        );
+        let mut new = target("new", json!({}));
+        new.credential.expires_at = None;
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(live(&f, &c)["claudeAiOauth"].get("expiresAt").is_none());
+    }
+    #[test]
+    fn a_live_lock_is_waited_for_and_a_stale_one_is_taken_over() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(".claude.lock");
+        fs::create_dir(&path).unwrap();
+        let start = std::time::Instant::now();
+        assert_eq!(
+            acquire_lock(&path, Duration::from_secs(60), Duration::from_millis(300)).unwrap_err(),
+            "Claude is updating its account. Wait for login or refresh to finish, then retry."
+        );
+        assert!(
+            start.elapsed() >= Duration::from_millis(250),
+            "waited before giving up"
+        );
+        // A holder that stopped heartbeating long ago left an empty directory: taken over.
+        let old = std::time::SystemTime::now() - Duration::from_secs(120);
+        fs::File::open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        acquire_lock(&path, Duration::from_secs(60), Duration::from_millis(300)).unwrap();
+        assert!(path.is_dir());
+        // A holder released during the wait lets us in.
+        fs::remove_dir(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        let release = path.clone();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            fs::remove_dir(release).unwrap();
+        });
+        acquire_lock(&path, Duration::from_secs(60), Duration::from_secs(2)).unwrap();
+        handle.join().unwrap();
+    }
+    #[test]
+    fn only_claude_swap_itself_counts_as_running() {
+        assert!(running_swap_line(
+            "/Users/x/.local/share/uv/tools/claude-swap/bin/python3 /Users/x/.local/bin/cswap"
+        ));
+        assert!(running_swap_line("cswap auto"));
+        assert!(running_swap_line(
+            "/usr/bin/python3 -m claude_swap/__main__.py"
+        ));
+        assert!(!running_swap_line("vim notes-about-cswap.md"));
+        assert!(!running_swap_line(
+            "/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard"
+        ));
     }
     #[test]
     fn backup_file_precedes_keychain() {
@@ -1278,6 +1841,7 @@ mod tests {
             &new.credential,
             &new.identity,
             Some(&old.identity),
+            &mut |_| Ok(()),
             || {
                 let n = calls.get() + 1;
                 calls.set(n);

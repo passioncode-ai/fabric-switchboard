@@ -37,7 +37,20 @@ impl MonitorHandle {
                 if native_sources
                     && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
                 {
+                    // Network first, outside the lock: who owns a lineage not seen before.
+                    crate::refresh::learn_live_owner(
+                        &runtime.store,
+                        runtime.native,
+                        &runtime.refresh,
+                    )
+                    .await;
+                    // Claude Swap's files are read outside the lock; adopting its newer
+                    // generations happens under it, with the live sync.
+                    let swap = crate::external::claude_swap_running()
+                        .then(|| crate::external::read_claude_swap().ok().map(|b| b.profiles))
+                        .flatten();
                     let _mutation = runtime.mutations.lock().await;
+                    crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
                     sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();
                     last_source_sync = time;
@@ -272,6 +285,14 @@ fn sync_live_sources(
         };
         if provider == Provider::Claude {
             refresh.note_active(&profile.identity);
+            // Only a lineage proven to be this identity's is filed under it: after an
+            // interrupted switch or a half-finished `/login` the config can name account A
+            // while the Keychain holds account B's token (PLAN-0.5.1, report §P1-3).
+            if crate::refresh::lineage(store, refresh, &profile.identity, &profile.credential)
+                != crate::refresh::Lineage::Own
+            {
+                continue;
+            }
         }
         for account in accounts {
             if store
@@ -523,10 +544,7 @@ mod tests {
     async fn automatic_native_switch_journals_activation_and_rotation() {
         use crate::fixtures::*;
         for (activate, expected) in [
-            (
-                activates as fn(_: &_, _: &_, _: Option<&_>) -> _,
-                "switched",
-            ),
+            (activates as crate::Activate, "switched"),
             (fails, "activation_failed"),
         ] {
             let root = tempfile::tempdir().unwrap();
@@ -731,6 +749,48 @@ mod tests {
         assert_eq!(
             events(&runtime.store, "activation"),
             [(Some(b.id), "completed".to_string())]
+        );
+    }
+    #[tokio::test]
+    async fn background_sync_never_files_another_accounts_lineage() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let a = save(&store, "synthetic-a", "default");
+        save(&store, "synthetic-b", "default");
+        let state = crate::refresh::RefreshState::default();
+        fn a_named_b_held(_: Provider) -> Result<external::CapturedProfile, String> {
+            Ok(external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: credential("synthetic-b"),
+                identity: identity("synthetic-a"),
+                label: "synthetic-a".into(),
+            })
+        }
+        sync_live_sources(&store, a_named_b_held, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-token"
+        );
+        // Its own newer generation is adopted.
+        fn a_refreshed(_: Provider) -> Result<external::CapturedProfile, String> {
+            let mut c = credential("synthetic-a");
+            c.access_token = "synthetic-a-newer".into();
+            Ok(external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: c,
+                identity: identity("synthetic-a"),
+                label: "synthetic-a".into(),
+            })
+        }
+        sync_live_sources(&store, a_refreshed, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-newer"
         );
     }
     #[test]
