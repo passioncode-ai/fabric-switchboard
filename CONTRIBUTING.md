@@ -14,8 +14,7 @@ Fabric Switchboard is open source under the [GNU AGPL-3.0](LICENSE); a
 
 Contributions are accepted under the [Contributor License Agreement](CLA.md). By opening a
 pull request you agree to it — it is what lets every contribution be offered under the
-commercial license too; the pull request template asks you to confirm this with a
-checkbox. Pull requests without that confirmation are not merged.
+commercial license too. There is no checkbox to tick.
 
 ## Before you open a pull request
 

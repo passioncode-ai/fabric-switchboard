@@ -8,7 +8,8 @@
 
 ## Checklist
 
-- [ ] I agree to [CLA.md](https://github.com/passioncode-ai/fabric-switchboard/blob/main/CLA.md) for this contribution.
+Opening this pull request means you agree to the repository's `CLA.md` for this contribution. Nothing to tick.
+
 - [ ] `./scripts/check.sh` passes locally.
 - [ ] Tests use synthetic fixtures only; no real credentials, prompts or provider error bodies are included.
 - [ ] A user-facing change updates `docs/ux/scenarios.md` and its evidence.
