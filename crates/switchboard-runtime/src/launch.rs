@@ -7,6 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::Arc,
+    time::{Duration, SystemTime},
 };
 use switchboard_core::{AuthKind, Credential, Provider, Store};
 use switchboard_proxy::ProxyHandle;
@@ -270,6 +271,17 @@ fn script(
 ) -> String {
     windows_script(home, program, args, env, login, working_directory)
 }
+/// A reservation guards only the window between writing a home and its script removing
+/// the marker; a Terminal that never ran the script must not hold the home forever.
+const RESERVATION_TTL: Duration = Duration::from_secs(10 * 60);
+/// A marker dated ahead of the clock (a clock set back) has no knowable age, so it expires
+/// by the same distance rather than holding the home until the clock catches up.
+fn reservation_expired(written: SystemTime, now: SystemTime) -> bool {
+    match now.duration_since(written) {
+        Ok(age) => age > RESERVATION_TTL,
+        Err(ahead) => ahead.duration() > RESERVATION_TTL,
+    }
+}
 struct Reservation {
     path: PathBuf,
     committed: bool,
@@ -293,7 +305,23 @@ impl Drop for Reservation {
         }
     }
 }
+/// What a launch needs from outside its private root: the provider CLI, the Switchboard
+/// CLI its tools run from, and a Terminal for the written script. Tests substitute all
+/// three, so no real CLI is resolved and no window opens.
+struct Host {
+    binary: fn(Provider) -> Result<PathBuf, String>,
+    agent_cli: fn() -> Option<PathBuf>,
+    start_terminal: fn(&Path) -> Result<(), String>,
+}
+const NATIVE: Host = Host {
+    binary,
+    agent_cli,
+    start_terminal,
+};
 fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
+    start_terminal(&write_launch_script(home, content)?)
+}
+fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
     #[cfg(windows)]
     let path = home.join("launch.ps1");
     #[cfg(not(windows))]
@@ -301,6 +329,9 @@ fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     #[cfg(windows)]
     let content = format!("\u{feff}{content}"); // Windows PowerShell 5.1 needs a UTF-8 BOM for Unicode paths.
     private_write(&path, content.as_bytes(), true)?;
+    Ok(path)
+}
+fn start_terminal(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let status = Command::new("/usr/bin/open")
@@ -339,6 +370,7 @@ fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
+        let _ = path;
         Err("Terminal launch is currently supported on macOS and Windows only.".into())
     }
 }
@@ -420,6 +452,34 @@ fn keychain_service(home: &Path) -> String {
         &format!("{:x}", Sha256::digest(raw.as_bytes()))[..8]
     )
 }
+/// The Keychain account Claude Code files its login item under. This MUST match
+/// `crate::external::username()` — `$USER` when set and non-empty, then the passwd entry
+/// of the effective user — or a sign-in is captured under one name and cleaned under another.
+#[cfg(target_os = "macos")]
+fn login_user() -> Result<String, String> {
+    pick_user(std::env::var("USER").ok(), passwd_user)
+}
+#[cfg(any(target_os = "macos", test))]
+fn pick_user(
+    environment: Option<String>,
+    passwd: impl FnOnce() -> Option<String>,
+) -> Result<String, String> {
+    environment
+        .filter(|user| !user.is_empty())
+        .or_else(|| passwd().filter(|user| !user.is_empty()))
+        .ok_or_else(|| "Local login user unavailable.".into())
+}
+#[cfg(target_os = "macos")]
+fn passwd_user() -> Option<String> {
+    // getpwuid returns null or static storage valid until the next passwd call; the name
+    // is copied out before returning.
+    let pw = unsafe { libc::getpwuid(libc::geteuid()) };
+    (!pw.is_null()).then(|| {
+        unsafe { std::ffi::CStr::from_ptr((*pw).pw_name) }
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 fn read_regular(path: &Path) -> Result<String, String> {
     let bytes = switchboard_core::private_fs::read_private(path, 1024 * 1024).map_err(|_| {
         "Sign-in is not complete or its private file is unsafe. Finish in Terminal, then try again."
@@ -435,7 +495,7 @@ pub fn capture_login(login: &Login) -> Result<Credential, String> {
         Provider::Claude => {
             #[cfg(target_os = "macos")]
             {
-                let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
+                let user = login_user()?;
                 // Claude Code wrote this item with /usr/bin/security; reading it the same
                 // way is silent (PLAN-0.5 C-3).
                 let bytes = crate::external_keychain::read(&keychain_service(&login.home), &user)
@@ -481,7 +541,7 @@ pub fn cancel_login(login: &Login) -> Result<(), String> {
     // A cancelled/failed sign-in may never have created a vault item.
     #[cfg(target_os = "macos")]
     if login.provider == Provider::Claude {
-        let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
+        let user = login_user()?;
         crate::external_keychain::delete(&keychain_service(&login.home), &user)
             .map_err(|_| "Sign-in cleanup needs Keychain access.")?;
     }
@@ -490,7 +550,7 @@ pub fn cancel_login(login: &Login) -> Result<(), String> {
 pub fn clean_login(login: &Login) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if login.provider == Provider::Claude {
-        let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
+        let user = login_user()?;
         crate::external_keychain::delete(&keychain_service(&login.home), &user)
             .map_err(|_| "Account saved; isolated login cleanup needs attention.")?;
     }
@@ -500,9 +560,72 @@ pub fn clean_login(login: &Login) -> Result<(), String> {
         Err(_) => Err("Account saved; isolated login cleanup needs attention.".into()),
     }
 }
+/// A session marker is written as its shell starts, so a live process younger than the
+/// marker by more than this margin cannot be that shell: its pid was reused.
+#[cfg(any(unix, test))]
+const PID_REUSE_MARGIN: Duration = Duration::from_secs(60);
+#[cfg(any(unix, test))]
+fn pid_reused(marker_age: Duration, process_age: Duration) -> bool {
+    process_age + PID_REUSE_MARGIN < marker_age
+}
+/// Parses `ps -o etime=`, `[[dd-]hh:]mm:ss`; macOS `ps` has no `etimes` keyword.
+#[cfg(any(unix, test))]
+fn parse_elapsed(text: &str) -> Option<Duration> {
+    let number = |s: &str| {
+        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse::<u64>().ok())
+            .flatten()
+    };
+    let text = text.trim();
+    let (days, clock) = match text.split_once('-') {
+        Some((days, clock)) => (number(days)?, clock),
+        None => (0, text),
+    };
+    let parts = clock.split(':').map(number).collect::<Option<Vec<u64>>>()?;
+    let (hours, minutes, seconds) = match parts[..] {
+        [m, s] => (0, m, s),
+        [h, m, s] => (h, m, s),
+        _ => return None,
+    };
+    if minutes >= 60 || seconds >= 60 {
+        return None;
+    }
+    let total = days
+        .checked_mul(86_400)?
+        .checked_add(hours.checked_mul(3600)?)?
+        .checked_add(minutes * 60 + seconds)?;
+    Some(Duration::from_secs(total))
+}
+/// How long ago `pid` started; None when `ps` cannot say, which keeps the home busy.
+#[cfg(unix)]
+fn process_age(pid: u32) -> Option<Duration> {
+    let output = Command::new("/bin/ps")
+        .args(["-o", "etime=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| parse_elapsed(&String::from_utf8_lossy(&output.stdout)))
+        .flatten()
+}
 fn ensure_idle(home: &Path) -> Result<(), String> {
-    if home.join(".launch-pending").exists() {
-        return Err("Close the existing session before changing its home.".into());
+    let pending = home.join(".launch-pending");
+    match fs::symlink_metadata(&pending) {
+        Ok(meta) => {
+            let expired = meta.file_type().is_file()
+                && meta
+                    .modified()
+                    .is_ok_and(|t| reservation_expired(t, SystemTime::now()));
+            // The script never ran: releasing the abandoned marker frees the home.
+            if !expired || fs::remove_file(&pending).is_err() {
+                return Err("Close the existing session before changing its home.".into());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
     }
     #[cfg(windows)]
     {
@@ -541,7 +664,17 @@ fn ensure_idle(home: &Path) -> Result<(), String> {
             .status()
             .is_ok_and(|s| s.success())
         {
-            return Err("Close the existing session before changing its home.".into());
+            // A live pid may since belong to another process; only a process at least as
+            // old as the marker can be the session that wrote it. Unknown ages stay busy.
+            let reused = fs::symlink_metadata(&marker)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| SystemTime::now().duration_since(t).ok())
+                .zip(process_age(pid))
+                .is_some_and(|(marker_age, age)| pid_reused(marker_age, age));
+            if !reused {
+                return Err("Close the existing session before changing its home.".into());
+            }
         }
     }
     Ok(())
@@ -605,6 +738,17 @@ pub fn launch(
     mode: &str,
     working_directory: &Path,
 ) -> Result<bool, String> {
+    launch_with(root, store, proxy, id, mode, working_directory, &NATIVE)
+}
+fn launch_with(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    host: &Host,
+) -> Result<bool, String> {
     if !working_directory.is_absolute() {
         return Err("Choose an existing project directory.".into());
     }
@@ -630,7 +774,7 @@ pub fn launch(
     if !account.enabled {
         return Err("Enable the account before launch.".into());
     }
-    let program = binary(account.provider)?;
+    let program = (host.binary)(account.provider)?;
     let homes = root.join(if mode == "managed" {
         "runtimes"
     } else {
@@ -650,7 +794,7 @@ pub fn launch(
     } else {
         format!("isolated:{}:{}", account.provider.as_str(), account.id)
     };
-    let cli = agent_cli();
+    let cli = (host.agent_cli)();
     let tools = agent_tools(
         cli.as_deref(),
         root,
@@ -693,11 +837,13 @@ pub fn launch(
         }
     } else {
         let credential = store.credential(id)?;
+        // Store::credential already refuses an expired credential; this guards the second
+        // between that check and the copy. No provider was asked, so it is not a rejection.
         if credential
             .expires_at
             .is_some_and(|t| t <= switchboard_proxy::now())
         {
-            return Err("Provider rejected the credential. Sign in again.".into());
+            return Err("Credential expired; reauthenticate this account".into());
         }
         match account.provider {
             Provider::Claude => {
@@ -746,10 +892,10 @@ pub fn launch(
         Some(path) => vec!["--mcp-config", path.as_str()],
         None => Vec::new(),
     };
-    open_terminal(
+    (host.start_terminal)(&write_launch_script(
         &home,
         &script(&home, &program, &args, &env, false, &working_directory),
-    )?;
+    )?)?;
     reservation.committed = true;
     journal_launch(store, id, mode);
     Ok(cli.is_some())
@@ -1024,6 +1170,589 @@ mod tests {
             "email names it at finish"
         );
         assert!(validate_fields(&"x".repeat(81), "default").is_err());
+    }
+    fn age(path: &Path, seconds: u64) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(seconds))
+            .unwrap();
+    }
+    #[test]
+    fn reservation_expires_after_ten_minutes_in_either_direction() {
+        let now = std::time::SystemTime::now();
+        let minutes = |m: u64| Duration::from_secs(m * 60);
+        assert!(!reservation_expired(now - minutes(9), now));
+        assert!(!reservation_expired(now, now));
+        assert!(reservation_expired(now - minutes(11), now));
+        // A clock set back leaves the marker's age unknowable; it must not hold the home forever.
+        assert!(!reservation_expired(now + minutes(9), now));
+        assert!(reservation_expired(now + minutes(11), now));
+    }
+    #[test]
+    fn stale_reservation_no_longer_holds_the_home() {
+        let root = tempfile::tempdir().unwrap();
+        let mut hold = Reservation::new(root.path()).unwrap();
+        hold.committed = true; // Terminal was asked to run the script, which never ran.
+        drop(hold);
+        age(&root.path().join(".launch-pending"), 9 * 60);
+        assert!(
+            ensure_idle(root.path()).is_err(),
+            "a fresh launch still holds"
+        );
+        age(&root.path().join(".launch-pending"), 11 * 60);
+        assert!(ensure_idle(root.path()).is_ok());
+        assert!(!root.path().join(".launch-pending").exists());
+        assert!(Reservation::new(root.path()).is_ok());
+    }
+    #[test]
+    fn sign_in_whose_terminal_never_ran_can_be_cancelled_once_its_reservation_expires() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("login");
+        private_dir(&home).unwrap();
+        let mut hold = Reservation::new(&home).unwrap();
+        hold.committed = true;
+        drop(hold);
+        let login = Login {
+            id: Uuid::new_v4().to_string(),
+            provider: Provider::Codex,
+            label: "Synthetic".into(),
+            pool: "default".into(),
+            saved: None,
+            home: home.clone(),
+        };
+        assert!(cancel_login(&login).is_err());
+        age(&home.join(".launch-pending"), 11 * 60);
+        cancel_login(&login).unwrap();
+        assert!(!home.exists());
+    }
+    #[test]
+    fn keychain_user_prefers_a_set_user_then_the_passwd_entry() {
+        let unused = || -> Option<String> { panic!("passwd must not be read when USER is set") };
+        assert_eq!(pick_user(Some("alice".into()), unused).unwrap(), "alice");
+        assert_eq!(
+            pick_user(Some(String::new()), || Some("bob".into())).unwrap(),
+            "bob"
+        );
+        assert_eq!(pick_user(None, || Some("bob".into())).unwrap(), "bob");
+        assert!(pick_user(None, || Some(String::new())).is_err());
+        assert!(pick_user(Some(String::new()), || None).is_err());
+    }
+    #[test]
+    fn ps_elapsed_time_forms_parse_and_malformed_ones_do_not() {
+        let s = Duration::from_secs;
+        assert_eq!(parse_elapsed("00:05"), Some(s(5)));
+        assert_eq!(parse_elapsed("  12:34\n"), Some(s(12 * 60 + 34)));
+        assert_eq!(parse_elapsed("01:02:03"), Some(s(3723)));
+        assert_eq!(parse_elapsed("2-01:02:03"), Some(s(2 * 86_400 + 3723)));
+        for bad in [
+            "", "5", "1:2:3:4", "aa:bb", "-01:00", "01:60", "x-01:00", "+1:00", "1-2",
+        ] {
+            assert_eq!(parse_elapsed(bad), None, "{bad:?}");
+        }
+    }
+    #[test]
+    fn a_process_younger_than_its_marker_is_a_reused_pid() {
+        let s = Duration::from_secs;
+        assert!(pid_reused(s(3600), s(10)));
+        assert!(!pid_reused(s(3600), s(3590)), "within the margin");
+        assert!(
+            !pid_reused(s(10), s(3600)),
+            "the session shell predates its marker"
+        );
+        assert!(!pid_reused(s(60), s(0)));
+        assert!(pid_reused(s(61), s(0)));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn live_pid_holds_the_home_only_while_it_can_be_the_session() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join(".session-pid");
+        // This test process is alive and seconds old: a marker as fresh is its session.
+        private_write(&marker, std::process::id().to_string().as_bytes(), false).unwrap();
+        assert!(ensure_idle(root.path()).is_err());
+        // A month-old marker cannot name a process started seconds ago: the pid was reused.
+        age(&marker, 30 * 86_400);
+        assert!(ensure_idle(root.path()).is_ok());
+    }
+
+    fn native_never(_: Provider) -> Result<PathBuf, String> {
+        panic!("tests must not resolve a real provider CLI")
+    }
+    fn synthetic_program(_: Provider) -> Result<PathBuf, String> {
+        Ok(PathBuf::from("/opt/Provider Tools/o'cli"))
+    }
+    fn no_agent_cli() -> Option<PathBuf> {
+        None
+    }
+    fn synthetic_agent_cli() -> Option<PathBuf> {
+        Some(PathBuf::from("/opt/Switchboard Tools/switchboard"))
+    }
+    fn terminal_opens(_: &Path) -> Result<(), String> {
+        Ok(())
+    }
+    fn terminal_fails(_: &Path) -> Result<(), String> {
+        Err("Terminal could not open.".into())
+    }
+    const TEST_HOST: Host = Host {
+        binary: synthetic_program,
+        agent_cli: no_agent_cli,
+        start_terminal: terminal_opens,
+    };
+    struct Fixture {
+        temp: tempfile::TempDir,
+        root: PathBuf,
+        project: PathBuf,
+        vault: Arc<switchboard_core::MemoryVault>,
+        store: Arc<Store>,
+    }
+    fn fixture() -> Fixture {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        private_dir(&root).unwrap();
+        // Windows file names cannot hold a double quote.
+        let project = temp.path().join(if cfg!(windows) {
+            "My project o'neil"
+        } else {
+            "My \"project\" o'neil"
+        });
+        fs::create_dir(&project).unwrap();
+        let vault = Arc::new(switchboard_core::MemoryVault::default());
+        let store = Arc::new(Store::open(root.clone(), vault.clone()).unwrap());
+        Fixture {
+            temp,
+            root,
+            project,
+            vault,
+            store,
+        }
+    }
+    impl Fixture {
+        fn add(&self, provider: Provider, kind: AuthKind, pool: &str, material: &str) -> String {
+            let credential = Credential::parse(provider, kind, material).unwrap();
+            self.store
+                .add("Synthetic".into(), provider, kind, pool.into(), credential)
+                .unwrap()
+                .id
+        }
+        fn launch(
+            &self,
+            proxy: &ProxyHandle,
+            id: &str,
+            mode: &str,
+            host: &Host,
+        ) -> Result<bool, String> {
+            launch_with(
+                &self.root,
+                &self.store,
+                proxy,
+                id,
+                mode,
+                &self.project,
+                host,
+            )
+        }
+        /// Every file below the fixture's temporary directory, so a test can prove where a
+        /// launch wrote.
+        fn files(&self) -> std::collections::BTreeSet<PathBuf> {
+            fn walk(dir: &Path, out: &mut std::collections::BTreeSet<PathBuf>) {
+                for entry in fs::read_dir(dir).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        walk(&path, out);
+                    } else {
+                        out.insert(path);
+                    }
+                }
+            }
+            let mut out = std::collections::BTreeSet::new();
+            walk(self.temp.path(), &mut out);
+            out
+        }
+    }
+    const CLAUDE_OAUTH: &str = r#"{"claudeAiOauth":{"accessToken":"synthetic-access","refreshToken":"synthetic-refresh-must-not-export"}}"#;
+    #[tokio::test]
+    async fn isolated_claude_launch_writes_only_the_access_token_into_its_home() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let oauth = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let api = f.add(
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default",
+            "synthetic-api-key",
+        );
+        let before = f.files();
+        assert!(!f.launch(&proxy, &oauth, "isolated", &TEST_HOST).unwrap());
+        assert!(!f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap());
+
+        let home = f.root.join("homes").join(&oauth);
+        let settings: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            settings,
+            json!({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-access"}})
+        );
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(f.root.join("homes").join(&api).join("settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            settings,
+            json!({"env": {"ANTHROPIC_API_KEY": "synthetic-api-key"}})
+        );
+        // The reservation stays until the script itself removes it.
+        assert!(home.join(".launch-pending").exists());
+        assert!(f.launch(&proxy, &oauth, "isolated", &TEST_HOST).is_err());
+
+        let private_root = f.root.canonicalize().unwrap();
+        for path in f.files().difference(&before) {
+            let path = path.canonicalize().unwrap();
+            assert!(
+                path.starts_with(&private_root),
+                "{path:?} is outside the root"
+            );
+            if path.file_name().is_some_and(|n| n != "accounts.json") {
+                assert!(!fs::read_to_string(&path)
+                    .unwrap()
+                    .contains("synthetic-refresh-must-not-export"));
+            }
+        }
+        assert_eq!(fs::read_dir(&f.project).unwrap().count(), 0);
+        let events = f.store.snapshot().unwrap().events;
+        assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 2);
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn isolated_launch_script_exports_the_home_and_runs_in_the_project() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        f.launch(&proxy, &id, "isolated", &TEST_HOST).unwrap();
+        let home = f.root.join("homes").join(&id);
+        let script_path = home.join("launch.command");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&script_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        let text = fs::read_to_string(script_path).unwrap();
+        assert!(text.contains(&format!(
+            "export CLAUDE_CONFIG_DIR={}\n",
+            quote(&home.to_string_lossy())
+        )));
+        assert!(text.contains(&format!(
+            "export SWITCHBOARD_SESSION='isolated:claude:{id}'\n"
+        )));
+        let project = f.project.canonicalize().unwrap();
+        assert!(text.contains(&format!(
+            "cd {} || exit 1\nexec '/opt/Provider Tools/o'\\''cli'\n",
+            quote(&project.to_string_lossy())
+        )));
+        assert!(
+            !text.contains("synthetic-access"),
+            "the token stays in settings.json"
+        );
+    }
+    #[tokio::test]
+    async fn expired_credential_is_refused_and_releases_the_home() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let mut expired =
+            Credential::parse(Provider::Claude, AuthKind::OAuth, CLAUDE_OAUTH).unwrap();
+        expired.expires_at = Some(1);
+        switchboard_core::Vault::put(f.vault.as_ref(), &id, &expired).unwrap();
+        assert_eq!(
+            f.launch(&proxy, &id, "isolated", &TEST_HOST).unwrap_err(),
+            "Credential expired; reauthenticate this account"
+        );
+        let home = f.root.join("homes").join(&id);
+        assert!(!home.join("settings.json").exists());
+        assert!(!home.join("launch.command").exists());
+        assert!(ensure_idle(&home).is_ok());
+    }
+    #[tokio::test]
+    async fn managed_launch_requires_the_selected_account_and_routes_through_the_proxy() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let selected = f.add(Provider::Claude, AuthKind::OAuth, "work", CLAUDE_OAUTH);
+        let other = f.add(
+            Provider::Claude,
+            AuthKind::OAuth,
+            "work",
+            &CLAUDE_OAUTH.replace("synthetic-access", "synthetic-other"),
+        );
+        assert_eq!(
+            f.launch(&proxy, &other, "managed", &TEST_HOST).unwrap_err(),
+            "No account selected for this provider and pool"
+        );
+        f.store.select(Provider::Claude, "work", &selected).unwrap();
+        assert_eq!(
+            f.launch(&proxy, &other, "managed", &TEST_HOST).unwrap_err(),
+            "Select this account before launching managed mode."
+        );
+        let home = f.root.join("runtimes").join("claude-work");
+        assert!(
+            ensure_idle(&home).is_ok(),
+            "a refused launch releases the home"
+        );
+
+        let host = Host {
+            agent_cli: synthetic_agent_cli,
+            ..TEST_HOST
+        };
+        assert!(f.launch(&proxy, &selected, "managed", &host).unwrap());
+        assert!(
+            !home.join("settings.json").exists(),
+            "no credential is copied"
+        );
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join("switchboard-mcp.json")).unwrap()).unwrap();
+        let args = &config["mcpServers"]["switchboard"]["args"];
+        assert!(!args.as_array().unwrap().iter().any(|a| a == "--read-only"));
+        #[cfg(not(windows))]
+        {
+            let text = fs::read_to_string(home.join("launch.command")).unwrap();
+            assert!(text.contains(&format!(
+                "export ANTHROPIC_BASE_URL='http://{}/claude/work'\n",
+                proxy.address()
+            )));
+            assert!(text.contains(&format!(
+                "export ANTHROPIC_AUTH_TOKEN='{}'\n",
+                proxy.token()
+            )));
+            assert!(text.contains("export ANTHROPIC_API_KEY=''\n"));
+            assert!(text.contains("'--mcp-config'"));
+        }
+    }
+    #[tokio::test]
+    async fn managed_codex_launch_points_codex_at_the_local_proxy() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "team",
+            "synthetic-api-key",
+        );
+        f.store.select(Provider::Codex, "team", &id).unwrap();
+        f.launch(&proxy, &id, "managed", &TEST_HOST).unwrap();
+        let home = f.root.join("runtimes").join("codex-team");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(home.join("config.toml")).unwrap()).unwrap();
+        assert_eq!(config["model_provider"].as_str(), Some("switchboard"));
+        let provider = &config["model_providers"]["switchboard"];
+        assert_eq!(
+            provider["base_url"].as_str().unwrap(),
+            format!("http://{}/codex/team/v1", proxy.address())
+        );
+        assert_eq!(
+            provider["env_key"].as_str(),
+            Some("SWITCHBOARD_LOCAL_TOKEN")
+        );
+        assert!(!home.join("auth.json").exists(), "no credential is copied");
+    }
+    #[tokio::test]
+    async fn isolated_codex_launch_writes_the_native_auth_snapshot() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let oauth = f.add(
+            Provider::Codex,
+            AuthKind::OAuth,
+            "default",
+            r#"{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh-must-not-export","id_token":"header.eyJzdWIiOiJzeW50aGV0aWMifQ.signature","account_id":"synthetic-account"}}"#,
+        );
+        let api = f.add(
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "default",
+            "synthetic-api-key",
+        );
+        let host = Host {
+            agent_cli: synthetic_agent_cli,
+            ..TEST_HOST
+        };
+        assert!(f.launch(&proxy, &oauth, "isolated", &host).unwrap());
+        f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap();
+
+        let home = f.root.join("homes").join(&oauth);
+        let auth: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join("auth.json")).unwrap()).unwrap();
+        assert_eq!(auth["auth_mode"], "chatgpt");
+        assert!(auth["OPENAI_API_KEY"].is_null());
+        assert_eq!(auth["tokens"]["access_token"], "synthetic-access");
+        assert_eq!(auth["tokens"]["refresh_token"], "");
+        assert_eq!(
+            auth["tokens"]["id_token"],
+            "header.eyJzdWIiOiJzeW50aGV0aWMifQ.signature"
+        );
+        assert_eq!(auth["tokens"]["account_id"], "synthetic-account");
+        assert!(auth["last_refresh"].is_string());
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(home.join("config.toml")).unwrap()).unwrap();
+        assert_eq!(config["cli_auth_credentials_store"].as_str(), Some("file"));
+        let server = &config["mcp_servers"]["switchboard"];
+        assert_eq!(
+            server["command"].as_str(),
+            Some("/opt/Switchboard Tools/switchboard")
+        );
+        assert_eq!(
+            server["args"].as_array().unwrap().last().unwrap().as_str(),
+            Some("--read-only"),
+            "an isolated session cannot change routes"
+        );
+        for entry in fs::read_dir(&home).unwrap() {
+            let text = fs::read_to_string(entry.unwrap().path()).unwrap_or_default();
+            assert!(!text.contains("synthetic-refresh-must-not-export"));
+        }
+        let auth: serde_json::Value = serde_json::from_slice(
+            &fs::read(f.root.join("homes").join(&api).join("auth.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            auth,
+            json!({"OPENAI_API_KEY": "synthetic-api-key", "auth_mode": "apikey"})
+        );
+    }
+    #[tokio::test]
+    async fn launch_refuses_bad_input_before_touching_a_home() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let never = Host {
+            binary: native_never,
+            ..TEST_HOST
+        };
+        let refuse = |wd: &Path, id: &str, mode: &str| {
+            launch_with(&f.root, &f.store, &proxy, id, mode, wd, &never).unwrap_err()
+        };
+        let project = "Choose an existing project directory.";
+        assert_eq!(refuse(Path::new("relative"), &id, "isolated"), project);
+        assert_eq!(refuse(&f.project.join("missing"), &id, "isolated"), project);
+        assert_eq!(refuse(&f.root, &id, "isolated"), project);
+        assert_eq!(
+            refuse(&f.project, &id, "elsewhere"),
+            "Choose isolated or managed launch."
+        );
+        assert_eq!(
+            refuse(&f.project, &Uuid::new_v4().to_string(), "isolated"),
+            "Account not found."
+        );
+        f.store.update(&id, "Synthetic".into(), false).unwrap();
+        assert_eq!(
+            refuse(&f.project, &id, "isolated"),
+            "Enable the account before launch."
+        );
+        assert!(!f.root.join("homes").exists());
+    }
+    #[tokio::test]
+    async fn terminal_failure_releases_the_home_and_records_no_launch() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let host = Host {
+            start_terminal: terminal_fails,
+            ..TEST_HOST
+        };
+        assert_eq!(
+            f.launch(&proxy, &id, "isolated", &host).unwrap_err(),
+            "Terminal could not open."
+        );
+        assert!(ensure_idle(&f.root.join("homes").join(&id)).is_ok());
+        let events = f.store.snapshot().unwrap().events;
+        assert!(!events.iter().any(|e| e.action == "launch"));
+        f.launch(&proxy, &id, "isolated", &TEST_HOST).unwrap();
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn script_unsets_every_conflicting_variable() {
+        let text = script(
+            Path::new("/tmp/home"),
+            Path::new("/bin/true"),
+            &[],
+            &BTreeMap::new(),
+            false,
+            Path::new("/tmp/project"),
+        );
+        let unset = text.lines().find(|l| l.starts_with("unset ")).unwrap();
+        let names: Vec<&str> = unset.split(' ').skip(1).collect();
+        assert_eq!(names, CONFLICTS);
+        assert!(text.find("unset ").unwrap() < text.find("export ").unwrap_or(usize::MAX));
+    }
+    /// Runs the real generated script with zsh against hostile paths and a polluted
+    /// environment. Terminal launches only exist on macOS, which is where zsh is guaranteed.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn generated_zsh_script_survives_hostile_paths_and_scrubs_the_environment() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let home = base.join("it's \"a\" $(touch pwned) `touch pwned` dir");
+        let project = base.join("my project; touch pwned");
+        private_dir(&home).unwrap();
+        fs::create_dir(&project).unwrap();
+        let report = base.join("report");
+        let provider = base.join("provider's cli");
+        private_write(
+            &provider,
+            format!(
+                "#!/bin/sh\n{{ pwd; printf '%s\\n' \"$@\"; env; }} > {}\n",
+                quote(&report.to_string_lossy())
+            )
+            .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let mut hold = Reservation::new(&home).unwrap();
+        hold.committed = true;
+        let env = BTreeMap::from([
+            (
+                "CODEX_HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            ),
+            (
+                "SWITCHBOARD_SESSION".to_string(),
+                "isolated:codex:x'y".into(),
+            ),
+        ]);
+        let path = home.join("launch.command");
+        let text = script(&home, &provider, &["a b", "c'd"], &env, false, &project);
+        private_write(&path, text.as_bytes(), true).unwrap();
+        let mut command = Command::new("/bin/zsh");
+        command.arg(&path).env_clear().env("PATH", "/usr/bin:/bin");
+        for variable in CONFLICTS {
+            command.env(variable, "synthetic-conflict");
+        }
+        assert!(command.status().unwrap().success());
+
+        let report = fs::read_to_string(report).unwrap();
+        let mut lines = report.lines();
+        assert_eq!(lines.next(), Some(project.to_string_lossy().as_ref()));
+        assert_eq!(lines.next(), Some("a b"));
+        assert_eq!(lines.next(), Some("c'd"));
+        let env: BTreeMap<&str, &str> = lines.filter_map(|l| l.split_once('=')).collect();
+        assert_eq!(
+            env.get("CODEX_HOME").copied(),
+            Some(home.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            env.get("SWITCHBOARD_SESSION").copied(),
+            Some("isolated:codex:x'y")
+        );
+        for variable in CONFLICTS {
+            if !matches!(*variable, "CODEX_HOME" | "SWITCHBOARD_SESSION") {
+                assert!(!env.contains_key(variable), "{variable} leaked");
+            }
+        }
+        assert!(!home.join(".launch-pending").exists());
+        assert!(read_regular(&home.join(".session-pid")).is_ok());
+        let mut found = Vec::new();
+        for dir in [&base, &home, &project] {
+            found.extend(fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()));
+        }
+        assert!(!found.iter().any(|n| n == "pwned"), "a path was evaluated");
     }
     #[test]
     fn private_write_and_symlink_refusal() {
