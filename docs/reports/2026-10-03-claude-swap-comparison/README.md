@@ -110,3 +110,22 @@ exactly as Claude Code itself does for the same item (no prompt-free alternative
   the branch also found that an idle renewal of the live account dropped the successor when
   the token endpoint named another owner, signing Claude Code out; fixed in 0.5.1 (REQ-30,
   `an_idle_renewal_issued_to_another_account_stays_with_claude_code_only`).
+- **2026-10-03 (later).** The working gap table had 22 rows, but rows #16 and #19–#22 were left
+  out of the table above, where #16 should have appeared in the P3 group. They are recorded here
+  with what became of each:
+  - **#16 `invalid_client`.** Claude Swap labels it on its own and counts no strike against the
+    account (`oauth.py:205-214`). Switchboard treated it as transient for each account in turn.
+    Fixed in 0.5.2 (PLAN-0.5 REQ-49): one hold covers every account, with no dead lineage, a
+    retry within the hour and `MonitorStatus.renewal_blocked`.
+  - **#19 sharing in isolated homes.** Claude Swap shares settings, `CLAUDE.md`, skills, agents
+    and `mcpServers` into its session homes (`session.py:71-80`, 1053-1285). Switchboard's
+    isolated home holds only `settings.json` plus its own MCP entry, which is isolation by
+    contract (SPEC §8). Changing that is the operator's call: board SB-20.
+  - **#20 fresh `~/.claude.json`.** Claude Swap sets `hasCompletedOnboarding` (`session.py:911-921`).
+    A config Switchboard creates from nothing now carries it too (0.5.2, REQ-50); an existing
+    config is left as it is.
+  - **#21 the "~30 s" adoption delay.** Both tools repeat it without a source. It is measured
+    only on a live session, so it belongs to board SB-06, which now names it.
+  - **#22 previous-generation copy.** Claude Swap keeps `.prev` per slot
+    (`credentials.py:1460-1526`). Declined: encrypted backups keep ten generations, and 0.5.1
+    keeps every renewal's successor until it is stored.

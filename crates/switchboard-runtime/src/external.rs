@@ -1103,6 +1103,12 @@ fn activate(
         .as_object_mut()
         .ok_or("Claude config format is invalid.")?;
     object.insert("oauthAccount".into(), oauth.clone());
+    // A config Switchboard creates from nothing would otherwise send Claude Code through its
+    // first-run onboarding although an account is signed in (Claude Swap `session.py:911-921`).
+    // An existing config keeps whatever it says.
+    if old_config.is_none() {
+        object.insert("hasCompletedOnboarding".into(), json!(true));
+    }
     // A managed API key would keep billing per token over the OAuth sign-in (Claude Swap
     // `credentials.py:797-937`); the whole old config comes back on rollback.
     object.remove("primaryApiKey");
@@ -1585,6 +1591,48 @@ mod tests {
             "Claude activation failed; previous account restored."
         );
         assert_eq!(*f.keys.borrow(), before);
+    }
+    #[test]
+    fn a_config_created_by_a_switch_skips_onboarding_and_an_existing_one_is_kept() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        let new = target("new", json!({}));
+        // Signed out and no config at all: the switch creates it.
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let cfg = parse(&f.files.borrow()[&c.config]).unwrap();
+        assert_eq!(cfg["hasCompletedOnboarding"], true);
+        assert_eq!(
+            cfg["oauthAccount"]["accountUuid"],
+            new.identity.account_id.clone().unwrap()
+        );
+        // An existing config never gains the key.
+        let f = Fixture::new();
+        f.put(
+            &c.config,
+            &serde_json::to_vec(&json!({"theme":"dark"})).unwrap(),
+        );
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let cfg = parse(&f.files.borrow()[&c.config]).unwrap();
+        assert!(cfg.get("hasCompletedOnboarding").is_none());
+        assert_eq!(cfg["theme"], "dark");
     }
     #[test]
     fn a_wiped_live_sign_in_is_signed_out_and_does_not_block_a_switch() {

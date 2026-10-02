@@ -545,6 +545,7 @@ function renderPolicies(main: HTMLElement) {
   } else copy.append(el('span', 'usage-caption', monitor ? 'When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.' : 'Quota monitor status unavailable. Refresh to retry.'));
   const swapHeld = monitor?.claude_swap_accounts ?? 0;
   if (swapHeld) copy.append(el('span', 'usage-caption', `Claude Swap is running and renews ${swapHeld} of these ${swapHeld === 1 ? 'account' : 'accounts'}. Switchboard takes their newest sign-ins from it and does not renew them itself.`));
+  if (monitor?.renewal_blocked) copy.append(el('span', 'usage-caption', 'Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.'));
   if (demo) copy.append(el('span', 'usage-caption', 'Demo policies are editable fixtures; no switching runs here.'));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies);

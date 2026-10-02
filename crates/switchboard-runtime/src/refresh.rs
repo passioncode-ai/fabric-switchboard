@@ -66,6 +66,8 @@ pub(crate) struct RefreshState {
     owners: Mutex<HashMap<String, ExternalIdentity>>,
     /// The lineage last asked about without an answer, and when: asked again after a minute.
     profile_tried: Mutex<Option<(String, i64)>>,
+    /// When the token endpoint last refused the client itself (`invalid_client`).
+    client_rejected: Mutex<Option<i64>>,
 }
 impl Default for RefreshState {
     fn default() -> Self {
@@ -97,6 +99,7 @@ impl RefreshState {
             ),
             owners: Mutex::new(HashMap::new()),
             profile_tried: Mutex::new(None),
+            client_rejected: Mutex::new(None),
             stash: Arc::new(Mutex::new(HashMap::new())),
             swap_held: Mutex::new(Default::default()),
             journal: Mutex::new(None),
@@ -131,6 +134,19 @@ impl RefreshState {
     #[cfg(test)]
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;
+    }
+    /// True while renewals are held because the provider refused the client itself.
+    pub(crate) fn renewal_blocked(&self) -> bool {
+        self.client_rejected
+            .lock()
+            .ok()
+            .and_then(|at| *at)
+            .is_some_and(|at| (0..CLIENT_HOLD_SECONDS).contains(&(now() - at)))
+    }
+    fn client_refused(&self, refused: bool) {
+        if let Ok(mut at) = self.client_rejected.lock() {
+            *at = refused.then(now);
+        }
     }
     #[cfg(test)]
     pub(crate) fn set_owner(&self, token: &str, owner: ExternalIdentity) {
@@ -295,6 +311,8 @@ pub(crate) async fn ensure_fresh(
             settled(store, state, id, &refresh_token, &kept)
         }
         Err(Failure::Permanent) => remember_dead(state, id, &refresh_token),
+        // Not this account's fault and not its backoff: the hold covers every account.
+        Err(Failure::Systemic) => Outcome::Transient,
         Err(Failure::Transient) => {
             if let Ok(mut backoff) = state.backoff.lock() {
                 let delay = backoff
@@ -314,10 +332,14 @@ async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Fa
     let Some(consumed) = credential.refresh_token.clone() else {
         return Err(Failure::Transient);
     };
+    // The client itself was refused: every grant would fail the same way until it is fixed.
+    if state.renewal_blocked() {
+        return Err(Failure::Systemic);
+    }
     let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
     let stash = state.stash.clone();
     let credential = credential.clone();
-    tokio::spawn(async move {
+    let result = tokio::spawn(async move {
         let (refreshed, owner) = grant(&endpoint, &credential).await?;
         let kept = Kept { refreshed, owner };
         if let Ok(mut stash) = stash.lock() {
@@ -326,7 +348,13 @@ async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Fa
         Ok(kept)
     })
     .await
-    .unwrap_or(Err(Failure::Transient))
+    .unwrap_or(Err(Failure::Transient));
+    match &result {
+        Err(Failure::Systemic) => state.client_refused(true),
+        Ok(_) | Err(Failure::Permanent) => state.client_refused(false),
+        Err(Failure::Transient) => {}
+    }
+    result
 }
 /// Hands a kept successor to the copies that should have it. Ok: the ids updated; the other
 /// holders of the spent token are remembered as dead and the successor is forgotten. Err: the
@@ -405,6 +433,9 @@ fn is_active(
 pub(crate) enum Failure {
     Permanent,
     Transient,
+    /// `invalid_client`: the provider refused Claude Code's client id itself, so no account
+    /// can renew and none of their lineages is to blame (Claude Swap `oauth.py:205-214`).
+    Systemic,
 }
 
 /// One refresh grant. Fixed destination, no redirects, bounded body, no error text kept.
@@ -445,15 +476,12 @@ pub(crate) async fn grant(
     let value: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     if !(200..300).contains(&status) {
         // RFC 6749 §5.2: the verdict is the top-level `error`; anything else may be a blip.
-        return Err(
-            if matches!(status, 400 | 401 | 403)
-                && value.get("error") == Some(&json!("invalid_grant"))
-            {
-                Failure::Permanent
-            } else {
-                Failure::Transient
-            },
-        );
+        let failure = match (status, value.get("error").and_then(Value::as_str)) {
+            (400 | 401 | 403, Some("invalid_grant")) => Failure::Permanent,
+            (400 | 401, Some("invalid_client")) => Failure::Systemic,
+            _ => Failure::Transient,
+        };
+        return Err(failure);
     }
     let owner = value
         .pointer("/account/uuid")
@@ -586,7 +614,7 @@ pub(crate) async fn renew_idle_live(
                 }
                 return Outcome::SignInRequired;
             }
-            Err(Failure::Transient) => return Outcome::Transient,
+            Err(Failure::Transient | Failure::Systemic) => return Outcome::Transient,
         },
     };
     let Some(item) = renewed_item(&before, &kept.refreshed) else {
@@ -757,6 +785,8 @@ pub(crate) fn lineage(
         None => Lineage::Unresolved,
     }
 }
+/// After `invalid_client` no grant is tried for an hour; one grant then tests the client again.
+const CLIENT_HOLD_SECONDS: i64 = 3600;
 /// An unanswered owner question is not repeated sooner (the monitor asks every 10 seconds).
 const PROFILE_RETRY_SECONDS: i64 = 60;
 pub(crate) const UNCONFIRMED_LIVE: &str = "Switchboard could not confirm which account Claude Code is signed in to. Check the connection, or use Claude Code once, then retry.";
@@ -1688,6 +1718,64 @@ mod tests {
             Outcome::SignInRequired
         );
         assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
+    }
+    #[tokio::test]
+    async fn a_refused_client_holds_every_renewal_without_blaming_an_account() {
+        let (url, calls) = endpoint((
+            401,
+            json!({"error":"invalid_client","error_description":"Client authentication failed"}),
+        ))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[("synthetic-b", "default"), ("synthetic-c", "default")],
+        );
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        let c = id_of(&store, "synthetic-c", "default");
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await,
+            Outcome::Transient
+        );
+        assert!(state.renewal_blocked());
+        // No account is marked dead, and no other account spends a grant while held.
+        assert!(!state.is_dead(&store, &b));
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &c, false).await,
+            Outcome::Transient
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(state.sign_in_required(&store).is_empty());
+        // A grant that gets through clears the hold.
+        let (url, _) = endpoint((
+            200,
+            json!({"access_token":"fresh","expires_in":28800,"refresh_token":"fresh-r"}),
+        ))
+        .await;
+        state.set_endpoint(url);
+        state.client_refused(false);
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &c, false).await,
+            Outcome::Refreshed
+        );
+        assert!(!state.renewal_blocked());
+    }
+    #[tokio::test]
+    async fn a_refused_client_after_the_hold_is_tried_once_more() {
+        let (url, calls) = endpoint((400, json!({"error":"invalid_client"}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await;
+        // An hour later the hold lapses and exactly one grant tests the client again.
+        *state.client_rejected.lock().unwrap() = Some(now() - CLIENT_HOLD_SECONDS);
+        assert!(!state.renewal_blocked());
+        state.backoff.lock().unwrap().clear();
+        ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(state.renewal_blocked());
     }
     #[test]
     fn malformed_grant_responses_are_rejected() {

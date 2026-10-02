@@ -609,6 +609,7 @@ async fn execute(
             "sign_in_required": refresh_state.sign_in_required(&store),
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
             "claude_swap_accounts": refresh::swap_held(refresh_state),
+            "renewal_blocked": refresh_state.renewal_blocked(),
         })),
         Operation::Add {
             label,

@@ -28,3 +28,7 @@ Humanization: on, own pass; each message names cause and next action, no decorat
 - Backend vocabulary shown verbatim: “This account's sign-in has ended. Sign in to it again.”, “Sign-in not found. Start again.”; mapped: expired credential → “This credential has expired. Sign in to this account again.”
 Humanization: on, own pass; each message names the effect and the next action; no claim that a running session already changed account.
 - 0.5 backups and limits: About “Backups” — “Switchboard saves an encrypted copy of your accounts after every change and once a day, and keeps the newest ten.”, “The key stays in this Mac’s Keychain. These backups restore after reinstalling Switchboard on this Mac; they cannot be opened on another Mac or after the Keychain is erased.”, “Back up now”, “Restore”, “{n} accounts restored · {k} already here”; row badge “Limit reached · until {time}”; decisions “The account in use hit a provider limit…”, “Switched after the account in use hit a provider limit.”
+
+0.5.1–0.5.2 automatic switching captions (operator-brief; effect and recovery):
+- “Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.”
+- “Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.” — shown while `MonitorStatus.renewal_blocked` (the token endpoint answered `invalid_client`).
