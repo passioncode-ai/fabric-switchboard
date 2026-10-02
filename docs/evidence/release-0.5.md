@@ -1,4 +1,4 @@
-# Evidence — 0.5 prompt-free switching, renewal, one-click accounts (unreleased)
+# Evidence — 0.5 prompt-free switching, renewal, one-click accounts; 0.5.1 Claude Swap parity
 
 Run: [PLAN-0.5](../PLAN-0.5.md), 2026-10-02, branch `agent/switchboard-0.5`, first built on `main` `5bac51c`,
 then rebased onto `main` `1cfc793` (0.4.1-beta.1 and its shared-trust vault). At integration the
@@ -99,3 +99,90 @@ MCP `switchboard_status` reports `limited`. Holds live in memory and are re-read
 | Running sessions | the Claude Code session that ran these checks kept working; whether it moved to the new account is not observable from outside it (board SB-06) |
 
 Not observed yet: a renewal of an inactive account and a switch on a limit error with live accounts (SB-15), Windows (SB-02).
+
+## 0.5.1
+
+Branch `agent/switchboard-0.5.1` from 0.5.0 (`67bf1a3`); scope and REQ-18…REQ-48 in
+[PLAN-0.5 §0.5.1](../PLAN-0.5.md#051--claude-swap-parity-and-review-fixes); source report
+[RPT fabric-switchboard/2026-10-03-claude-swap-comparison](../reports/2026-10-03-claude-swap-comparison/README.md).
+Synthetic fixtures only: nothing read or wrote the real Keychain, `~/.claude*` or `~/.codex`.
+
+### Checks run (macOS 26.6, arm64, 2026-10-03)
+
+| Command | Result |
+|---|---|
+| `./scripts/check.sh` (fmt, clippy `-D warnings`, all Rust tests, UI build and logic, error vocabulary, docs links, plugin, notices) | exit 0 |
+| `cargo test --workspace` | 242 passed, 0 failed, 2 ignored (the opt-in synthetic Keychain tests named in README) |
+| `node scripts/check-error-vocabulary.mjs` | 231 backend messages: 77 verbatim, 140 mapped, 14 allowlisted |
+| `cargo llvm-cov --workspace --summary-only` | 86.10 % of lines (table below) |
+| `reports.py check docs/reports/2026-10-03-claude-swap-comparison` | 0 errors |
+
+### Planted-defect checks
+
+Each fix was reverted in place and the suite run; every one failed a named test, then the
+source was restored byte for byte.
+
+| Defect planted | Tests that failed |
+|---|---|
+| grant task does not keep the successor | `a_grant_whose_caller_gives_up_still_keeps_the_successor`, `a_renewed_token_that_cannot_be_stored_is_kept_and_adopted_later`, `an_idle_renewal_that_cannot_be_written_is_stashed` |
+| settle ignores the owner the token endpoint named | `a_renewal_issued_to_another_saved_account_reaches_that_account`, `a_token_issued_for_another_account_is_a_dead_lineage_here`, `an_idle_renewal_issued_to_another_account_stays_with_claude_code_only` |
+| idle renewal drops a foreign successor | `an_idle_renewal_issued_to_another_account_stays_with_claude_code_only` |
+| switch overwrites a newer copy | `a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch` |
+| email-only identities compare equal | `identities_without_an_account_id_are_never_the_same_account` |
+| (before this pass) MCP keys dropped, outgoing generation saved before the locks, foreign lineage filed, successor discarded, double renewal beside Claude Swap | five tests, one each, recorded with the comparison report's probes |
+
+### Final adversarial review
+
+An independent read of `git diff main...dc17508 -- crates/` reported twelve findings, R-1…R-12:
+
+- **P1 (two):**
+  - R-1: a refresh issued to another account discarded the successor.
+  - R-2: a deadline or a dropped request could cancel a grant mid-flight.
+- **P2 (four):**
+  - R-3: a stash shared by several copies got stuck.
+  - R-4: a switch could overwrite a newer copy.
+  - R-5: an unattributed lineage was filed.
+  - R-6: the owner check ignored the organization.
+- **R-7:** Claude Swap read failures and unverified session tokens.
+- **R-8:** a failed foreign idle write.
+- **P3:**
+  - R-9: locks were held across a network call.
+  - R-10: email-only identities compared equal.
+  - R-11: the plaintext copy went stale on idle renewal.
+- **R-12:** two tests that passed for the wrong reason.
+
+All twelve were confirmed against the code and fixed in `13a8712`, each with a test (REQ-41…REQ-48). Checked and found correct by the same review:
+
+- activation re-reads under the locks and refuses to roll back after a lost lock;
+- shared keys come from the live item;
+- dead lineages are kept as fingerprints only;
+- no credential reaches logs or IPC;
+- responses are size-capped with redirects off;
+- untrusted input has no panic paths.
+
+### Coverage (lines, `cargo llvm-cov`)
+
+| File | Lines | What is not covered, and why |
+|---|---|---|
+| runtime `refresh.rs` | 95.92 % | network error branches of the profile call |
+| runtime `limits.rs` | 94.82 % | |
+| runtime `control.rs` | 95.02 % | |
+| runtime `monitor.rs` | 88.64 % | the owner loop's native branch runs only with `Owner::native` (the real sign-in) |
+| runtime `launch.rs` | 87.07 % | opening Terminal and a live official login |
+| runtime `external.rs` | 84.03 % | `Native` reader and writer: the real Keychain, `~/.claude.json` and `ps` |
+| runtime `lib.rs` | 80.86 % | `Owner::native` paths and the packaged-app helpers |
+| runtime `agents.rs` | 91.60 % (55.88 % before `setup_offers_commands_for_the_found_cli_and_never_a_credential`) | `link_bundled_cli` writes `~/.local/bin`, never run by tests |
+| runtime `external_keychain.rs` | 0 % | the `/usr/bin/security` calls for Claude Code's item; its command shape, quoting and exit codes are tested in core `security_cli.rs` |
+| core `vault.rs` | 52.78 % | Security.framework vault, exercised by the opt-in synthetic Keychain test only |
+| core `security_cli.rs` | 74.04 % | spawning the real `/usr/bin/security` |
+| cli `main.rs` | 60.24 % | human-readable output of commands that need a running owner with real accounts |
+| core `lib.rs`, `credential.rs`, `rotation.rs`, `projects.rs`, `backup.rs`, proxy `lib.rs`, cli `mcp.rs` | 92–97 %, 79 % | |
+
+100 % line coverage is not reachable without the real Keychain, Terminal and provider accounts, which
+AGENTS.md forbids in tests. The uncovered code is the OS boundary. Each of those calls is reached
+through a seam, and the seam is covered with fixtures.
+
+### Not run
+
+Live provider acceptance (board SB-01, SB-15), Windows on a Windows host (SB-02), and a running
+Claude Code picking up a switch without restart (SB-06).

@@ -83,7 +83,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Choose + Add account → Sign in to another Claude (or Codex) account → Terminal opens the official CLI in an isolated home and a banner says to finish there; no form opens (0.5).
 2. Finish the provider's sign-in → Switchboard notices completion on its own and adds the account, named by its email, in the default pool; no Finish click (0.5).
-**Alt paths:** Cancel in the banner → the staged sign-in is cleaned once its Terminal process has exited. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in again on a row reuses its label and pool, so the same identity updates in place. CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “Finish an existing sign-in before starting another.”
+**Alt paths:** Cancel in the banner → the staged sign-in is cleaned once its Terminal process has exited. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in again on a row reuses its label and pool, so the same identity updates in place. CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “Finish an existing sign-in before starting another.” The account was saved but its temporary folder could not be removed yet → the banner closes with “Account added to Claude. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.” The owner restarted and no longer knows the sign-in → the banner reads ended, and Cancel closes it with “Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.” (0.5.1, `loginOutcome`). A sign-in reservation whose Terminal never ran expires after ten minutes.
 **Expected result:** Provider login is captured only from the new home.
 **UI elements:** Add account menu, sign-in banner (pending, adding, ended, error), account list, notice.
 **States covered:** loading, pending, ended, error, success
@@ -373,7 +373,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts
 **Steps:**
 1. Choose + Add account → Import from Claude Swap → native import reads the standard local source into the default pool and reports imported, skipped and failed counts in one notice (0.5, no dialog).
-**Alt paths:** Reimport → same identities update without duplicate accounts or enabling disabled rows.
+**Alt paths:** Reimport → same identities update without duplicate accounts or enabling disabled rows. A Claude Swap session profile holding a later-expiring sign-in than its backup is imported instead (0.5.1). Claude Swap still running → the notice adds “Claude Swap is still running, so it keeps renewing those accounts and Switchboard follows its newest sign-ins”, and the Automatic switching bar names how many accounts it renews (0.5.1).
 **Expected result:** Successful profiles remain available when other profiles fail; the user can correct the source and retry.
 **UI elements:** Add account menu item, import result notice, account list.
 **States covered:** empty source, loading, partial success, error, success
@@ -547,7 +547,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts (Switch), the CLI (`accounts activate`), `switchboard mcp` (`switchboard_switch` with `global: true`), automatic rotation.
 **Steps:**
 1. Switch, an automatic switch or a finished official sign-in → no Keychain dialog from Switchboard, and Claude Code itself reads its account afterwards without one (0.5).
-**Alt paths:** A `Claude Code-credentials` item that a 0.4 build created while Claude Code was signed out trusts only that build; sign out and in once in Claude Code to recreate it ([operations](../OPERATIONS.md)). Switchboard's own account storage is SCN-027.
+**Alt paths:** Claude Code's MCP and plugin sign-ins stay signed in across a switch (0.5.1). Claude Code is updating its account → Switchboard waits up to 9 s and takes over a lock left behind by a crashed process (0.5.1). Refusals, each with nothing changed (0.5.1): the signed-in account is not saved in Switchboard (“Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).”); the sign-in belongs to another account than its settings name (“The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.”); a sign-in nothing attributes yet (“Switchboard could not confirm which account Claude Code is signed in to. Check the connection, or use Claude Code once, then retry.”); a renewed sign-in not yet stored (“Switchboard has not stored this account's renewed sign-in yet. Retry in a minute.”); a session Switchboard launched (“This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.”). Switching to the account already in use changes nothing. A `Claude Code-credentials` item that a 0.4 build created while Claude Code was signed out trusts only that build; sign out and in once in Claude Code to recreate it ([operations](../OPERATIONS.md)). Switchboard's own account storage is SCN-027.
 **Expected result:** Repeated switching raises no dialog for Switchboard or Claude Code.
 **UI elements:** none new; the absence of a system dialog is the outcome.
 **States covered:** Claude Code signed in, signed out, item created by an older build, Keychain locked.
@@ -556,7 +556,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Meaning:** operator request 2026-10-02 ([PLAN-0.5](../PLAN-0.5.md) C-2, C-3): Claude's items are read, written and deleted only through `/usr/bin/security`, the executable Claude Code uses.
 **Coverage:** `cargo test -p switchboard-core security_cli` (stdin transport, quoting, exit codes); measured `security` exit codes in [release-0.5](../evidence/release-0.5.md); on-screen absence on the operator's Mac not yet observed.
 **Product:** unobserved
-**Traces:** PLAN-0.5 REQ-2, REQ-3
+**Traces:** PLAN-0.5 REQ-2, REQ-3, REQ-18…REQ-20, REQ-23…REQ-26, REQ-28, REQ-35
 
 ## SCN-029 — Keep saved accounts usable for automatic switching
 **Persona:** P-01
@@ -566,7 +566,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Leave Switchboard running → inactive Claude accounts keep fresh quota and stay eligible; when the account in use reaches the threshold, rotation switches to one of them (0.5).
 2. Switch to an account whose access token has expired → it is renewed first and Claude Code starts on it.
-**Alt paths:** The provider rejects an account's sign-in → its row shows Sign in again as the primary action and a red badge; signing in updates the same row. The account signed in to the ordinary Claude Code is never renewed by Switchboard.
+**Alt paths:** The provider rejects an account's sign-in → its row shows Sign in again as the primary action and a red badge; signing in updates the same row. The account signed in to the ordinary Claude Code is renewed by Claude Code; only when Claude Code has left it expired for more than five minutes does Switchboard renew it under Claude Code's locks, keeping Claude Code signed in (0.5.1). While Claude Swap runs, the accounts it manages are renewed by it and Switchboard follows (0.5.1).
 **Expected result:** Rotation no longer stalls on `no_eligible_account` because saved tokens aged out.
 **UI elements:** quota cell, Sign in again badge and action, Automatic switching bar decision text.
 **States covered:** fresh, renewing, transient failure, sign-in required.
@@ -575,7 +575,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Meaning:** operator request 2026-10-02 (PLAN-0.5 C-4…C-6, D-2); fixture-tested against a local token endpoint; live provider renewal not yet observed.
 **Coverage:** `cargo test -p switchboard-runtime refresh`; `native_rotation_switches_to_an_expired_but_renewable_account`; `an_account_with_an_expired_access_token_still_activates`; browser demo `docs/evidence/design-0.5/accounts-1280-full.png` (Meadow team row).
 **Product:** unobserved
-**Traces:** PLAN-0.5 REQ-4, REQ-5, REQ-6
+**Traces:** PLAN-0.5 REQ-4, REQ-5, REQ-6, REQ-21, REQ-22, REQ-27, REQ-30, REQ-31, REQ-33
 
 ## SCN-030 — Get accounts back after reinstalling Switchboard
 **Persona:** P-01

@@ -104,3 +104,9 @@ exactly as Claude Code itself does for the same item (no prompt-free alternative
   `crates/switchboard-core/src/{security_cli,lib,backup}.rs`, `crates/switchboard-proxy/src/lib.rs`.
 
 ## Поправки
+
+- **2026-10-03.** Row #14 was planned for the board; it was implemented in 0.5.1 instead
+  (PLAN-0.5 REQ-40: numeric `Retry-After` honoured up to 6 h, else 900 s). The final review of
+  the branch also found that an idle renewal of the live account dropped the successor when
+  the token endpoint named another owner, signing Claude Code out; fixed in 0.5.1 (REQ-30,
+  `an_idle_renewal_issued_to_another_account_stays_with_claude_code_only`).
