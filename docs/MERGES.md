@@ -4,6 +4,12 @@
 
 Written by `agent_sync.py merge`. Entries newer than 7 days keep their detail; older ones are compacted to one line each on the next write. Read it before starting work: it is the shortest answer to *what landed while I was on my branch*.
 
+### 2026-10-02T23:48:36Z · `switchboard-0.5.2` · agent/switchboard-0.5.2 → main · `dda7e0e`
+- run: r-47aaa5aa6
+- files: 21 (21 files changed, 227 insertions(+), 29 deletions(-))
+- conflicts: none
+- summary: 0.5.2: invalid_client hold, created config skips onboarding; report rows 16,19-22 closed; PR #21
+
 ### 2026-10-02T23:38:30Z · `switchboard-0.5.1-record` · agent/switchboard-0.5.1-record → main · `d34d15b`
 - run: r-47aaa5aa6
 - files: 7 (7 files changed, 160 insertions(+), 12 deletions(-))
