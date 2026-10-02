@@ -1,6 +1,9 @@
 # Handoff — Switchboard 0.5.1: Claude Swap parity and review fixes — 2026-10-03
 
-**State: merged to `main`, release v0.5.1-beta.1 in progress (board SB-19).**
+**State: released as v0.5.1-beta.1 (`2f4e429`) and installed.** Notary `fb3aa43b-…` Accepted.
+Site `852cbeb`, Worker `66574e15-…`. `/Applications` holds 0.5.1, with 0.5.0 kept for rollback.
+After install, 0 `SecurityAgent` entries were logged, and the monitor follows Claude Swap's 14 accounts.
+Record: [release-0.5 §0.5.1](../evidence/release-0.5.md#release-v051-beta1-2026-10-03).
 
 Objective (operator, Russian, paraphrased): study how switching, session isolation and credential
 substitution work; read Claude Swap's code; review again; finish whatever is missing; fix the bugs;
@@ -46,12 +49,25 @@ Accepted:
   - with Claude Swap running beside Switchboard, Switchboard follows it rather than racing it.
 - **SB-01, SB-02, SB-06, SB-16:** unchanged.
 
+## Fabric workspace
+
+**Knowledge base: done.** `knowledge/products.md` names 0.5.1-beta.1
+([fabric-workspace#19](https://github.com/passioncode-ai/fabric-workspace/pull/19), `ae00d28`).
+
+**Content snapshot (`content/repos/fabric-switchboard`): not yet published.** It is still pinned
+at `1cfc793`, and `workspace.mjs lag` reports it `within-grace`. The automatic publisher,
+launchd `ai.passioncode.fabric-workspace-sync` (every 2 h), stops at Fabric's own gate:
+- `bash scripts/ci.sh fast` fails because the provider-capability matrix on Fabric `origin/main`
+  pins claude-code 2.1.287, while 2.1.288 is installed (`~/Library/Logs/fabric-workspace-sync.log`).
+- The repin is staged, uncommitted, by the active Fabric run `r-07dbb329a` on
+  `claude/onboarding-and-plan`, so it was not duplicated here. That session was told by message.
+- The gate is not bypassed. Once the repin lands, the next sync publishes every source, this one
+  included.
+
 ## Exact next task
 
-Finish SB-19 in this order, recording each step in release-0.5.md:
-
-1. Tag `v0.5.1-beta.1` on `main` and publish the release with the notarized macOS build, the
-   Windows build and `SHA256SUMS`.
-2. Update the site.
-3. Install to `/Applications`, keeping 0.5.0 for rollback.
-4. Republish the Fabric workspace snapshot.
+1. Confirm the snapshot. Run `node scripts/workspace.mjs lag` in a Fabric checkout and expect
+   `fabric-switchboard` to be `current` at `2f4e429` or later. If the repin has not landed after
+   24 h, land it in a clean Fabric worktree following precedent `0f700bde`, then
+   `node scripts/workspace.mjs publish`.
+2. Then SB-15 with the operator: a day of switching with Claude Swap running beside Switchboard.

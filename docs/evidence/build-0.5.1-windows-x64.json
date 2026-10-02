@@ -1,0 +1,39 @@
+{
+  "version": "0.5.1",
+  "commit": "2f4e4293784a95ab49d539513d7e4c0a4857da95",
+  "source_clean": true,
+  "target": "x86_64-pc-windows-msvc",
+  "build_host": "Darwin arm64",
+  "method": "cross-compiled; native acceptance NOT_RUN",
+  "toolchain": {
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "cargo_xwin": "cargo-xwin-xwin 0.23.1",
+    "llvm": "Homebrew clang version 23.1.2",
+    "nsis": "v3.12"
+  },
+  "cli_rustflags": "-C target-feature=+crt-static",
+  "cli_external_vcruntime_import": false,
+  "pe_headers": {
+    "fabric-switchboard.exe": {
+      "machine": "0x8664",
+      "subsystem": 2
+    },
+    "switchboard.exe": {
+      "machine": "0x8664",
+      "subsystem": 3
+    },
+    "Fabric Switchboard_0.5.1_x64-setup.exe": {
+      "machine": "0x14c",
+      "subsystem": 2
+    }
+  },
+  "sha256": {
+    "Fabric Switchboard_0.5.1_x64-setup.exe": "64b511cce96876c8cec4238a4e1ce0a9f45d71ed3515231fe4218936ece81a91",
+    "switchboard.exe": "a8aba941b2c610032153a64ad53688ecd6bfe156160c4ee74594186168dd976a"
+  },
+  "native_windows_tests": "NOT_RUN",
+  "windows_authenticode": "NOT_SIGNED",
+  "provider_live_acceptance": "NOT_RUN",
+  "archive": "Fabric-Switchboard-0.5.1-windows-x64.zip",
+  "archive_sha256": "59bc73b2d8180b847d4b6e9478060c59f1d1756acb2727d9ffbdfeb730450cf9"
+}

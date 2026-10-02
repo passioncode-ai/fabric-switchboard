@@ -1,0 +1,25 @@
+{
+  "release": "v0.5.1-beta.1",
+  "tag_commit": "2f4e4293784a95ab49d539513d7e4c0a4857da95",
+  "url": "https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.1-beta.1",
+  "prerelease": true,
+  "anonymous_download": {
+    "Fabric-Switchboard-0.5.1-macos-universal.zip": "03327a56bab2c17136efa42a2180362655bb0fb4ae08eb655e9a619e3c36a8a4",
+    "Fabric-Switchboard-0.5.1-windows-x64.zip": "59bc73b2d8180b847d4b6e9478060c59f1d1756acb2727d9ffbdfeb730450cf9"
+  },
+  "shasum_check": "OK for both against SHA256SUMS-0.5.1.txt",
+  "gatekeeper": "accepted, source=Notarized Developer ID (spctl -a -vv on the anonymously downloaded app)",
+  "cli_version": "switchboard 0.5.1",
+  "notary_submission": "fb3aa43b-fe74-4d4e-af62-30334493acdb",
+  "site": {
+    "repository": "passioncode-ai/passioncode-ai.github.io",
+    "commit": "852cbebbffe5ce268fa9cefa40032e0a6f942db6",
+    "pull_request": 28,
+    "worker_version": "66574e15-f590-4143-8189-c746ec2f8cd6",
+    "routes": {
+      "/switchboard/download/macos": "302 \u2192 v0.5.1-beta.1 macOS archive, fetched SHA-256 equal",
+      "/switchboard/download/windows": "302 \u2192 v0.5.1-beta.1 Windows archive"
+    }
+  },
+  "verified_at": "2026-10-03"
+}

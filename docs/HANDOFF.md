@@ -1,4 +1,4 @@
-# Switchboard 0.5.1 — Claude Swap parity and review fixes (2026-10-03)
+# Released — Switchboard v0.5.1-beta.1: Claude Swap parity and review fixes (2026-10-03)
 
 **Start here:** [handoffs/2026-10-03-switchboard-0.5.1.md](handoffs/2026-10-03-switchboard-0.5.1.md).
 
@@ -15,8 +15,11 @@ What changed since 0.5.0:
 - An adversarial review of the branch found 12 more issues; all are fixed with tests.
 - Coverage is 86.10 % of lines; the rest is the OS boundary ([evidence](evidence/release-0.5.md#051)).
 
-**Exact next task:** SB-19, the v0.5.1-beta.1 release: tag, notarized build, GitHub release, site,
-local install, then the Fabric workspace snapshot.
+**Released** as [v0.5.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.1-beta.1)
+(`2f4e429`, notary `fb3aa43b-…` Accepted, site `852cbeb`, installed, 0 `SecurityAgent`).
+The workspace knowledge page is updated. The content snapshot waits on Fabric's claude-code 2.1.288
+repin, which another run holds. **Exact next task:** confirm `workspace.mjs lag` shows
+fabric-switchboard `current`, then SB-15.
 
 ---
 
