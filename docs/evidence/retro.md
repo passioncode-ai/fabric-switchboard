@@ -8,6 +8,9 @@
    building, and put the guard in the shared function they all reach. Source: run 2026-10-02.
    Retire when two consecutive runs that add such a state pass the seam tier with no finding of
    this class.
+2. **Fetch and read the remote integration branch's HANDOFF before the grill.** A local `main`
+   is a snapshot; a parallel run may have released since. Source: run 2026-10-02. Retire after
+   three runs whose stage-0 fetch found no unread remote commits.
 
 ## Run stamps
 
@@ -35,3 +38,14 @@
   test was watched failing against a planted defect.
 - **Check next time:** standing instruction 1, plus a seam-tier reading before the commit of any
   change that adds a gating state.
+
+### 2026-10-02 — a parallel release changed the base under the run
+
+- **Symptom:** at release time `origin/main` was 11 commits ahead (`1cfc793`), including
+  0.4.1-beta.1 with a different Keychain vault already installed on the operator's Mac; the
+  branch could not fast-forward and its vault (D-1) duplicated shipped work.
+- **Surfaced at:** stage 7 (land on `main`). **Owned by:** stage 0 harvest — `git fetch` and the
+  repository's handoff on the remote were not read at the start; the local `main` snapshot was
+  taken as current.
+- **Fix (grade: procedural):** rebased onto `1cfc793`, withdrew the file vault, kept KEYCHAIN.md.
+- **Check next time:** standing instruction 2.
