@@ -37,6 +37,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-027 | Keep saved accounts readable without repeated Keychain dialogs | draft |
 | SCN-028 | Switch Claude Code without Keychain confirmations | draft |
 | SCN-029 | Keep saved accounts usable for automatic switching | draft |
+| SCN-030 | Get accounts back after reinstalling Switchboard | draft |
+| SCN-031 | Move off an account that hit a limit the quota does not show | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -574,3 +576,41 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `cargo test -p switchboard-runtime refresh`; `native_rotation_switches_to_an_expired_but_renewable_account`; `an_account_with_an_expired_access_token_still_activates`; browser demo `docs/evidence/design-0.5/accounts-1280-full.png` (Meadow team row).
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-4, REQ-5, REQ-6
+
+## SCN-030 — Get accounts back after reinstalling Switchboard
+**Persona:** P-01
+**Goal:** Lose no saved account when Switchboard or its data folder is reinstalled on the same Mac.
+**Preconditions:** the desktop app has run with accounts saved; the Keychain of this Mac is intact.
+**Entry point:** About → Backups; CLI `switchboard backup`.
+**Steps:**
+1. Use Switchboard as usual → an encrypted backup appears in `~/Library/Application Support/Fabric Switchboard Backups` after changes and daily; About lists the newest five.
+2. After a reinstall, open About → Backups → Restore on the newest → the missing accounts come back; the notice says how many were restored and how many were already here.
+**Alt paths:** Back up now writes one at once. A backup from another Mac or after the Keychain was erased reads “This backup was made with another key and cannot be opened on this machine.” A restored account whose sign-in has since rotated shows Sign in again.
+**Expected result:** Accounts and policies are back; nothing newer is overwritten; policies return switched off.
+**UI elements:** Backups panel (folder, limit note, list, Restore, Back up now), notice.
+**States covered:** no backups, list, last automatic backup failed, restored, foreign key.
+**Errors & recovery:** every refusal is a fixed sentence naming the next step.
+**Status:** draft
+**Meaning:** operator request 2026-10-02 ([PLAN-0.5](../PLAN-0.5.md) D-5).
+**Coverage:** `cargo test -p switchboard-core backup`; `backups_follow_changes_and_restore_into_a_fresh_install`; browser demo `docs/evidence/design-0.5/about-backups.png`.
+**Product:** unobserved
+**Traces:** PLAN-0.5 REQ-14, REQ-15, REQ-17
+
+## SCN-031 — Move off an account that hit a limit the quota does not show
+**Persona:** P-01
+**Goal:** Keep working when Claude Code answers “You've hit your individual spend limit” although the quota still shows room.
+**Preconditions:** automatic switching on for Claude Code; another saved account with fresh quota.
+**Entry point:** automatic; SCR-01 shows the result.
+**Steps:**
+1. A Claude Code session hits a usage or spend limit → within about 30 seconds Switchboard switches Claude Code to the free account with the lowest usage, even inside the cooldown; the bar reads “Switched after the account in use hit a provider limit.”
+2. The limited row shows “Limit reached · until …” and is not chosen again before then.
+**Alt paths:** No other free account → “The account in use hit a provider limit, and no other account is free. Holding it.” Managed sessions are detected from the proxy's own 429 responses.
+**Expected result:** work continues on another account; the limited one returns after its reset.
+**UI elements:** row badge, Automatic switching decision text.
+**States covered:** limited, switched on limit, all limited.
+**Errors & recovery:** a failed activation reads as before (`activation_failed`).
+**Status:** draft
+**Meaning:** operator request 2026-10-02 ([PLAN-0.5](../PLAN-0.5.md) D-6); Claude Swap does not do this.
+**Coverage:** `limits::tests`, `a_limit_error_in_claude_code_switches_with_quota_to_spare`, rotation test; marker shape measured on this machine's own transcripts (field names only).
+**Product:** unobserved
+**Traces:** PLAN-0.5 REQ-16, REQ-17

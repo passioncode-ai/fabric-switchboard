@@ -41,6 +41,9 @@ Then use another terminal:
 
 ```sh
 switchboard status
+switchboard backup list
+switchboard backup now
+switchboard backup restore switchboard-backup-1790000000.json
 switchboard login begin --provider codex --label Work --pool work
 switchboard login status LOGIN_UUID
 switchboard login finish LOGIN_UUID

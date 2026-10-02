@@ -233,3 +233,5 @@ button.row-usage:hover:not(:disabled) .usage-line strong { text-decoration: unde
   .rotation-bar, .login-banner { flex-direction: column; align-items: stretch; }
   .proxy-status { margin-left: 0; }
 }
+.warn-badge { color: var(--warn); border-color: var(--warn); background: var(--warn-weak); }
+.backup-list { margin: var(--space-3) 0; }

@@ -5,6 +5,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 pub mod launch;
+mod limits;
 mod monitor;
 pub mod projects;
 mod refresh;
@@ -123,6 +124,11 @@ pub enum Operation {
         session: projects::Session,
         global: bool,
     },
+    Backups,
+    BackupNow,
+    RestoreBackup {
+        file: String,
+    },
 }
 
 /// The ordinary CLI sign-in: read by capture/current/rotation, written only by activation.
@@ -157,6 +163,27 @@ pub struct Runtime {
     monitor_decisions: Mutex<Vec<Value>>,
     native: NativeSources,
     refresh: refresh::RefreshState,
+    limits: limits::LimitState,
+    /// Set only for a real owner; synthetic owners never write a backup anywhere.
+    backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
+    backup_folder: Mutex<Option<PathBuf>>,
+    backup_state: Mutex<BackupState>,
+}
+#[derive(Default)]
+pub(crate) struct BackupState {
+    pub(crate) written_changes: Option<u64>,
+    pub(crate) written_at: i64,
+    pub(crate) last_error: Option<String>,
+    pub(crate) writing: bool,
+}
+/// `SWITCHBOARD_BACKUP_DIR` (absolute), else `Fabric Switchboard Backups` beside — not inside —
+/// the app's data folder: `~/Library/Application Support` on macOS (no privacy prompt, unlike
+/// Documents), `%APPDATA%` on Windows. Removing the app's data folder leaves it.
+pub fn backup_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("SWITCHBOARD_BACKUP_DIR").map(PathBuf::from) {
+        return dir.is_absolute().then_some(dir);
+    }
+    dirs::data_dir().map(|d| d.join("Fabric Switchboard Backups"))
 }
 #[derive(Default)]
 struct CurrentCache {
@@ -185,6 +212,10 @@ impl Runtime {
             monitor_decisions: Mutex::new(Vec::new()),
             native,
             refresh: refresh::RefreshState::default(),
+            limits: limits::LimitState::default(),
+            backup_key: Mutex::new(None),
+            backup_folder: Mutex::new(None),
+            backup_state: Mutex::new(BackupState::default()),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -200,6 +231,7 @@ impl Runtime {
                 | Operation::ResolveProject { .. }
                 | Operation::CurrentAccounts
                 | Operation::LoginStatus { .. }
+                | Operation::Backups
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -291,6 +323,80 @@ impl Runtime {
         logins.remove(id);
         Ok(())
     }
+    pub(crate) fn enable_backups(
+        &self,
+        key: Option<Arc<dyn switchboard_core::backup::BackupKey>>,
+        folder: Option<PathBuf>,
+    ) {
+        if let Ok(mut slot) = self.backup_key.lock() {
+            *slot = key;
+        }
+        if let Ok(mut slot) = self.backup_folder.lock() {
+            *slot = folder;
+        }
+    }
+    fn backup_folder(&self) -> Option<PathBuf> {
+        self.backup_folder.lock().ok().and_then(|f| f.clone())
+    }
+    fn backup_key(&self) -> Option<Arc<dyn switchboard_core::backup::BackupKey>> {
+        self.backup_key.lock().ok().and_then(|k| k.clone())
+    }
+    /// Writes a backup when accounts changed (at most once a minute) or once a day. The state
+    /// lock is held only to decide and to record: the write reads every credential, and the
+    /// About panel's listing must not wait behind it.
+    pub(crate) fn maybe_backup(
+        &self,
+        time: i64,
+        force: bool,
+    ) -> Result<Option<switchboard_core::backup::Info>, String> {
+        let (Some(key), Some(dir)) = (self.backup_key(), self.backup_folder()) else {
+            return if force {
+                Err("Backups are written by the desktop app or switchboard serve.".into())
+            } else {
+                Ok(None)
+            };
+        };
+        let changes = self.store.changes();
+        {
+            let mut state = self
+                .backup_state
+                .lock()
+                .map_err(|_| "Backup state unavailable.")?;
+            let changed = state.written_changes != Some(changes);
+            let due = force
+                || (changed && time - state.written_at >= 60)
+                || time - state.written_at >= 86_400
+                || time < state.written_at;
+            if !due || state.writing {
+                return Ok(None);
+            }
+            state.writing = true;
+        }
+        let result = switchboard_core::backup::write(&self.store, &dir, key.as_ref(), time);
+        let mut state = self
+            .backup_state
+            .lock()
+            .map_err(|_| "Backup state unavailable.")?;
+        state.writing = false;
+        // Success or not, the next attempt waits a minute, not a tick.
+        state.written_at = time;
+        match result {
+            Ok(info) => {
+                state.written_changes = Some(changes);
+                state.last_error = info.as_ref().filter(|i| i.missing > 0).map(|i| {
+                    format!(
+                        "{} of the accounts could not be read and are missing from the latest backup.",
+                        i.missing
+                    )
+                });
+                Ok(info)
+            }
+            Err(error) => {
+                state.last_error = Some(error.clone());
+                Err(error)
+            }
+        }
+    }
     fn invalidate_current(&self) {
         if let Ok(mut cache) = self.current_cache.lock() {
             cache.generation = cache.generation.wrapping_add(1);
@@ -343,6 +449,13 @@ impl Owner {
         let sources = if native_sources { NATIVE } else { UNAVAILABLE };
         let runtime = Runtime::open_with(root, vault, sources).await?;
         let control = control::ControlHandle::start(runtime.clone()).await?;
+        // Only the real data folder is backed up: a `--data-dir` scratch store must never
+        // write into the operator's backup folder with the operator's key.
+        if native_sources && default_root().ok().as_deref() == Some(runtime.root.as_path()) {
+            if let Some(dir) = backup_dir() {
+                runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
+            }
+        }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         Ok(Self {
             runtime,
@@ -451,6 +564,16 @@ async fn execute(
                 return Err(refresh::SIGN_IN.into());
             }
             activate_native(&store, &id, None, native, Some(refresh_state))?;
+            // A manual switch starts the new account's error slate after the grace, too.
+            if let Some(runtime) = runtime {
+                let identity = store
+                    .snapshot()?
+                    .accounts
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .and_then(|a| a.external_identity);
+                runtime.limits.switched(identity.as_ref(), monitor::now());
+            }
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
@@ -464,6 +587,7 @@ async fn execute(
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
             "sign_in_required": refresh_state.sign_in_required(&store),
+            "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
         })),
         Operation::Add {
             label,
@@ -536,6 +660,54 @@ async fn execute(
             let path = projects::rule_path(root, &path)?;
             let rule = store.remove_rule(&path, provider)?;
             Ok(projects::rule_view(&store, &rule, monitor::now()))
+        }
+        Operation::Backups => {
+            let enabled_dir = runtime.and_then(|r| r.backup_folder());
+            let dir = enabled_dir.clone().or_else(backup_dir);
+            let key = runtime.and_then(|r| r.backup_key()).or_else(|| {
+                dir.as_deref()
+                    .and_then(switchboard_core::backup::platform_key)
+            });
+            let (last_error, written_at) = runtime
+                .and_then(|r| {
+                    r.backup_state
+                        .lock()
+                        .ok()
+                        .map(|s| (s.last_error.clone(), s.written_at))
+                })
+                .unwrap_or((None, 0));
+            let enabled =
+                enabled_dir.is_some() && runtime.is_some_and(|r| r.backup_key().is_some());
+            let backups = match (dir.as_deref(), key) {
+                (Some(dir), Some(key)) => switchboard_core::backup::list(dir, &store, key.as_ref()),
+                _ => vec![],
+            };
+            Ok(json!({
+                "directory": dir.as_ref().map(|d| d.to_string_lossy().into_owned()),
+                "enabled": enabled,
+                "backups": backups,
+                "last_error": last_error,
+                "last_written_at": (written_at > 0).then_some(written_at),
+            }))
+        }
+        Operation::BackupNow => match runtime {
+            Some(runtime) => Ok(json!(runtime.maybe_backup(monitor::now(), true)?)),
+            None => Err("Backups are written by the desktop app or switchboard serve.".into()),
+        },
+        Operation::RestoreBackup { file } => {
+            let dir = runtime
+                .and_then(|r| r.backup_folder())
+                .or_else(backup_dir)
+                .ok_or("The backup folder is unavailable.")?;
+            let key = runtime
+                .and_then(|r| r.backup_key())
+                .or_else(|| switchboard_core::backup::platform_key(&dir))
+                .ok_or("Backups are not available on this platform.")?;
+            let restored = switchboard_core::backup::restore(&store, &dir, &file, key.as_ref())?;
+            if let Some(runtime) = runtime {
+                runtime.invalidate_current();
+            }
+            Ok(json!(restored))
         }
         Operation::ResolveProject { path } => {
             projects::resolve(&store, &projects::project_dir(root, &path)?, monitor::now())
@@ -1026,6 +1198,57 @@ mod owner_tests {
         );
     }
 
+    #[derive(Default)]
+    struct FakeKey(Mutex<Option<[u8; 32]>>);
+    impl switchboard_core::backup::BackupKey for FakeKey {
+        fn load(&self) -> Result<Option<[u8; 32]>, String> {
+            Ok(*self.0.lock().unwrap())
+        }
+        fn create(&self, key: &[u8; 32]) -> Result<bool, String> {
+            *self.0.lock().unwrap() = Some(*key);
+            Ok(true)
+        }
+    }
+    #[tokio::test]
+    async fn backups_follow_changes_and_restore_into_a_fresh_install() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("backups");
+        let key: Arc<dyn switchboard_core::backup::BackupKey> = Arc::new(FakeKey::default());
+        let runtime = fixtures::runtime(&root.path().join("one"), signed_out, activates).await;
+        // A synthetic owner has no key: nothing is ever written.
+        assert!(runtime.maybe_backup(1_000_000, true).is_err());
+        runtime.enable_backups(Some(key.clone()), Some(folder.clone()));
+        assert_eq!(
+            runtime.maybe_backup(1_000_000, false).unwrap(),
+            None,
+            "no accounts"
+        );
+        save(&runtime.store, "synthetic-a", "default");
+        let first = runtime.maybe_backup(1_000_100, false).unwrap().unwrap();
+        assert_eq!(first.accounts, 1);
+        // Nothing changed: no new file until a day has passed.
+        assert_eq!(runtime.maybe_backup(1_000_200, false).unwrap(), None);
+        save(&runtime.store, "synthetic-b", "default");
+        assert_eq!(
+            runtime.maybe_backup(1_000_130, false).unwrap(),
+            None,
+            "within a minute"
+        );
+        let second = runtime.maybe_backup(1_000_300, false).unwrap().unwrap();
+        assert_eq!(second.accounts, 2);
+        let listed = runtime.execute(Operation::Backups).await.unwrap();
+        assert_eq!(listed["backups"].as_array().unwrap().len(), 2);
+        assert_eq!(listed["enabled"], true);
+        // Reinstall on the same machine: an empty data folder, the same key and backups.
+        let fresh = fixtures::runtime(&root.path().join("two"), signed_out, activates).await;
+        fresh.enable_backups(Some(key), Some(folder));
+        let restored = fresh
+            .execute(Operation::RestoreBackup { file: second.file })
+            .await
+            .unwrap();
+        assert_eq!(restored["added"], 2);
+        assert_eq!(fresh.store.snapshot().unwrap().accounts.len(), 2);
+    }
     #[tokio::test]
     async fn workbench_metadata_stays_available_during_a_reserved_mutation() {
         let root = tempfile::tempdir().unwrap();

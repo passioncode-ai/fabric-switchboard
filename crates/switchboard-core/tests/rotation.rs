@@ -736,3 +736,57 @@ fn partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation() {
         Some(candidate)
     );
 }
+
+/// 0.5: a provider limit error moves off an account whose measured quota still looks fine —
+/// a seat's individual spend limit is invisible to the quota endpoint.
+#[test]
+fn a_limit_error_switches_despite_spare_quota_and_skips_limited_candidates() {
+    use std::collections::HashSet;
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    for (id, used) in [(&a, 20.), (&b, 5.), (&c, 30.)] {
+        observe(&store, id, used, now);
+    }
+    let mut p = policy();
+    // Without an error the 20% account stays.
+    let held = store.rotation_decision(&p, Some(&a), now).unwrap();
+    assert_eq!(held.reason, "below_threshold");
+    // The account in use hit a limit; the best unlimited candidate is chosen, even inside cooldown.
+    p.last_switched_at = Some(now - 10);
+    let limited: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_reached");
+    assert_eq!(
+        decision.candidate_id.as_deref(),
+        Some(c.as_str()),
+        "b is limited too"
+    );
+    // Every other account limited as well: hold with a distinct reason.
+    let all: HashSet<String> = [a.clone(), b.clone(), c.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &all)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_no_eligible_account");
+    assert!(decision.candidate_id.is_none());
+    // A limited candidate is never chosen by an ordinary threshold switch either.
+    p.last_switched_at = None;
+    observe(&store, &a, 95., now);
+    let only_b: HashSet<String> = [b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &only_b)
+        .unwrap();
+    assert_eq!(decision.reason, "threshold_reached");
+    assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+    // A limited account in use takes any account with room, even above the usual headroom.
+    observe(&store, &c, 92., now);
+    let limited: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+}

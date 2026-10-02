@@ -53,3 +53,24 @@ skill.
   `x86_64-pc-windows-msvc`). The Windows workflow is the proof.
 - Any real account, live refresh grant against `platform.claude.com`, a running Claude Code picking
   up a switch, and the absence of `Claude Code-credentials` dialogs on the operator's Mac — board SB-15.
+
+## Backups and limit errors (second operator request, 2026-10-02)
+
+Built on branch `agent/switchboard-0.5-backup`. A second seam review returned **fail** with four
+breaks; each fix has a test that was watched failing against a planted defect:
+
+| Finding | Fix | Test (planted defect → FAILED) |
+|---|---|---|
+| Backups of every store shared one folder; pruning deleted another store's or machine's files; offline `backup now` wrote | each backup names its store and key; only the writing store's files are pruned; only the default data folder's owner writes; offline `backup now` refuses | `stores_sharing_a_folder_never_prune_each_other`, `offline_backup_never_writes_and_restore_takes_only_backup_names` |
+| Partial backups (an unreadable account) pushed out the complete one | the store's most complete backup is always kept; About shows how many accounts were missing | `partial_backups_never_push_out_the_last_complete_one` (protection removed → FAILED) |
+| A second restore changed accounts without identity | the same token in the same provider and pool counts as present | `restoring_twice_changes_nothing_for_accounts_without_identity` (token rule removed → FAILED) |
+| After a restart, the previous account's limit was charged to the new one | the journal's last switch to the account in use dates it | `after_a_restart_the_journal_dates_the_last_switch` (journal date removed → FAILED) |
+
+Risks raised and their disposition: the backup folder moved from Documents (a macOS privacy
+prompt) to `~/Library/Application Support/Fabric Switchboard Backups`, beside the data folder;
+the Windows key moved into the backup folder; a marker with another held account's reset or
+within 10 s of a managed 429 is not charged to the account in use; one managed 429 is a burst,
+two within five minutes a limit; a limited account in use takes any account below 100%; the
+write no longer holds the lock the About listing reads; project rules start the switch grace;
+MCP `switchboard_status` reports `limited`. Holds live in memory and are re-read from the
+15-minute transcript window after a restart.

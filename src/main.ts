@@ -5,7 +5,7 @@ import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -37,6 +37,8 @@ let agentSetupError = false;
 let openMenu: string | null = null;
 let pendingLogin: { id: string; provider: Provider; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
 const quotaOpen = new Set<string>();
+let backupStatus: BackupStatus | null = null;
+let backupError = false;
 let busy = false;
 let loading = true;
 let loadError = '';
@@ -93,6 +95,7 @@ async function reload() {
   else { runtime = null; runtimeError = true; }
   loading = false; render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
+  void loadBackups();
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
   void readContext().then((context) => {
@@ -109,7 +112,7 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
     await action();
     await refreshContext();
     if (accountId) usageErrors.delete(accountId);
-    showNotice(success);
+    showNotice(restoredText || success); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = 'The action completed, but accounts could not be refreshed. Retry loading the account list.'; }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
@@ -260,6 +263,7 @@ function renderAgents(main: HTMLElement) {
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 // ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──
 const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includes(account.id);
+const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
 /** A menu is part of the render: `openMenu` names the one that is open. */
 function menu(key: string, label: string, items: ([string, () => void] | [string, () => void, string])[], triggerClass = 'icon-button', text = '⋯') {
   const wrapper = el('div', 'menu-root');
@@ -396,6 +400,8 @@ function accountRow(account: Account) {
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? 'In Claude Code' : 'In Codex CLI'));
   if (active) title.append(el('span', 'badge selected-badge', 'Next managed request'));
   if (signIn) title.append(el('span', 'badge danger-badge', 'Sign in again'));
+  const limit = accountLimit(account);
+  if (limit) { const badge = el('span', 'badge warn-badge', `Limit reached · until ${date(limit.until)}`); badge.title = limit.source === 'managed' ? 'A managed request was refused with a rate limit.' : 'Claude Code reported a usage or spend limit for this account.'; title.append(badge); }
   if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
   const email = account.external_identity?.email;
   name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? 'OAuth' : '')));
@@ -556,7 +562,35 @@ function renderAbout(main: HTMLElement) {
     ['Native Claude activation', 'An explicit update of the local Claude Code account. CLI reload timing is not a guarantee that a running session has changed account.'],
     ['Automatic rotation', 'Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
-  section.append(definitions); main.append(section, appearancePanel(), productPanel());
+  section.append(definitions); main.append(section, backupsPanel(), appearancePanel(), productPanel());
+}
+async function loadBackups() {
+  try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
+  backgroundRender();
+}
+function backupsPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'backups-heading');
+  const heading = el('h2', '', 'Backups'); heading.id = 'backups-heading'; panel.append(heading);
+  if (backupError || !backupStatus) { panel.append(el('p', 'form-note', backupError ? 'Backup status is unavailable. Refresh to retry.' : 'Reading backups…')); return panel; }
+  const status = backupStatus;
+  panel.append(el('p', '', status.enabled ? 'Switchboard saves an encrypted copy of your accounts after every change and once a day, and keeps the newest ten.' : 'Automatic backups run in the desktop app.'));
+  if (status.directory) panel.append(el('code', 'address', status.directory));
+  panel.append(el('p', 'form-note', 'The key stays in this Mac’s Keychain. These backups restore after reinstalling Switchboard on this Mac; they cannot be opened on another Mac or after the Keychain is erased.'));
+  if (status.last_error) panel.append(el('p', 'usage-error', `The last automatic backup failed: ${safeError(status.last_error)}`));
+  const list = el('div', 'backup-list');
+  if (!status.backups.length) list.append(el('p', 'form-note', 'No backups yet.'));
+  for (const backup of status.backups.slice(0, 5)) {
+    const row = el('div', 'policy-row'); const copy = el('div');
+    copy.append(el('strong', 'block', date(backup.created_at)), el('span', 'usage-caption', `${backup.accounts} ${backup.accounts === 1 ? 'account' : 'accounts'}`));
+    row.append(copy, button('Restore', () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, 'Backup restored.', `restore-${backup.file}`), 'text-button', `restore-${backup.file}`));
+    list.append(row);
+  }
+  panel.append(list, button('Back up now', () => void mutate(async () => { await adapter.backupNow(); backupStatus = await adapter.backups(); }, 'Backup saved.', 'backup-now'), 'button', 'backup-now'));
+  return panel;
+}
+let restoredText = '';
+function showRestored(result: { added: number; skipped: number; failed: number }) {
+  restoredText = `${result.added} ${result.added === 1 ? 'account' : 'accounts'} restored · ${result.skipped} already here${result.failed ? ` · ${result.failed} could not be restored` : ''}.`;
 }
 function appearancePanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'appearance-heading');
@@ -667,7 +701,7 @@ function decisionText(reason: string) {
     disabled: 'Rotation is off.', cooldown: 'Waiting for the cooldown to end.', below_threshold: 'Current usage is below the threshold.',
     no_eligible_account: 'No eligible account. Holding the current account.',
     stale_usage: 'Waiting for fresh usage. Holding the current account.', usage_unavailable: 'Usage unavailable. Holding the current account.',
-    current_unavailable: 'Current account unavailable. Holding the current account.', threshold_reached: 'Threshold reached. An eligible account is available; a switch is not yet confirmed.', switched: 'The monitor recorded a switch.', switch_failed: 'The switch failed. The current account stays selected; check Activity.', activation_failed: 'Native activation failed. Check the current CLI identity and retry manually.',
+    current_unavailable: 'Current account unavailable. Holding the current account.', limit_reached: 'The account in use hit a provider limit. An unlimited account is available; a switch is not yet confirmed.', limit_no_eligible_account: 'The account in use hit a provider limit, and no other account is free. Holding it.', switched_on_limit: 'Switched after the account in use hit a provider limit.', threshold_reached: 'Threshold reached. An eligible account is available; a switch is not yet confirmed.', switched: 'The monitor recorded a switch.', switch_failed: 'The switch failed. The current account stays selected; check Activity.', activation_failed: 'Native activation failed. Check the current CLI identity and retry manually.',
   };
   return labels[reason] || 'The monitor has evaluated this policy. Check Activity for recorded changes.';
 }

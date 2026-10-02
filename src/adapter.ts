@@ -27,6 +27,9 @@ export const nativeAdapter: Adapter = {
   setProjectRule: (input) => invoke('set_project_rule', { ...input }),
   removeProjectRule: (path, provider) => invoke('remove_project_rule', { path, provider }),
   agentSetup: () => readWithDeadline(invoke('agent_setup')),
+  backups: () => readWithDeadline(invoke('backups')),
+  backupNow: () => invoke('backup_now'),
+  restoreBackup: (file) => invoke('restore_backup', { file }),
   linkCli: () => invoke('link_cli'),
 };
 
@@ -89,6 +92,16 @@ const safeErrors = new Set([
   'Finish an existing sign-in before starting another.',
   "This account's sign-in has ended. Sign in to it again.",
   'Sign-in not found. Start again.',
+  'This backup was made with another key and cannot be opened on this machine.',
+  'Choose a backup from the backup folder.',
+  'Backup not found. Refresh the list and choose another.',
+  'This file is not a Switchboard backup.',
+  'This backup is damaged and cannot be restored.',
+  'Backups are written by the desktop app or switchboard serve.',
+  'Backups are restored by the desktop app or switchboard serve.',
+  'The backup folder is unavailable.',
+  'Backups are not available on this platform.',
+  'Backup storage unavailable. Check the backup folder and Keychain access.',
 ]);
 const coreErrors: Record<string, string> = {
   'No current Claude sign-in found.': 'No current Claude sign-in found. Sign in with the official CLI, then capture again.',

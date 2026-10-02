@@ -27,6 +27,7 @@ impl MonitorHandle {
             let mut interval = tokio::time::interval(Duration::from_secs(10));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut last_source_sync = 0;
+            let mut last_limit_scan = 0;
             loop {
                 interval.tick().await;
                 let Some(runtime) = weak.upgrade() else {
@@ -40,6 +41,13 @@ impl MonitorHandle {
                     sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();
                     last_source_sync = time;
+                }
+                if native_sources {
+                    let _ = runtime.maybe_backup(time, false);
+                }
+                if time - last_limit_scan >= 30 || time < last_limit_scan {
+                    scan_limits(&runtime, native_sources, time);
+                    last_limit_scan = time;
                 }
                 let Ok(snapshot) = runtime.store.snapshot() else {
                     continue;
@@ -297,6 +305,29 @@ fn sync_live_sources(
     }
 }
 
+/// Collects limit errors: the proxy's own events always; Claude Code's transcript markers only
+/// for a real owner, which is the only one allowed to look at the ordinary Claude sign-in.
+fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
+    let Ok(snapshot) = runtime.store.snapshot() else {
+        return;
+    };
+    let profile = native_sources
+        .then(|| (runtime.native.current)(Provider::Claude).ok())
+        .flatten();
+    let native = profile.as_ref().map(|p| {
+        let ids = crate::matching_accounts(&runtime.store, Provider::Claude, &p.identity)
+            .map(|accounts| accounts.into_iter().map(|a| a.id).collect())
+            .unwrap_or_default();
+        (&p.identity, ids)
+    });
+    let files = if native.is_some() {
+        crate::limits::transcript_files(time)
+    } else {
+        vec![]
+    };
+    runtime.limits.refresh(&snapshot, native, &files, time);
+}
+
 fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
     let mut decisions = Vec::new();
     let snapshot = runtime.store.snapshot()?;
@@ -320,9 +351,12 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         } else {
             None
         };
-        let decision = runtime
-            .store
-            .rotation_decision(policy, current.as_deref(), now())?;
+        let decision = runtime.store.rotation_decision_with(
+            policy,
+            current.as_deref(),
+            now(),
+            &runtime.limits.limited_ids(now()),
+        )?;
         let mut reason = decision.reason;
         if let Some(id) = decision.candidate_id.as_deref() {
             let result = if policy.target == "managed" {
@@ -342,7 +376,20 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
             };
             if result.is_ok() {
                 runtime.invalidate_current();
-                reason = "switched".into();
+                if policy.target == "claude_cli" {
+                    let identity = snapshot
+                        .accounts
+                        .iter()
+                        .find(|a| a.id == id)
+                        .and_then(|a| a.external_identity.as_ref());
+                    runtime.limits.switched(identity, now());
+                }
+                reason = if reason.starts_with("limit") {
+                    "switched_on_limit"
+                } else {
+                    "switched"
+                }
+                .into();
             } else if policy.target == "claude_cli" {
                 reason = "activation_failed".into();
             } else {
@@ -647,6 +694,43 @@ mod tests {
         assert_eq!(
             runtime.store.stored_credential(&b.id).unwrap().access_token,
             "renewed"
+        );
+    }
+    #[tokio::test]
+    async fn a_limit_error_in_claude_code_switches_with_quota_to_spare() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 20.0);
+        quota(&runtime.store, &b.id, 5.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "below_threshold", "no error, no move");
+        // Claude Code wrote a spend-limit marker a minute ago for the account in use.
+        let projects = root.path().join("claude").join("projects").join("-p");
+        std::fs::create_dir_all(&projects).unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(now() - 60)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let line = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"timestamp":at,"quotaLimits":{"resetsAt":now()+3600}});
+        let file = projects.join("s.jsonl");
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        let profile = signed_in(Provider::Claude).unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime.limits.refresh(
+            &snapshot,
+            Some((&profile.identity, vec![a.id.clone()])),
+            &[file],
+            now(),
+        );
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched_on_limit");
+        assert_eq!(
+            events(&runtime.store, "activation"),
+            [(Some(b.id), "completed".to_string())]
         );
     }
     #[test]

@@ -288,6 +288,10 @@ pub(crate) fn apply(
                         Ok(()) => {
                             if let Some(runtime) = runtime {
                                 runtime.invalidate_current();
+                                runtime.limits.switched(
+                                    account.external_identity.as_ref(),
+                                    crate::monitor::now(),
+                                );
                             }
                             store.record_rule_applied(&account.id)?;
                             outcome(provider, "activated", Some(account), format!("Claude Code now signs in as {} for every ordinary claude session. Running sessions may keep their account until they reload credentials.", account.label))

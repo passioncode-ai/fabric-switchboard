@@ -63,7 +63,9 @@ impl Store {
             policy.last_switched_at = None;
             candidate.policies.push(policy);
         }
-        self.publish(&mut state, candidate)
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     pub fn mark_rotated(
         &self,
@@ -96,6 +98,19 @@ impl Store {
         current_id: Option<&str>,
         now: i64,
     ) -> Result<RotationDecision, String> {
+        self.rotation_decision_with(policy, current_id, now, &Default::default())
+    }
+    /// As `rotation_decision`, with the accounts a provider limit error has stopped (0.5).
+    /// A limited current account moves at once — the error is evidence the quota figures
+    /// cannot show, such as a seat's spend limit — and the cooldown does not hold it there.
+    /// A limited account is never a candidate.
+    pub fn rotation_decision_with(
+        &self,
+        policy: &RotationPolicy,
+        current_id: Option<&str>,
+        now: i64,
+        limited: &std::collections::HashSet<String>,
+    ) -> Result<RotationDecision, String> {
         policy.validate()?;
         if now <= 0 {
             return Err("Invalid rotation time".into());
@@ -103,9 +118,11 @@ impl Store {
         if !policy.enabled {
             return Ok(hold("disabled"));
         }
-        if policy
-            .last_switched_at
-            .is_some_and(|t| now < t || now - t < policy.cooldown_seconds)
+        let current_limited = current_id.is_some_and(|id| limited.contains(id));
+        if !current_limited
+            && policy
+                .last_switched_at
+                .is_some_and(|t| now < t || now - t < policy.cooldown_seconds)
         {
             return Ok(hold("cooldown"));
         }
@@ -119,25 +136,36 @@ impl Store {
         let Some(current) = current else {
             return Ok(hold("current_unavailable"));
         };
-        if !self.rotation_credential_eligible(current, policy, now) {
-            return Ok(hold("current_unavailable"));
-        }
-        let Some(usage) = fresh_usage(current, policy, now) else {
-            return Ok(hold("usage_unavailable"));
-        };
-        if usage < policy.threshold_percent {
-            return Ok(hold("below_threshold"));
+        if !current_limited {
+            if !self.rotation_credential_eligible(current, policy, now) {
+                return Ok(hold("current_unavailable"));
+            }
+            let Some(usage) = fresh_usage(current, policy, now) else {
+                return Ok(hold("usage_unavailable"));
+            };
+            if usage < policy.threshold_percent {
+                return Ok(hold("below_threshold"));
+            }
         }
         let candidate = state
             .accounts
             .iter()
             .filter(|a| {
-                a.id != current.id && a.provider == policy.provider && a.pool == policy.pool
+                a.id != current.id
+                    && a.provider == policy.provider
+                    && a.pool == policy.pool
+                    && !limited.contains(&a.id)
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
             .filter(|(a, used)| {
-                *used < policy.threshold_percent - policy.hysteresis_percent
-                    && self.rotation_credential_eligible(a, policy, now)
+                // An account in use that fails every request is worse than any account with
+                // room left; otherwise the usual headroom applies.
+                let limit = if current_limited {
+                    100.0
+                } else {
+                    policy.threshold_percent - policy.hysteresis_percent
+                };
+                *used < limit && self.rotation_credential_eligible(a, policy, now)
             })
             .min_by(|(a, x), (b, y)| {
                 x.total_cmp(y)
@@ -147,9 +175,18 @@ impl Store {
         Ok(match candidate {
             Some((a, _)) => RotationDecision {
                 candidate_id: Some(a.id.clone()),
-                reason: "threshold_reached".into(),
+                reason: if current_limited {
+                    "limit_reached"
+                } else {
+                    "threshold_reached"
+                }
+                .into(),
             },
-            None => hold("no_eligible_account"),
+            None => hold(if current_limited {
+                "limit_no_eligible_account"
+            } else {
+                "no_eligible_account"
+            }),
         })
     }
     fn rotation_credential_eligible(
