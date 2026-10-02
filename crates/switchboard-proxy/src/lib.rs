@@ -502,8 +502,54 @@ fn parse_reset(value: &serde_json::Value, observed_at: i64) -> Result<i64, Strin
 /// network failure. A refresh may recover it; callers compare against this exact text.
 pub const REJECTED: &str = "Provider rejected the credential. Sign in again.";
 
+/// A failed quota check: a sanitized message, and for a provider 429 how long it asked to wait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeFailure {
+    pub message: String,
+    /// `Some` only for 429: `Some(seconds)` from a numeric `Retry-After`, `Some(None)` without one.
+    pub rate_limited: Option<Option<i64>>,
+}
+impl From<String> for ProbeFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            rate_limited: None,
+        }
+    }
+}
+impl From<&str> for ProbeFailure {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+pub const USAGE_RATE_LIMITED: &str =
+    "Usage checks are rate limited by the provider. Switchboard waits before the next one.";
+const USAGE_ORIGINS: (&str, &str) = ("https://api.anthropic.com", "https://chatgpt.com");
+
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
 pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String> {
+    probe_usage_detailed(store, id).await.map_err(|f| f.message)
+}
+/// The quota check with the provider's own wait on 429 (`Retry-After`), for the scheduler.
+pub async fn probe_usage_detailed(store: Arc<Store>, id: String) -> Result<Usage, ProbeFailure> {
+    probe_usage_from(store, id, USAGE_ORIGINS).await
+}
+/// Seconds from a numeric `Retry-After`; an HTTP date or anything malformed is no value.
+fn retry_after_seconds(headers: &HeaderMap) -> Option<i64> {
+    let seconds: i64 = headers
+        .get("retry-after")?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    (seconds >= 0).then_some(seconds)
+}
+async fn probe_usage_from(
+    store: Arc<Store>,
+    id: String,
+    origins: (&str, &str),
+) -> Result<Usage, ProbeFailure> {
     let snapshot = store.snapshot()?;
     let account = snapshot
         .accounts
@@ -527,8 +573,8 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
         .build()
         .map_err(|_| "Usage check unavailable.")?;
     let url = match account.provider {
-        Provider::Claude => "https://api.anthropic.com/api/oauth/usage",
-        Provider::Codex => "https://chatgpt.com/backend-api/wham/usage",
+        Provider::Claude => format!("{}/api/oauth/usage", origins.0),
+        Provider::Codex => format!("{}/backend-api/wham/usage", origins.1),
     };
     let mut request = client.get(url).bearer_auth(&credential.access_token);
     if account.provider == Provider::Claude {
@@ -546,6 +592,12 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
     // Only 401 speaks about the token itself; a 403 can be a plan or region refusal.
     if response.status().as_u16() == 401 {
         return Err(REJECTED.into());
+    }
+    if response.status().as_u16() == 429 {
+        return Err(ProbeFailure {
+            message: USAGE_RATE_LIMITED.into(),
+            rate_limited: Some(retry_after_seconds(response.headers())),
+        });
     }
     if !response.status().is_success() {
         return Err("Usage unavailable. Check the account and retry later.".into());

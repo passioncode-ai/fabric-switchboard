@@ -897,11 +897,14 @@ fn replace_native(
     }
     // A renewed generation that could not be stored yet is the only valid one.
     if let Some(state) = refresh {
-        if refresh::adopt_stash(store, state, &account.id) == Some(false) {
-            return Err(
+        match refresh::adopt_stash(store, state, &account.id) {
+            Some(refresh::Outcome::Transient) => return Err(
                 "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute."
                     .into(),
-            );
+            ),
+            // Its successor belonged to another account: what this row holds is spent.
+            Some(refresh::Outcome::SignInRequired) => return Err(refresh::SIGN_IN.into()),
+            _ => {}
         }
     }
     // An expired access token is fine while a refresh token remains: Claude Code renews it
@@ -936,7 +939,8 @@ fn replace_native(
         state.note_active(&current.identity);
         // Already the account in use: writing its stored copy would replace Claude Code's
         // newer live generation with an older one. Nothing to do.
-        if current.identity.account_id == identity.account_id
+        if current.identity.account_id.is_some()
+            && current.identity.account_id == identity.account_id
             && current.identity.organization_id == identity.organization_id
         {
             return Ok(());
@@ -945,12 +949,9 @@ fn replace_native(
         if copies.is_empty() {
             return Err(UNSAVED_CURRENT.into());
         }
-        // Another stored account's lineage under this account's name is never filed here.
-        if refresh::lineage(store, state, &current.identity, &current.credential)
-            == refresh::Lineage::Foreign
-        {
-            return Err(refresh::FOREIGN_LIVE.into());
-        }
+        // Another account's lineage under this account's name is never filed here, and one
+        // nobody can attribute is not filed either (the caller asked the provider first).
+        refresh::filable(store, state, &current.identity, &current.credential)?;
     }
     let mut preserve = |outgoing: &external::Outgoing<'_>| -> Result<(), String> {
         let live = external::profile_of(outgoing)?;
@@ -959,13 +960,17 @@ fn replace_native(
         }
         // The bytes read under the locks are the newest generation; Claude Code may have
         // refreshed since the check above, and a different lineage now is not this account's.
-        if refresh::lineage(store, state, &live.identity, &live.credential)
-            == refresh::Lineage::Foreign
-        {
-            return Err(refresh::FOREIGN_LIVE.into());
-        }
-        // Every stored copy of that identity, in every pool (PLAN-0.5 C-6).
+        refresh::filable(store, state, &live.identity, &live.credential)?;
+        // Every stored copy of that identity, in every pool (PLAN-0.5 C-6) — except one that
+        // already holds a newer generation than Claude Code's (a renewal Switchboard stored
+        // while writing it back to Claude Code failed): the live token is the spent one then.
         for copy in &copies {
+            if store.stored_credential(&copy.id).is_ok_and(|stored| {
+                stored.refresh_token != live.credential.refresh_token
+                    && stored.expires_at.unwrap_or(0) > live.credential.expires_at.unwrap_or(0)
+            }) {
+                continue;
+            }
             store.upsert(
                 copy.label.clone(),
                 copy.provider,
@@ -1246,10 +1251,53 @@ mod owner_tests {
             )
             .unwrap()
     }
+    /// A local `/api/oauth/profile` that attributes every token to `account`.
+    async fn profile_of(account: &'static str) -> String {
+        use axum::{routing::get, Json, Router};
+        let app = Router::new().route(
+            "/profile",
+            get(move || async move {
+                Json(json!({"account":{"uuid":account},"organization":{"uuid":"synthetic-org"}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://{address}/profile")
+    }
+    #[tokio::test]
+    async fn a_live_generation_nobody_can_attribute_is_never_filed() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        // Claude Code renewed synthetic-a on its own: the stored copy has an older lineage, and
+        // the provider cannot be asked (offline, or the access token has lapsed).
+        let home = stale_copy(&runtime.store, "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative { id: b.id.clone() })
+                .await
+                .unwrap_err(),
+            refresh::UNCONFIRMED_LIVE
+        );
+        assert_eq!(
+            runtime
+                .store
+                .stored_credential(&home.id)
+                .unwrap()
+                .access_token,
+            "synthetic-a-old-token",
+            "nothing filed"
+        );
+    }
     #[tokio::test]
     async fn switching_away_keeps_the_live_generation_in_every_pool() {
         let root = tempfile::tempdir().unwrap();
         let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        // The provider names the live lineage's owner, so it is synthetic-a's newest generation.
+        runtime
+            .refresh
+            .set_profile_endpoint(profile_of("synthetic-a").await);
         let home = stale_copy(&runtime.store, "default");
         let work = stale_copy(&runtime.store, "work");
         let b = save(&runtime.store, "synthetic-b", "default");
@@ -1266,6 +1314,79 @@ mod owner_tests {
             );
             assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-a-refresh"));
         }
+    }
+    #[tokio::test]
+    async fn a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        runtime
+            .refresh
+            .set_profile_endpoint(profile_of("synthetic-a").await);
+        // Switchboard stored a renewal of synthetic-a, but writing it back to Claude Code
+        // failed: Claude Code's item still holds the spent generation.
+        let mut newer = credential("synthetic-a");
+        newer.access_token = "synthetic-a-newer-token".into();
+        newer.refresh_token = Some("synthetic-a-newer-refresh".into());
+        newer.expires_at = newer.expires_at.map(|t| t + 1000);
+        let a = runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                newer,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let b = save(&runtime.store, "synthetic-b", "default");
+        runtime
+            .execute(Operation::ActivateNative { id: b.id })
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .store
+                .stored_credential(&a.id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-a-newer-refresh")
+        );
+    }
+    fn email_only(provider: Provider) -> Result<external::CapturedProfile, String> {
+        let mut live = signed_in(provider)?;
+        live.identity = ExternalIdentity {
+            account_id: None,
+            organization_id: None,
+            email: Some("someone@example.invalid".into()),
+        };
+        Ok(live)
+    }
+    #[tokio::test]
+    async fn identities_without_an_account_id_are_never_the_same_account() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), email_only, activates).await;
+        let target = runtime
+            .store
+            .upsert(
+                "other".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential("synthetic-b"),
+                Some(ExternalIdentity {
+                    account_id: None,
+                    organization_id: None,
+                    email: Some("other@example.invalid".into()),
+                }),
+            )
+            .unwrap();
+        // Two email-only identities once compared equal (None == None): a silent no-op.
+        assert!(runtime
+            .execute(Operation::ActivateNative { id: target.id })
+            .await
+            .is_err());
     }
     #[tokio::test]
     async fn an_account_with_an_expired_access_token_still_activates() {

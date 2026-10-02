@@ -934,3 +934,65 @@ async fn connection_listed_headers_are_not_relayed_in_either_direction() {
     p.shutdown().await;
     up.abort();
 }
+#[tokio::test]
+async fn usage_checks_report_the_providers_wait_and_never_its_body() {
+    use axum::routing::get;
+    let router = Router::new()
+        .route(
+            "/limited/api/oauth/usage",
+            get(|| async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "1200")],
+                    "upstream detail that must not leak",
+                )
+            }),
+        )
+        .route(
+            "/dated/api/oauth/usage",
+            get(|| async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")],
+                    "",
+                )
+            }),
+        )
+        .route(
+            "/rejected/api/oauth/usage",
+            get(|| async { StatusCode::UNAUTHORIZED }),
+        )
+        .route(
+            "/ok/api/oauth/usage",
+            get(|| async {
+                axum::Json(serde_json::json!({"five_hour":{"utilization":42.0,"resets_at":null}}))
+            }),
+        );
+    let (base, _task) = fixture(router).await;
+    let (_root, store) = store();
+    let a = add(
+        &store,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "a",
+        "synthetic-token",
+    );
+    let probe = |path: &str| {
+        let origin = format!("{base}/{path}");
+        let store = store.clone();
+        let id = a.id.clone();
+        async move { probe_usage_from(store, id, (&origin, &origin)).await }
+    };
+    assert_eq!(
+        probe("limited").await.unwrap_err(),
+        ProbeFailure {
+            message: USAGE_RATE_LIMITED.into(),
+            rate_limited: Some(Some(1200))
+        }
+    );
+    assert_eq!(probe("dated").await.unwrap_err().rate_limited, Some(None));
+    let rejected = probe("rejected").await.unwrap_err();
+    assert_eq!(rejected.message, REJECTED);
+    assert_eq!(rejected.rate_limited, None);
+    assert_eq!(probe("ok").await.unwrap().used_percent, 42.0);
+}

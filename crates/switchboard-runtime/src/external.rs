@@ -597,7 +597,11 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
                 .ok_or("Backup config missing.")?;
             // A `cswap run` profile can hold a newer generation than the backup (Claude Swap
             // `session.py:272-286`); the one that expires later is the live lineage.
-            let newest = session_credential(reader, root, slot, mac)
+            let account = parse(&cfg)
+                .ok()
+                .and_then(|c| text(&c["oauthAccount"], "accountUuid"));
+            let newest = account
+                .and_then(|account| session_credential(reader, root, slot, &account, mac))
                 .filter(|session| expires(session) > expires(&secret));
             let profile = claude_profile(newest.as_deref().unwrap_or(&secret), &cfg, Some(label))?;
             if profile.identity.email.as_deref() != Some(email)
@@ -679,7 +683,15 @@ fn expires(auth: &[u8]) -> i64 {
 }
 /// The credential of Claude Swap's session profile for `slot` (`sessions/<slot>-<slug>/`): its
 /// plaintext seed or, once Claude Code took it over, the Keychain item for that config dir.
-fn session_credential(reader: &dyn Reader, root: &Path, slot: &str, mac: bool) -> Option<Vec<u8>> {
+/// Only while the session's own config still names `account`: a `/login` inside the session
+/// to another account leaves that account's token there, never the slot's.
+fn session_credential(
+    reader: &dyn Reader,
+    root: &Path,
+    slot: &str,
+    account: &str,
+    mac: bool,
+) -> Option<Vec<u8>> {
     let sessions = root.join("sessions");
     let entries = fs::read_dir(&sessions).ok()?;
     let prefix = format!("{slot}-");
@@ -689,6 +701,16 @@ fn session_credential(reader: &dyn Reader, root: &Path, slot: &str, mac: bool) -
             continue;
         }
         let home = sessions.join(&name);
+        // Claude Code's config for a custom dir: a legacy `.config.json` wins, as in `context`.
+        let same = [".config.json", ".claude.json"]
+            .iter()
+            .find_map(|file| reader.read(&home.join(file), CAP).ok().flatten())
+            .and_then(|bytes| parse(&bytes).ok())
+            .and_then(|c| text(&c["oauthAccount"], "accountUuid"))
+            .is_some_and(|uuid| uuid == account);
+        if !same {
+            continue;
+        }
         if mac {
             if let Ok(Some(bytes)) =
                 reader.keychain(&service(&home.to_string_lossy()), &username().ok()?)
@@ -828,6 +850,11 @@ struct Locks {
 }
 impl Locks {
     fn acquire(c: &Context) -> Result<Self, String> {
+        Self::acquire_with(c, true)
+    }
+    /// `config: false` takes only the two credential locks — a renewal writes no config, and
+    /// holding `~/.claude.json.lock` through a network grant would stall Claude Code's writes.
+    fn acquire_with(c: &Context, config: bool) -> Result<Self, String> {
         let mut locks = Self {
             paths: vec![],
             stop: None,
@@ -845,7 +872,11 @@ impl Locks {
                 c.config.file_name().ok_or(UNAVAILABLE)?.to_string_lossy()
             )),
         ];
-        for (index, path) in paths.into_iter().enumerate() {
+        for (index, path) in paths
+            .into_iter()
+            .enumerate()
+            .take(if config { 3 } else { 2 })
+        {
             checked_path(&path)?;
             // Claude Code's proper-lockfile protocol (Claude Swap `claude_locks.py:46-129`,
             // against the 2.1.218 bundle): credential locks are stale after 60 s, the config
@@ -1139,7 +1170,10 @@ fn activate(
 /// Switchboard's own homes are never the ordinary Claude Code (Claude Swap
 /// `switcher.py:6661-6690`): a session Switchboard launched must not switch "the" account.
 fn refuse_own_home(home: &Path) -> Result<(), String> {
-    let inside = crate::default_root().ok().is_some_and(|root| {
+    refuse_home_inside(home, crate::default_root().ok())
+}
+fn refuse_home_inside(home: &Path, root: Option<PathBuf>) -> Result<(), String> {
+    let inside = root.is_some_and(|root| {
         let root = root.canonicalize().unwrap_or(root);
         let home = home.canonicalize().unwrap_or_else(|_| home.to_owned());
         home.starts_with(root)
@@ -1180,7 +1214,7 @@ pub fn lock_live() -> Result<Box<dyn LiveItem>, String> {
     let context = context(Provider::Claude, None)?;
     checked_path(&context.home)?;
     refuse_own_home(&context.home)?;
-    let locks = Locks::acquire(&context)?;
+    let locks = Locks::acquire_with(&context, false)?;
     Ok(Box::new(LiveLock { context, locks }))
 }
 impl LiveItem for LiveLock {
@@ -1190,9 +1224,20 @@ impl LiveItem for LiveLock {
     }
     fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;
-        Native.auth_write(&self.context, Some(auth))?;
+        write_live(&Native, &self.context, auth)?;
         self.locks.ensure()
     }
+}
+/// Writes a renewed live item, and on macOS the plaintext copy too when one exists, so it never
+/// keeps a spent token (activation does the same).
+fn write_live(writer: &dyn Writer, c: &Context, auth: &[u8]) -> Result<(), String> {
+    writer.auth_write(c, Some(auth))?;
+    let shadow = c.home.join(".credentials.json");
+    if c.mac && matches!(writer.read(&shadow, SECRET_CAP), Ok(Some(_))) {
+        // The Keychain item is what Claude Code reads; a failed copy is not a failed renewal.
+        let _ = writer.config_write(&shadow, Some(auth));
+    }
+    Ok(())
 }
 pub fn activate_claude(
     credential: &Credential,
@@ -1763,6 +1808,22 @@ mod tests {
         let session = root.join("sessions/8-a_example.test");
         fs::create_dir_all(&session).unwrap();
         f.put(&session.join(".credentials.json"), &newer);
+        // Without the session's own config naming the slot's account it is not trusted.
+        assert_eq!(
+            import(&f, root, false).unwrap().profiles[0]
+                .credential
+                .access_token,
+            "backup"
+        );
+        f.put(&session.join(".claude.json"), &config("someone-else"));
+        assert_eq!(
+            import(&f, root, false).unwrap().profiles[0]
+                .credential
+                .access_token,
+            "backup",
+            "a /login to another account inside the session"
+        );
+        f.put(&session.join(".claude.json"), &config("a@example.test"));
         let batch = import(&f, root, false).unwrap();
         assert_eq!(batch.profiles[0].credential.access_token, "session");
         // An older session copy never replaces a newer backup.
@@ -1779,6 +1840,76 @@ mod tests {
                 .access_token,
             "backup"
         );
+    }
+    #[test]
+    fn a_renewed_live_item_reaches_an_existing_plaintext_copy_only() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("synthetic-account"));
+        write_live(&f, &c, &auth("renewed")).unwrap();
+        assert_eq!(parse(&auth("renewed")).unwrap(), live(&f, &c));
+        assert!(
+            !f.files
+                .borrow()
+                .contains_key(&c.home.join(".credentials.json")),
+            "never created"
+        );
+        f.put(&c.home.join(".credentials.json"), &auth("spent"));
+        write_live(&f, &c, &auth("renewed-again")).unwrap();
+        assert_eq!(
+            f.files.borrow()[&c.home.join(".credentials.json")],
+            auth("renewed-again")
+        );
+    }
+    #[test]
+    fn a_renewal_takes_only_the_credential_locks() {
+        let dir = tempfile::tempdir().unwrap();
+        // Lock paths are refused through a symlink (/var → /private/var on macOS).
+        let base = dir.path().canonicalize().unwrap();
+        let temp = base.as_path();
+        let home = temp.join(".claude");
+        fs::create_dir_all(&home).unwrap();
+        let c = Context {
+            home: home.clone(),
+            config: temp.join(".claude.json"),
+            ..ctx()
+        };
+        let config_lock = temp.join(".claude.json.lock");
+        {
+            let locks = Locks::acquire_with(&c, false).unwrap();
+            assert!(home.join(".oauth_refresh.lock").is_dir());
+            assert!(temp.join(".claude.lock").is_dir());
+            assert!(
+                !config_lock.exists(),
+                "Claude Code can keep writing its config"
+            );
+            locks.ensure().unwrap();
+        }
+        let locks = Locks::acquire(&c).unwrap();
+        assert!(config_lock.is_dir());
+        drop(locks);
+        assert!(!config_lock.exists(), "released on drop");
+    }
+    #[test]
+    fn a_home_inside_switchboards_data_folder_is_refused() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().join("ai.passioncode.fabric-switchboard");
+        let own = root.join("homes").join("claude-1");
+        std::fs::create_dir_all(&own).unwrap();
+        let refused = refuse_home_inside(&own, Some(root.clone())).unwrap_err();
+        assert!(refused.contains("Switchboard home"), "{refused}");
+        // A sibling whose name only starts the same, and no data folder at all, are fine.
+        let sibling = data.path().join("ai.passioncode.fabric-switchboard-other");
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert!(refuse_home_inside(&sibling, Some(root.clone())).is_ok());
+        assert!(refuse_home_inside(&own, None).is_ok());
+        // A path through a symlink into the data folder is still inside.
+        #[cfg(unix)]
+        {
+            let link = data.path().join("link");
+            std::os::unix::fs::symlink(&own, &link).unwrap();
+            assert!(refuse_home_inside(&link, Some(root)).is_err());
+        }
     }
     #[test]
     fn context_resolves_homes_configs_and_keychain_services_like_the_cli() {

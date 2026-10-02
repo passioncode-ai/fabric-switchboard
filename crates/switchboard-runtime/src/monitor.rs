@@ -46,9 +46,14 @@ impl MonitorHandle {
                     .await;
                     // Claude Swap's files are read outside the lock; adopting its newer
                     // generations happens under it, with the live sync.
-                    let swap = crate::external::claude_swap_running()
-                        .then(|| crate::external::read_claude_swap().ok().map(|b| b.profiles))
-                        .flatten();
+                    let swap = if !crate::external::claude_swap_running() {
+                        crate::refresh::SwapView::NotRunning
+                    } else {
+                        match crate::external::read_claude_swap() {
+                            Ok(batch) => crate::refresh::SwapView::Profiles(batch.profiles),
+                            Err(_) => crate::refresh::SwapView::Unreadable,
+                        }
+                    };
                     let _mutation = runtime.mutations.lock().await;
                     // Claude Code left its token expired: renew it under Claude Code's locks so
                     // managed sessions and quota checks on that account keep working.
@@ -98,6 +103,16 @@ impl MonitorHandle {
                     )
                     .await;
                 }
+                if native_sources {
+                    // A native switch files the live lineage under its account: know its owner
+                    // first (network, outside the lock; at most once a minute per lineage).
+                    crate::refresh::learn_live_owner(
+                        &runtime.store,
+                        runtime.native,
+                        &runtime.refresh,
+                    )
+                    .await;
+                }
                 let _mutation = runtime.mutations.lock().await;
                 let _ = rotate(&runtime, native_sources);
             }
@@ -130,6 +145,20 @@ fn backoff(previous: Option<(i64, i64)>) -> i64 {
         .unwrap_or(INTERVAL_SECONDS)
 }
 
+/// A usage check the provider answered 429 waits at least this long without `Retry-After`
+/// (Claude Swap waits 900 s too), and at most `MAX_RETRY_AFTER` with one.
+const RATE_LIMIT_FLOOR: i64 = 900;
+const MAX_RETRY_AFTER: i64 = 6 * 3600;
+/// When the next check of a failed account is due. A provider 429 is honoured: its `Retry-After`
+/// (bounded) or the floor, never sooner than the ordinary backoff.
+fn failure_delay(previous: Option<(i64, i64)>, rate_limited: Option<Option<i64>>) -> i64 {
+    let ordinary = backoff(previous);
+    match rate_limited {
+        None => ordinary,
+        Some(wait) => ordinary.max(wait.unwrap_or(RATE_LIMIT_FLOOR).min(MAX_RETRY_AFTER)),
+    }
+}
+
 pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
     let account = store
         .snapshot()?
@@ -154,24 +183,29 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
             );
         }
     };
-    let result = switchboard_proxy::probe_usage(store.clone(), id.to_owned()).await;
+    let result = switchboard_proxy::probe_usage_detailed(store.clone(), id.to_owned()).await;
     let checked = now();
     match result {
         Ok(usage) => Ok(usage),
-        Err(error) => {
-            let delay = backoff(
+        Err(failure) => {
+            let delay = failure_delay(
                 account
                     .usage_health
                     .filter(|h| h.status != "ok")
                     .map(|h| (h.checked_at, h.next_check_at)),
+                failure.rate_limited,
             );
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
-            Err(if error == switchboard_proxy::REJECTED {
-                error
-            } else {
-                "Usage unavailable. Check sign-in or try again after the next scheduled check."
-                    .into()
-            })
+            Err(
+                if failure.message == switchboard_proxy::REJECTED
+                    || failure.message == switchboard_proxy::USAGE_RATE_LIMITED
+                {
+                    failure.message
+                } else {
+                    "Usage unavailable. Check sign-in or try again after the next scheduled check."
+                        .into()
+                },
+            )
         }
     }
 }
@@ -801,6 +835,51 @@ mod tests {
             store.stored_credential(&a.id).unwrap().access_token,
             "synthetic-a-newer"
         );
+        // Claude Code rotated the lineage: the new refresh token is stored nowhere, so only the
+        // provider's answer decides whose it is.
+        fn a_rotated(_: Provider) -> Result<external::CapturedProfile, String> {
+            let mut c = credential("synthetic-a");
+            c.access_token = "rotated-access".into();
+            c.refresh_token = Some("rotated-refresh".into());
+            Ok(external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: c,
+                identity: identity("synthetic-a"),
+                label: "synthetic-a".into(),
+            })
+        }
+        sync_live_sources(&store, a_rotated, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-newer",
+            "unattributed: not filed"
+        );
+        state.set_owner("rotated-refresh", identity("synthetic-b"));
+        sync_live_sources(&store, a_rotated, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-newer",
+            "the provider says it is synthetic-b's"
+        );
+        state.set_owner("rotated-refresh", identity("synthetic-a"));
+        sync_live_sources(&store, a_rotated, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "rotated-access"
+        );
+    }
+    #[test]
+    fn a_rate_limited_usage_check_waits_as_the_provider_asks() {
+        // No 429: the ordinary backoff.
+        assert_eq!(failure_delay(None, None), 180);
+        // 429 without Retry-After: the 900 s floor.
+        assert_eq!(failure_delay(None, Some(None)), 900);
+        // Retry-After longer than the backoff is honoured, bounded at six hours.
+        assert_eq!(failure_delay(None, Some(Some(2400))), 2400);
+        assert_eq!(failure_delay(None, Some(Some(999_999))), 6 * 3600);
+        // A short Retry-After never makes the check sooner than the backoff already is.
+        assert_eq!(failure_delay(Some((100, 1000)), Some(Some(5))), 1800);
     }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {

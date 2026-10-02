@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use switchboard_core::{Account, AuthKind, Credential, ExternalIdentity, Provider, Store};
@@ -38,6 +38,13 @@ pub(crate) enum Outcome {
     Transient,
 }
 
+/// A renewal's successor and the account the token endpoint said it was issued to.
+#[derive(Clone)]
+pub(crate) struct Kept {
+    refreshed: Credential,
+    owner: Option<String>,
+}
+
 /// In-memory refresh bookkeeping of one owner process.
 pub(crate) struct RefreshState {
     endpoint: Mutex<String>,
@@ -52,10 +59,13 @@ pub(crate) struct RefreshState {
     journal: Mutex<Option<std::path::PathBuf>>,
     /// Identities (`account_id`) a running Claude Swap holds: it renews them, Switchboard does not.
     swap_held: Mutex<std::collections::HashSet<String>>,
-    /// Account id → (the refresh token a grant spent, its successor) not yet stored.
-    stash: Mutex<HashMap<String, (String, Credential)>>,
+    /// The refresh token a grant spent → its successor, until every holder has it. Shared with
+    /// the grant task, which records the successor before anyone can drop it.
+    stash: Arc<Mutex<HashMap<String, Kept>>>,
     /// Refresh-token fingerprint → the identity `/api/oauth/profile` reported for it.
     owners: Mutex<HashMap<String, ExternalIdentity>>,
+    /// The lineage last asked about without an answer, and when: asked again after a minute.
+    profile_tried: Mutex<Option<(String, i64)>>,
 }
 impl Default for RefreshState {
     fn default() -> Self {
@@ -86,7 +96,8 @@ impl RefreshState {
                 .into(),
             ),
             owners: Mutex::new(HashMap::new()),
-            stash: Mutex::new(HashMap::new()),
+            profile_tried: Mutex::new(None),
+            stash: Arc::new(Mutex::new(HashMap::new())),
             swap_held: Mutex::new(Default::default()),
             journal: Mutex::new(None),
         }
@@ -120,6 +131,13 @@ impl RefreshState {
     #[cfg(test)]
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;
+    }
+    #[cfg(test)]
+    pub(crate) fn set_owner(&self, token: &str, owner: ExternalIdentity) {
+        self.owners
+            .lock()
+            .unwrap()
+            .insert(fingerprint(token), owner);
     }
     fn owner(&self, token: &str) -> Option<ExternalIdentity> {
         self.owners
@@ -223,10 +241,8 @@ pub(crate) async fn ensure_fresh(
         return Outcome::NotNeeded;
     };
     // A successor that could not be stored yet goes first; the stored token is already spent.
-    match adopt_stash(store, state, id) {
-        Some(true) => return Outcome::Refreshed,
-        Some(false) => return Outcome::Transient,
-        None => {}
+    if let Some(outcome) = adopt_stash(store, state, id) {
+        return outcome;
     }
     let Some(refresh_token) = credential.refresh_token.clone() else {
         return Outcome::NotNeeded;
@@ -268,36 +284,15 @@ pub(crate) async fn ensure_fresh(
     if state.recently_active(&account, time) || is_active(native, state, &account, &credential) {
         return Outcome::Active;
     }
-    let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
-    match grant(&endpoint, &credential).await {
-        Ok((refreshed, owner)) => {
+    match spend(state, &credential).await {
+        Ok(kept) => {
             if let Ok(mut backoff) = state.backoff.lock() {
                 backoff.remove(id);
             }
-            // The token endpoint names whose token it issued; another account's means this
-            // saved profile holds a foreign lineage (Claude Swap `autoswitch.py:836-877`).
-            let foreign = owner.is_some_and(|owner| {
-                account
-                    .external_identity
-                    .as_ref()
-                    .and_then(|i| i.account_id.as_deref())
-                    .is_some_and(|mine| mine != owner)
-            });
-            if foreign {
-                return remember_dead(state, id, &refresh_token);
-            }
-            match store.adopt_refreshed(Provider::Claude, &refresh_token, &refreshed) {
-                Ok(_) => Outcome::Refreshed,
-                // The stored token is spent now: keep its successor until it can be stored,
-                // never report a storage hiccup as an ended sign-in (Claude Swap
-                // `switcher.py:2296-2410`).
-                Err(_) => {
-                    if let Ok(mut stash) = state.stash.lock() {
-                        stash.insert(id.to_owned(), (refresh_token, refreshed));
-                    }
-                    Outcome::Transient
-                }
-            }
+            // The token endpoint names whose token it issued: only that account's copies get
+            // the successor, and a copy of another account holding it is a dead lineage here
+            // (Claude Swap `autoswitch.py:836-877`).
+            settled(store, state, id, &refresh_token, &kept)
         }
         Err(Failure::Permanent) => remember_dead(state, id, &refresh_token),
         Err(Failure::Transient) => {
@@ -312,21 +307,71 @@ pub(crate) async fn ensure_fresh(
         }
     }
 }
-/// Stores a kept successor. None: nothing kept; Some(stored?).
-pub(crate) fn adopt_stash(store: &Store, state: &RefreshState, id: &str) -> Option<bool> {
-    let mut stash = state.stash.lock().ok()?;
-    let (consumed, refreshed) = stash.get(id)?;
-    let stored = store
-        .adopt_refreshed(Provider::Claude, consumed, refreshed)
-        .is_ok();
-    if stored {
-        stash.remove(id);
+/// One refresh grant whose successor survives its caller: the grant runs in its own task and
+/// records the successor before returning, so a deadline, a dropped control request or a
+/// cancelled caller can never lose a token the provider has already spent.
+async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Failure> {
+    let Some(consumed) = credential.refresh_token.clone() else {
+        return Err(Failure::Transient);
+    };
+    let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
+    let stash = state.stash.clone();
+    let credential = credential.clone();
+    tokio::spawn(async move {
+        let (refreshed, owner) = grant(&endpoint, &credential).await?;
+        let kept = Kept { refreshed, owner };
+        if let Ok(mut stash) = stash.lock() {
+            stash.insert(consumed, kept.clone());
+        }
+        Ok(kept)
+    })
+    .await
+    .unwrap_or(Err(Failure::Transient))
+}
+/// Hands a kept successor to the copies that should have it. Ok: the ids updated; the other
+/// holders of the spent token are remembered as dead and the successor is forgotten. Err: the
+/// vault refused a write and the successor stays kept for the next pass.
+fn settle(
+    store: &Store,
+    state: &RefreshState,
+    consumed: &str,
+    kept: &Kept,
+) -> Result<Vec<String>, ()> {
+    let (updated, others) = store
+        .adopt_refreshed_for(
+            Provider::Claude,
+            consumed,
+            &kept.refreshed,
+            kept.owner.as_deref(),
+        )
+        .map_err(|_| ())?;
+    for other in &others {
+        remember_dead(state, other, consumed);
     }
-    Some(stored)
+    if let Ok(mut stash) = state.stash.lock() {
+        stash.remove(consumed);
+    }
+    Ok(updated)
+}
+/// What settling a successor means for the account `id` that held the spent token.
+fn settled(store: &Store, state: &RefreshState, id: &str, consumed: &str, kept: &Kept) -> Outcome {
+    match settle(store, state, consumed, kept) {
+        Ok(updated) if updated.iter().any(|u| u == id) => Outcome::Refreshed,
+        Ok(_) if state.is_dead(store, id) => Outcome::SignInRequired,
+        // Its credential changed meanwhile (a new sign-in); nothing more to do for it.
+        Ok(_) => Outcome::NotNeeded,
+        Err(()) => Outcome::Transient,
+    }
+}
+/// Stores a kept successor of the token `id` holds. None: nothing kept for it.
+pub(crate) fn adopt_stash(store: &Store, state: &RefreshState, id: &str) -> Option<Outcome> {
+    let consumed = store.stored_credential(id).ok()?.refresh_token?;
+    let kept = state.stash.lock().ok()?.get(&consumed).cloned()?;
+    Some(settled(store, state, id, &consumed, &kept))
 }
 #[cfg(test)]
-pub(crate) fn has_stash(state: &RefreshState, id: &str) -> bool {
-    state.stash.lock().is_ok_and(|s| s.contains_key(id))
+pub(crate) fn has_stash(state: &RefreshState, consumed: &str) -> bool {
+    state.stash.lock().is_ok_and(|s| s.contains_key(consumed))
 }
 fn remember_dead(state: &RefreshState, id: &str, token: &str) -> Outcome {
     if let Ok(mut dead) = state.dead.lock() {
@@ -495,19 +540,27 @@ pub(crate) async fn renew_idle_live(
     let Ok(live) = (native.current)(Provider::Claude) else {
         return Outcome::NotNeeded;
     };
-    if live.credential.refresh_token.is_none()
-        || live
-            .credential
-            .expires_at
-            .is_none_or(|t| time - t < IDLE_EXPIRED_SECONDS)
-        || lineage(store, state, &live.identity, &live.credential) != Lineage::Own
-    {
+    let Some(consumed) = live.credential.refresh_token.clone() else {
         return Outcome::NotNeeded;
-    }
+    };
+    // A successor kept from an earlier pass means the live token is already spent: Claude
+    // Code needs it now, idle or not.
+    let kept = state
+        .stash
+        .lock()
+        .ok()
+        .and_then(|stash| stash.get(&consumed).cloned());
     let Ok(copies) = crate::matching_accounts(store, Provider::Claude, &live.identity) else {
         return Outcome::NotNeeded;
     };
-    if copies.is_empty() {
+    if kept.is_none()
+        && (live
+            .credential
+            .expires_at
+            .is_none_or(|t| time - t < IDLE_EXPIRED_SECONDS)
+            || copies.is_empty()
+            || lineage(store, state, &live.identity, &live.credential) != Lineage::Own)
+    {
         return Outcome::NotNeeded;
     }
     let Ok(lock) = (native.live)() else {
@@ -518,95 +571,81 @@ pub(crate) async fn renew_idle_live(
     };
     let unchanged =
         crate::external::claude_auth_tokens(&before).is_some_and(|(access, refresh)| {
-            access == live.credential.access_token && refresh == live.credential.refresh_token
+            access == live.credential.access_token && refresh.as_deref() == Some(&consumed)
         });
     if !unchanged {
         return Outcome::NotNeeded;
     }
-    let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
-    match grant(&endpoint, &live.credential).await {
-        Ok((refreshed, owner)) => {
-            let Some(item) = renewed_item(&before, &refreshed) else {
-                return Outcome::Transient;
-            };
-            let foreign = owner
-                .as_deref()
-                .filter(|o| live.identity.account_id.as_deref() != Some(*o))
-                .map(str::to_owned);
-            if let Some(owner) = foreign {
-                // The grant spent the live token, so its successor goes back to Claude Code
-                // whoever owns it — dropping it would sign Claude Code out. It is never filed
-                // under the account named in the config, and is remembered as foreign.
-                let _ = lock.write(&item);
-                if let (Some(token), Ok(mut owners)) =
-                    (refreshed.refresh_token.as_ref(), state.owners.lock())
-                {
-                    owners.insert(
-                        fingerprint(token),
-                        ExternalIdentity {
-                            account_id: Some(owner),
-                            organization_id: None,
-                            email: None,
-                        },
-                    );
-                }
-                return Outcome::Transient;
-            }
-            if lock.write(&item).is_err() {
-                // The grant spent the live token: keep the successor for every copy.
+    let kept = match kept {
+        Some(kept) => kept,
+        None => match spend(state, &live.credential).await {
+            Ok(kept) => kept,
+            Err(Failure::Permanent) => {
                 for copy in &copies {
-                    if let Ok(mut stash) = state.stash.lock() {
-                        stash.insert(
-                            copy.id.clone(),
-                            (
-                                live.credential.refresh_token.clone().unwrap_or_default(),
-                                refreshed.clone(),
-                            ),
-                        );
-                    }
+                    remember_dead(state, &copy.id, &consumed);
                 }
-                return Outcome::Transient;
+                return Outcome::SignInRequired;
             }
-            drop(lock);
-            for copy in copies {
-                let _ = store.upsert(
-                    copy.label,
-                    copy.provider,
-                    copy.kind,
-                    copy.pool,
-                    refreshed.clone(),
-                    Some(live.identity.clone()),
-                );
-            }
-            Outcome::Refreshed
-        }
-        Err(Failure::Permanent) => {
-            for copy in copies {
-                remember_dead(
-                    state,
-                    &copy.id,
-                    live.credential.refresh_token.as_deref().unwrap_or_default(),
-                );
-            }
-            Outcome::SignInRequired
-        }
-        Err(Failure::Transient) => Outcome::Transient,
+            Err(Failure::Transient) => return Outcome::Transient,
+        },
+    };
+    let Some(item) = renewed_item(&before, &kept.refreshed) else {
+        return Outcome::Transient;
+    };
+    // A failed write leaves the successor kept; the next pass writes it before anything else.
+    if lock.write(&item).is_err() {
+        return Outcome::Transient;
     }
+    drop(lock);
+    let foreign = kept
+        .owner
+        .as_deref()
+        .filter(|owner| live.identity.account_id.as_deref() != Some(*owner));
+    if let (Some(owner), Some(token), Ok(mut owners)) = (
+        foreign,
+        kept.refreshed.refresh_token.as_ref(),
+        state.owners.lock(),
+    ) {
+        // Claude Code keeps it, whoever owns it — dropping it would sign Claude Code out — but
+        // it is never filed under the account named in the config.
+        owners.insert(
+            fingerprint(token),
+            ExternalIdentity {
+                account_id: Some(owner.to_owned()),
+                organization_id: None,
+                email: None,
+            },
+        );
+    }
+    // The copies get the successor only if it is theirs; otherwise they hold a spent token.
+    match settle(store, state, &consumed, &kept) {
+        Err(()) => Outcome::Transient,
+        Ok(_) if foreign.is_some() => Outcome::SignInRequired,
+        Ok(_) => Outcome::Refreshed,
+    }
+}
+/// What the monitor saw of Claude Swap this pass.
+pub(crate) enum SwapView {
+    NotRunning,
+    Unreadable,
+    Profiles(Vec<crate::external::CapturedProfile>),
 }
 /// Coexistence with a running Claude Swap (report §P1-5). Records the identities it holds so
 /// Switchboard does not renew them, and takes its newer generation of each into every stored
 /// copy of that identity — a lineage it renewed would otherwise be spent under Switchboard.
-/// `profiles` is None when Claude Swap is not running. Returns how many copies were updated.
-pub(crate) fn follow_claude_swap(
-    store: &Store,
-    state: &RefreshState,
-    profiles: Option<Vec<crate::external::CapturedProfile>>,
-) -> usize {
-    let Some(profiles) = profiles else {
-        if let Ok(mut held) = state.swap_held.lock() {
-            held.clear();
+/// Returns how many copies were updated.
+pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: SwapView) -> usize {
+    let profiles = match swap {
+        SwapView::NotRunning => {
+            if let Ok(mut held) = state.swap_held.lock() {
+                held.clear();
+            }
+            return 0;
         }
-        return 0;
+        // Running, but its files could not be read this pass (it was writing them): what it
+        // held last time it still holds — clearing it would start a second renewer.
+        SwapView::Unreadable => return 0,
+        SwapView::Profiles(profiles) => profiles,
     };
     let mut held = std::collections::HashSet::new();
     let mut updated = 0;
@@ -705,9 +744,34 @@ pub(crate) fn lineage(
         }
     }
     match state.owner(token) {
-        Some(owner) if owner.account_id == identity.account_id => Lineage::Own,
+        // The same login in another organization is another account.
+        Some(owner)
+            if owner.account_id == identity.account_id
+                && (owner.organization_id.is_none()
+                    || identity.organization_id.is_none()
+                    || owner.organization_id == identity.organization_id) =>
+        {
+            Lineage::Own
+        }
         Some(_) => Lineage::Foreign,
         None => Lineage::Unresolved,
+    }
+}
+/// An unanswered owner question is not repeated sooner (the monitor asks every 10 seconds).
+const PROFILE_RETRY_SECONDS: i64 = 60;
+pub(crate) const UNCONFIRMED_LIVE: &str = "Switchboard could not confirm which account Claude Code is signed in to. Check the connection, or use Claude Code once, then retry.";
+/// Whether the live credential may be filed under `identity`: refused when it is another
+/// account's lineage, and when nothing — no stored copy, no provider answer — attributes it.
+pub(crate) fn filable(
+    store: &Store,
+    state: &RefreshState,
+    identity: &ExternalIdentity,
+    credential: &Credential,
+) -> Result<(), String> {
+    match lineage(store, state, identity, credential) {
+        Lineage::Own => Ok(()),
+        Lineage::Foreign => Err(FOREIGN_LIVE.into()),
+        Lineage::Unresolved => Err(UNCONFIRMED_LIVE.into()),
     }
 }
 
@@ -722,6 +786,16 @@ pub(crate) async fn learn_live_owner(store: &Store, native: NativeSources, state
     };
     if lineage(store, state, &live.identity, &live.credential) != Lineage::Unresolved {
         return;
+    }
+    let print = fingerprint(&token);
+    let time = now();
+    if let Ok(mut tried) = state.profile_tried.lock() {
+        if tried.as_ref().is_some_and(|(at_print, at)| {
+            *at_print == print && (0..PROFILE_RETRY_SECONDS).contains(&(time - at))
+        }) {
+            return;
+        }
+        *tried = Some((print.clone(), time));
     }
     let endpoint = state
         .profile_endpoint
@@ -1136,7 +1210,7 @@ mod tests {
             state.sign_in_required(&store).is_empty(),
             "a storage hiccup is not an ended sign-in"
         );
-        assert!(has_stash(&state, &id));
+        assert!(has_stash(&state, "synthetic-b-refresh"));
         // While it cannot be stored, no second grant spends anything.
         assert_eq!(
             ensure_fresh(&store, SIGNED_IN_A, &state, &id, true).await,
@@ -1177,6 +1251,148 @@ mod tests {
             store.stored_credential(&b).unwrap().access_token,
             "synthetic-b-token",
             "nothing foreign was stored"
+        );
+    }
+    #[tokio::test]
+    async fn a_renewal_issued_to_another_saved_account_reaches_that_account() {
+        let (url, _) = endpoint((
+            200,
+            json!({"access_token":"next-access","expires_in":28800,"refresh_token":"next-refresh","account":{"uuid":"synthetic-c"}}),
+        ))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        // synthetic-c rightfully holds the lineage synthetic-b holds by mistake.
+        let mut shared = expired("synthetic-c");
+        shared.refresh_token = Some("synthetic-b-refresh".into());
+        store
+            .upsert(
+                "synthetic-c".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                shared,
+                Some(identity("synthetic-c")),
+            )
+            .unwrap();
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        let c = id_of(&store, "synthetic-c", "work");
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await,
+            Outcome::SignInRequired
+        );
+        assert_eq!(
+            store
+                .stored_credential(&c)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("next-refresh"),
+            "the owner keeps its lineage"
+        );
+        assert!(state.is_dead(&store, &b));
+        assert!(!state.is_dead(&store, &c));
+    }
+    #[tokio::test]
+    async fn a_grant_whose_caller_gives_up_still_keeps_the_successor() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            "/token",
+            post(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    Json(json!({"access_token":"late-access","expires_in":28800,"refresh_token":"late-refresh"}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(format!("http://{address}/token"));
+        let b = id_of(&store, "synthetic-b", "default");
+        // The caller's deadline passes while the provider is already rotating the token.
+        assert!(tokio::time::timeout(
+            Duration::from_millis(50),
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, false)
+        )
+        .await
+        .is_err());
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(has_stash(&state, "synthetic-b-refresh"));
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "no second grant");
+        assert_eq!(
+            store
+                .stored_credential(&b)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("late-refresh")
+        );
+    }
+    #[tokio::test]
+    async fn the_same_login_in_another_organization_is_another_account() {
+        use axum::routing::get;
+        let app = Router::new().route(
+            "/profile",
+            get(|| async {
+                Json(
+                    json!({"account":{"uuid":"synthetic-a"},"organization":{"uuid":"another-org"}}),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-c", "default")]);
+        let state = RefreshState::default();
+        state.set_profile_endpoint(format!("http://{address}/profile"));
+        let live = signed_in(Provider::Claude).unwrap();
+        learn_live_owner(&store, SIGNED_IN_A, &state).await;
+        assert_eq!(
+            lineage(&store, &state, &live.identity, &live.credential),
+            Lineage::Foreign
+        );
+        assert_eq!(
+            filable(&store, &state, &live.identity, &live.credential).unwrap_err(),
+            FOREIGN_LIVE
+        );
+    }
+    #[tokio::test]
+    async fn an_unanswered_owner_question_waits_a_minute() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            "/profile",
+            axum::routing::get(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { axum::http::StatusCode::UNAUTHORIZED }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-c", "default")]);
+        let state = RefreshState::default();
+        state.set_profile_endpoint(format!("http://{address}/profile"));
+        learn_live_owner(&store, SIGNED_IN_A, &state).await;
+        learn_live_owner(&store, SIGNED_IN_A, &state).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let live = signed_in(Provider::Claude).unwrap();
+        assert_eq!(
+            filable(&store, &state, &live.identity, &live.credential).unwrap_err(),
+            UNCONFIRMED_LIVE
         );
     }
     #[tokio::test]
@@ -1227,7 +1443,7 @@ mod tests {
             label: "b".into(),
         };
         assert_eq!(
-            follow_claude_swap(&store, &state, Some(vec![profile])),
+            follow_claude_swap(&store, &state, SwapView::Profiles(vec![profile])),
             2,
             "both pools follow"
         );
@@ -1236,17 +1452,26 @@ mod tests {
             "swap-renewed"
         );
         // While it runs, Switchboard never spends that lineage itself.
-        let mut stale = expired("synthetic-b");
-        stale.refresh_token = Some("swap-renewed-r".into());
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
+            Outcome::NotNeeded
+        );
+        // A pass that cannot read its files (it was writing them) keeps what it holds.
+        follow_claude_swap(&store, &state, SwapView::Unreadable);
+        assert_eq!(swap_held(&state), 1);
         assert_eq!(
             ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
             Outcome::NotNeeded
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         // Claude Swap stops: renewal is Switchboard's again.
-        follow_claude_swap(&store, &state, None);
+        follow_claude_swap(&store, &state, SwapView::NotRunning);
         assert_eq!(swap_held(&state), 0);
-        let _ = stale;
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
     #[tokio::test]
     async fn a_rejected_lineage_is_remembered_across_restarts() {
@@ -1381,7 +1606,7 @@ mod tests {
         let state = RefreshState::at(url);
         assert_eq!(
             renew_idle_live(&store, IDLE_A, &state).await,
-            Outcome::Transient
+            Outcome::SignInRequired
         );
         // The spent token's successor reached Claude Code, so it stays signed in.
         assert_eq!(
@@ -1394,6 +1619,9 @@ mod tests {
             "synthetic-a-token",
             "nothing foreign was filed under synthetic-a"
         );
+        // synthetic-a's copies hold the spent token: they need a new sign-in.
+        assert!(state.is_dead(&store, &a));
+        assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
         let mut renewed = idle_a(Provider::Claude).unwrap();
         renewed.credential.refresh_token = Some("other-refresh".into());
         assert_eq!(
@@ -1403,7 +1631,7 @@ mod tests {
     }
     #[tokio::test]
     async fn an_idle_renewal_that_cannot_be_written_is_stashed() {
-        let (url, _) = endpoint((
+        let (url, calls) = endpoint((
             200,
             json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh"}),
         ))
@@ -1415,9 +1643,26 @@ mod tests {
             renew_idle_live(&store, IDLE_A, &state).await,
             Outcome::Transient
         );
+        assert!(has_stash(&state, "synthetic-a-refresh"));
+        // The next pass writes the kept successor before anything else — no second grant —
+        // and every copy holding the spent token gets it, not just the first.
+        WRITE_FAILS.with(|f| f.set(false));
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            live_item()["claudeAiOauth"]["refreshToken"],
+            "fresh-refresh"
+        );
         for pool in ["default", "work"] {
-            assert!(has_stash(&state, &id_of(&store, "synthetic-a", pool)));
+            let c = store
+                .stored_credential(&id_of(&store, "synthetic-a", pool))
+                .unwrap();
+            assert_eq!(c.refresh_token.as_deref(), Some("fresh-refresh"));
         }
+        assert!(!has_stash(&state, "synthetic-a-refresh"));
     }
     #[tokio::test]
     async fn an_idle_live_item_that_changed_is_left_alone() {
