@@ -111,16 +111,21 @@ export function createDemoAdapter(): Adapter {
     async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, { ...input, started: Date.now() }); return { login_id, message: 'Synthetic sign-in opened; it completes on its own in a few seconds.' }; },
     // A synthetic Terminal "finishes" three seconds after it opened.
     async loginStatus(id) { const login = logins.get(id); if (!login) throw new Error('Sign-in not found. Start again.'); return { state: Date.now() - login.started > 3000 ? 'complete' : 'pending' }; },
+    // Codex sign-ins save the account, then report a staging cleanup failure as the owner does
+    // (runtime lib.rs finish_login), so the demo shows the saved-with-cleanup notice.
     async finishLogin(id) {
-      const input = logins.get(id); if (!input) throw new Error('Sign-in is not complete. Finish in Terminal, then try again.');
+      const input = logins.get(id); if (!input) throw new Error('Sign-in not found. Start again.');
       await pause(); logins.delete(id); signIns += 1;
       const identity: ExternalIdentity = { account_id: `synthetic-signin-${signIns}`, organization_id: 'synthetic-work', email: `signin-${signIns}@example.test` };
       const existing = state.accounts.find((entry) => entry.provider === input.provider && entry.pool === input.pool && entry.label === input.label && input.label);
       if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account.updated', existing.id, 'Synthetic sign-in renewed'); return structuredClone(existing); }
       const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
-      state.accounts.push(item); log('account.added', item.id, 'Synthetic sign-in account added'); return structuredClone(item);
+      state.accounts.push(item); log('account.added', item.id, 'Synthetic sign-in account added');
+      if (input.provider === 'codex') throw new Error('Account saved; isolated login cleanup needs attention.');
+      return structuredClone(item);
     },
-    async cancelLogin(id) { await pause(); logins.delete(id); },
+    // Like the owner, an unknown or already finished sign-in cannot be cancelled.
+    async cancelLogin(id) { await pause(); if (!logins.delete(id)) throw new Error('Sign-in not found. Start again.'); },
     async setProjectRule(input) {
       await pause();
       if (!isAbsoluteProjectPath(input.path)) throw new Error('Choose an absolute project folder.');

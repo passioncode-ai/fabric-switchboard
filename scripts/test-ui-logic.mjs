@@ -69,6 +69,11 @@ check(() => {
     'Claude rollback lost its account lock. Check the current Claude sign-in before retrying.',
     'Claude account lock is unavailable. Check permissions of the Claude config directory.',
     'Finish an existing sign-in before starting another.',
+    // 0.5.1: actionable backend sentences that used to fall back to the generic text.
+    'Part of this account is stored where only the Fabric Switchboard app can remove it. Remove the account in the app.',
+    'Enable the account before launch.',
+    'Account home cleanup failed. Close its sessions and retry.',
+    'Sign-in credential unavailable. Check Keychain access and finish login.',
   ]) assert(source.includes(`  '${message}',`), `verbatim: ${message}`);
   for (const message of ['Label, pool or identity is invalid', 'Account identity is ambiguous in this pool', 'Terminal could not open.', 'Sign-in cleanup needs Keychain access.', 'Rotation time precedes the last switch']) assert(source.includes(`  '${message}': '`), `mapped: ${message}`);
 });
@@ -127,4 +132,22 @@ check(() => {
   assert.equal(logic.autoSwitchPool([acct('default'), acct('default')], [{ provider: 'claude', target: 'claude_cli', enabled: true }]), null, 'already on');
 });
 
-console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start.`);
+// 0.5.1: a sign-in that saved its account but left its staging folder is a success; one the
+// owner forgot (it restarted) can no longer be finished or cancelled; anything else retries.
+check(() => {
+  assert.equal(logic.loginOutcome('Account saved; isolated login cleanup needs attention.'), 'saved_with_cleanup');
+  assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
+  for (const text of ['Sign-in is not complete. Finish in Terminal, then try again.', 'Finish or close sign-in in Terminal before cancelling.', 'Sign-in cleanup needs Keychain access. Unlock Keychain and allow access, then cancel again.', 'The operation could not be completed. Check your input and native credential storage access, then retry.', '', 'sign-in not found. start again.', 'Account saved; isolated login cleanup needs attention'])
+    assert.equal(logic.loginOutcome(text), 'retry', text);
+});
+// The outcomes compare sanitized text, so adapter.ts must show both backend sentences verbatim,
+// and main.ts must decide through loginOutcome rather than its own string comparisons.
+check(() => {
+  const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
+  for (const message of [logic.LOGIN_FORGOTTEN, logic.LOGIN_SAVED_CLEANUP]) assert(adapter.includes(`  '${message}',`), `verbatim: ${message}`);
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert(!main.includes(logic.LOGIN_FORGOTTEN) && !main.includes(logic.LOGIN_SAVED_CLEANUP), 'main.ts classifies sign-in errors through loginOutcome');
+  assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 3, 'status poll, finish and cancel each classify');
+});
+
+console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start, sign-in outcomes.`);
