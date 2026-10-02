@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, canProbe, expiryFrom, monitorChecks, parseAppearance, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -34,7 +34,9 @@ let monitor: MonitorStatus | null = null;
 let page: 'accounts' | 'projects' | 'agents' | 'activity' | 'about' = 'accounts';
 let agentSetup: AgentSetup | null = null;
 let agentSetupError = false;
-let filter: 'all' | Provider = 'all';
+let openMenu: string | null = null;
+let pendingLogin: { id: string; provider: Provider; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
+const quotaOpen = new Set<string>();
 let busy = false;
 let loading = true;
 let loadError = '';
@@ -64,7 +66,7 @@ function applyContext(context: Context) { currentAccounts = context.current; mon
 async function refreshContext() { applyContext(await readContext()); }
 /** Background results apply only when no user mutation began after they were requested. */
 function backgroundRender() {
-  if (busy || loading || document.querySelector('dialog')) return;
+  if (busy || loading || openMenu || document.querySelector('dialog')) return;
   const key = (document.activeElement as HTMLElement | null)?.dataset.focus;
   if (render({ background: true })) restoreFocus(key);
 }
@@ -147,12 +149,12 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', projects: 'Projects', agents: 'Agents', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Choose who handles the next request.', projects: 'Optional rules: a project folder starts on a chosen account.', agents: 'Let coding agents read usage and switch accounts.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
+  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Switch Claude Code, keep sign-ins fresh and watch quota.', projects: 'Optional rules: a project folder starts on a chosen account.', agents: 'Let coding agents read usage and switch accounts.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? 'Loading…' : 'Refresh', () => void reload(), 'button quiet', 'refresh'));
-    if (page === 'accounts') actions.append(button('Import Claude Swap', () => importDialog(), 'button', 'import-swap'), button('+ Add account', () => addDialog(), 'button primary', 'add-account'));
+    if (page === 'accounts') actions.append(addMenu());
     if (page === 'projects' && snapshot?.accounts.length) actions.append(button('+ Add rule', () => ruleDialog(), 'button primary', 'add-rule'));
     header.append(actions);
   }
@@ -163,6 +165,7 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.append(main); return commit();
   }
   if (notice) { const alert = el('div', `notice ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button('Dismiss', () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  loginBanner(main);
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (loadError) {
@@ -255,62 +258,276 @@ function renderAgents(main: HTMLElement) {
   main.append(setup);
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
+// ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──
+const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includes(account.id);
+/** A menu is part of the render: `openMenu` names the one that is open. */
+function menu(key: string, label: string, items: ([string, () => void] | [string, () => void, string])[], triggerClass = 'icon-button', text = '⋯') {
+  const wrapper = el('div', 'menu-root');
+  const trigger = button(text, () => { openMenu = openMenu === key ? null : key; render(); if (openMenu === key) document.querySelector<HTMLElement>(`[data-menu="${key}"] [role="menuitem"]`)?.focus(); else restoreFocus(`menu-${key}`); }, triggerClass, `menu-${key}`);
+  trigger.setAttribute('aria-haspopup', 'menu'); trigger.setAttribute('aria-expanded', String(openMenu === key)); trigger.setAttribute('aria-label', label);
+  wrapper.append(trigger);
+  if (openMenu === key) {
+    const list = el('div', 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
+    for (const [text, action, tone] of items) {
+      const item = button(text, () => { openMenu = null; action(); }, `menu-item ${tone ?? ''}`); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; list.append(item);
+    }
+    list.addEventListener('keydown', (event) => {
+      const entries = [...list.querySelectorAll<HTMLElement>('[role="menuitem"]')]; const index = entries.indexOf(document.activeElement as HTMLElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); entries[(index + (event.key === 'ArrowDown' ? 1 : entries.length - 1)) % entries.length]?.focus(); }
+      else if (event.key === 'Home') { event.preventDefault(); entries[0]?.focus(); }
+      else if (event.key === 'End') { event.preventDefault(); entries[entries.length - 1]?.focus(); }
+    });
+    wrapper.append(list);
+  }
+  return wrapper;
+}
+function addMenu() {
+  return menu('add', 'Add account', [
+    ['Sign in to another Claude account', () => void startLogin('claude')],
+    ['Sign in to another Codex account', () => void startLogin('codex')],
+    ['Import from Claude Swap', () => void importSwap()],
+    ['Add an API key or token…', () => addDialog()],
+  ], 'button primary', '+ Add account');
+}
+/** Official sign-in without a form: Terminal opens, completion is detected, the email names the account. */
+async function startLogin(provider: Provider, label = '', pool = 'default') {
+  if (pendingLogin) { showNotice('A sign-in is already in progress. Finish it in Terminal or cancel it first.', true); render(); return; }
+  busy = true; notice = ''; render();
+  try {
+    const result = await adapter.beginLogin({ provider, label, pool });
+    pendingLogin = { id: result.login_id, provider, state: 'pending', error: '' };
+    announce(`Sign in to ${providerName(provider)} in the Terminal window that opened. Switchboard adds the account when you finish.`);
+  } catch (error) { showNotice(safeError(error), true); }
+  finally { busy = false; render(); restoreFocus('login-cancel'); }
+}
+async function pollLogin() {
+  const login = pendingLogin;
+  // A failed finish waits for Retry instead of repeating under the owner lock every tick.
+  if (!login || login.state !== 'pending' || login.error || busy) return;
+  let state: 'pending' | 'complete' | 'ended';
+  try { state = (await adapter.loginStatus(login.id)).state; }
+  catch (error) {
+    // The owner restarted and forgot this sign-in: nothing can finish it any more.
+    if (safeError(error) === 'Sign-in not found. Start again.' && pendingLogin === login) { login.state = 'ended'; render(); }
+    return;
+  }
+  if (pendingLogin !== login || login.state !== 'pending') return;
+  if (state === 'ended') { login.state = 'ended'; render(); announce('Sign-in ended in Terminal without adding an account.'); return; }
+  if (state !== 'complete') return;
+  login.state = 'finishing'; render();
+  busy = true; clock.begin();
+  try {
+    const account = await adapter.finishLogin(login.id);
+    pendingLogin = null;
+    await refreshContext();
+    try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'The account was added, but the list could not be refreshed. Retry loading accounts.'; }
+    showNotice(`${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
+  } catch (error) { login.state = 'pending'; login.error = safeError(error); }
+  finally { clock.end(); busy = false; render(); }
+}
+async function cancelLogin() {
+  const login = pendingLogin; if (!login) return;
+  busy = true; render();
+  try { await adapter.cancelLogin(login.id); pendingLogin = null; showNotice('Sign-in cancelled. No account was added.'); }
+  catch (error) { login.error = safeError(error); }
+  finally { busy = false; render(); }
+}
+function loginBanner(main: HTMLElement) {
+  const login = pendingLogin; if (!login) return;
+  const banner = el('section', `login-banner ${login.state === 'ended' || login.error ? 'is-error' : ''}`); banner.setAttribute('role', 'status');
+  const text = el('div', 'login-copy');
+  if (login.state === 'ended') text.append(el('strong', '', 'Sign-in ended without an account'), el('span', '', 'The Terminal session closed before the sign-in finished. Start again when you are ready.'));
+  else if (login.state === 'finishing') text.append(el('strong', '', 'Adding the account…'), el('span', '', 'Reading the new sign-in from its private home.'));
+  else text.append(el('strong', '', `Signing in to ${providerName(login.provider)}`), el('span', '', 'Finish in the Terminal window. If a browser opens, complete that step first. Switchboard adds the account on its own.'));
+  if (login.error) text.append(el('span', 'usage-error', login.error));
+  const actions = el('div', 'login-actions');
+  if (login.error && login.state === 'pending') actions.append(button('Retry', () => { login.error = ''; render(); void pollLogin(); }, 'button', 'login-retry-finish'));
+  if (login.state === 'ended') actions.append(button('Try again', () => { const provider = login.provider; void adapter.cancelLogin(login.id).catch(() => undefined).finally(() => { pendingLogin = null; void startLogin(provider); }); }, 'button', 'login-retry'));
+  actions.append(button(login.state === 'ended' ? 'Dismiss' : 'Cancel', () => void cancelLogin(), 'button quiet', 'login-cancel'));
+  banner.append(text, actions); main.append(banner);
+}
+async function importSwap() {
+  busy = true; notice = ''; clock.begin(); render();
+  try {
+    const result = await adapter.importClaudeSwap('default');
+    await refreshContext();
+    try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'; }
+    const parts = [`${result.imported.length} Claude Swap ${result.imported.length === 1 ? 'profile' : 'profiles'} imported or updated in the default pool`];
+    if (result.skipped) parts.push(`${result.skipped} skipped`);
+    if (result.failed) parts.push(`${result.failed} could not be read — check them in Claude Swap and import again`);
+    showNotice(`${parts.join(' · ')}.`, result.failed > 0);
+  } catch (error) { showNotice(safeError(error), true); }
+  finally { clock.end(); busy = false; render(); restoreFocus('menu-add'); }
+}
+function switchNative(account: Account) {
+  void mutate(() => adapter.activateNative(account.id), demo ? `Synthetic switch: Claude Code now uses ${account.label}. No local credentials were read or written.` : `Claude Code now uses ${account.label}. New claude sessions start on it; a running session may need a restart.`, `primary-${account.id}`);
+}
 function renderAccounts(main: HTMLElement) {
-  const status = el('section', 'runtime'); status.setAttribute('aria-label', 'Runtime status');
-  const indicator = el('span', `status-dot ${runtimeError ? 'unavailable' : ''}`); indicator.setAttribute('aria-hidden', 'true');
-  const text = el('div', 'runtime-copy');
-  text.append(el('strong', '', demo ? 'Demo runtime' : runtimeError ? 'Proxy status unavailable' : 'Local proxy ready'), el('span', '', runtimeError ? 'Refresh to retry. Isolated launch is still available.' : `${runtime?.proxy_address ?? 'Checking…'} · ${demo ? 'No live requests' : 'HTTP / SSE'}`));
-  status.append(indicator, text, el('span', 'runtime-caption', 'Selection applies to the next managed request.'));
-  main.append(status);
   rulesStrip(main);
   renderCurrent(main);
   renderPolicies(main);
-  const toolbar = el('div', 'toolbar');
-  const filters = el('div', 'filters'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Filter by provider');
-  for (const [value, label] of [['all', 'All providers'], ['claude', 'Claude Code'], ['codex', 'Codex CLI']] as const) {
-    const control = button(label, () => { filter = value; render(); restoreFocus(`filter-${value}`); }, `filter ${filter === value ? 'active' : ''}`, `filter-${value}`); control.setAttribute('aria-pressed', String(filter === value)); filters.append(control);
-  }
-  const accounts = snapshot!.accounts.filter((account) => filter === 'all' || account.provider === filter);
-  toolbar.append(filters, el('span', 'count', `${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}`)); main.append(toolbar);
+  const accounts = snapshot!.accounts;
   if (!accounts.length) {
-    const empty = emptyState(snapshot!.accounts.length ? 'No accounts for this provider' : 'Start with one account', snapshot!.accounts.length ? 'Add an account here, or choose All providers to see your other accounts.' : 'Capture your current CLI account without another sign-in, or add a different account through the official CLI. Choose a pool to keep work and personal sessions separate.');
-    empty.append(button('Add account', () => addDialog(), 'button primary', 'empty-add')); main.append(empty);
-  } else {
-    const list = el('div', 'account-list'); list.setAttribute('aria-label', 'Accounts');
-    accounts.forEach((account) => list.append(accountCard(account))); main.append(list);
+    const empty = emptyState('Start with one account', 'Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.');
+    empty.append(addMenu()); main.append(empty); return;
   }
-  const footer = el('p', 'surface-note', 'Managed sessions follow your selection within the same provider and pool. In-progress responses keep their account. Native Claude activation is a separate action; session reload behavior depends on the CLI.'); main.append(footer);
+  for (const group of groupAccounts(accounts)) {
+    const section = el('section', 'account-group'); section.setAttribute('aria-label', `${providerName(group.provider)} accounts`);
+    const heading = el('div', 'group-heading');
+    heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${group.count} ${group.count === 1 ? 'account' : 'accounts'}`));
+    section.append(heading);
+    for (const pool of group.pools) {
+      if (group.pools.length > 1) section.append(el('h3', 'pool-heading', `Pool · ${pool.pool}`));
+      const list = el('div', 'account-list'); list.setAttribute('role', 'list');
+      pool.accounts.forEach((account) => list.append(accountRow(account)));
+      section.append(list);
+    }
+    main.append(section);
+  }
+  main.append(el('p', 'surface-note', 'Switch changes the account of the ordinary Claude Code on this Mac. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.'));
 }
-function accountCard(account: Account) {
-  const active = selected(account);
-  const card = el('article', `account-card ${active ? 'is-selected' : ''} ${!account.enabled ? 'is-disabled' : ''} ${currentMatch(account) ? 'is-current' : ''}`);
-  card.setAttribute('aria-label', `${account.label}, ${providerName(account.provider)}, ${account.pool} pool`);
-  const identity = el('div', 'account-identity');
+function accountRow(account: Account) {
+  const current = currentMatch(account); const active = selected(account); const signIn = signInRequired(account);
+  const row = el('article', `account-row ${current ? 'is-current' : ''} ${active ? 'is-selected' : ''} ${!account.enabled ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
+  row.setAttribute('aria-label', `${account.label}, ${providerName(account.provider)}, ${account.pool} pool${current ? ', in use by the CLI' : ''}`);
   const icon = el('span', `provider-icon ${account.provider}`, account.provider === 'claude' ? '✳' : '◎'); icon.setAttribute('aria-hidden', 'true');
-  const details = el('div', 'account-details'); const title = el('div', 'account-title');
-  title.append(el('h2', '', account.label)); if (currentMatch(account)) title.append(el('span', 'badge current-badge', 'Current CLI account')); if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
-  details.append(title, el('p', 'account-meta', `${providerName(account.provider)} · ${kindName(account.kind)} · ${account.pool}`));
-  if (account.external_identity) details.append(el('p', 'account-meta', identityText(account.external_identity)));
-  identity.append(icon, details); card.append(identity);
-  card.append(usagePanel(account));
-  const route = el('div', 'route-control');
-  if (active) { const badge = el('span', 'selected-label', '✓ Selected for next request'); badge.tabIndex = -1; badge.dataset.focus = `select-${account.id}`; route.append(badge); }
-  else { const select = button('Select', () => void mutate(() => adapter.select(account), `${account.label} selected for the next managed request in ${account.pool}.`, `select-${account.id}`), 'button select-button', `select-${account.id}`); select.disabled ||= !account.enabled; route.append(select); }
-  card.append(route);
-  const actions = el('div', 'account-actions');
-  const launches = el('div', 'launch-actions');
-  const isolated = button('Launch isolated', () => launchDialog(account, 'isolated'), 'text-button', `isolated-${account.id}`); isolated.disabled ||= !account.enabled;
-  const managed = button('Launch managed', () => launchDialog(account, 'managed'), 'text-button', `managed-${account.id}`); managed.disabled ||= !account.enabled || !active || runtimeError; managed.title = !active ? 'Select this account before launching a managed session.' : 'Launch through the local proxy.';
-  launches.append(isolated, managed);
-  if (account.provider === 'claude' && account.kind === 'oauth' && account.external_identity) {
-    const activate = button('Activate in Claude Code', () => activateDialog(account), 'text-button', `activate-${account.id}`);
-    activate.disabled ||= !account.enabled; launches.append(activate);
+  const name = el('div', 'row-name');
+  const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
+  if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? 'In Claude Code' : 'In Codex CLI'));
+  if (active) title.append(el('span', 'badge selected-badge', 'Next managed request'));
+  if (signIn) title.append(el('span', 'badge danger-badge', 'Sign in again'));
+  if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
+  const email = account.external_identity?.email;
+  name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? 'OAuth' : '')));
+  row.append(icon, name, usageCell(account), primaryButton(account, { current, selected: active, signIn }), rowMenu(account, { current, selected: active, signIn }));
+  if (quotaOpen.has(account.id) && account.usage) row.append(quotaDetails(account));
+  if (usageErrors.has(account.id)) row.append(el('p', 'row-error', usageErrors.get(account.id)!));
+  return row;
+}
+function primaryButton(account: Account, state: { current: boolean; selected: boolean; signIn: boolean }) {
+  const slot = el('div', 'row-primary'); const key = `primary-${account.id}`;
+  const action = primaryAction(account, state);
+  const status = (text: string) => { const label = el('span', 'row-state', text); label.tabIndex = -1; label.dataset.focus = key; return label; };
+  if (action === 'in_use') slot.append(status('✓ In use'));
+  else if (action === 'selected') slot.append(status('✓ Selected'));
+  else if (action === 'switch') { const control = button('Switch', () => switchNative(account), 'button row-button', key); control.title = 'Make this the Claude Code account on this Mac'; slot.append(control); }
+  else if (action === 'select') slot.append(button('Select', () => void mutate(() => adapter.select(account), `${account.label} selected for the next managed request in ${account.pool}.`, key), 'button row-button', key));
+  else if (action === 'sign_in') slot.append(button('Sign in', () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
+  else slot.append(button('Enable', () => void mutate(() => adapter.update(account.id, account.label, true), `${account.label} enabled.`, key), 'button row-button quiet', key));
+  return slot;
+}
+function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean }) {
+  const items: ([string, () => void] | [string, () => void, string])[] = [];
+  if (account.enabled && canSwitchNative(account) && !state.selected) items.push(['Select for managed sessions', () => void mutate(() => adapter.select(account), `${account.label} selected for the next managed request in ${account.pool}.`, `menu-${account.id}`)]);
+  if (account.enabled && canProbe(account)) items.push(['Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `menu-${account.id}`, account.id)]);
+  if (account.enabled) items.push(['Launch isolated…', () => launchDialog(account, 'isolated')]);
+  if (account.enabled && state.selected && !runtimeError) items.push(['Launch managed…', () => launchDialog(account, 'managed')]);
+  if (account.kind === 'oauth' && !state.signIn) items.push(['Sign in again', () => void startLogin(account.provider, account.label, account.pool)]);
+  items.push(['Rename or disable…', () => editDialog(account)], ['Remove…', () => removeDialog(account), 'danger-text']);
+  return menu(account.id, `More actions for ${account.label}`, items);
+}
+function usageCell(account: Account) {
+  const observation = account.usage; const now = Date.now() / 1000;
+  if (!observation) {
+    const cell = el('div', 'row-usage');
+    cell.append(el('span', 'usage-unknown', account.kind === 'oauth' ? (account.usage_health?.status === 'failed' ? 'Check failed' : 'Usage unknown') : account.kind === 'api_key' ? 'API billing' : 'No quota check'));
+    return cell;
   }
-  const management = el('div', 'management-actions');
-  // Non-OAuth kinds have no provider quota endpoint; the reason is shown in the usage panel.
-  if (canProbe(account)) { const probe = button('Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `usage-${account.id}`, account.id), 'text-button', `usage-${account.id}`); probe.disabled ||= !account.enabled; management.append(probe); }
-  management.append(button('Edit', () => editDialog(account), 'text-button', `edit-${account.id}`), button('Remove', () => removeDialog(account), 'text-button danger-text', `remove-${account.id}`));
-  actions.append(launches, management); card.append(actions); return card;
+  const policies = snapshot?.policies?.filter((policy) => policy.provider === account.provider && policy.pool === account.pool && policy.enabled) ?? [];
+  const maxAge = policies.length ? Math.min(...policies.map((policy) => policy.max_age_seconds)) : 300;
+  const { stale, resetPassed } = usageFreshness(observation, maxAge, now);
+  const control = button('', () => { if (quotaOpen.has(account.id)) quotaOpen.delete(account.id); else quotaOpen.add(account.id); render(); restoreFocus(`quota-${account.id}`); }, 'row-usage', `quota-${account.id}`);
+  control.setAttribute('aria-expanded', String(quotaOpen.has(account.id))); control.setAttribute('aria-label', `${Math.round(observation.used_percent)}% of the highest quota used. Show quota windows.`);
+  const meter = el('progress', `usage-meter ${observation.used_percent >= 90 ? 'is-high' : ''}`); meter.max = 100; meter.value = observation.used_percent;
+  const line = el('span', 'usage-line');
+  line.append(el('strong', '', `${Math.round(observation.used_percent)}%`), el('span', stale ? 'stale' : '', resetPassed ? 'reset since check' : stale ? `stale · ${age(observation.observed_at)}` : observation.resets_at ? `resets ${date(observation.resets_at)}` : age(observation.observed_at)));
+  control.append(line, meter);
+  return control;
+}
+function quotaDetails(account: Account) {
+  const observation = account.usage!; const now = Date.now() / 1000; const health = account.usage_health;
+  const details = el('div', 'row-details');
+  const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
+  for (const window of windows) {
+    const reset = windowReset(window.resets_at, now);
+    const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`), el('span', 'usage-caption', reset ? `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before` : window.resets_at ? `Resets ${date(window.resets_at)}` : 'Reset time unavailable')); details.append(row);
+  }
+  details.append(el('p', 'usage-caption', `${observation.source} · Observed ${date(observation.observed_at)}`));
+  if (health?.status === 'failed') details.append(el('p', 'usage-error', 'Last quota check failed. Not eligible for automatic switching until a check succeeds.'));
+  if (monitorChecks(account) && health) details.append(el('span', 'usage-caption', `Checked ${age(health.checked_at)} · Next check ${date(health.next_check_at)}`));
+  else if (!monitorChecks(account)) details.append(el('span', 'usage-caption', canProbe(account) ? 'Not checked automatically while disabled' : 'Not checked automatically · Quota checks need OAuth'));
+  return details;
+}
+function addDialog() {
+  const context = openDialog('Add an API key or token', 'For accounts without an official sign-in. To add a Claude Code or Codex login, use + Add account → Sign in, or add the account the CLI already uses.');
+  const provider = select([['claude', 'Claude Code'], ['codex', 'Codex CLI']]);
+  const method = select([['api_key', 'API key'], ['setup_token', 'Claude setup token'], ['oauth', 'OAuth JSON']]);
+  const label = input(); label.maxLength = 80; label.placeholder = 'e.g. Studio';
+  const pool = input('default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+'; pool.title = 'Use lowercase letters, numbers, hyphens, or underscores.';
+  const grid = el('div', 'form-grid'); grid.append(field('Provider', provider), field('Credential type', method), field('Account label', label), field('Pool', pool, 'A boundary for routing, such as work or personal.'));
+  const credentialSlot = el('div'); context.actions.append(submit('Add account')); context.body.append(grid, credentialSlot);
+  let secret: HTMLInputElement | HTMLTextAreaElement | null = null;
+  const update = () => {
+    if (secret) secret.value = ''; credentialSlot.replaceChildren(); secret = null;
+    const setup = method.querySelector<HTMLOptionElement>('option[value="setup_token"]')!; setup.disabled = provider.value !== 'claude';
+    if (setup.disabled && method.value === 'setup_token') method.value = 'api_key';
+    if (method.value === 'oauth') { const textarea = el('textarea', 'secret-json'); textarea.rows = 5; textarea.required = true; textarea.spellcheck = false; textarea.autocomplete = 'off'; textarea.placeholder = 'Paste credential JSON'; secret = textarea; }
+    else { secret = input('', 'password'); secret.autocomplete = 'new-password'; secret.placeholder = 'Enter credential'; }
+    credentialSlot.append(field(method.value === 'oauth' ? 'OAuth credential JSON' : 'Credential', secret, demo ? 'Use synthetic input only. Nothing is stored after reload.' : 'Sent only to native credential storage. Cleared on submit or cancel.'));
+    if (method.value === 'oauth') credentialSlot.append(el('p', 'form-note', 'Imported OAuth is a snapshot. Sign in again when it expires. Imported identity is not independently verified.'));
+  };
+  provider.addEventListener('change', update); method.addEventListener('change', update); update();
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault(); if (!context.form.reportValidity()) return;
+    if (!label.value.trim()) { label.setCustomValidity('Enter an account label.'); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; }
+    const value = secret!.value; secret!.value = '';
+    void dialogSave(context, () => adapter.add({ provider: provider.value as Provider, label: label.value.trim(), pool: pool.value.trim(), kind: method.value as AuthKind, secret: value }), 'Account added. Select it when you are ready.');
+  });
+  provider.focus();
+}
+function renderCurrent(main: HTMLElement) {
+  const section = el('section', 'current-section'); section.setAttribute('aria-label', 'Accounts the CLIs use now');
+  const heading = el('div', 'section-heading');
+  const proxy = el('span', 'proxy-status'); const dot = el('span', `status-dot ${runtimeError ? 'unavailable' : ''}`); dot.setAttribute('aria-hidden', 'true');
+  proxy.append(dot, el('span', '', demo ? 'Demo · no live requests' : runtimeError ? 'Local proxy status unavailable' : `Local proxy ${runtime?.proxy_address ?? 'starting…'}`));
+  heading.append(el('h2', '', 'In use now'), proxy);
+  section.append(heading);
+  const grid = el('div', 'current-grid');
+  for (const provider of ['claude', 'codex'] as const) {
+    const current = currentAccounts?.[provider]; const card = el('div', 'current-card');
+    const copy = el('div', 'current-copy'); copy.append(el('span', 'current-provider', providerName(provider)));
+    if (current?.status === 'available') {
+      copy.append(el('strong', 'current-identity', identityText(current.identity)));
+      const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
+      card.append(copy);
+      if (matches.length) card.append(el('span', 'current-state', `✓ Saved as ${matches.map((account) => account.label).join(', ')}`));
+      else card.append(button('Add to Switchboard', () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), `${identityText(current.identity)} added to ${providerName(provider)} · default. Switchboard keeps its sign-in up to date.`, `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
+    } else {
+      copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? 'Not signed in' : current ? 'Could not read the sign-in' : 'Reading…'));
+      card.append(copy);
+      if (current?.status === 'unavailable') card.append(button('Retry', () => void reload(), 'button quiet row-button', `retry-current-${provider}`));
+    }
+    grid.append(card);
+  }
+  section.append(grid); main.append(section);
+}
+const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? 'Managed route' : 'Claude Code account';
+function renderPolicies(main: HTMLElement) {
+  const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
+  const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', 'Automatic switching');
+  const copy = el('div', 'rotation-copy');
+  copy.append(el('strong', '', enabled.length ? 'Automatic switching is on' : 'Automatic switching is off'));
+  if (enabled.length) for (const policy of enabled) {
+    const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
+    copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)} · at ${policy.threshold_percent}% used${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
+  } else copy.append(el('span', 'usage-caption', monitor ? 'When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.' : 'Quota monitor status unavailable. Refresh to retry.'));
+  if (demo) copy.append(el('span', 'usage-caption', 'Demo policies are editable fixtures; no switching runs here.'));
+  const actions = el('div', 'rotation-actions');
+  const pool = autoSwitchPool(snapshot!.accounts, policies);
+  if (pool) actions.append(button('Turn on for Claude Code', () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), `Automatic switching is on for Claude Code in ${pool}. It moves at 90% used to an account with at least 10 points more headroom.`, 'menu-policies'); }, 'button primary row-button', 'auto-on'));
+  for (const policy of enabled) actions.append(button(enabled.length > 1 ? `Stop ${policy.pool}` : 'Stop', () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), 'Automatic switching stopped for this provider, pool and target.', 'policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
+  actions.append(menu('policies', 'Automatic switching settings', [...policies.map((policy): [string, () => void] => [`Edit ${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)}…`, () => policyDialog(policy)]), ['New policy…', () => policyDialog()]], 'icon-button', '⚙'));
+  panel.append(copy, actions); main.append(panel);
 }
 function renderActivity(main: HTMLElement) {
   if (!snapshot!.events.length) { main.append(emptyState('No activity yet', 'Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.')); return; }
@@ -411,63 +628,6 @@ async function dialogSave(context: DialogContext, action: () => Promise<unknown>
   catch (error) { context.error.textContent = safeError(error); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
-function addDialog() {
-  const context = openDialog('Add account', 'Capture an account already signed in to the CLI, or sign in with another account.');
-  // Leaving for Import is offered only before a sign-in exists; afterwards Cancel owns cleanup.
-  const importSwap = button('Import Claude Swap', () => { if (loginId) return; context.close(); importDialog(context.trigger); }, 'button', 'dialog-import-swap');
-  context.body.append(importSwap);
-  const provider = select([['claude', 'Claude Code'], ['codex', 'Codex CLI']]);
-  const method = select([['capture', 'Capture current CLI account'], ['login', 'Official sign-in with another account'], ['api_key', 'API key'], ['setup_token', 'Claude setup token'], ['oauth', 'Import OAuth JSON']]);
-  const label = input(); label.maxLength = 80; label.placeholder = 'e.g. Studio';
-  const pool = input('default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+'; pool.title = 'Use lowercase letters, numbers, hyphens, or underscores.';
-  const grid = el('div', 'form-grid'); grid.append(field('Provider', provider), field('Authentication', method), field('Account label', label), field('Pool', pool, 'A boundary for routing, such as work or personal.'));
-  const credentialSlot = el('div'); const submitButton = submit('Capture current account'); context.actions.append(submitButton); context.body.append(grid, credentialSlot);
-  let secret: HTMLInputElement | HTMLTextAreaElement | null = null;
-  let loginId: string | null = null;
-  context.beforeCancel(async () => {
-    if (loginId) await adapter.cancelLogin(loginId);
-  });
-  const update = () => {
-    if (secret) secret.value = ''; credentialSlot.replaceChildren(); secret = null;
-    const setup = method.querySelector<HTMLOptionElement>('option[value="setup_token"]')!; setup.disabled = provider.value !== 'claude';
-    if (setup.disabled && method.value === 'setup_token') method.value = 'api_key';
-    label.required = method.value !== 'capture';
-    if (method.value === 'capture') {
-      const current = currentAccounts?.[provider.value as Provider];
-      credentialSlot.append(el('p', 'form-note', current?.status === 'available' ? `Current CLI account: ${identityText(current.identity)}. A stored copy is added to this pool. Leave the label empty to use the source identity.` : 'Capture reads the CLI account on this machine. If none is signed in, choose official sign-in with another account.'));
-      submitButton.textContent = 'Capture current account';
-    } else if (method.value === 'login') {
-      credentialSlot.append(el('p', 'form-note', demo ? 'Demo sign-in is synthetic. No provider or terminal will open.' : 'Begin sign-in opens the official CLI in a private home. Complete the provider’s flow, then return here to finish.'));
-      submitButton.textContent = 'Begin sign-in';
-    } else {
-      if (method.value === 'oauth') { const textarea = el('textarea', 'secret-json'); textarea.rows = 5; textarea.required = true; textarea.spellcheck = false; textarea.autocomplete = 'off'; textarea.placeholder = 'Paste credential JSON'; secret = textarea; }
-      else { secret = input('', 'password'); secret.autocomplete = 'new-password'; secret.placeholder = 'Enter credential'; }
-      credentialSlot.append(field(method.value === 'oauth' ? 'OAuth credential JSON' : 'Credential', secret, demo ? 'Use synthetic input only. Nothing is stored after reload.' : 'Sent only to native credential storage. Cleared on submit or cancel.'));
-      if (method.value === 'oauth') credentialSlot.append(el('p', 'form-note', 'Imported OAuth is a snapshot. Sign in again when it expires. Imported identity is not independently verified.'));
-      submitButton.textContent = 'Add account';
-    }
-  };
-  provider.addEventListener('change', update); method.addEventListener('change', update); update();
-  context.form.addEventListener('submit', (event) => {
-    event.preventDefault(); if (!context.form.reportValidity()) return;
-    const base = { provider: provider.value as Provider, label: label.value.trim(), pool: pool.value.trim() };
-    if (method.value === 'capture') { void dialogSave(context, () => adapter.captureCurrent({ provider: base.provider, pool: base.pool, ...(base.label ? { label: base.label } : {}) }), 'Current CLI account captured. Existing records in this pool are updated without enabling disabled accounts.'); return; }
-    if (!base.label) { label.setCustomValidity('Enter an account label.'); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; }
-    if (loginId) { void dialogSave(context, () => adapter.finishLogin(loginId!), demo ? 'Synthetic sign-in account added.' : 'Account captured from the private sign-in home. Select it when you are ready.').finally(() => { grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; }); }); return; }
-    if (method.value !== 'login') {
-      const value = secret!.value; secret!.value = '';
-      void dialogSave(context, () => adapter.add({ ...base, kind: method.value as AuthKind, secret: value }), 'Account added. Select it when you are ready.'); return;
-    }
-    context.error.textContent = ''; context.setBusy(true);
-    void adapter.beginLogin(base).then((result) => {
-      loginId = result.login_id; importSwap.dataset.locked = 'true'; importSwap.hidden = true; context.setBusy(false);
-      grid.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input,select').forEach((node) => { node.disabled = true; node.dataset.locked = 'true'; });
-      credentialSlot.replaceChildren(el('div', 'login-pending', demo ? 'Synthetic sign-in ready. Choose Finish sign-in to add this demo account.' : 'Complete sign-in in the terminal, then choose Finish sign-in. If the provider opens a browser, finish that step first.'));
-      submitButton.textContent = 'Finish sign-in'; submitButton.focus();
-    }).catch((error) => { context.error.textContent = safeError(error); context.setBusy(false); });
-  });
-  provider.focus();
-}
 function launchDialog(account: Account, mode: 'isolated' | 'managed') {
   const context = openDialog(`Launch ${mode}`, `${account.label} · ${providerName(account.provider)} · ${account.pool} pool`);
   const directory = input(lastWorkingDirectory); directory.placeholder = projectPathExample(runtime?.platform);
@@ -502,82 +662,6 @@ function removeDialog(account: Account) {
   context.actions.querySelector('button')?.focus();
 }
 
-function renderCurrent(main: HTMLElement) {
-  const section = el('section', 'current-section'); section.setAttribute('aria-label', 'Current CLI accounts');
-  const heading = el('div', 'section-heading');
-  heading.append(el('h2', '', 'Current CLI accounts'), el('span', 'usage-caption', 'Observed local identity · managed selection is separate'));
-  section.append(heading);
-  const grid = el('div', 'current-grid');
-  for (const provider of ['claude', 'codex'] as const) {
-    const current = currentAccounts?.[provider]; const card = el('div', 'current-card');
-    card.append(el('strong', '', providerName(provider)));
-    if (current?.status === 'available') {
-      card.append(el('p', 'current-identity', identityText(current.identity)));
-      if (current.identity?.organization_id) card.append(el('span', 'usage-caption', `Organization: ${current.identity.organization_id}`));
-      const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
-      card.append(el('span', 'usage-caption', matches.length ? `Stored as ${matches.map((account) => `${account.label} · ${account.pool}`).join(', ')}` : 'Not matched to a stored account. Capture it to add it.'));
-    } else card.append(el('p', 'current-identity', current?.status === 'missing' ? 'No signed-in CLI account found' : 'Current identity unavailable'), el('span', 'usage-caption', current?.status === 'missing' ? 'Use official sign-in to add an account.' : 'Refresh to retry reading the local CLI account.'));
-    const capture = button('Capture current account', () => addDialogForProvider(provider), 'text-button', `capture-${provider}`);
-    card.append(capture); grid.append(card);
-  }
-  section.append(grid); main.append(section);
-}
-function addDialogForProvider(provider: Provider) {
-  addDialog();
-  const control = document.querySelector<HTMLSelectElement>('dialog select');
-  if (control) { control.value = provider; control.dispatchEvent(new Event('change')); }
-}
-function usagePanel(account: Account) {
-  const section = el('div', 'usage'); const observation = account.usage; const health = account.usage_health;
-  if (observation) {
-    const policies = snapshot?.policies?.filter((policy) => policy.provider === account.provider && policy.pool === account.pool && policy.enabled) ?? [];
-    const maxAge = policies.length ? Math.min(...policies.map((policy) => policy.max_age_seconds)) : 300;
-    const now = Date.now() / 1000;
-    const { stale, resetPassed } = usageFreshness(observation, maxAge, now);
-    const label = el('div', 'usage-label'); label.append(el('strong', '', `${Math.round(observation.used_percent)}% used${resetPassed ? ' before reset' : ''}`), el('span', stale ? 'stale' : '', `${resetPassed ? 'Reset since check' : stale ? 'Stale' : 'Observed'} · ${age(observation.observed_at)}`)); section.append(label);
-    const meter = el('progress', 'usage-meter'); meter.max = 100; meter.value = observation.used_percent; meter.setAttribute('aria-label', `Highest quota used for ${account.label}`); section.append(meter);
-    const details = el('details', 'quota-details'); const summary = el('summary', '', 'Quota windows'); summary.dataset.focus = `quota-${account.id}`; details.append(summary);
-    const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
-    for (const window of windows) {
-      const reset = windowReset(window.resets_at, now);
-      const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`), el('span', 'usage-caption', reset ? `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before` : window.resets_at ? `Resets ${date(window.resets_at)}` : 'Reset time unavailable')); details.append(row);
-    }
-    details.append(el('p', 'usage-caption', `${observation.source} · Observed ${date(observation.observed_at)}`));
-    if (stale) details.append(el('p', 'usage-caption', resetPassed ? 'A quota window has reset since this check. Not used for automatic rotation until a fresh check.' : 'Too old for automatic rotation. Waiting for a fresh quota check.'));
-    section.append(details);
-  } else section.append(el('strong', 'usage-unknown', 'Usage unknown'), el('span', 'usage-caption', account.kind === 'api_key' ? 'API billing is separate' : 'No observation yet'));
-  // Non-OAuth kinds have no quota endpoint: one reason, no check history to report.
-  if (!canProbe(account)) { section.append(el('span', 'usage-caption', 'Not checked automatically · Quota checks need OAuth')); if (usageErrors.has(account.id)) section.append(el('p', 'usage-error', usageErrors.get(account.id)!)); return section; }
-  if (health) {
-    if (health.status === 'failed') section.append(el('p', 'usage-error', 'Last quota check failed. Not eligible for automatic rotation.'));
-    else if (health.status === 'unavailable') section.append(el('p', 'usage-caption', 'Quota unavailable for this account.'));
-  }
-  // The monitor polls enabled OAuth accounts only; never promise a check it will not run.
-  if (monitorChecks(account)) { if (health) section.append(el('span', 'usage-caption', `Checked ${age(health.checked_at)} · Next check ${date(health.next_check_at)}`)); }
-  else section.append(el('span', 'usage-caption', `${health ? `Checked ${age(health.checked_at)} · ` : ''}Not checked automatically while disabled`));
-  if (usageErrors.has(account.id)) section.append(el('p', 'usage-error', usageErrors.get(account.id)!));
-  return section;
-}
-const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? 'Managed route' : 'Claude Code account';
-function renderPolicies(main: HTMLElement) {
-  const details = el('details', 'policy-panel'); const policies = snapshot!.policies ?? [];
-  const summary = el('summary', '', `Automatic rotation · ${policies.filter((policy) => policy.enabled).length} enabled`); summary.dataset.focus = 'policies'; details.append(summary);
-  details.append(el('p', 'form-note', monitor ? `${monitor.running ? 'Quota monitor running' : 'Quota monitor stopped'} · Normal check interval ${monitor.interval_seconds} seconds. Failed checks back off. Rotation starts only when you enable a policy.` : 'Quota monitor status unavailable. Refresh to retry.'));
-  if (demo) details.append(el('p', 'form-note', 'Demo policies are editable fixtures. No automatic switching or provider checks run here.'));
-  if (!policies.length) details.append(el('p', 'form-note', 'No rotation policies saved. Configure a provider and pool to begin.'));
-  for (const policy of policies) {
-    const row = el('div', 'policy-row');
-    const content = el('div'); content.append(el('strong', '', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)}`), el('p', 'usage-caption', `${policy.enabled ? 'Enabled' : 'Off'} · At ${policy.threshold_percent}% used · Headroom ${policy.hysteresis_percent} points · Cooldown ${policy.cooldown_seconds}s · Fresh within ${policy.max_age_seconds}s`));
-    if (policy.last_switched_at) content.append(el('p', 'usage-caption', `Last switched ${date(policy.last_switched_at)}`));
-    const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
-    if (decision) content.append(el('p', 'usage-caption', decisionText(decision.reason)));
-    const actions = el('div', 'policy-actions');
-    actions.append(button('Edit policy', () => policyDialog(policy), 'text-button', `policy-${policy.provider}-${policy.pool}-${policy.target}`));
-    if (policy.enabled) actions.append(button('Stop rotation', () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), 'Automatic rotation stopped for this provider, pool and target.', 'policies'), 'text-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
-    row.append(content, actions); details.append(row);
-  }
-  details.append(button('Configure rotation', () => policyDialog(), 'button', 'configure-policy')); main.append(details);
-}
 function decisionText(reason: string) {
   const labels: Record<string, string> = {
     disabled: 'Rotation is off.', cooldown: 'Waiting for the cooldown to end.', below_threshold: 'Current usage is below the threshold.',
@@ -622,37 +706,19 @@ function policyDialog(existing?: RotationPolicy) {
   hysteresis.addEventListener('input', () => hysteresis.setCustomValidity('')); threshold.addEventListener('input', () => hysteresis.setCustomValidity(''));
   (existing ? threshold : provider).focus();
 }
-function importDialog(returnFocus?: string) {
-  const context = openDialog('Import Claude Swap', 'Read Claude Swap profiles from their standard local location. Existing identities in this pool are updated; disabled accounts remain disabled.', returnFocus);
-  const pool = input('default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+';
-  context.body.append(field('Pool', pool, 'All imported profiles are placed in this routing pool.'));
-  if (demo) context.body.append(el('p', 'form-note', 'Synthetic fixture: two profiles import, one fails, and one is skipped.'));
-  context.actions.append(submit('Import profiles'));
-  context.form.addEventListener('submit', (event) => {
-    event.preventDefault(); if (!context.form.reportValidity()) return;
-    context.setBusy(true); context.error.textContent = ''; clock.begin();
-    void adapter.importClaudeSwap(pool.value.trim()).then(async (result) => {
-      await refreshContext();
-      try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'; }
-      showNotice(`${result.imported.length} profiles imported or updated · ${result.skipped} skipped · ${result.failed} failed. ${result.failed ? 'Check the source profiles and retry; imported accounts remain available.' : 'Select an account when you are ready.'}`, result.failed > 0);
-      render(); context.setBusy(false); context.close();
-    }).catch((failure) => { context.error.textContent = safeError(failure); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }).finally(() => clock.end());
-  }); pool.focus();
-}
-function activateDialog(account: Account) {
-  const context = openDialog('Activate in Claude Code', `Use ${account.label} (${identityText(account.external_identity)}) as the local Claude Code account.`);
-  context.body.append(el('p', 'form-note', 'This writes the native Claude Code account. Managed route selection stays separate. Running sessions may need to reload; activation alone is not evidence of a provider response.'));
-  context.actions.append(submit('Activate in Claude Code'));
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.activateNative(account.id), demo ? 'Synthetic Claude Code account changed. No local credentials were read or written.' : 'Claude Code account activated. Reload the CLI if needed; current local identity is shown above.'); });
-}
 
 render();
 if (demo) { const { createDemoAdapter } = await import('./demo'); adapter = createDemoAdapter(); }
 void reload();
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
+// A pending official sign-in finishes on its own once Terminal reports completion.
+setInterval(() => { void pollLogin(); }, 1500);
+// Menus close on Escape and on a click anywhere outside them.
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
+document.addEventListener('click', (event) => { if (openMenu && !(event.target as HTMLElement | null)?.closest('.menu-root')) { openMenu = null; render(); } });
 setInterval(() => {
-  if ((!native && !demo) || refreshing || document.hidden || document.querySelector('dialog') || busy || loading) return;
+  if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
   refreshing = true; const stamp = clock.stamp();
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.

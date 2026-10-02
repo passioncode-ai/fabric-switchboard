@@ -58,7 +58,9 @@ The server works out which session asks from its own environment, first match wi
 - `fresh` is false when the observation is older than the pool's freshest enabled rotation
   policy allows (300 seconds without one), when a window's reset time has passed, or when
   the last check failed.
-- `refresh: true` needs one `account_id` and asks the provider. Within 60 seconds of the
+- `refresh: true` needs one `account_id` and asks the provider. For an inactive Claude account
+  whose token has expired, Switchboard first renews that sign-in itself (0.5); the account the
+  ordinary Claude Code uses is never renewed, and no credential reaches the agent. Within 60 seconds of the
   last check it answers with the earlier observation and `note` = "Checked less than a
   minute ago; showing that observation."
 

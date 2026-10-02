@@ -26,3 +26,6 @@ SCN-023 covers the fixed dark register, yellow S icon, Switchboard / by PassionC
 
 ## Startup and import recovery (0.3.2)
 SCN-024: primary metadata loads independently of external credential observation; bounded native reads expose Retry. SCN-019: Import Claude Swap remains on Accounts and is also directly reachable from Add account. No visual theme changes.
+
+## SCR-01 revision — compact grouped accounts (0.5)
+Scenarios: SCN-003, SCN-018…SCN-020, SCN-022, SCN-028, SCN-029. Accounts are grouped by provider (Claude Code, Codex CLI) with pool sub-groups when a provider has more than one; each account is one ~48 px row: provider mark, label with badges (In Claude Code, Next managed request, Sign in again, Disabled), email or credential type, a quota cell (highest window %, reset or staleness, 3 px meter; click expands windows), one primary action (Switch / ✓ In use for Claude OAuth, Select / ✓ Selected otherwise, Sign in, Enable) and a ⋯ menu for the rest. The provider filter, the per-card action rows, the capture/import/activation dialogs and the Finish sign-in step are gone; + Add account is a menu, In use now offers Add to Switchboard, and a sign-in banner replaces the login dialog. Density 8. Inspected in the browser demo at 1280×720 and 740×560, light and dark: [design 0.5 evidence](../evidence/design-0.5.md).

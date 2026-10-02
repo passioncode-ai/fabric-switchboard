@@ -35,6 +35,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-025 | Keep an optional project rule in sight | draft |
 | SCN-026 | Connect a coding agent to Switchboard | draft |
 | SCN-027 | Keep saved accounts readable without repeated Keychain dialogs | draft |
+| SCN-028 | Switch Claude Code without Keychain confirmations | draft |
+| SCN-029 | Keep saved accounts usable for automatic switching | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -77,11 +79,12 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Choose provider, label and pool, start sign-in in an isolated home, then finish → Provider login is captured only from the new home.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. Once Begin sign-in succeeds, the dialog no longer offers Import Claude Swap; leaving is only through Cancel, which cleans the staged sign-in (0.4, B-02). A second sign-in while one is open reads “Finish an existing sign-in before starting another.”
+1. Choose + Add account → Sign in to another Claude (or Codex) account → Terminal opens the official CLI in an isolated home and a banner says to finish there; no form opens (0.5).
+2. Finish the provider's sign-in → Switchboard notices completion on its own and adds the account, named by its email, in the default pool; no Finish click (0.5).
+**Alt paths:** Cancel in the banner → the staged sign-in is cleaned once its Terminal process has exited. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in again on a row reuses its label and pool, so the same identity updates in place. CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “Finish an existing sign-in before starting another.”
 **Expected result:** Provider login is captured only from the new home.
-**UI elements:** navigation, account list, labelled actions, dialog, status/error message.
-**States covered:** loading, empty, error, success
+**UI elements:** Add account menu, sign-in banner (pending, adding, ended, error), account list, notice.
+**States covered:** loading, pending, ended, error, success
 **Errors & recovery:** Missing CLI, incomplete login or denied Keychain keeps the previous list; cancel leaves global auth unchanged.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
@@ -349,10 +352,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
 **Entry point:** SCR-01 Accounts
 **Steps:**
-1. Choose Add account → Capture current CLI account is selected. Choose provider and pool, optionally enter a label, then capture → the account appears or its same-pool identity is updated.
-**Alt paths:** Choose official sign-in with another account → the existing isolated Terminal login flow remains available. Cancel before capture → no mutation.
+1. Under In use now, the Claude Code or Codex CLI identity that is not yet saved shows Add to Switchboard → one click saves it in the default pool, named by its email; the card then reads “Saved as …” (0.5, no dialog).
+**Alt paths:** An identity already saved shows “✓ Saved as …” and no button. Not signed in or unreadable reads so, with Retry for unreadable. Another account → SCN-003.
 **Expected result:** The source CLI account stays active; a disabled stored account is not enabled by capture.
-**UI elements:** provider selector, authentication selector, optional account label, pool, capture button, current CLI cards.
+**UI elements:** In use now cards, Add to Switchboard, notice.
 **States covered:** loading, missing account, error, success
 **Errors & recovery:** A missing, unreadable or incompatible source produces a sanitized recovery message. Choose official sign-in or correct native storage access, then retry.
 **Status:** validated
@@ -367,10 +370,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
 **Entry point:** SCR-01 Accounts
 **Steps:**
-1. Choose Import Claude Swap, enter the pool, then Import profiles → native import reads the standard local source and reports imported, skipped and failed counts.
-**Alt paths:** Reimport → same identities update without duplicate accounts or enabling disabled rows. Cancel → no mutation.
+1. Choose + Add account → Import from Claude Swap → native import reads the standard local source into the default pool and reports imported, skipped and failed counts in one notice (0.5, no dialog).
+**Alt paths:** Reimport → same identities update without duplicate accounts or enabling disabled rows.
 **Expected result:** Successful profiles remain available when other profiles fail; the user can correct the source and retry.
-**UI elements:** import button, pool input, import result notice, account list.
+**UI elements:** Add account menu item, import result notice, account list.
 **States covered:** empty source, loading, partial success, error, success
 **Errors & recovery:** Malformed profiles are counted as failed without raw source content in errors. Missing/unreadable source directs the user to check the local source before retrying.
 **Status:** validated
@@ -385,10 +388,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
 **Entry point:** SCR-01 Accounts
 **Steps:**
-1. Open Accounts → current Claude Code and Codex CLI identities appear above stored accounts, with matches highlighted. Choose Activate in Claude Code on an enabled Claude OAuth account with external identity, review the effect, then activate → native identity refreshes.
-**Alt paths:** A current identity without a stored match says so and offers capture. Missing/unavailable source has a distinct state. Cancel activation → no mutation.
+1. Open Accounts → current Claude Code and Codex CLI identities appear above stored accounts, with matches highlighted. Choose Switch on an enabled Claude OAuth row → Claude Code uses that account; the row reads “✓ In use” with the In Claude Code badge (0.5: one click, no confirmation dialog — operator decision D-3).
+**Alt paths:** A current identity without a stored match offers Add to Switchboard (SCN-018). Missing/unavailable source has a distinct state. Managed selection is in the row menu (Select for managed sessions) and reads “Next managed request”.
 **Expected result:** Current CLI identity remains visibly separate from Selected for next request. Activation does not assert that an existing session reloaded or that a provider response succeeded.
-**UI elements:** current CLI cards, account match badges, managed selection label, activation action and dialog.
+**UI elements:** In use now cards, In Claude Code and Next managed request badges, Switch, row menu.
 **States covered:** loading, missing identity, unmatched identity, unavailable, error, success
 **Errors & recovery:** Current-source changes, native locks or failed activation produce a sanitized message; refresh identity and retry after the external conflict is resolved.
 **Status:** validated
@@ -421,10 +424,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
 **Entry point:** SCR-01 Accounts
 **Steps:**
-1. Expand Automatic rotation, then Configure rotation → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
+1. With two or more switchable Claude accounts and no native policy on, the Automatic switching bar offers Turn on for Claude Code → one click enables the `claude_cli` policy for the pool holding most of them with the defaults below, and the bar reads “Automatic switching is on” with the latest decision (0.5). Stop turns it off in one click.
+2. For other boundaries, the ⚙ menu → New policy… or Edit … → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
 **Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop rotation → the saved policy is disabled in one action. Codex cannot select the native Claude target.
 **Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
-**UI elements:** monitor status, policy list, numeric fields, enabled checkbox, target selector, save/edit/stop actions, last switch and decision.
+**UI elements:** Automatic switching bar, Turn on / Stop, ⚙ settings menu, policy dialog with numeric fields, enabled checkbox and target selector, latest decision.
 **States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
 **Errors & recovery:** Invalid bounds or failed persistence keep the dialog open with a sanitized recovery message. A failed or stale quota check never implies spare capacity.
 **Status:** validated
@@ -534,3 +538,39 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `crates/switchboard-core/src/keychain.rs` tests (fake Keychain), `keychain_macos.rs` throwaway-keychain tests, manual signed-bundle acceptance in KEYCHAIN.md; the operator's real items after the next release NOT_RUN.
 **Product:** unobserved
 **Traces:** REQ-004
+## SCN-028 — Switch Claude Code without Keychain confirmations
+**Persona:** P-01
+**Goal:** Switch the ordinary Claude Code between saved accounts, sign in to another account and let rotation run without macOS asking about `Claude Code-credentials`.
+**Preconditions:** macOS; Claude Code signed in or signed out; accounts saved in Switchboard.
+**Entry point:** SCR-01 Accounts (Switch), the CLI (`accounts activate`), `switchboard mcp` (`switchboard_switch` with `global: true`), automatic rotation.
+**Steps:**
+1. Switch, an automatic switch or a finished official sign-in → no Keychain dialog from Switchboard, and Claude Code itself reads its account afterwards without one (0.5).
+**Alt paths:** A `Claude Code-credentials` item that a 0.4 build created while Claude Code was signed out trusts only that build; sign out and in once in Claude Code to recreate it ([operations](../OPERATIONS.md)). Switchboard's own account storage is SCN-027.
+**Expected result:** Repeated switching raises no dialog for Switchboard or Claude Code.
+**UI elements:** none new; the absence of a system dialog is the outcome.
+**States covered:** Claude Code signed in, signed out, item created by an older build, Keychain locked.
+**Errors & recovery:** A locked or denied Keychain reads “Keychain unavailable. Unlock it and allow access, then retry.”
+**Status:** draft
+**Meaning:** operator request 2026-10-02 ([PLAN-0.5](../PLAN-0.5.md) C-2, C-3): Claude's items are read, written and deleted only through `/usr/bin/security`, the executable Claude Code uses.
+**Coverage:** `cargo test -p switchboard-core security_cli` (stdin transport, quoting, exit codes); measured `security` exit codes in [release-0.5](../evidence/release-0.5.md); on-screen absence on the operator's Mac not yet observed.
+**Product:** unobserved
+**Traces:** PLAN-0.5 REQ-2, REQ-3
+
+## SCN-029 — Keep saved accounts usable for automatic switching
+**Persona:** P-01
+**Goal:** Saved accounts stay ready to switch to and to measure, hours or days after they were added.
+**Preconditions:** Claude OAuth accounts saved; the desktop app or `switchboard serve` running.
+**Entry point:** SCR-01 Accounts (rows, Automatic switching bar).
+**Steps:**
+1. Leave Switchboard running → inactive Claude accounts keep fresh quota and stay eligible; when the account in use reaches the threshold, rotation switches to one of them (0.5).
+2. Switch to an account whose access token has expired → it is renewed first and Claude Code starts on it.
+**Alt paths:** The provider rejects an account's sign-in → its row shows Sign in again as the primary action and a red badge; signing in updates the same row. The account signed in to the ordinary Claude Code is never renewed by Switchboard.
+**Expected result:** Rotation no longer stalls on `no_eligible_account` because saved tokens aged out.
+**UI elements:** quota cell, Sign in again badge and action, Automatic switching bar decision text.
+**States covered:** fresh, renewing, transient failure, sign-in required.
+**Errors & recovery:** “This account's sign-in has ended. Sign in to it again.”; transient failures retry from 60 s up to 30 min.
+**Status:** draft
+**Meaning:** operator request 2026-10-02 (PLAN-0.5 C-4…C-6, D-2); fixture-tested against a local token endpoint; live provider renewal not yet observed.
+**Coverage:** `cargo test -p switchboard-runtime refresh`; `native_rotation_switches_to_an_expired_but_renewable_account`; `an_account_with_an_expired_access_token_still_activates`; browser demo `docs/evidence/design-0.5/accounts-1280-full.png` (Meadow team row).
+**Product:** unobserved
+**Traces:** PLAN-0.5 REQ-4, REQ-5, REQ-6

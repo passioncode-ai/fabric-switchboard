@@ -20,6 +20,7 @@ export const nativeAdapter: Adapter = {
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
   beginLogin: (input) => invoke('begin_login', { ...input }),
+  loginStatus: (loginId) => readWithDeadline(invoke('login_status', { loginId })),
   finishLogin: (loginId) => invoke('finish_login', { loginId }),
   cancelLogin: (loginId) => invoke('cancel_login', { loginId }),
   probe: (id) => invoke('probe_usage', { id }),
@@ -86,6 +87,8 @@ const safeErrors = new Set([
   'Could not create ~/.local/bin.',
   'Keep switchboard.exe from the download folder, or add it to PATH.',
   'Finish an existing sign-in before starting another.',
+  "This account's sign-in has ended. Sign in to it again.",
+  'Sign-in not found. Start again.',
 ]);
 const coreErrors: Record<string, string> = {
   'No current Claude sign-in found.': 'No current Claude sign-in found. Sign in with the official CLI, then capture again.',
@@ -116,7 +119,7 @@ const coreErrors: Record<string, string> = {
   'Account credential already exists in this pool': 'This credential already exists in this provider and pool. Use the existing account.',
   'Select another account or disable this account before removing it': 'Select another account in this pool, or disable this account, before removing it.',
   'Account is disabled': 'This account is disabled. Enable it before continuing.',
-  'Credential expired; reauthenticate this account': 'This credential has expired. Add an account through official sign-in again.',
+  'Credential expired; reauthenticate this account': 'This credential has expired. Sign in to this account again.',
   'Credential storage unavailable; reauthenticate this account': 'The stored credential is unavailable. Check native credential storage access or sign in again.',
   'No account selected for this provider and pool': 'Select an account in this provider and pool before launching managed mode.',
   'Account is unavailable in this provider and pool': 'This account is unavailable in the chosen provider and pool. Refresh the account list.',

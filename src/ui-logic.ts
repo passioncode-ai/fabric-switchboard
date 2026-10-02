@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, ProjectRule, Usage } from './types';
+import type { Account, ProjectRule, RotationPolicy, Usage } from './types';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -79,4 +79,44 @@ export function expiryFrom(choice: string, nowSeconds: number): number | null {
 export function projectName(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path;
+}
+
+type Groupable = Pick<Account, 'provider' | 'pool' | 'enabled' | 'created_at'>;
+export interface AccountGroup<T> { provider: Account['provider']; count: number; pools: { pool: string; accounts: T[] }[] }
+/** Provider sections (Claude Code first), pool sub-groups (default first), enabled before disabled. */
+export function groupAccounts<T extends Groupable>(accounts: T[]): AccountGroup<T>[] {
+  const groups: AccountGroup<T>[] = [];
+  for (const provider of ['claude', 'codex'] as const) {
+    const mine = accounts.filter((account) => account.provider === provider);
+    if (!mine.length) continue;
+    const pools = [...new Set(mine.map((account) => account.pool))].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)));
+    groups.push({
+      provider, count: mine.length,
+      pools: pools.map((pool) => ({ pool, accounts: mine.filter((account) => account.pool === pool).sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.created_at - b.created_at) })),
+    });
+  }
+  return groups;
+}
+
+type Switchable = Pick<Account, 'provider' | 'kind' | 'enabled' | 'external_identity'>;
+/** Native Claude Code activation needs a Claude OAuth profile with its captured identity. */
+export function canSwitchNative(account: Switchable): boolean {
+  return account.provider === 'claude' && account.kind === 'oauth' && !!account.external_identity;
+}
+export type PrimaryAction = 'switch' | 'in_use' | 'select' | 'selected' | 'sign_in' | 'disabled';
+/** The one button a row shows (PLAN-0.5 D-3); everything else lives in the row menu. */
+export function primaryAction(account: Switchable, state: { current: boolean; selected: boolean; signIn: boolean }): PrimaryAction {
+  if (!account.enabled) return 'disabled';
+  if (state.signIn) return 'sign_in';
+  if (canSwitchNative(account)) return state.current ? 'in_use' : 'switch';
+  return state.selected ? 'selected' : 'select';
+}
+/** The pool a one-click "turn on automatic switching" uses, or null when it cannot or need not. */
+export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[], policies: Pick<RotationPolicy, 'provider' | 'target' | 'enabled'>[]): string | null {
+  if (policies.some((policy) => policy.provider === 'claude' && policy.target === 'claude_cli' && policy.enabled)) return null;
+  const counts = new Map<string, number>();
+  for (const account of accounts) if (account.enabled && canSwitchNative(account)) counts.set(account.pool, (counts.get(account.pool) ?? 0) + 1);
+  let best: string | null = null; let most = 1;
+  for (const [pool, count] of counts) if (count > most || (count === most && best !== null && pool === 'default')) { best = pool; most = count; }
+  return best;
 }

@@ -162,6 +162,13 @@ async fn finish_login(login_id: String, state: State<'_, Owner>) -> Result<Value
         .await
 }
 #[tauri::command]
+async fn login_status(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
+    state
+        .runtime
+        .execute(Operation::LoginStatus { login_id })
+        .await
+}
+#[tauri::command]
 async fn cancel_login(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
     state
         .runtime
@@ -255,6 +262,7 @@ fn main() {
             launch_account,
             begin_login,
             finish_login,
+            login_status,
             cancel_login,
             probe_usage,
             set_project_rule,

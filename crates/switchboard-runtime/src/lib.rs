@@ -7,6 +7,7 @@ mod external_keychain;
 pub mod launch;
 mod monitor;
 pub mod projects;
+mod refresh;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -97,6 +98,9 @@ pub enum Operation {
     FinishLogin {
         login_id: String,
     },
+    LoginStatus {
+        login_id: String,
+    },
     CancelLogin {
         login_id: String,
     },
@@ -152,6 +156,7 @@ pub struct Runtime {
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
     native: NativeSources,
+    refresh: refresh::RefreshState,
 }
 #[derive(Default)]
 struct CurrentCache {
@@ -179,6 +184,7 @@ impl Runtime {
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
             native,
+            refresh: refresh::RefreshState::default(),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -193,6 +199,7 @@ impl Runtime {
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
                 | Operation::CurrentAccounts
+                | Operation::LoginStatus { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -234,8 +241,13 @@ impl Runtime {
             account.clone()
         } else {
             let captured = launch::capture_login_profile(login)?;
+            let label = if login.label.trim().is_empty() {
+                captured.label.clone()
+            } else {
+                login.label.clone()
+            };
             let account = self.store.upsert(
-                login.label.clone(),
+                label,
                 login.provider,
                 AuthKind::OAuth,
                 login.pool.clone(),
@@ -256,6 +268,14 @@ impl Runtime {
         }
         self.invalidate_current();
         cleaned.map(|()| account)
+    }
+    fn login_status(&self, id: &str) -> Result<Value, String> {
+        let logins = self
+            .logins
+            .lock()
+            .map_err(|_| "Sign-in state unavailable.")?;
+        let login = logins.get(id).ok_or("Sign-in not found. Start again.")?;
+        Ok(json!({"state": launch::login_state(login)}))
     }
     fn retry_login_cleanup(&self) {
         if let Ok(mut stale) = self.stale_logins.lock() {
@@ -352,6 +372,9 @@ async fn execute(
     operation: Operation,
 ) -> Result<Value, String> {
     let native = runtime.map_or(NATIVE, |r| r.native);
+    // The offline CLI owns the store for one command; its refresh bookkeeping is its own.
+    let offline_refresh = refresh::RefreshState::default();
+    let refresh_state = runtime.map_or(&offline_refresh, |r| &r.refresh);
     let needs_owner = || {
         runtime.ok_or_else(|| {
             "Start the desktop app or 'switchboard serve' before login or launch.".to_string()
@@ -419,7 +442,15 @@ async fn execute(
             Ok(json!({"imported": imported, "failed": failed, "skipped": batch.skipped}))
         }
         Operation::ActivateNative { id } => {
-            activate_native(&store, &id, None, native)?;
+            // The target is inactive by definition; an expired token is renewed first so
+            // Claude Code starts on a live one. A failed refresh still activates: Claude
+            // Code renews from the refresh token itself.
+            if refresh::ensure_fresh(&store, native, refresh_state, &id, false).await
+                == refresh::Outcome::SignInRequired
+            {
+                return Err(refresh::SIGN_IN.into());
+            }
+            activate_native(&store, &id, None, native, Some(refresh_state))?;
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
@@ -431,7 +462,8 @@ async fn execute(
         }
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS,
-            "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default()
+            "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
+            "sign_in_required": refresh_state.sign_in_required(&store),
         })),
         Operation::Add {
             label,
@@ -459,13 +491,19 @@ async fn execute(
             store.select_with_cooldown(provider, &pool, &id, monitor::now())?;
             Ok(Value::Null)
         }
-        Operation::Usage { id } => Ok(json!(monitor::probe(store, &id).await?)),
+        // The owner transaction is already held here, so the refresh takes no second lock.
+        Operation::Usage { id } => Ok(json!(
+            monitor::check(&store, native, refresh_state, &id, None).await?
+        )),
         Operation::Launch {
             id,
             mode,
             working_directory,
         } => {
             let runtime = needs_owner()?;
+            if mode == "isolated" {
+                refresh::ensure_fresh(&store, native, refresh_state, &id, false).await;
+            }
             let agent_tools =
                 launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;
             Ok(
@@ -478,6 +516,7 @@ async fn execute(
             pool,
         } => needs_owner()?.begin_login(provider, label, pool),
         Operation::FinishLogin { login_id } => Ok(json!(needs_owner()?.finish_login(&login_id)?)),
+        Operation::LoginStatus { login_id } => needs_owner()?.login_status(&login_id),
         Operation::CancelLogin { login_id } => {
             needs_owner()?.cancel_login(&login_id)?;
             Ok(Value::Null)
@@ -574,7 +613,12 @@ fn activate_native(
     id: &str,
     expected_id: Option<&str>,
     native: NativeSources,
+    refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
+    // A lineage the provider rejected would sign every ordinary `claude` session out.
+    if refresh.is_some_and(|state| state.is_dead(store, id)) {
+        return Err(refresh::SIGN_IN.into());
+    }
     let account = store
         .snapshot()?
         .accounts
@@ -588,7 +632,7 @@ fn activate_native(
         .external_identity
         .as_ref()
         .ok_or("Capture or import this profile before native activation.")?;
-    let result = replace_native(store, &account, identity, expected_id, native);
+    let result = replace_native(store, &account, identity, expected_id, native, refresh);
     // The outcome is already decided; a journal failure must not change it.
     let _ = store.record(
         "activation",
@@ -607,8 +651,19 @@ fn replace_native(
     identity: &ExternalIdentity,
     expected_id: Option<&str>,
     native: NativeSources,
+    refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
-    let credential = store.credential(&account.id)?;
+    if !account.enabled {
+        return Err("Account is disabled".into());
+    }
+    // An expired access token is fine while a refresh token remains: Claude Code renews it
+    // on first use, exactly as after its own idle expiry (PLAN-0.5 C-5).
+    let credential = store.stored_credential(&account.id)?;
+    if credential.refresh_token.is_none()
+        && credential.expires_at.is_some_and(|t| t <= monitor::now())
+    {
+        return Err("Credential expired; reauthenticate this account".into());
+    }
     // After `claude logout` there is no current identity; the adapter handles that state.
     let current = match (native.current)(Provider::Claude) {
         Ok(current) => Some(current),
@@ -625,16 +680,24 @@ fn replace_native(
         return Err("Current CLI account changed. Refresh before switching.".into());
     }
     let expected = current.as_ref().map(|c| c.identity.clone());
-    if let (Some(previous), Some(current)) = (previous, current) {
-        // Preserve the live client's newest refresh generation before replacing it.
-        store.upsert(
-            previous.label,
-            previous.provider,
-            previous.kind,
-            previous.pool,
-            current.credential,
-            Some(current.identity),
-        )?;
+    // The account being switched away from stays "recently active" for renewal purposes.
+    if let (Some(state), Some(current)) = (refresh, current.as_ref()) {
+        state.note_active(&current.identity);
+    }
+    if let Some(current) = current {
+        // Preserve the live client's newest refresh generation in every stored copy of
+        // that identity, in every pool: a copy left behind would hold a refresh token
+        // Claude Code has already rotated away (PLAN-0.5 C-6).
+        for copy in matching_accounts(store, Provider::Claude, &current.identity)? {
+            store.upsert(
+                copy.label,
+                copy.provider,
+                copy.kind,
+                copy.pool,
+                current.credential.clone(),
+                Some(current.identity.clone()),
+            )?;
+        }
     }
     (native.activate)(&credential, identity, expected.as_ref())?;
     if store.snapshot()?.policies.iter().any(|p| {
@@ -873,6 +936,93 @@ mod owner_tests {
         assert_eq!(
             events(&runtime.store, "activation"),
             [(Some(b.id), "failed".to_string())]
+        );
+    }
+
+    /// Captures `synthetic-a` as a stored copy whose token generation is older than the live one.
+    fn stale_copy(store: &Store, pool: &str) -> Account {
+        let mut old = credential("synthetic-a");
+        old.access_token = "synthetic-a-old-token".into();
+        old.refresh_token = Some("synthetic-a-old-refresh".into());
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                pool.into(),
+                old,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap()
+    }
+    #[tokio::test]
+    async fn switching_away_keeps_the_live_generation_in_every_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let home = stale_copy(&runtime.store, "default");
+        let work = stale_copy(&runtime.store, "work");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        runtime
+            .execute(Operation::ActivateNative { id: b.id.clone() })
+            .await
+            .unwrap();
+        for copy in [home, work] {
+            let stored = runtime.store.stored_credential(&copy.id).unwrap();
+            assert_eq!(
+                stored.access_token, "synthetic-a-token",
+                "pool {}",
+                copy.pool
+            );
+            assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-refresh"));
+        }
+    }
+    #[tokio::test]
+    async fn an_account_with_an_expired_access_token_still_activates() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        save(&runtime.store, "synthetic-a", "default");
+        let mut expired = credential("synthetic-b");
+        expired.expires_at = Some(1_000);
+        let b = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired.clone(),
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        // The refresh endpoint is unreachable in tests; Claude Code renews the token itself.
+        runtime
+            .execute(Operation::ActivateNative { id: b.id.clone() })
+            .await
+            .unwrap();
+        // Without a refresh token nothing could renew it: refused.
+        expired.refresh_token = None;
+        let c = runtime
+            .store
+            .upsert(
+                "synthetic-c".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                {
+                    let mut c = credential("synthetic-c");
+                    c.refresh_token = None;
+                    c.expires_at = Some(1_000);
+                    c
+                },
+                Some(identity("synthetic-c")),
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative { id: c.id })
+                .await
+                .unwrap_err(),
+            "Credential expired; reauthenticate this account"
         );
     }
 

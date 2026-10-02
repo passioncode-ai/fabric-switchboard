@@ -648,18 +648,13 @@ impl Writer for Native {
     fn auth_write(&self, c: &Context, value: Option<&[u8]>) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         if c.mac {
+            // Claude Code creates and reads this item with /usr/bin/security; writing it
+            // from any other executable would make macOS ask for consent (PLAN-0.5 C-2).
             return match value {
-                Some(bytes) => {
-                    security_framework::passwords::set_generic_password(&c.service, &c.user, bytes)
-                        .map_err(|_| "Claude credential write needs Keychain access.".into())
-                }
-                None => match security_framework::passwords::delete_generic_password(
-                    &c.service, &c.user,
-                ) {
-                    Ok(()) => Ok(()),
-                    Err(e) if e.code() == -25300 => Ok(()),
-                    _ => Err("Claude credential rollback needs Keychain access.".into()),
-                },
+                Some(bytes) => crate::external_keychain::write(&c.service, &c.user, bytes)
+                    .map_err(|_| "Claude credential write needs Keychain access.".into()),
+                None => crate::external_keychain::delete(&c.service, &c.user)
+                    .map_err(|_| "Claude credential rollback needs Keychain access.".into()),
             };
         }
         atomic_write(&c.home.join(".credentials.json"), value)

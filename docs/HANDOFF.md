@@ -1,3 +1,9 @@
+# In progress — Switchboard 0.5 (2026-10-02, branch `agent/switchboard-0.5`)
+
+**Start here:** [handoffs/2026-10-02-switchboard-0.5.md](handoffs/2026-10-02-switchboard-0.5.md). On top of 0.4.1's shared-trust vault ([KEYCHAIN.md](KEYCHAIN.md), unchanged): Claude Code's `Claude Code-credentials` item and an official sign-in's staged item go only through `/usr/bin/security`, the executable Claude Code uses; inactive Claude tokens are renewed so automatic switching keeps working; adding and switching accounts is one click on a compact grouped list. Plan and decisions: [PLAN-0.5](PLAN-0.5.md); checks: [release-0.5](evidence/release-0.5.md). **Exact next task:** release 0.5.0-beta.1 (SB-17), then operator acceptance (SB-15). The sections below are earlier history.
+
+---
+
 # Released — Switchboard v0.4.1-beta.1, Keychain fix installed (2026-10-01)
 
 **Start here:** [handoffs/2026-10-01-release-0.4.1-beta.1.md](handoffs/2026-10-01-release-0.4.1-beta.1.md). [v0.4.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1) is published from `15851e3`: macOS universal signed, notarized (`c93a1bdc-…` Accepted) and stapled, Windows x64 unsigned cross-build, `SHA256SUMS-0.4.1.txt`; the first release under the AGPL. The site selects it (Worker `cacbdcf6-…`). `/Applications` holds 0.4.1; after one launch every Switchboard Keychain item sits under `ai.passioncode.fabric-switchboard.shared` trusting the app and its CLI (SB-12 done). Record: [release-0.4.1.md](evidence/release-0.4.1.md). **Exact next task:** SB-10, the launcher member with `ref: v0.4.1-beta.1`.
@@ -106,7 +112,7 @@ Packets and shared API: [PLAN-0.3](PLAN-0.3.md). Branches `codex/v03-core`, `cod
 
 Metadata writes schema2 and lazily reads schema1; no destructive downgrade. Secrets never reach renderer/control output, logs or Git. Existing streams keep their identity. Native activation explicitly updates ordinary Claude auth; tests use fixtures. Local identity is a source claim until authenticated provider evidence exists.
 
-Inactive snapshots can expire; recapture/reimport or official login is recovery. No competing refresh grant. Codex file/direct macOS keyring capture is supported; newer secrets/ephemeral stores report unavailable. Other shells' transient overrides cannot be inferred. Native Codex takeover, crash-resumable login IDs, indefinite account pins, quarantine, encrypted cross-device export and automatic updates remain follow-ons.
+Inactive snapshots can expire; recapture/reimport or official login is recovery. No competing refresh grant (superseded in 0.5: inactive Claude accounts are refreshed, the active one never — [PLAN-0.5](PLAN-0.5.md) D-2). Codex file/direct macOS keyring capture is supported; newer secrets/ephemeral stores report unavailable. Other shells' transient overrides cannot be inferred. Native Codex takeover, crash-resumable login IDs, indefinite account pins, quarantine, encrypted cross-device export and automatic updates remain follow-ons.
 
 Signing is separate from notarization. Native Windows and provider acceptance remain separate. Hosted full checks remain nightly only; previous hosted run was billing-blocked before any step.
 

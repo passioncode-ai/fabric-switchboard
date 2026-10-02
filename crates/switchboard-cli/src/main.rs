@@ -213,10 +213,15 @@ enum Login {
     Begin {
         #[arg(long, value_enum)]
         provider: ProviderArg,
-        #[arg(long)]
+        /// Defaults to the email of the account that signs in.
+        #[arg(long, default_value = "")]
         label: String,
         #[arg(long, default_value = "default")]
         pool: String,
+    },
+    /// pending, complete (ready to finish) or ended (Terminal exited without signing in).
+    Status {
+        login_id: String,
     },
     Finish {
         login_id: String,
@@ -398,6 +403,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 provider: (*provider).into(),
                 label: label.clone(),
                 pool: pool.clone(),
+            },
+            Login::Status { login_id } => Operation::LoginStatus {
+                login_id: login_id.clone(),
             },
             Login::Finish { login_id } => Operation::FinishLogin {
                 login_id: login_id.clone(),

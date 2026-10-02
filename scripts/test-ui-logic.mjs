@@ -92,4 +92,39 @@ check(() => {
   assert.equal(logic.projectName('C:\\Work\\beta-api'), 'beta-api');
 });
 
-console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules.`);
+// 0.5: accounts group by provider, then pool; default pool first; enabled before disabled.
+check(() => {
+  const a = (id, provider, pool, enabled = true, created_at = 1) => ({ id, provider, pool, enabled, created_at, kind: 'oauth' });
+  const groups = logic.groupAccounts([a('c2', 'codex', 'work'), a('x', 'claude', 'work', false), a('y', 'claude', 'default', true, 5), a('z', 'claude', 'work', true, 9), a('w', 'claude', 'default', true, 2)]);
+  assert.deepEqual(groups.map((g) => g.provider), ['claude', 'codex']);
+  assert.deepEqual(groups[0].pools.map((p) => p.pool), ['default', 'work']);
+  assert.deepEqual(groups[0].pools[0].accounts.map((x) => x.id), ['w', 'y']);
+  assert.deepEqual(groups[0].pools[1].accounts.map((x) => x.id), ['z', 'x'], 'disabled last');
+  assert.equal(groups[0].count, 4);
+  assert.deepEqual(logic.groupAccounts([]), []);
+});
+// 0.5 D-3: a Claude OAuth row with identity switches Claude Code; others select the managed route.
+check(() => {
+  const claude = { provider: 'claude', kind: 'oauth', enabled: true, external_identity: { account_id: 'a', organization_id: null, email: null } };
+  const flags = (o = {}) => ({ current: false, selected: false, signIn: false, ...o });
+  assert.equal(logic.primaryAction(claude, flags()), 'switch');
+  assert.equal(logic.primaryAction(claude, flags({ current: true })), 'in_use');
+  assert.equal(logic.primaryAction(claude, flags({ signIn: true })), 'sign_in');
+  assert.equal(logic.primaryAction({ ...claude, enabled: false }, flags()), 'disabled');
+  assert.equal(logic.primaryAction({ ...claude, external_identity: null }, flags()), 'select');
+  const codex = { provider: 'codex', kind: 'oauth', enabled: true, external_identity: claude.external_identity };
+  assert.equal(logic.primaryAction(codex, flags()), 'select');
+  assert.equal(logic.primaryAction(codex, flags({ selected: true })), 'selected');
+  assert.equal(logic.canSwitchNative(claude), true);
+  assert.equal(logic.canSwitchNative({ ...claude, kind: 'api_key' }), false);
+});
+// 0.5: one click turns on Claude Code switching for the pool holding most switchable accounts.
+check(() => {
+  const acct = (pool, kind = 'oauth') => ({ provider: 'claude', kind, pool, enabled: true, external_identity: { account_id: pool + Math.random(), organization_id: null, email: null } });
+  assert.equal(logic.autoSwitchPool([acct('default')], []), null, 'one account cannot rotate');
+  assert.equal(logic.autoSwitchPool([acct('default'), acct('work'), acct('work')], []), 'work');
+  assert.equal(logic.autoSwitchPool([acct('default'), acct('default'), acct('work', 'api_key')], []), 'default');
+  assert.equal(logic.autoSwitchPool([acct('default'), acct('default')], [{ provider: 'claude', target: 'claude_cli', enabled: true }]), null, 'already on');
+});
+
+console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start.`);

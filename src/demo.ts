@@ -7,9 +7,11 @@ export function createDemoAdapter(): Adapter {
   const now = () => Math.floor(Date.now() / 1000);
   const studio: ExternalIdentity = { account_id: 'synthetic-studio', organization_id: 'synthetic-work', email: 'studio@example.test' };
   const codexIdentity: ExternalIdentity = { account_id: 'synthetic-codex', organization_id: 'synthetic-work', email: 'engineering@example.test' };
+  // The Codex CLI is signed in to an account Switchboard has not saved yet: one click adds it.
+  const codexUnsaved: ExternalIdentity = { account_id: 'synthetic-codex-new', organization_id: 'synthetic-work', email: 'release@example.test' };
   const current: CurrentAccounts = {
     claude: { status: 'available', identity: studio, account_id: 'demo-claude-work' },
-    codex: { status: 'available', identity: codexIdentity, account_id: 'demo-codex-work' },
+    codex: { status: 'available', identity: codexUnsaved, account_id: null },
   };
   const state: Snapshot = {
     accounts: [
@@ -18,6 +20,7 @@ export function createDemoAdapter(): Adapter {
       { id: 'demo-claude-personal', label: 'Personal', provider: 'claude', kind: 'setup_token', pool: 'personal', enabled: true, created_at: now(), identity: null, usage: null },
       { id: 'demo-codex-lab', label: 'Experiments', provider: 'codex', kind: 'api_key', pool: 'personal', enabled: true, created_at: now(), identity: null, usage: null },
       { id: 'demo-claude-archive', label: 'Previous workspace', provider: 'claude', kind: 'oauth', pool: 'work', enabled: false, created_at: now(), identity: null, usage: { used_percent: 86, observed_at: now() - 7200, resets_at: now() - 600, source: 'Synthetic fixture' } },
+      ...['north', 'south', 'east', 'west', 'harbor', 'summit', 'meadow'].map((name, index): Account => ({ id: `demo-claude-${name}`, label: `${name[0].toUpperCase()}${name.slice(1)} team`, provider: 'claude', kind: 'oauth', pool: index < 5 ? 'work' : 'personal', enabled: true, created_at: now() + index + 1, identity: null, external_identity: { account_id: `synthetic-${name}`, organization_id: 'synthetic-work', email: `${name}@example.test` }, usage: index === 6 ? null : { used_percent: [12, 47, 91, 64, 5, 33][index], observed_at: now() - 60 * (index + 1), resets_at: now() + 3600 * (index + 1), source: 'Synthetic fixture' } })),
     ],
     policies: [{ provider: 'claude', pool: 'work', target: 'managed', enabled: false, threshold_percent: 90, hysteresis_percent: 10, cooldown_seconds: 1800, max_age_seconds: 300, last_switched_at: null }],
     routes: { 'claude:work': 'demo-claude-work', 'codex:work': 'demo-codex-work' },
@@ -41,10 +44,12 @@ export function createDemoAdapter(): Adapter {
   const pause = () => new Promise<void>((resolve) => setTimeout(resolve, 220));
   const account = (id: string) => { const found = state.accounts.find((item) => item.id === id); if (!found) throw new Error('Account unavailable'); return found; };
   const enabled = (id: string) => { const found = account(id); if (!found.enabled) throw new Error('This account is disabled. Enable it before continuing.'); return found; };
-  const logins = new Map<string, LoginInput>();
+  const logins = new Map<string, LoginInput & { started: number }>();
+  let signIns = 0;
+  const signInRequired = new Set(['demo-claude-meadow']);
   return {
     async currentAccounts() { return structuredClone(current); },
-    async monitorStatus() { return { running: true, interval_seconds: 180 }; },
+    async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired] }; },
     async captureCurrent(input) {
       await pause();
       const source = current[input.provider];
@@ -102,8 +107,18 @@ export function createDemoAdapter(): Adapter {
     async remove(id) { await pause(); if (Object.values(state.routes).includes(id)) throw new Error('Select another account in this pool, or disable this account, before removing it.'); account(id); state.accounts = state.accounts.filter((item) => item.id !== id); state.rules = state.rules!.filter((rule) => rule.account_id !== id); log('account.removed', id, 'Synthetic account removed'); },
     async select(item) { await pause(); enabled(item.id); state.routes[`${item.provider}:${item.pool}`] = item.id; log('route.selected', item.id, 'Selected for next request'); },
     async launch(id, mode, workingDirectory) { await pause(); if (!isAbsoluteProjectPath(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
-    async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, input); return { login_id, message: 'Synthetic sign-in is ready to finish.' }; },
-    async finishLogin(id) { const input = logins.get(id); if (!input) throw new Error('Sign-in is not complete. Finish in Terminal, then try again.'); const item = await this.add({ ...input, kind: 'oauth', secret: '{}' }); logins.delete(id); return item; },
+    async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, { ...input, started: Date.now() }); return { login_id, message: 'Synthetic sign-in opened; it completes on its own in a few seconds.' }; },
+    // A synthetic Terminal "finishes" three seconds after it opened.
+    async loginStatus(id) { const login = logins.get(id); if (!login) throw new Error('Sign-in not found. Start again.'); return { state: Date.now() - login.started > 3000 ? 'complete' : 'pending' }; },
+    async finishLogin(id) {
+      const input = logins.get(id); if (!input) throw new Error('Sign-in is not complete. Finish in Terminal, then try again.');
+      await pause(); logins.delete(id); signIns += 1;
+      const identity: ExternalIdentity = { account_id: `synthetic-signin-${signIns}`, organization_id: 'synthetic-work', email: `signin-${signIns}@example.test` };
+      const existing = state.accounts.find((entry) => entry.provider === input.provider && entry.pool === input.pool && entry.label === input.label && input.label);
+      if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account.updated', existing.id, 'Synthetic sign-in renewed'); return structuredClone(existing); }
+      const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
+      state.accounts.push(item); log('account.added', item.id, 'Synthetic sign-in account added'); return structuredClone(item);
+    },
     async cancelLogin(id) { await pause(); logins.delete(id); },
     async setProjectRule(input) {
       await pause();
