@@ -17,7 +17,55 @@ use tokio::{
 };
 use uuid::Uuid;
 
-const BODY_LIMIT: usize = 16 * 1024 * 1024;
+/// The provider's own request ceiling (Anthropic: 32 MB); the proxy must not be the smaller one.
+const BODY_LIMIT: usize = 32 * 1024 * 1024;
+/// Client headers relayed upstream. Authentication (`authorization`, `x-api-key`), cookies,
+/// proxy and account-identity headers are never on this list: the proxy injects its own.
+const REQUEST_HEADERS: &[&str] = &[
+    "content-type",
+    "accept",
+    "user-agent",
+    "x-app",
+    "anthropic-version",
+    "anthropic-beta",
+    "openai-beta",
+    "x-stainless-lang",
+    "x-stainless-package-version",
+    "x-stainless-os",
+    "x-stainless-arch",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-retry-count",
+    "x-stainless-timeout",
+];
+/// Provider headers relayed back: the client's own retry and limit handling reads them.
+const RESPONSE_HEADERS: &[&str] = &[
+    "content-type",
+    "cache-control",
+    "retry-after",
+    "retry-after-ms",
+    "x-should-retry",
+    "request-id",
+    "x-request-id",
+];
+const RESPONSE_HEADER_PREFIXES: &[&str] = &["anthropic-ratelimit-", "x-ratelimit-"];
+/// Upstream timeouts. There is deliberately no total deadline: a stream that keeps
+/// delivering bytes runs to EOF however long it takes.
+#[derive(Clone, Copy, Debug)]
+struct Timeouts {
+    connect: Duration,
+    /// Longest silence: before response headers (which includes a non-streaming call's
+    /// whole generation) and between body frames.
+    read: Duration,
+}
+impl Default for Timeouts {
+    fn default() -> Self {
+        Self {
+            connect: Duration::from_secs(10),
+            read: Duration::from_secs(600),
+        }
+    }
+}
 #[derive(Clone)]
 struct Gateway {
     store: Arc<Store>,
@@ -42,6 +90,7 @@ impl ProxyHandle {
             "https://api.anthropic.com".into(),
             "https://api.openai.com".into(),
             "https://chatgpt.com".into(),
+            Timeouts::default(),
         )
         .await
     }
@@ -50,6 +99,7 @@ impl ProxyHandle {
         claude: String,
         openai: String,
         chatgpt: String,
+        timeouts: Timeouts,
     ) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -61,8 +111,8 @@ impl ProxyHandle {
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(600))
+            .connect_timeout(timeouts.connect)
+            .read_timeout(timeouts.read)
             .build()
             .map_err(|_| "HTTP client unavailable.")?;
         let state = Gateway {
@@ -147,12 +197,11 @@ impl futures_util::Stream for AuditedStream {
     ) -> std::task::Poll<Option<Self::Item>> {
         let poll = self.inner.as_mut().poll_next(cx);
         match &poll {
-            // One outcome per request: a non-success status was journaled at headers.
+            // A non-success status was journaled at headers. A completed success is not
+            // journaled: it is the common case, and one event per request would evict the
+            // activation and rotation history from the bounded journal.
             std::task::Poll::Ready(None) => {
                 self.finished = true;
-                if self.success {
-                    let _ = self.store.record("request", Some(&self.id), "success");
-                }
             }
             std::task::Poll::Ready(Some(Err(_))) => {
                 self.finished = true;
@@ -270,19 +319,7 @@ async fn relay(
     };
     let mut headers = HeaderMap::new();
     let request_hop_fields = connection_fields(&parts.headers);
-    for name in [
-        "content-type",
-        "accept",
-        "anthropic-version",
-        "anthropic-beta",
-        "openai-beta",
-        "x-stainless-lang",
-        "x-stainless-package-version",
-        "x-stainless-os",
-        "x-stainless-arch",
-        "x-stainless-runtime",
-        "x-stainless-runtime-version",
-    ] {
+    for &name in REQUEST_HEADERS {
         if request_hop_fields.contains(name) {
             continue;
         }
@@ -294,34 +331,35 @@ async fn relay(
         "content-type",
         axum::http::HeaderValue::from_static("application/json"),
     );
+    // Claude headers are settled in the map: `RequestBuilder::header` appends, and a
+    // second `anthropic-beta` beside the client's would leave the provider two answers.
+    if provider == Provider::Claude && account.kind == AuthKind::OAuth {
+        let existing = headers
+            .get("anthropic-beta")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("");
+        let beta = if existing.split(',').any(|v| v.trim() == "oauth-2025-04-20") {
+            existing.to_owned()
+        } else if existing.is_empty() {
+            "oauth-2025-04-20".into()
+        } else {
+            format!("{existing},oauth-2025-04-20")
+        };
+        let beta = axum::http::HeaderValue::from_str(&beta)
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("oauth-2025-04-20"));
+        headers.insert("anthropic-beta", beta);
+    }
+    if provider == Provider::Claude && !headers.contains_key("anthropic-version") {
+        headers.insert(
+            "anthropic-version",
+            axum::http::HeaderValue::from_static("2023-06-01"),
+        );
+    }
     let mut outgoing = g.client.post(url).headers(headers).body(bytes);
     if provider == Provider::Claude && account.kind == AuthKind::ApiKey {
         outgoing = outgoing.header("x-api-key", &credential.access_token);
     } else {
         outgoing = outgoing.bearer_auth(&credential.access_token);
-        if provider == Provider::Claude {
-            let existing = if request_hop_fields.contains("anthropic-beta") {
-                None
-            } else {
-                parts.headers.get("anthropic-beta")
-            }
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or("");
-            let beta = if existing.split(',').any(|v| v.trim() == "oauth-2025-04-20") {
-                existing.to_owned()
-            } else if existing.is_empty() {
-                "oauth-2025-04-20".into()
-            } else {
-                format!("{existing},oauth-2025-04-20")
-            };
-            outgoing = outgoing.header("anthropic-beta", beta);
-        }
-    }
-    if provider == Provider::Claude
-        && (!parts.headers.contains_key("anthropic-version")
-            || request_hop_fields.contains("anthropic-version"))
-    {
-        outgoing = outgoing.header("anthropic-version", "2023-06-01");
     }
     if provider == Provider::Codex && account.kind == AuthKind::OAuth {
         let Some(id) = credential.account_id.as_ref() else {
@@ -364,17 +402,11 @@ async fn relay(
     }
     let mut response = Response::builder().status(status);
     let response_hop_fields = connection_fields(upstream.headers());
-    for name in [
-        "content-type",
-        "cache-control",
-        "retry-after",
-        "request-id",
-        "x-request-id",
-    ] {
-        if response_hop_fields.contains(name) {
-            continue;
-        }
-        if let Some(value) = upstream.headers().get(name) {
+    for (name, value) in upstream.headers() {
+        let name = name.as_str();
+        let relayed = RESPONSE_HEADERS.contains(&name)
+            || RESPONSE_HEADER_PREFIXES.iter().any(|p| name.starts_with(p));
+        if relayed && !response_hop_fields.contains(name) {
             response = response.header(name, value);
         }
     }
@@ -470,8 +502,54 @@ fn parse_reset(value: &serde_json::Value, observed_at: i64) -> Result<i64, Strin
 /// network failure. A refresh may recover it; callers compare against this exact text.
 pub const REJECTED: &str = "Provider rejected the credential. Sign in again.";
 
+/// A failed quota check: a sanitized message, and for a provider 429 how long it asked to wait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProbeFailure {
+    pub message: String,
+    /// `Some` only for 429: `Some(seconds)` from a numeric `Retry-After`, `Some(None)` without one.
+    pub rate_limited: Option<Option<i64>>,
+}
+impl From<String> for ProbeFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            rate_limited: None,
+        }
+    }
+}
+impl From<&str> for ProbeFailure {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+pub const USAGE_RATE_LIMITED: &str =
+    "Usage checks are rate limited by the provider. Switchboard waits before the next one.";
+const USAGE_ORIGINS: (&str, &str) = ("https://api.anthropic.com", "https://chatgpt.com");
+
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
 pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String> {
+    probe_usage_detailed(store, id).await.map_err(|f| f.message)
+}
+/// The quota check with the provider's own wait on 429 (`Retry-After`), for the scheduler.
+pub async fn probe_usage_detailed(store: Arc<Store>, id: String) -> Result<Usage, ProbeFailure> {
+    probe_usage_from(store, id, USAGE_ORIGINS).await
+}
+/// Seconds from a numeric `Retry-After`; an HTTP date or anything malformed is no value.
+fn retry_after_seconds(headers: &HeaderMap) -> Option<i64> {
+    let seconds: i64 = headers
+        .get("retry-after")?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    (seconds >= 0).then_some(seconds)
+}
+async fn probe_usage_from(
+    store: Arc<Store>,
+    id: String,
+    origins: (&str, &str),
+) -> Result<Usage, ProbeFailure> {
     let snapshot = store.snapshot()?;
     let account = snapshot
         .accounts
@@ -495,8 +573,8 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
         .build()
         .map_err(|_| "Usage check unavailable.")?;
     let url = match account.provider {
-        Provider::Claude => "https://api.anthropic.com/api/oauth/usage",
-        Provider::Codex => "https://chatgpt.com/backend-api/wham/usage",
+        Provider::Claude => format!("{}/api/oauth/usage", origins.0),
+        Provider::Codex => format!("{}/backend-api/wham/usage", origins.1),
     };
     let mut request = client.get(url).bearer_auth(&credential.access_token);
     if account.provider == Provider::Claude {
@@ -514,6 +592,12 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
     // Only 401 speaks about the token itself; a 403 can be a plan or region refusal.
     if response.status().as_u16() == 401 {
         return Err(REJECTED.into());
+    }
+    if response.status().as_u16() == 429 {
+        return Err(ProbeFailure {
+            message: USAGE_RATE_LIMITED.into(),
+            rate_limited: Some(retry_after_seconds(response.headers())),
+        });
     }
     if !response.status().is_success() {
         return Err("Usage unavailable. Check the account and retry later.".into());

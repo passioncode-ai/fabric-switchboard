@@ -135,3 +135,40 @@ mod tests {
         assert!(link_cli(&temp.path().join("missing"), &bin).is_err());
     }
 }
+
+#[cfg(test)]
+mod setup_tests {
+    use super::*;
+
+    #[test]
+    fn a_hostile_cli_path_stays_one_shell_word() {
+        assert_eq!(shell_quote("/plain/switchboard"), "'/plain/switchboard'");
+        assert_eq!(
+            shell_quote("/it's; rm -rf ~/switchboard"),
+            r#"'/it'\''s; rm -rf ~/switchboard'"#
+        );
+    }
+    #[test]
+    fn setup_offers_commands_for_the_found_cli_and_never_a_credential() {
+        // Read-only: it looks for the CLI and a link, and writes nothing.
+        let setup = setup();
+        for key in [
+            "cli_path",
+            "bundled_cli",
+            "linked_cli",
+            "can_link",
+            "commands",
+        ] {
+            assert!(setup.get(key).is_some(), "{key}");
+        }
+        let claude = setup["commands"]["claude_code"].as_str().unwrap();
+        assert!(claude.starts_with("claude mcp add --scope user switchboard -- "));
+        assert!(claude.ends_with(" mcp"));
+        match setup["cli_path"].as_str() {
+            Some(path) => assert!(claude.contains(&shell_quote(path))),
+            None => assert!(claude.contains("-- switchboard mcp")),
+        }
+        // A test binary is never a bundled desktop CLI, so nothing can be linked.
+        assert_eq!(setup["can_link"], false);
+    }
+}

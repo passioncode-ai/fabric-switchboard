@@ -112,4 +112,66 @@ matches the current ordinary Claude Code sign-in, or when that sign-in cannot be
 |---|---|
 | Codex OAuth refresh for inactive Codex accounts (Codex has no native rotation target; managed route only) | open → board SB-16 |
 | Prompt-free behaviour observed on the operator's own Mac with real accounts (synthetic tests cannot see a macOS dialog) | open → board SB-15 |
-| Release 0.5.0-beta.1 | in progress → board SB-17 |
+| Release 0.5.0-beta.1 | done → board SB-17 |
+
+## 0.5.1 — Claude Swap parity and review fixes
+
+Run started 2026-10-03 on `agent/switchboard-0.5.1` from 0.5.0 (`67bf1a3`). Operator request
+(Russian, paraphrased): study how switching, session isolation and credential substitution work,
+read Claude Swap's code, review again, finish whatever is missing or unfinished, fix bugs, bring
+the documentation up to date, cover the project with tests, release, and update the Fabric
+workspace after the child repositories. Source: the comparison report
+[RPT fabric-switchboard/2026-10-03-claude-swap-comparison](reports/2026-10-03-claude-swap-comparison/README.md)
+(rows #1–#18 below) plus three review packets run in parallel worktrees (packet-d launch,
+packet-e proxy, packet-f UI vocabulary) and a final adversarial review of the branch at
+`dc17508` (findings R-1…R-12; two P1 — a grant whose successor could be lost — four P2, four
+P3 and two test gaps; all fixed in `13a8712`, REQ-41…REQ-48).
+
+No new operator decision was needed: every fix tightens an existing contract (D-2 renewal,
+C-2 prompt-free item) toward what Claude Swap already does. The one deliberate extension is
+REQ-33 — the live account is renewed when Claude Code itself left it expired and idle, under
+Claude Code's own locks — which stays inside D-2's intent (no second refresher of a lineage in
+use).
+
+| REQ | Requirement (report row) | Verified by |
+|---|---|---|
+| REQ-18 | Shared credential keys (`mcpOAuth`, `mcpOAuthClientConfig`, `mcpXaaIdp`, `mcpXaaIdpConfig`, `pluginSecrets`) come from the live item on a switch (#1) | `shared_keys_come_from_the_live_item_and_account_keys_from_the_target` |
+| REQ-19 | The outgoing generation is stored under Claude Code's locks before the first write; a failure aborts (#2) | `the_outgoing_generation_is_preserved_under_the_lock_before_any_write`, `switching_away_keeps_the_live_generation_in_every_pool` |
+| REQ-20 | A live token of another lineage is never filed under the configured name nor switched from (#3) | `a_foreign_lineage_under_this_name_is_never_filed_or_switched_from`, `background_sync_never_files_another_accounts_lineage`, `the_provider_names_the_owner_of_an_unknown_live_lineage` |
+| REQ-21 | A renewed token that cannot be stored is kept and adopted before the next grant or switch (#4) | `a_renewed_token_that_cannot_be_stored_is_kept_and_adopted_later`, `an_idle_renewal_that_cannot_be_written_is_stashed` |
+| REQ-22 | While Claude Swap runs, its accounts are not renewed and its newer generations are followed; the UI says so (#5) | `a_running_claude_swap_renews_its_accounts_and_switchboard_follows_it`, `only_claude_swap_itself_counts_as_running`; rotation-bar and import notices |
+| REQ-23 | A live sign-in wiped after `invalid_grant` is signed out and does not block a switch (#6) | `a_wiped_live_sign_in_is_signed_out_and_does_not_block_a_switch` |
+| REQ-24 | Held locks are waited for up to 9 s; stale ones (60 s, config 10 s) are taken over (#7; closes board SB-04) | `a_live_lock_is_waited_for_and_a_stale_one_is_taken_over` |
+| REQ-25 | An existing macOS `.credentials.json` is rewritten and restored on rollback, never created (#8) | `a_plaintext_copy_on_macos_is_rewritten_only_when_it_exists` |
+| REQ-26 | A managed `primaryApiKey` is removed on OAuth activation and restored on rollback (#9) | `a_managed_api_key_is_removed_and_returns_on_rollback` |
+| REQ-27 | Isolated launches renew below four hours of token life; the account in use launches with the live token (#10) | `an_isolated_launch_wants_hours_of_token_life` |
+| REQ-28 | Native operations are refused from inside Switchboard's data folder (#11) | `a_home_inside_switchboards_data_folder_is_refused` |
+| REQ-29 | Import prefers a Claude Swap session profile's later-expiring credential (#12) | `a_newer_session_profile_generation_wins_over_the_backup` |
+| REQ-30 | A token endpoint naming another owner is a dead lineage for an inactive account; for the live account the successor stays with Claude Code and is remembered as foreign (#13) | `a_token_issued_for_another_account_is_a_dead_lineage_here`, `an_idle_renewal_issued_to_another_account_stays_with_claude_code_only` |
+| REQ-31 | Rejected lineages are remembered across restarts as fingerprints only (#15) | `a_rejected_lineage_is_remembered_across_restarts` |
+| REQ-32 | The Keychain account at sign-in is `$USER`, else the OS user (#17) | `keychain_user_prefers_a_set_user_then_the_passwd_entry` |
+| REQ-33 | The live account Claude Code left expired for more than 300 s is renewed under its locks into the live item and every copy; a changed item is left alone | `an_idle_live_account_is_renewed_in_claude_code_and_every_copy`, `an_idle_live_item_that_changed_is_left_alone`, `an_idle_live_lineage_rejected_by_the_provider_is_dead`, `a_renewed_live_item_keeps_every_other_key` |
+| REQ-34 | A reset-less limit marker from a session older than the switch is not charged to the new account | `an_old_sessions_marker_without_a_reset_is_not_charged_to_the_new_account` |
+| REQ-35 | Switching away from an unsaved signed-in account is refused; the account in use is a no-op | `switching_away_from_an_unsaved_account_is_refused_and_the_account_in_use_is_a_no_op` |
+| REQ-36 | Proxy (packet-e): only unsuccessful requests are journaled; 10 s connect, 600 s idle read, no total cap; 32 MiB body; client identity headers relayed, limit and retry headers returned | `successful_requests_never_push_other_events_out_of_the_journal`, `every_unsuccessful_outcome_is_still_journaled_once`, `a_stream_that_keeps_moving_outlives_the_read_timeout_many_times_over`, `a_stream_idle_past_the_read_timeout_is_cut_and_journaled_as_aborted`, `body_limit_admits_the_providers_32_mib_and_refuses_one_byte_more`, `claude_code_headers_reach_upstream_and_limit_headers_come_back` |
+| REQ-37 | Launch (packet-d): a sign-in reservation expires after ten minutes; a reused pid does not hold a home | `reservation_expires_after_ten_minutes_in_either_direction`, `stale_reservation_no_longer_holds_the_home`, `a_process_younger_than_its_marker_is_a_reused_pid`, `live_pid_holds_the_home_only_while_it_can_be_the_session` |
+| REQ-38 | UI (packet-f): every backend refusal reaches the user verbatim or through a mapped message; the sign-in banner reports each outcome | `scripts/check-error-vocabulary.mjs` (in `check.sh`), `scripts/test-ui-logic.mjs` (sign-in outcomes) |
+| REQ-40 | A usage probe answered 429 waits as the provider asks: numeric `Retry-After` up to six hours, else 900 s, never sooner than the backoff (#14; board SB-18) | `a_rate_limited_usage_check_waits_as_the_provider_asks`, `usage_checks_report_the_providers_wait_and_never_its_body` |
+| REQ-41 | Final review R-1/R-8: a grant never loses its successor — kept by the grant task before returning, keyed by the spent token, so a cancelled caller or a failed write keeps it | `a_grant_whose_caller_gives_up_still_keeps_the_successor`, `an_idle_renewal_that_cannot_be_written_is_stashed` (mutation: dropping the keep fails three tests) |
+| REQ-42 | Review R-1: a successor the token endpoint issues to another saved account reaches that account; the named account's copies holding the spent token are dead | `a_renewal_issued_to_another_saved_account_reaches_that_account`, `a_renewal_goes_only_to_the_owner_the_token_endpoint_named` (mutation: ignoring the owner fails three tests) |
+| REQ-43 | Review R-3: every copy holding one spent token adopts the same kept successor | `an_idle_renewal_that_cannot_be_written_is_stashed` (both pools) |
+| REQ-44 | Review R-4: a switch never overwrites a copy newer than Claude Code's item | `a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch` (mutation-checked) |
+| REQ-45 | Review R-5/R-6: a live lineage nothing attributes is never filed; the same login in another organization is another account; the owner is asked before each native rotation, at most once a minute | `a_live_generation_nobody_can_attribute_is_never_filed`, `the_same_login_in_another_organization_is_another_account`, `an_unanswered_owner_question_waits_a_minute`, `background_sync_never_files_another_accounts_lineage` (rotated case) |
+| REQ-46 | Review R-7: Claude Swap running but unreadable keeps what it holds; a session profile is trusted only while its own config names the slot's account | `a_running_claude_swap_renews_its_accounts_and_switchboard_follows_it`, `a_newer_session_profile_generation_wins_over_the_backup` |
+| REQ-47 | Review R-9/R-11: idle renewal takes only the credential locks and rewrites an existing plaintext copy | `a_renewal_takes_only_the_credential_locks`, `a_renewed_live_item_reaches_an_existing_plaintext_copy_only` |
+| REQ-48 | Review R-10: identities without an account id are never the same account | `identities_without_an_account_id_are_never_the_same_account` (mutation-checked) |
+| REQ-39 | Docs in the same change (ACCOUNTS-AND-ROTATION, SPEC, CONTRACTS, scenarios, evidence, HANDOFF), coverage measured, full gate green (#18) | `scripts/check_docs.py`, `cargo llvm-cov`, `./scripts/check.sh` |
+
+**Not taken, with reason.** Report §"Accepted": a credential item larger than the `security -i`
+line goes to argv as hex, exactly as Claude Code does; no prompt-free alternative exists.
+
+| Item | Status |
+|---|---|
+| Usage-probe `Retry-After` (report #14) | done in this run (REQ-40), board SB-18 closed |
+| Release 0.5.1-beta.1 | in progress → board SB-19 |
+| Live acceptance of 0.5.1 on the operator's Mac beside a running Claude Swap | open → board SB-15 (extended) |

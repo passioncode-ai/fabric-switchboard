@@ -744,3 +744,80 @@ fn native_vault_roundtrip_uses_only_random_app_owned_item() {
     assert!(vault.get(&id).is_err());
     vault.delete(&id).unwrap();
 }
+
+#[test]
+fn a_renewal_goes_only_to_the_owner_the_token_endpoint_named() {
+    use switchboard_core::ExternalIdentity;
+    let (_root, _vault, store) = setup();
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let identity = |account: &str| ExternalIdentity {
+        account_id: Some(account.into()),
+        organization_id: None,
+        email: Some(format!("{account}@example.invalid")),
+    };
+    // Account A holds B's lineage by mistake; B holds it rightfully.
+    let a = store
+        .upsert(
+            "A".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            oauth("shared"),
+            Some(identity("synthetic-a")),
+        )
+        .unwrap();
+    let b = store
+        .upsert(
+            "B".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "work".into(),
+            oauth("shared"),
+            Some(identity("synthetic-b")),
+        )
+        .unwrap();
+    let next = oauth("next");
+    let (updated, others) = store
+        .adopt_refreshed_for(Provider::Claude, "shared", &next, Some("synthetic-b"))
+        .unwrap();
+    assert_eq!(updated, vec![b.id.clone()]);
+    assert_eq!(others, vec![a.id.clone()]);
+    assert_eq!(
+        store
+            .stored_credential(&b.id)
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("next")
+    );
+    assert_eq!(
+        store
+            .stored_credential(&a.id)
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("shared")
+    );
+    // Nobody holds a spent token any more: nothing updated, and no error.
+    let (updated, others) = store
+        .adopt_refreshed_for(Provider::Claude, "gone", &next, None)
+        .unwrap();
+    assert!(updated.is_empty() && others.is_empty());
+    assert!(store
+        .adopt_refreshed(Provider::Claude, "gone", &next)
+        .is_err());
+    // Without an owner every holder is updated.
+    let (updated, _) = store
+        .adopt_refreshed_for(Provider::Claude, "shared", &oauth("third"), None)
+        .unwrap();
+    assert_eq!(updated, vec![a.id]);
+}

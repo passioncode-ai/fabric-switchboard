@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -312,7 +312,7 @@ async function pollLogin() {
   try { state = (await adapter.loginStatus(login.id)).state; }
   catch (error) {
     // The owner restarted and forgot this sign-in: nothing can finish it any more.
-    if (safeError(error) === 'Sign-in not found. Start again.' && pendingLogin === login) { login.state = 'ended'; render(); }
+    if (loginOutcome(safeError(error)) === 'forgotten' && pendingLogin === login) { login.state = 'ended'; render(); }
     return;
   }
   if (pendingLogin !== login || login.state !== 'pending') return;
@@ -322,18 +322,33 @@ async function pollLogin() {
   busy = true; clock.begin();
   try {
     const account = await adapter.finishLogin(login.id);
-    pendingLogin = null;
-    await refreshContext();
-    try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'The account was added, but the list could not be refreshed. Retry loading accounts.'; }
-    showNotice(`${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
-  } catch (error) { login.state = 'pending'; login.error = safeError(error); }
+    await loginSaved(`${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
+  } catch (error) {
+    const text = safeError(error); const outcome = loginOutcome(text);
+    // The owner saved the account and released the sign-in; only its staging folder is left.
+    if (outcome === 'saved_with_cleanup') await loginSaved(`Account added to ${providerName(login.provider)}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.`);
+    else if (outcome === 'forgotten') login.state = 'ended';
+    else { login.state = 'pending'; login.error = text; }
+  }
   finally { clock.end(); busy = false; render(); }
+}
+/** The account is saved: the banner closes, then the list and the current CLI accounts refresh. */
+async function loginSaved(text: string) {
+  pendingLogin = null;
+  await refreshContext();
+  try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = 'The account was added, but the list could not be refreshed. Retry loading accounts.'; }
+  showNotice(text);
 }
 async function cancelLogin() {
   const login = pendingLogin; if (!login) return;
   busy = true; render();
   try { await adapter.cancelLogin(login.id); pendingLogin = null; showNotice('Sign-in cancelled. No account was added.'); }
-  catch (error) { login.error = safeError(error); }
+  catch (error) {
+    const text = safeError(error);
+    // The owner restarted and no longer knows this sign-in: there is nothing left to cancel.
+    if (loginOutcome(text) === 'forgotten') { if (pendingLogin === login) pendingLogin = null; showNotice('Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.'); }
+    else login.error = text;
+  }
   finally { busy = false; render(); }
 }
 function loginBanner(main: HTMLElement) {
@@ -359,6 +374,7 @@ async function importSwap() {
     const parts = [`${result.imported.length} Claude Swap ${result.imported.length === 1 ? 'profile' : 'profiles'} imported or updated in the default pool`];
     if (result.skipped) parts.push(`${result.skipped} skipped`);
     if (result.failed) parts.push(`${result.failed} could not be read — check them in Claude Swap and import again`);
+    if (result.claude_swap_running) parts.push('Claude Swap is still running, so it keeps renewing those accounts and Switchboard follows its newest sign-ins');
     showNotice(`${parts.join(' · ')}.`, result.failed > 0);
   } catch (error) { showNotice(safeError(error), true); }
   finally { clock.end(); busy = false; render(); restoreFocus('menu-add'); }
@@ -527,6 +543,8 @@ function renderPolicies(main: HTMLElement) {
     const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
     copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)} · at ${policy.threshold_percent}% used${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
   } else copy.append(el('span', 'usage-caption', monitor ? 'When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.' : 'Quota monitor status unavailable. Refresh to retry.'));
+  const swapHeld = monitor?.claude_swap_accounts ?? 0;
+  if (swapHeld) copy.append(el('span', 'usage-caption', `Claude Swap is running and renews ${swapHeld} of these ${swapHeld === 1 ? 'account' : 'accounts'}. Switchboard takes their newest sign-ins from it and does not renew them itself.`));
   if (demo) copy.append(el('span', 'usage-caption', 'Demo policies are editable fixtures; no switching runs here.'));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies);

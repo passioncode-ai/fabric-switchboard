@@ -120,3 +120,19 @@ export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[],
   for (const [pool, count] of counts) if (count > most || (count === most && best !== null && pool === 'default')) { best = pool; most = count; }
   return best;
 }
+
+/** Backend sign-in outcomes the banner acts on (runtime lib.rs finish_login, cancel_login); adapter.ts shows both verbatim. */
+export const LOGIN_FORGOTTEN = 'Sign-in not found. Start again.';
+export const LOGIN_SAVED_CLEANUP = 'Account saved; isolated login cleanup needs attention.';
+export type LoginOutcome = 'saved_with_cleanup' | 'forgotten' | 'retry';
+/**
+ * What a failed sign-in step means, read from the already-sanitized error text.
+ * saved_with_cleanup: the account was saved and the owner released the sign-in; it retries the
+ * staging cleanup before the next sign-in. forgotten: the owner no longer knows this sign-in
+ * (it restarted), so nothing can finish or cancel it. retry: anything else keeps the banner.
+ */
+export function loginOutcome(errorText: string): LoginOutcome {
+  if (errorText === LOGIN_SAVED_CLEANUP) return 'saved_with_cleanup';
+  if (errorText === LOGIN_FORGOTTEN) return 'forgotten';
+  return 'retry';
+}

@@ -622,8 +622,25 @@ impl Store {
         consumed: &str,
         refreshed: &Credential,
     ) -> Result<Vec<String>, String> {
+        let (updated, _) = self.adopt_refreshed_for(provider, consumed, refreshed, None)?;
+        if updated.is_empty() {
+            return Err("Credential changed during refresh".into());
+        }
+        Ok(updated)
+    }
+    /// Stores a renewal's successor in every account still holding the spent `consumed`
+    /// refresh token, or — when the token endpoint named the `owner` — only in those whose
+    /// identity is that account. Returns (updated, holders left with the spent token).
+    pub fn adopt_refreshed_for(
+        &self,
+        provider: Provider,
+        consumed: &str,
+        refreshed: &Credential,
+        owner: Option<&str>,
+    ) -> Result<(Vec<String>, Vec<String>), String> {
         let state = self.lock()?;
         let mut updated = Vec::new();
+        let mut others = Vec::new();
         for a in state
             .accounts
             .iter()
@@ -633,6 +650,15 @@ impl Store {
                 continue;
             };
             if stored.refresh_token.as_deref() != Some(consumed) {
+                continue;
+            }
+            if owner.is_some_and(|owner| {
+                a.external_identity
+                    .as_ref()
+                    .and_then(|i| i.account_id.as_deref())
+                    != Some(owner)
+            }) {
+                others.push(a.id.clone());
                 continue;
             }
             refreshed.validate(a.provider, a.kind)?;
@@ -648,16 +674,20 @@ impl Store {
             {
                 return Err("Credential identity does not match account identity".into());
             }
-            self.vault
-                .put(&a.id, refreshed)
-                .map_err(|_| "Credential storage unavailable")?;
+            if self.vault.put(&a.id, refreshed).is_err() {
+                // The copies already written stay written; the caller keeps the successor
+                // for the rest, which still hold the spent token.
+                if !updated.is_empty() {
+                    self.changed();
+                }
+                return Err("Credential storage unavailable".into());
+            }
             updated.push(a.id.clone());
         }
-        if updated.is_empty() {
-            return Err("Credential changed during refresh".into());
+        if !updated.is_empty() {
+            self.changed();
         }
-        self.changed();
-        Ok(updated)
+        Ok((updated, others))
     }
     pub fn usage_health(
         &self,

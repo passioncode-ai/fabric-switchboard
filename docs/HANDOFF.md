@@ -1,3 +1,25 @@
+# Switchboard 0.5.1 — Claude Swap parity and review fixes (2026-10-03)
+
+**Start here:** [handoffs/2026-10-03-switchboard-0.5.1.md](handoffs/2026-10-03-switchboard-0.5.1.md).
+
+What changed since 0.5.0:
+- Claude Swap's code was read side by side with ours ([report](reports/2026-10-03-claude-swap-comparison/README.md)).
+- Every gap that could lose a refresh token or file one account's token under another is closed:
+  - a switch keeps the MCP sign-ins;
+  - the outgoing generation is stored under Claude Code's locks;
+  - the lineage is checked;
+  - a grant keeps its successor even when its caller gives up;
+  - Claude Swap coexistence;
+  - stale-lock takeover;
+  - idle renewal of the account in use.
+- An adversarial review of the branch found 12 more issues; all are fixed with tests.
+- Coverage is 86.10 % of lines; the rest is the OS boundary ([evidence](evidence/release-0.5.md#051)).
+
+**Exact next task:** SB-19, the v0.5.1-beta.1 release: tag, notarized build, GitHub release, site,
+local install, then the Fabric workspace snapshot.
+
+---
+
 # Released — Switchboard v0.5.0-beta.1 (2026-10-02)
 
 **Start here:** [handoffs/2026-10-02-switchboard-0.5.md](handoffs/2026-10-02-switchboard-0.5.md). [v0.5.0-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.0-beta.1) is published from `e6c5e54`: macOS universal notarized (`0b19c796-…` Accepted) and stapled, Windows x64 unsigned cross-build, `SHA256SUMS-0.5.0.txt`. The site selects it (`a7e5a8b`). `/Applications` holds 0.5.0, 0.4.1 kept for rollback. On top of 0.4.1's vault ([KEYCHAIN.md](KEYCHAIN.md), unchanged): Claude Code's item only through `/usr/bin/security`, renewal of inactive Claude accounts, switching on provider limit errors, automatic encrypted backups, one-click accounts. First live switch on the operator's Mac: new session `ok`, 0 `SecurityAgent`. Record: [release-0.5.md](evidence/release-0.5.md). **Exact next task:** SB-15 — a day of use with automatic switching on, then confirm renewal and a limit switch from the journal.

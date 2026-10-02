@@ -14,9 +14,9 @@ export interface RotationPolicy {
 export interface AccountLimit { account_id: string; until: number; source: 'managed' | 'claude_code' }
 export interface BackupInfo { file: string; created_at: number; accounts: number }
 export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null }
-export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
+export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; claude_swap_accounts?: number; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
-export interface ImportResult { imported: Account[]; failed: number; skipped: number }
+export interface ImportResult { imported: Account[]; failed: number; skipped: number; claude_swap_running?: boolean }
 export interface Account {
   id: string; label: string; provider: Provider; kind: AuthKind; pool: string;
   external_identity?: ExternalIdentity | null; usage_health?: UsageHealth | null;

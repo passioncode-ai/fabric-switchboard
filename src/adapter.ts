@@ -91,7 +91,13 @@ const safeErrors = new Set([
   'Keep switchboard.exe from the download folder, or add it to PATH.',
   'Finish an existing sign-in before starting another.',
   "This account's sign-in has ended. Sign in to it again.",
+  'This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.',
+  "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute.",
+  'Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).',
+  'The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.',
+  'Switchboard could not confirm which account Claude Code is signed in to. Check the connection, or use Claude Code once, then retry.',
   'Sign-in not found. Start again.',
+  'Usage checks are rate limited by the provider. Switchboard waits before the next one.',
   'This backup was made with another key and cannot be opened on this machine.',
   'Choose a backup from the backup folder.',
   'Backup not found. Refresh the list and choose another.',
@@ -102,8 +108,27 @@ const safeErrors = new Set([
   'The backup folder is unavailable.',
   'Backups are not available on this platform.',
   'Backup storage unavailable. Check the backup folder and Keychain access.',
+  // Keychain migration and access outcomes (core keychain.rs ACTIONABLE): each names its own recovery.
+  'This account was saved by an earlier Switchboard. Open the Fabric Switchboard app once so it can move the account to shared storage, then retry.',
+  'Keychain access was not allowed, so this account stays where an earlier Switchboard saved it. Restart Fabric Switchboard and choose Allow when macOS asks.',
+  'Keychain did not let this copy of Switchboard read the account without asking. Unlock the login keychain, or use Fabric Switchboard from Applications, then retry.',
+  'This development build reads only accounts saved by the same build and never asks Keychain for access. Add the account again in this build, or use the signed app.',
+  'The account could not be moved to shared storage and stays where it was. Retry, or restart Fabric Switchboard.',
+  'Part of this account is stored where only the Fabric Switchboard app can remove it. Remove the account in the app.',
+  // Sign-in, launch and session-home outcomes (runtime launch.rs).
+  'Enter a label of up to 80 characters.',
+  'Pool must use lowercase letters, digits, hyphens or underscores.',
+  'Sign-in is not complete or its private file is unsafe. Finish in Terminal, then try again.',
+  'Sign-in credential unavailable. Check Keychain access and finish login.',
+  'Account home cleanup failed. Close its sessions and retry.',
+  'Session state invalid. Inspect the managed home.',
+  'Terminal launch is currently supported on macOS and Windows only.',
+  'Choose isolated or managed launch.',
+  'Enable the account before launch.',
+  'Usage unavailable. Check the account and retry later.',
 ]);
 const coreErrors: Record<string, string> = {
+  'Session state unavailable. Inspect the managed home.': 'Switchboard could not read whether a session still uses this account’s home. Close its Terminal window, then retry.',
   'No current Claude sign-in found.': 'No current Claude sign-in found. Sign in with the official CLI, then capture again.',
   'No current Codex sign-in found.': 'No current Codex sign-in found. Sign in with the official CLI, then capture again.',
   'No Claude Swap profiles found.': 'No Claude Swap profiles found in the standard local location. Save a profile in Claude Swap, then retry.',
@@ -147,11 +172,58 @@ const coreErrors: Record<string, string> = {
   'Storage failure; credential cleanup requires recovery': 'The account could not be saved and credential cleanup needs recovery. Check storage before retrying.',
   'Native vault is not implemented on this platform': 'Native credential storage is not available on this platform. Use a supported native build.',
   'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use a supported native build.',
+  'Credential identity does not match account identity': 'The new credential belongs to a different account. Sign in with the account this row names, or add it as a new account.',
+  'Pool or identity is invalid': 'The pool name or the reported account identity is invalid. Use a pool of lowercase letters, numbers, hyphens, or underscores, then retry.',
+  'Credential changed during refresh': 'The stored credential changed during refresh, so nothing was overwritten. Retry.',
+  'Credential changed during usage check': 'The credential changed during the usage check. Check usage again.',
+  'Invalid usage health': 'The usage check returned an invalid status. The last observation is unchanged.',
+  'Usage health is older than the stored observation': 'A newer usage check already finished. The last observation is unchanged.',
+  'Invalid rotation time': 'The system clock reads an invalid time. Check the date and time settings, then retry.',
+  'Unsupported event': 'An activity log entry could not be recorded. Retry the action.',
+  'Rotation policy not found': 'This automatic switching policy no longer exists. Refresh, then set it again.',
+  'Choose managed or claude_cli as the rule target.': 'Choose whether the rule selects a managed session or changes the Claude Code login.',
+  'Invalid credential identifier': 'This account’s credential reference is invalid. Refresh the account list; if it repeats, restore a known-good backup.',
+  'Stored credential is invalid': 'The stored credential could not be read. Sign in to this account again.',
+  'Credential serialization failed': 'The credential could not be prepared for storage. Nothing was saved; retry.',
+  'Stored credential is too large': 'The credential is larger than native storage allows. Nothing was saved; use official sign-in instead.',
+  'LOCALAPPDATA unavailable': 'Windows did not report a local app-data folder. Check the LOCALAPPDATA setting of your user profile, then restart Switchboard.',
+  'Session process cannot be inspected': 'Windows could not check whether this account’s session is still running. Close its Terminal window, then retry.',
+  'Session state invalid.': 'Session state invalid. Inspect the managed home.',
+  'CLI home must be an absolute path.': 'The CLI config folder (CLAUDE_CONFIG_DIR or CODEX_HOME) must be an absolute path. Fix the variable, then retry.',
+  'Claude credential exceeds size limit.': 'This Claude credential is too large to write. Nothing was changed; sign in to the account again.',
+  'Claude config format is invalid.': 'The Claude Code config file is not valid JSON. Nothing was changed; open Claude Code once so it can repair the file, then retry.',
+  'Claude config exceeds size limit.': 'The Claude Code config file is too large to update safely. Nothing was changed; sign in through Claude Code instead.',
+  'Provider CLI path unavailable.': 'The provider CLI was found, but its location could not be resolved. Reinstall the official CLI, then retry.',
+  'Windows system directory unavailable.': 'Windows did not report its system folder, so Terminal could not open. Restart Switchboard, then retry.',
+  'Sign-in credential is unsupported.': 'The new sign-in saved a credential Switchboard cannot read. Cancel, then sign in again with the official CLI.',
+  'Sign-in cleanup failed.': 'The sign-in folder could not be removed. Close its Terminal window, then cancel again.',
+  'Account home unavailable.': 'The account’s session folder could not be checked. Close its sessions, then retry.',
+  'Unsafe account home.': 'The account’s session folder is a link rather than a folder, so Switchboard left it in place. Remove the link, then retry.',
+  'Credential snapshot timestamp unavailable.': 'The system clock could not be read, so the session was not prepared. Check the date and time settings, then retry.',
+  'Codex does not support setup tokens.': 'Choose an API key, imported OAuth JSON, or official sign-in for Codex.',
+  'Managed home unavailable.': 'The app’s data folder could not be resolved, so the session did not start. Restart Switchboard, then retry.',
+  'Native account source unavailable.': 'Claude Code login switching is unavailable in this session. Use a managed session instead.',
+  'The bundled command-line tool is unavailable.': 'The bundled command-line tool is missing from this app. Reinstall Fabric Switchboard, then link it again.',
+  'Existing link unreadable.': 'The existing ~/.local/bin/switchboard link could not be read. Remove it, then link again.',
+  'Could not replace the old link.': 'The old ~/.local/bin/switchboard link could not be replaced. Remove it, then link again.',
+  'Could not inspect ~/.local/bin.': 'Could not check ~/.local/bin. Check its permissions, then link again.',
+  'Could not create the link.': 'The command-line link could not be created. Check permissions of ~/.local/bin, then retry.',
+  'Home folder unavailable.': 'Your home folder could not be found, so the command-line tool was not linked. Add the bundled tool to PATH instead.',
+  'Provider returned no usage windows.': 'The provider reported no usage limits for this account. The last observation is unchanged.',
+  'Usage check unavailable.': 'The usage check could not be prepared. Try again after the next scheduled check.',
+  'Usage check could not reach provider.': 'The usage check could not reach the provider. Check the network connection, then retry.',
+  'Usage response interrupted.': 'The usage response was interrupted. Check usage again.',
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
-for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Account metadata exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
-for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
+for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['Unsafe private storage path', 'Unsafe private storage directory', 'Unsafe private storage file', 'Private file permissions are unsafe; rotate its capability before reuse', 'Private file has no parent', 'Invalid private storage path', 'Windows private storage unavailable', 'Unsafe Windows reparse point', 'Private storage belongs to another Windows user', 'Private directory has no parent', 'Unsafe Windows private file', 'Private replacement must stay in one directory', 'Managed file permissions unavailable.']) coreErrors[error] = 'A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.';
+for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.', 'Claude account identity is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
 for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';
+for (const error of ['Account not found.', 'Invalid account.']) coreErrors[error] = 'This account no longer exists. Refresh the account list.';
+for (const error of ['Local user unavailable.', 'Local login user unavailable.', 'User home unavailable.']) coreErrors[error] = 'Switchboard could not identify your user account or home folder. Restart Switchboard from your own user session, then retry.';
+// A poisoned in-process lock or an unserializable snapshot: only a restart recovers.
+for (const error of ['Sign-in state unavailable.', 'Backup state unavailable.', 'Current account unavailable.', 'Snapshot unavailable.', 'Monitor state unavailable.']) coreErrors[error] = 'Switchboard could not read its own state. Restart Switchboard, then retry.';
+for (const error of ['Usage reset unsupported.', 'Usage response unsupported.', 'Usage observation time invalid.', 'Usage response too large.']) coreErrors[error] = 'The provider reported usage in a form Switchboard does not read. The last observation is unchanged.';
 export function safeError(error: unknown): string {
   const candidate = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
   return safeErrors.has(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and native credential storage access, then retry.';

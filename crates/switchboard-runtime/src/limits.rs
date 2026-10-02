@@ -243,25 +243,48 @@ pub(crate) fn latest_limit(files: &[PathBuf], since: i64, now: i64) -> Option<i6
         .max()
 }
 /// Every rate-limit marker at or after `since`: when it was written, and until when it holds.
+/// A marker without a reported reset, in a session that began before `since`, is skipped: that
+/// session may still run on the previous account, and nothing in the marker can tell the two
+/// apart (report §P2-8). One with a reset is told apart by the foreign-reset filter instead.
 pub(crate) fn markers(files: &[PathBuf], since: i64, now: i64) -> Vec<(i64, i64)> {
     let mut found = Vec::new();
     for path in files {
         let Some(tail) = tail(path) else {
             continue;
         };
+        let began = session_start(path);
         for line in tail.split(|b| *b == b'\n') {
             // Cheap byte checks first: a line that is not an API error is never parsed.
             if !contains(line, b"\"isApiErrorMessage\":true") || !contains(line, b"rate_limit") {
                 continue;
             }
-            if let Some(marker) = marker(line, since, now) {
-                found.push(marker);
+            if let Some((at, hold, reported)) = marker(line, since, now) {
+                if !reported && began.is_some_and(|b| b < since - SWITCH_GRACE_SECONDS) {
+                    continue;
+                }
+                found.push((at, hold));
             }
         }
     }
     found
 }
-fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, i64)> {
+/// The time of the first timestamped entry of a session transcript (its first 64 KiB).
+fn session_start(path: &Path) -> Option<i64> {
+    let mut head = Vec::new();
+    fs::File::open(path)
+        .ok()?
+        .take(64 * 1024)
+        .read_to_end(&mut head)
+        .ok()?;
+    head.split(|b| *b == b'\n').find_map(|line| {
+        let value: Value = serde_json::from_slice(line).ok()?;
+        let stamp = value.get("timestamp")?.as_str()?;
+        time::OffsetDateTime::parse(stamp, &time::format_description::well_known::Rfc3339)
+            .ok()
+            .map(|t| t.unix_timestamp())
+    })
+}
+fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, i64, bool)> {
     let value: Value = serde_json::from_slice(line).ok()?;
     let limited = value.get("error").and_then(Value::as_str) == Some("rate_limit")
         || value.get("apiErrorStatus").and_then(Value::as_i64) == Some(429);
@@ -286,6 +309,7 @@ fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, i64)> {
         reset
             .unwrap_or(at + DEFAULT_HOLD_SECONDS)
             .min(now + MAX_HOLD_SECONDS),
+        reset.is_some(),
     ))
 }
 fn tail(path: &Path) -> Option<Vec<u8>> {
@@ -544,6 +568,39 @@ mod tests {
             NOW,
         );
         assert!(!state.limited_ids(NOW).contains("id-a"));
+    }
+    #[test]
+    fn an_old_sessions_marker_without_a_reset_is_not_charged_to_the_new_account() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LimitState::default();
+        let snapshot = Snapshot::default();
+        state.refresh(
+            &snapshot,
+            Some((&identity("a"), vec!["id-a".into()])),
+            &[],
+            NOW,
+        );
+        state.switched(Some(&identity("b")), NOW);
+        let opened = format!(r#"{{"type":"user","timestamp":"{}"}}"#, rfc(NOW - 3600));
+        // A session opened an hour before the switch keeps failing without a reset.
+        let old = transcript(temp.path(), &[opened, error_line(NOW + 120, None)]);
+        state.refresh(
+            &snapshot,
+            Some((&identity("b"), vec!["id-b".into()])),
+            &[old],
+            NOW + 130,
+        );
+        assert!(state.limited_ids(NOW + 130).is_empty(), "no cascade onto b");
+        // A session started after the switch is b's own evidence.
+        let fresh_open = format!(r#"{{"type":"user","timestamp":"{}"}}"#, rfc(NOW + 90));
+        let new = transcript(temp.path(), &[fresh_open, error_line(NOW + 140, None)]);
+        state.refresh(
+            &snapshot,
+            Some((&identity("b"), vec!["id-b".into()])),
+            &[new],
+            NOW + 150,
+        );
+        assert!(state.limited_ids(NOW + 150).contains("id-b"));
     }
     #[test]
     fn only_recent_jsonl_files_are_considered_and_tails_are_bounded() {
