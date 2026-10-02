@@ -182,6 +182,30 @@ All twelve were confirmed against the code and fixed in `13a8712`, each with a t
 AGENTS.md forbids in tests. The uncovered code is the OS boundary. Each of those calls is reached
 through a seam, and the seam is covered with fixtures.
 
+### Release v0.5.1-beta.1 (2026-10-03)
+
+| Step | Result |
+|---|---|
+| Source | `main` `2f4e429` (merge of [#20](https://github.com/passioncode-ai/fabric-switchboard/pull/20)); versions 0.5.1 in step (`check-brand.mjs` → `version 0.5.1 verified`, `check_plugin.py` 0 errors, `claude plugin validate --strict` passed for marketplace and plugin) |
+| Gate | `./scripts/check.sh` exit 0; 242 Rust tests passed, 2 opt-in Keychain tests ignored. No hosted dispatch (nightly policy) |
+| macOS | `build_macos.py --arch universal --notary-profile …` exit 0, [receipt](build-0.5.1-macos-universal.json): app and CLI `x86_64 arm64`, clean source `2f4e429`, notary `fb3aa43b-fe74-4d4e-af62-30334493acdb` **Accepted**, staple validated, Gatekeeper accepted |
+| Windows | `build_windows_cross.py` exit 0, [receipt](build-0.5.1-windows-x64.json); unsigned, native run NOT_RUN |
+| GitHub | tag `v0.5.1-beta.1` = `2f4e429`, [prerelease](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.1-beta.1) with 2 ZIPs, 2 receipts, `SHA256SUMS-0.5.1.txt`; [publication receipt](publication-0.5.1.json) |
+| Anonymous download | no token: both archives `OK` against the sums; downloaded app `accepted, source=Notarized Developer ID`; CLI `switchboard 0.5.1` |
+| Website | `passioncode-ai.github.io` `852cbeb` ([PR #28](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/28), check passed), deployed (Worker version `66574e15-…`); `/switchboard/download/macos` and `/windows` → 302 to the 0.5.1 archives, fetched macOS hash equal; page and `release.json` `0.5.1-beta.1` |
+| Local install | 0.5.0 quit and kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.5.0-2026-10-03/` (rollback: move it back); 0.5.1 from the verified anonymously downloaded ZIP; `CFBundleShortVersionString` 0.5.1, `spctl` accepted |
+
+#### On the operator's Mac after install (2026-10-03, 01:32 onward)
+
+| Check | Result |
+|---|---|
+| Keychain dialogs | `log show --predicate 'process == "SecurityAgent"'` since the install: **0** entries |
+| Monitor | `switchboard --json rotation status`: running; `claude_swap_accounts` **14**, so Claude Swap (running on this Mac) is detected and its accounts are followed, not renewed; `sign_in_required` 0, `limited` 0 |
+| Journal since the install | `account_updated success` ×2 (newer generations taken from Claude Swap) and `usage observed` ×10; no failure |
+| Backups | newest written at launch: 15 accounts, 0 missing, own, openable; 10 kept |
+
+No switch of the operator's Claude Code was made for this check. Switching with live accounts beside a running Claude Swap remains SB-15.
+
 ### Not run
 
 Live provider acceptance (board SB-01, SB-15), Windows on a Windows host (SB-02), and a running
