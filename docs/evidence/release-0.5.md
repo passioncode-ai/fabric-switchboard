@@ -210,3 +210,17 @@ No switch of the operator's Claude Code was made for this check. Switching with 
 
 Live provider acceptance (board SB-01, SB-15), Windows on a Windows host (SB-02), and a running
 Claude Code picking up a switch without restart (SB-06).
+
+## 0.5.2
+
+Report rows #16 and #20 ([PLAN-0.5 §0.5.2](../PLAN-0.5.md#052--the-last-rows-of-the-comparison)); #19 → SB-20, #21 → SB-06, #22 declined.
+
+| Command | Result |
+|---|---|
+| `./scripts/check.sh` | exit 0 |
+| `cargo test --workspace` (inside the gate) | 245 passed, 0 failed, 2 ignored |
+| `cargo llvm-cov --workspace --summary-only` | 86.21 % of lines (`refresh.rs` 96.13 %, `external.rs` 84.26 %) |
+| planted defect: `invalid_client` classified as transient | `a_refused_client_holds_every_renewal_without_blaming_an_account`, `a_refused_client_after_the_hold_is_tried_once_more` failed; restored |
+
+The renewal-refused caption was not rendered in a browser. It is one conditional `usage-caption`
+beside the Claude Swap caption, and `npm run build` type-checks it.
