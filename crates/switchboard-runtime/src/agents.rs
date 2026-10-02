@@ -152,7 +152,13 @@ mod setup_tests {
     fn setup_offers_commands_for_the_found_cli_and_never_a_credential() {
         // Read-only: it looks for the CLI and a link, and writes nothing.
         let setup = setup();
-        for key in ["cli_path", "bundled_cli", "linked_cli", "can_link", "commands"] {
+        for key in [
+            "cli_path",
+            "bundled_cli",
+            "linked_cli",
+            "can_link",
+            "commands",
+        ] {
             assert!(setup.get(key).is_some(), "{key}");
         }
         let claude = setup["commands"]["claude_code"].as_str().unwrap();
