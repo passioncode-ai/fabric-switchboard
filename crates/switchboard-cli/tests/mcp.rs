@@ -12,7 +12,7 @@ use switchboard_runtime::{Operation, Owner};
 
 struct Agent {
     child: Child,
-    input: ChildStdin,
+    input: Option<ChildStdin>,
     output: BufReader<ChildStdout>,
     next: i64,
 }
@@ -41,15 +41,19 @@ impl Agent {
         let output = BufReader::new(child.stdout.take().unwrap());
         Self {
             child,
-            input,
+            input: Some(input),
             output,
             next: 1,
         }
     }
     fn send(&mut self, raw: &str) -> Value {
-        self.input.write_all(raw.as_bytes()).unwrap();
-        self.input.write_all(b"\n").unwrap();
-        self.input.flush().unwrap();
+        self.input
+            .as_mut()
+            .unwrap()
+            .write_all(raw.as_bytes())
+            .unwrap();
+        self.input.as_mut().unwrap().write_all(b"\n").unwrap();
+        self.input.as_mut().unwrap().flush().unwrap();
         let mut line = String::new();
         self.output.read_line(&mut line).unwrap();
         serde_json::from_str(&line).unwrap()
@@ -79,7 +83,16 @@ impl Agent {
     }
 }
 impl Drop for Agent {
+    /// End of input ends the server normally, so a coverage profile is written; a server
+    /// that does not exit within five seconds is killed.
     fn drop(&mut self) {
+        drop(self.input.take());
+        for _ in 0..50 {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -138,6 +151,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     // A notification gets no answer; the next request is answered in order.
     agent
         .input
+        .as_mut()
+        .unwrap()
         .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
         .unwrap();
     assert_eq!(agent.request("ping", json!({}))["result"], json!({}));
