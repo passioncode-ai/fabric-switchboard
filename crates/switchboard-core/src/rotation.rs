@@ -172,8 +172,12 @@ impl Store {
         let Ok(credential) = self.vault.get(&account.id) else {
             return false;
         };
+        // Managed requests present the access token itself. Claude Code renews an expired
+        // one from its refresh token, so native rotation needs only a live lineage.
+        let live = credential.expires_at.is_none_or(|t| t > now)
+            || (policy.target == "claude_cli" && credential.refresh_token.is_some());
         credential.validate(account.provider, account.kind).is_ok()
-            && credential.expires_at.is_none_or(|t| t > now)
+            && live
             && (policy.target != "claude_cli" || credential.native_context.is_some())
     }
 }

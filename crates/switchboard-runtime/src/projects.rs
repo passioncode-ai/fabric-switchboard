@@ -284,7 +284,7 @@ pub(crate) fn apply(
                 } else if !global {
                     outcome(provider, "needs_global", Some(account), "This rule changes the Claude Code login for every ordinary claude session on this machine. Call again with global: true to apply it.".into())
                 } else {
-                    match activate_native(store, &account.id, None, native) {
+                    match activate_native(store, &account.id, None, native, runtime.map(|r| &r.refresh)) {
                         Ok(()) => {
                             if let Some(runtime) = runtime {
                                 runtime.invalidate_current();

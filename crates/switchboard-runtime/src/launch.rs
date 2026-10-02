@@ -342,8 +342,9 @@ fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
         Err("Terminal launch is currently supported on macOS and Windows only.".into())
     }
 }
+/// An empty sign-in label is allowed: the captured email names the account at finish.
 fn validate_fields(label: &str, pool: &str) -> Result<(), String> {
-    if label.trim().is_empty() || label.len() > 80 || label.chars().any(char::is_control) {
+    if label.len() > 80 || label.chars().any(char::is_control) {
         return Err("Enter a label of up to 80 characters.".into());
     }
     if pool.is_empty()
@@ -435,13 +436,14 @@ pub fn capture_login(login: &Login) -> Result<Credential, String> {
             #[cfg(target_os = "macos")]
             {
                 let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
-                let bytes = security_framework::passwords::get_generic_password(
-                    &keychain_service(&login.home),
-                    &user,
-                )
-                .map_err(|_| {
-                    "Sign-in credential unavailable. Check Keychain access and finish login."
-                })?;
+                // Claude Code wrote this item with /usr/bin/security; reading it the same
+                // way is silent (PLAN-0.5 C-3).
+                let bytes = crate::external_keychain::read(&keychain_service(&login.home), &user)
+                    .ok()
+                    .flatten()
+                    .ok_or(
+                        "Sign-in credential unavailable. Check Keychain access and finish login.",
+                    )?;
                 String::from_utf8(bytes).map_err(|_| "Sign-in credential is unsupported.")?
             }
             #[cfg(not(target_os = "macos"))]
@@ -451,6 +453,21 @@ pub fn capture_login(login: &Login) -> Result<Credential, String> {
         }
     };
     Credential::parse(login.provider, AuthKind::OAuth, &material)
+}
+/// Where an official sign-in stands, read from its private home only — no credential.
+/// `ended` means the Terminal session exited without the provider CLI succeeding.
+pub fn login_state(login: &Login) -> &'static str {
+    if read_regular(&login.home.join(".completed")).is_ok_and(|v| v == "complete") {
+        return "complete";
+    }
+    #[cfg(unix)]
+    let marker = login.home.join(".session-pid");
+    #[cfg(windows)]
+    let marker = login.home.join(".session-process");
+    if marker.exists() && ensure_idle(&login.home).is_ok() {
+        return "ended";
+    }
+    "pending"
 }
 pub fn capture_login_profile(login: &Login) -> Result<crate::external::CapturedProfile, String> {
     if read_regular(&login.home.join(".completed"))? != "complete" {
@@ -465,14 +482,8 @@ pub fn cancel_login(login: &Login) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if login.provider == Provider::Claude {
         let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
-        if let Err(error) = security_framework::passwords::delete_generic_password(
-            &keychain_service(&login.home),
-            &user,
-        ) {
-            if error.code() != -25300 {
-                return Err("Sign-in cleanup needs Keychain access.".into());
-            }
-        }
+        crate::external_keychain::delete(&keychain_service(&login.home), &user)
+            .map_err(|_| "Sign-in cleanup needs Keychain access.")?;
     }
     fs::remove_dir_all(&login.home).map_err(|_| "Sign-in cleanup failed.".into())
 }
@@ -480,14 +491,8 @@ pub fn clean_login(login: &Login) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     if login.provider == Provider::Claude {
         let user = std::env::var("USER").map_err(|_| "Local login user unavailable.")?;
-        if let Err(error) = security_framework::passwords::delete_generic_password(
-            &keychain_service(&login.home),
-            &user,
-        ) {
-            if error.code() != -25300 {
-                return Err("Account saved; isolated login cleanup needs attention.".into());
-            }
-        }
+        crate::external_keychain::delete(&keychain_service(&login.home), &user)
+            .map_err(|_| "Account saved; isolated login cleanup needs attention.")?;
     }
     match fs::remove_dir_all(&login.home) {
         Ok(()) => Ok(()),
@@ -984,10 +989,41 @@ mod tests {
         assert_eq!(store.snapshot().unwrap().events.len(), 1);
     }
     #[test]
+    fn login_state_reads_completion_and_an_exited_terminal() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("login");
+        std::fs::create_dir_all(&home).unwrap();
+        let account = switchboard_core::Account {
+            id: Uuid::new_v4().to_string(),
+            label: "x".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        let login = fixture_login(home.clone(), account);
+        assert_eq!(login_state(&login), "pending");
+        // A session pid that no longer runs, and no completion marker: the sign-in ended.
+        private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+        assert_eq!(login_state(&login), "ended");
+        private_write(&home.join(".completed"), b"complete", false).unwrap();
+        assert_eq!(login_state(&login), "complete");
+    }
+    #[test]
     fn rejects_invalid_fields() {
         assert!(validate_fields("x", "../../escape").is_err());
         assert!(validate_fields("\n", "default").is_err());
         assert!(validate_fields("Work", "team-a").is_ok());
+        assert!(
+            validate_fields("", "default").is_ok(),
+            "email names it at finish"
+        );
+        assert!(validate_fields(&"x".repeat(81), "default").is_err());
     }
     #[test]
     fn private_write_and_symlink_refusal() {

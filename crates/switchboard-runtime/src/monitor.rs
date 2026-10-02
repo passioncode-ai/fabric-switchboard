@@ -1,4 +1,5 @@
-//! Quota-only polling. No inference retry and no competing OAuth refresh grant.
+//! Quota polling and renewal of inactive Claude tokens (PLAN-0.5 D-2). No inference retry;
+//! the account signed in to the ordinary Claude Code is never refreshed here.
 use crate::{external, Runtime};
 use serde_json::json;
 use std::{
@@ -36,7 +37,7 @@ impl MonitorHandle {
                     && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
                 {
                     let _mutation = runtime.mutations.lock().await;
-                    sync_live_sources(&runtime.store, runtime.native.current);
+                    sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();
                     last_source_sync = time;
                 }
@@ -55,8 +56,18 @@ impl MonitorHandle {
                         .map(|h| h.next_check_at)
                         .unwrap_or(0)
                 });
+                if native_sources {
+                    renew_due(&runtime).await;
+                }
                 for account in due.into_iter().take(2) {
-                    let _ = probe(runtime.store.clone(), &account.id).await;
+                    let _ = check(
+                        &runtime.store,
+                        runtime.native,
+                        &runtime.refresh,
+                        &account.id,
+                        Some(&runtime.mutations),
+                    )
+                    .await;
                 }
                 let _mutation = runtime.mutations.lock().await;
                 let _ = rotate(&runtime, native_sources);
@@ -118,7 +129,7 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
     let checked = now();
     match result {
         Ok(usage) => Ok(usage),
-        Err(_) => {
+        Err(error) => {
             let delay = backoff(
                 account
                     .usage_health
@@ -126,10 +137,103 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
                     .map(|h| (h.checked_at, h.next_check_at)),
             );
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
+            Err(if error == switchboard_proxy::REJECTED {
+                error
+            } else {
+                "Usage unavailable. Check sign-in or try again after the next scheduled check."
+                    .into()
+            })
+        }
+    }
+}
+
+/// A quota check that first keeps an inactive Claude account's token alive and retries once
+/// after a refresh when the provider rejects the token (Claude Swap's shape, PLAN-0.5 D-2).
+/// `lock` is the owner's mutation lock when the caller does not already hold it.
+pub(crate) async fn check(
+    store: &Arc<Store>,
+    native: crate::NativeSources,
+    refresh: &crate::refresh::RefreshState,
+    id: &str,
+    lock: Option<&tokio::sync::Mutex<()>>,
+) -> Result<Usage, String> {
+    let refreshed = |force: bool| async move {
+        let _guard = match lock {
+            Some(lock) => Some(lock.lock().await),
+            None => None,
+        };
+        crate::refresh::ensure_fresh(store, native, refresh, id, force).await
+    };
+    // A dead lineage leaves the due queue for the long backoff; otherwise it would sort
+    // first on every tick and starve every other account's check and renewal.
+    let dead = || {
+        let time = now();
+        let _ = store.usage_health(id, "failed", time, time + MAX_BACKOFF);
+        Err(SIGN_IN.to_string())
+    };
+    let sequence = async {
+        if refreshed(false).await == crate::refresh::Outcome::SignInRequired {
+            return dead();
+        }
+        match probe(store.clone(), id).await {
+            Err(error) if error == switchboard_proxy::REJECTED => match refreshed(true).await {
+                crate::refresh::Outcome::Refreshed => probe(store.clone(), id).await,
+                crate::refresh::Outcome::SignInRequired => dead(),
+                _ => Err(error),
+            },
+            result => result,
+        }
+    };
+    // One deadline below the control channel's 30 seconds, so a CLI or MCP caller never
+    // times out while the owner keeps working on its behalf.
+    tokio::time::timeout(CHECK_DEADLINE, sequence)
+        .await
+        .unwrap_or_else(|_| {
             Err(
                 "Usage unavailable. Check sign-in or try again after the next scheduled check."
                     .into(),
             )
+        })
+}
+use crate::refresh::SIGN_IN;
+const CHECK_DEADLINE: Duration = Duration::from_secs(25);
+
+/// Renews inactive Claude tokens on their own schedule. Quota checks back off up to 30
+/// minutes, longer than the renewal margin, so a managed route could otherwise expire
+/// between checks. At most two grants per pass.
+async fn renew_due(runtime: &Runtime) {
+    let Ok(snapshot) = runtime.store.snapshot() else {
+        return;
+    };
+    let time = now();
+    let mut done = 0;
+    for account in snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+    {
+        if done == 2 {
+            break;
+        }
+        let due = runtime
+            .store
+            .stored_credential(&account.id)
+            .is_ok_and(|c| crate::refresh::due(&c, time));
+        if !due {
+            continue;
+        }
+        let _mutation = runtime.mutations.lock().await;
+        if crate::refresh::ensure_fresh(
+            &runtime.store,
+            runtime.native,
+            &runtime.refresh,
+            &account.id,
+            false,
+        )
+        .await
+            == crate::refresh::Outcome::Refreshed
+        {
+            done += 1;
         }
     }
 }
@@ -139,6 +243,7 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
 fn sync_live_sources(
     store: &Store,
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
+    refresh: &crate::refresh::RefreshState,
 ) {
     let Ok(snapshot) = store.snapshot() else {
         return;
@@ -157,6 +262,9 @@ fn sync_live_sources(
         let Ok(profile) = current(provider) else {
             continue;
         };
+        if provider == Provider::Claude {
+            refresh.note_active(&profile.identity);
+        }
         for account in accounts {
             if store
                 .match_external(provider, &account.pool, &profile.identity)
@@ -222,7 +330,13 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     .store
                     .select_with_cooldown(policy.provider, &policy.pool, id, now())
             } else if native_sources {
-                crate::activate_native(&runtime.store, id, current.as_deref(), runtime.native)
+                crate::activate_native(
+                    &runtime.store,
+                    id,
+                    current.as_deref(),
+                    runtime.native,
+                    Some(&runtime.refresh),
+                )
             } else {
                 Err("Native account source unavailable.".into())
             };
@@ -391,6 +505,149 @@ mod tests {
                 [(Some(b.id), detail.1.to_string())]
             );
         }
+    }
+    #[tokio::test]
+    async fn native_rotation_switches_to_an_expired_but_renewable_account() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let mut stale = credential("synthetic-b");
+        stale.expires_at = Some(1_000);
+        let b = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                stale,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+        // A managed route presents the access token itself, so it stays ineligible there.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let mut stale = credential("synthetic-b");
+        stale.expires_at = Some(1_000);
+        let b = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                stale,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "no_eligible_account");
+    }
+    #[tokio::test]
+    async fn a_rejected_lineage_reports_sign_in_without_probing() {
+        use crate::fixtures::*;
+        use axum::{routing::post, Router};
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    axum::Json(json!({"error":"invalid_grant"})),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/token", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let mut stale = credential("synthetic-b");
+        stale.expires_at = Some(1_000);
+        stale.refresh_token = Some("synthetic-b-refresh".into());
+        let b = store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                stale,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        let state = crate::refresh::RefreshState::at(url);
+        let native = crate::NativeSources {
+            current: signed_in,
+            activate: activates,
+        };
+        let lock = tokio::sync::Mutex::new(());
+        assert_eq!(
+            check(&store, native, &state, &b.id, Some(&lock))
+                .await
+                .unwrap_err(),
+            SIGN_IN
+        );
+        assert_eq!(state.sign_in_required(&store), vec![b.id.clone()]);
+        // It leaves the due queue for the long backoff instead of starving other accounts.
+        let account = store.snapshot().unwrap().accounts.remove(0);
+        let health = account.usage_health.clone().unwrap();
+        assert_eq!(health.status, "failed");
+        assert!(health.next_check_at >= now() + MAX_BACKOFF - 5);
+        assert!(!due(&account, now()));
+    }
+    #[tokio::test]
+    async fn a_token_expiring_between_backed_off_checks_is_renewed() {
+        use crate::fixtures::*;
+        use axum::{routing::post, Router};
+        let app = Router::new().route(
+            "/token",
+            post(|| async { axum::Json(json!({"access_token":"renewed","expires_in":28800})) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/token", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        runtime.refresh.set_endpoint(url);
+        let mut soon = credential("synthetic-b");
+        soon.expires_at = Some(now() + 300);
+        soon.refresh_token = Some("synthetic-b-refresh".into());
+        let b = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                soon,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        // Its quota check is backed off for half an hour, past the token's expiry.
+        runtime
+            .store
+            .usage_health(&b.id, "failed", now(), now() + MAX_BACKOFF)
+            .unwrap();
+        renew_due(&runtime).await;
+        assert_eq!(
+            runtime.store.stored_credential(&b.id).unwrap().access_token,
+            "renewed"
+        );
     }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {

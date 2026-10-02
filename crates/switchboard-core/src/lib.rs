@@ -8,6 +8,8 @@ mod persistence;
 pub mod private_fs;
 mod projects;
 mod rotation;
+#[cfg(unix)]
+pub mod security_cli;
 mod vault;
 #[cfg(windows)]
 pub mod windows;
@@ -567,6 +569,52 @@ impl Store {
             .map_err(vault::surface("Credential storage unavailable"))?;
         credential.validate(a.provider, a.kind)?;
         Ok(credential)
+    }
+    /// A refresh grant consumed `consumed` and returned `refreshed`. Every stored copy of that
+    /// lineage — the same identity may sit in several pools — takes the new generation, or its
+    /// next use would present a refresh token the provider has already rotated away. Quota
+    /// stays: it describes the account, and a refresh does not change who the account is.
+    pub fn adopt_refreshed(
+        &self,
+        provider: Provider,
+        consumed: &str,
+        refreshed: &Credential,
+    ) -> Result<Vec<String>, String> {
+        let state = self.lock()?;
+        let mut updated = Vec::new();
+        for a in state
+            .accounts
+            .iter()
+            .filter(|a| a.provider == provider && a.kind == AuthKind::OAuth)
+        {
+            let Ok(stored) = self.vault.get(&a.id) else {
+                continue;
+            };
+            if stored.refresh_token.as_deref() != Some(consumed) {
+                continue;
+            }
+            refreshed.validate(a.provider, a.kind)?;
+            if refreshed
+                .account_id
+                .as_ref()
+                .zip(
+                    a.external_identity
+                        .as_ref()
+                        .and_then(|i| i.account_id.as_ref()),
+                )
+                .is_some_and(|(x, y)| x != y)
+            {
+                return Err("Credential identity does not match account identity".into());
+            }
+            self.vault
+                .put(&a.id, refreshed)
+                .map_err(|_| "Credential storage unavailable")?;
+            updated.push(a.id.clone());
+        }
+        if updated.is_empty() {
+            return Err("Credential changed during refresh".into());
+        }
+        Ok(updated)
     }
     pub fn usage_health(
         &self,

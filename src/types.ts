@@ -11,7 +11,7 @@ export interface RotationPolicy {
   threshold_percent: number; hysteresis_percent: number; cooldown_seconds: number;
   max_age_seconds: number; last_switched_at: number | null;
 }
-export interface MonitorStatus { running: boolean; interval_seconds: number; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
+export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number }
 export interface Account {
@@ -42,6 +42,7 @@ export interface Adapter {
   select(account: Account): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
+  loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   finishLogin(loginId: string): Promise<Account>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;

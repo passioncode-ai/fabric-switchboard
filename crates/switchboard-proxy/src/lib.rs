@@ -466,6 +466,10 @@ fn parse_reset(value: &serde_json::Value, observed_at: i64) -> Result<i64, Strin
     Ok(parsed)
 }
 
+/// The provider refused the token itself (expired or revoked), as opposed to a quota or
+/// network failure. A refresh may recover it; callers compare against this exact text.
+pub const REJECTED: &str = "Provider rejected the credential. Sign in again.";
+
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
 pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String> {
     let snapshot = store.snapshot()?;
@@ -477,9 +481,12 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
     if account.kind != AuthKind::OAuth {
         return Err("Usage unavailable for this credential type.".into());
     }
-    let credential = store.credential(&id)?;
+    let credential = store.stored_credential(&id)?;
+    if !account.enabled {
+        return Err("Account is disabled".into());
+    }
     if credential.expires_at.is_some_and(|t| t <= now()) {
-        return Err("Provider rejected the credential. Sign in again.".into());
+        return Err(REJECTED.into());
     }
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -504,6 +511,10 @@ pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String>
         .send()
         .await
         .map_err(|_| "Usage check could not reach provider.")?;
+    // Only 401 speaks about the token itself; a 403 can be a plan or region refusal.
+    if response.status().as_u16() == 401 {
+        return Err(REJECTED.into());
+    }
     if !response.status().is_success() {
         return Err("Usage unavailable. Check the account and retry later.".into());
     }
