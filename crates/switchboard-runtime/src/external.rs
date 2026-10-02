@@ -226,16 +226,34 @@ fn username() -> Result<String, String> {
 }
 fn context(provider: Provider, explicit: Option<&Path>) -> Result<Context, String> {
     let user_home = dirs::home_dir().ok_or("User home unavailable.")?;
-    let env = std::env::var(if provider == Provider::Claude {
+    context_from(
+        provider,
+        explicit,
+        &|name| std::env::var(name).ok(),
+        &user_home,
+        &Native,
+        username()?,
+    )
+}
+/// Where Claude Code or Codex keeps its sign-in for this environment, resolved the way the CLI
+/// itself resolves it. Inputs are explicit so every branch is testable without the real home.
+fn context_from(
+    provider: Provider,
+    explicit: Option<&Path>,
+    env: &dyn Fn(&str) -> Option<String>,
+    user_home: &Path,
+    reader: &dyn Reader,
+    user: String,
+) -> Result<Context, String> {
+    let variable = env(if provider == Provider::Claude {
         "CLAUDE_CONFIG_DIR"
     } else {
         "CODEX_HOME"
     })
-    .ok()
     .filter(|s| !s.is_empty());
     let home = explicit
         .map(Path::to_owned)
-        .or_else(|| env.as_ref().map(PathBuf::from))
+        .or_else(|| variable.as_ref().map(PathBuf::from))
         .unwrap_or_else(|| {
             user_home.join(if provider == Provider::Claude {
                 ".claude"
@@ -246,9 +264,11 @@ fn context(provider: Provider, explicit: Option<&Path>) -> Result<Context, Strin
     if !home.is_absolute() {
         return Err("CLI home must be an absolute path.".into());
     }
-    let raw = explicit.map(|p| p.to_string_lossy().into_owned()).or(env);
+    let raw = explicit
+        .map(|p| p.to_string_lossy().into_owned())
+        .or(variable);
     if provider == Provider::Claude && explicit.is_none() {
-        if let Ok(secure) = std::env::var("CLAUDE_SECURESTORAGE_CONFIG_DIR") {
+        if let Some(secure) = env("CLAUDE_SECURESTORAGE_CONFIG_DIR") {
             if secure != raw.clone().unwrap_or_default() {
                 return Err("Claude secure storage points at another profile. Use a shell with matching Claude settings.".into());
             }
@@ -256,7 +276,7 @@ fn context(provider: Provider, explicit: Option<&Path>) -> Result<Context, Strin
     }
     let config = if provider == Provider::Codex {
         home.join("config.toml")
-    } else if Native.read(&home.join(".config.json"), CAP)?.is_some() {
+    } else if reader.read(&home.join(".config.json"), CAP)?.is_some() {
         home.join(".config.json")
     } else if raw.is_some() {
         home.join(".claude.json")
@@ -270,7 +290,7 @@ fn context(provider: Provider, explicit: Option<&Path>) -> Result<Context, Strin
             .as_deref()
             .map(service)
             .unwrap_or_else(|| "Claude Code-credentials".into()),
-        user: username()?,
+        user,
         mac: cfg!(target_os = "macos"),
     })
 }
@@ -1753,6 +1773,116 @@ mod tests {
                 .access_token,
             "backup"
         );
+    }
+    #[test]
+    fn context_resolves_homes_configs_and_keychain_services_like_the_cli() {
+        let f = Fixture::new();
+        let home = Path::new("/fixture/user");
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // Default: ~/.claude with ~/.claude.json and the plain service name.
+        let c = context_from(Provider::Claude, None, &env(&[]), home, &f, "u".into()).unwrap();
+        assert_eq!(
+            (c.home.as_path(), c.config.as_path()),
+            (
+                Path::new("/fixture/user/.claude"),
+                Path::new("/fixture/user/.claude.json")
+            )
+        );
+        assert_eq!(c.service, "Claude Code-credentials");
+        // CLAUDE_CONFIG_DIR: config inside it and a hashed service suffix.
+        let c = context_from(
+            Provider::Claude,
+            None,
+            &env(&[("CLAUDE_CONFIG_DIR", "/fixture/alt")]),
+            home,
+            &f,
+            "u".into(),
+        )
+        .unwrap();
+        assert_eq!(c.config, Path::new("/fixture/alt/.claude.json"));
+        assert_eq!(c.service, service("/fixture/alt"));
+        assert!(
+            c.service.starts_with("Claude Code-credentials-")
+                && c.service.len() == "Claude Code-credentials-".len() + 8
+        );
+        // A legacy .config.json wins over .claude.json.
+        f.put(Path::new("/fixture/alt/.config.json"), b"{}");
+        let c = context_from(
+            Provider::Claude,
+            None,
+            &env(&[("CLAUDE_CONFIG_DIR", "/fixture/alt")]),
+            home,
+            &f,
+            "u".into(),
+        )
+        .unwrap();
+        assert_eq!(c.config, Path::new("/fixture/alt/.config.json"));
+        // Secure storage pointing at another profile is refused; matching is fine.
+        assert!(context_from(
+            Provider::Claude,
+            None,
+            &env(&[
+                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/fixture/other")
+            ]),
+            home,
+            &f,
+            "u".into()
+        )
+        .is_err());
+        assert!(context_from(
+            Provider::Claude,
+            None,
+            &env(&[
+                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/fixture/alt")
+            ]),
+            home,
+            &f,
+            "u".into()
+        )
+        .is_ok());
+        // A relative home is refused; Codex uses CODEX_HOME and config.toml.
+        assert!(context_from(
+            Provider::Claude,
+            None,
+            &env(&[("CLAUDE_CONFIG_DIR", "relative")]),
+            home,
+            &f,
+            "u".into()
+        )
+        .is_err());
+        let c = context_from(
+            Provider::Codex,
+            None,
+            &env(&[("CODEX_HOME", "/fixture/codex")]),
+            home,
+            &f,
+            "u".into(),
+        )
+        .unwrap();
+        assert_eq!(c.config, Path::new("/fixture/codex/config.toml"));
+        // An explicit home (an isolated sign-in) ignores the environment.
+        let c = context_from(
+            Provider::Claude,
+            Some(Path::new("/fixture/login")),
+            &env(&[
+                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/elsewhere"),
+            ]),
+            home,
+            &f,
+            "u".into(),
+        )
+        .unwrap();
+        assert_eq!(c.service, service("/fixture/login"));
     }
     #[test]
     fn backup_file_precedes_keychain() {
