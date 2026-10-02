@@ -4,6 +4,12 @@
 
 Written by `agent_sync.py merge`. Entries newer than 7 days keep their detail; older ones are compacted to one line each on the next write. Read it before starting work: it is the shortest answer to *what landed while I was on my branch*.
 
+### 2026-10-02T21:48:55Z · `switchboard-0.5-backup` · agent/switchboard-0.5-backup → main · `03a375f`
+- run: r-47aaa5aa6
+- files: 30 (30 files changed, 1982 insertions(+), 29 deletions(-))
+- conflicts: none
+- summary: 0.5.0: automatic encrypted backups, switching on provider limit errors (PR #19)
+
 ### 2026-10-02T21:05:18Z · `switchboard-0.5` · agent/switchboard-0.5 → main · `23e11a9`
 - run: r-47aaa5aa6
 - files: 53 (53 files changed, 2410 insertions(+), 473 deletions(-))
