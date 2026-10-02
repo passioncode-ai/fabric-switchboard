@@ -15,6 +15,11 @@
    item or a log read by more than one store or machine gets an owner field and a rule for what
    each owner may delete, written in the spec before building. Source: run 2026-10-02 (backups).
    Retire after two runs adding shared paths pass the seam tier with no finding of this class.
+4. **A call with an irreversible remote effect must outlive its caller.** Anything that spends a
+   one-time credential (a refresh grant, a consumed code) runs in a task no deadline or dropped
+   request can cancel, and records its result before returning; its custody is keyed by the
+   thing spent, not by whoever asked. Name both in the spec's failure column. Source: run
+   2026-10-03. Retire after two runs adding such calls pass review with no finding of this class.
 
 ## Run stamps
 
@@ -22,8 +27,36 @@
 |---|---|---|---|
 | 2026-10-02 | PLAN-0.5 prompt-free switching | `2cf0088` | yes — entries below |
 | 2026-10-02 | PLAN-0.5 backups and limit errors, release v0.5.0-beta.1 | `e6c5e54` | yes — entry below |
+| 2026-10-03 | PLAN-0.5 §0.5.1 Claude Swap parity and review fixes | `13a8712` | yes — entry below |
 
 ## Recent log
+
+### 2026-10-03 — a token-spending call was cancellable, and its successor had one owner
+
+- **Symptom:**
+  - 133 runtime tests and the full gate were green at `dc17508`, yet the final review found two P1s
+    (release-0.5 §0.5.1 R-1, R-2):
+    - a grant whose response named another account dropped the successor;
+    - a grant awaited inside a 25 s deadline (or a control request that disconnected) could be
+      dropped after the provider had already rotated the token.
+  - The same review found the successor keyed by one account id, so a second copy holding the same
+    spent token could never adopt it.
+- **Surfaced at:** stage 5, independent review. **Owned by:** stage 3 spec. The renewal contract
+  said what happens when *storing* fails, but not when the caller stops waiting, and not whose
+  successor it is when several accounts hold one token.
+- **Root cause:** an irreversible remote effect (the grant spends the old token) was modelled as an
+  ordinary async call, and the token's custody was modelled per account rather than per token.
+- **Fix:** a code change, with three planted-defect checks:
+  - the grant runs in its own task and records the successor before returning;
+  - the successor is keyed by the spent token;
+  - an owner named by the token endpoint routes it.
+- **Catches it next time:** standing instruction 4.
+
+### Standing-instruction prune (2026-10-03)
+
+- Instruction 2 held: the stage-0 fetch found no unread remote commits. That is 1 of the 3 runs it
+  needs to retire.
+- Instructions 1 and 3 stay.
 
 ### 2026-10-02 — three breaks passed a green unit gate
 
