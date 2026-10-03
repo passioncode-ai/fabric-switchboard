@@ -8,9 +8,11 @@ request. It is a desktop app plus the `switchboard` command-line tool, for macOS
 Windows. It is Fabric's account tool and works on its own; built by
 [PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
 
-**Status: beta. [v0.4.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1)
-is published** (prerelease, macOS universal notarized by Apple + Windows x64 unsigned). Real
-provider login and end-to-end requests with live accounts are not yet verified.
+**Status: beta. [v0.5.3-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1)
+is published** (prerelease: macOS universal notarized by Apple and stapled; Windows x64 unsigned
+and cross-built). From the next release, builds are made and signed only by the
+[release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Real provider login and
+end-to-end requests with live accounts are not yet verified.
 
 - **Download:** [macOS](https://passioncode.ai/switchboard/download/macos) ·
   [Windows](https://passioncode.ai/switchboard/download/windows) ·
@@ -109,8 +111,9 @@ npm run app:build
 open 'target/release/bundle/macos/Fabric Switchboard.app'
 ```
 
-That command alone does not establish Developer ID signing or notarization. The signing
-procedure and the separate Windows workflow are in the [distribution guide](docs/DISTRIBUTION.md).
+That command alone does not establish Developer ID signing or notarization, and a build
+signed on a laptop is a debug build. Releases are built, signed and notarized only by the
+[release workflow](docs/DISTRIBUTION.md) in GitHub Actions.
 Binaries are not stored in Git. Dependencies are pinned by `Cargo.lock` and
 `package-lock.json`; byte-for-byte reproducibility is not claimed.
 
@@ -171,9 +174,21 @@ cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned
 | `src` | TypeScript interface and the clearly labelled demo |
 | `docs` | research, specification, scenarios, contracts and evidence |
 
-Full hosted CI runs nightly. The separate Windows build is started by hand for an exact
-commit SHA; push and pull requests do not run the full suite. A workflow existing does not
-mean it passed. Other projects' sources were studied but are not included as
+Full hosted CI runs nightly; push and pull requests do not run the full suite. A workflow
+existing does not mean it passed.
+
+## Releases
+
+A release is a `vX.Y.Z` tag on the merged release commit. The tag starts
+[`release.yml`](.github/workflows/release.yml) in the protected `release` environment: a member
+of `release-approvers` other than the tag's author approves; the macOS app and CLI are signed
+with the organization's CI Developer ID and notarized (the app stapled); Windows is built
+natively (Authenticode signing through Azure Artifact Signing is ready but switched off until
+the account exists, and the receipt says `windows_authenticode: NOT_SIGNED`); then every file
+is attested (Sigstore), summed in `SHA256SUMS`, GPG-signed and published with the notes from
+[CHANGELOG.md](CHANGELOG.md). A rehearsal runs the same path on a `vX.Y.Z-rc.N` tag with
+`gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false` and creates no release.
+Details, receipts and the Azure setup: [DISTRIBUTION.md](docs/DISTRIBUTION.md). Other projects' sources were studied but are not included as
 dependencies.
 
 ## License

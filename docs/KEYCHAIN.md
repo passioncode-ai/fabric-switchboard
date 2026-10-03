@@ -37,11 +37,16 @@ installed 0.4.0-beta.1 is in none of them.
    carries a `SecAccess` (`kSecAttrAccess`) whose trusted applications are the caller, the running
    app bundle and its `Contents/MacOS/switchboard`, and `/Applications/Fabric Switchboard.app` and
    its CLI — each only if present and signed by the release team (`anchor apple generic and
-   certificate leaf[subject.OU] = "KJ35UYYL22"`; a fork sets `SWITCHBOARD_SIGNING_TEAM` at build
-   time). Keychain stores each as a designated requirement, so a later update signed by the same
+   certificate leaf[subject.OU] = "<team>"`). The team is given at build time in
+   `SWITCHBOARD_SIGNING_TEAM` and is never a literal in the code: the release workflow passes the
+   `release` environment's `APPLE_TEAM_ID` (PassionCode.ai's team is `KJ35UYYL22`),
+   `scripts/build_macos.py` passes the signing identity's team, and a fork passes its own. A build
+   compiled without it trusts no team, so it is a development build (decision 2) whatever signs it
+   (`keychain_macos.rs`, tests `a_build_without_the_team_variable_trusts_no_team` and
+   `only_a_well_formed_team_id_becomes_a_requirement`). Keychain stores each as a designated requirement, so a later update signed by the same
    team with the same identifier matches without a prompt, wherever it is installed.
 2. **Namespaces by build.** A team-signed build uses `ai.passioncode.fabric-switchboard.shared`. Any
-   other build (ad hoc, unsigned, another team) uses `ai.passioncode.fabric-switchboard.development`
+   other build (ad hoc, unsigned, another team, or compiled without a team) uses `ai.passioncode.fabric-switchboard.development`
    and never reads, moves or deletes the user's items.
 3. **Ordinary operations never show a dialog.** Reads, writes and deletes run with
    `SecKeychainSetUserInteractionAllowed(false)`; Apple: "keychain services functions that
@@ -114,7 +119,8 @@ it against them); that is the post-release acceptance step below.
 Needs the Developer ID identity; never part of `./scripts/check.sh`.
 
 ```sh
-cargo test -p switchboard-core --lib --no-run      # note the unittests path it prints
+# the team must be compiled in, or the probe is a development build and `write` fails
+SWITCHBOARD_SIGNING_TEAM=<your team id> cargo test -p switchboard-core --lib --no-run   # note the unittests path
 # lay it out as Probe.app/Contents/MacOS/{fabric-switchboard,switchboard} with an Info.plist,
 # codesign the CLI with its own --identifier, then the bundle; create a throwaway keychain:
 security create-keychain -p synthetic-test-only "$TMP/acceptance.keychain-db"

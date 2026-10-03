@@ -27,6 +27,14 @@
 1. The agent-memory design in Project Observatory (DEC-0250, PB-137; Fabric ADR-0105). Its module M9 here is switching through a new session: the `claude --resume` probe first.
 2. Then SB-15.
 
+**Releases are now built and signed only in CI** (branch `feat/release-in-ci`, organization decision of 2026-10-03). The sections below this one still describe signing by hand on the operator's Mac; [DISTRIBUTION.md](DISTRIBUTION.md) is current.
+- [`release.yml`](../.github/workflows/release.yml) replaces `build-windows.yml`. A `vX.Y.Z` tag starts `preflight`, then `macos` and `windows` in the protected `release` environment, then the organization's `publish`. `-rc` tags rehearse with `publish=false`.
+- macOS: `build_macos.py --external-notarization`, the shared notarize action on the app, then `--finish-external`, which notarizes the CLI as its own ZIP and requires its ticket to list both slices' `CDHash`.
+- The team comes only from `SWITCHBOARD_SIGNING_TEAM`. CI passes `vars.APPLE_TEAM_ID`; a build without it is a development build ([KEYCHAIN.md](KEYCHAIN.md)).
+- Windows is built natively. Azure Artifact Signing is wired but off (`AZURE_SIGNING_ENABLED=false`). Opening the Azure account is the operator's step ([DISTRIBUTION.md → Human steps](DISTRIBUTION.md#human-steps-azure-artifact-signing-for-windows-operator)).
+- Tests: `scripts/test_build_macos.py`, `test_package_windows.py`, `test_release_preflight.py` (in `./scripts/check.sh`); `keychain_macos` tests `a_build_without_the_team_variable_trusts_no_team`, `only_a_well_formed_team_id_becomes_a_requirement`.
+- **Next for releases:** a `release-approvers` member other than the tag's author approves the `-rc` rehearsal, and its jobs are read to the end. The macOS smoke test and the Windows `tauri bundle` step have never run on a hosted runner. The 0.5.4 release PR then renames `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md) and keeps `windows_authenticode: NOT_SIGNED` in it.
+
 ---
 
 # Released — Switchboard v0.5.2-beta.1 (2026-10-03)
