@@ -315,10 +315,37 @@ pub fn restore(
             result.skipped += 1;
             continue;
         }
-        let Some(credential) = payload.credentials.get(&account.id).cloned() else {
+        let Some(mut credential) = payload.credentials.get(&account.id).cloned() else {
             result.failed += 1;
             continue;
         };
+        // The same account already saved in another pool may hold a newer generation than the
+        // backup: the restored copy starts from it, never from a token since spent.
+        if let Some(identity) = account
+            .external_identity
+            .as_ref()
+            .filter(|i| i.account_id.is_some())
+        {
+            let newest = existing
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.provider == account.provider
+                        && a.external_identity.as_ref().is_some_and(|other| {
+                            other.account_id == identity.account_id
+                                && other.organization_id == identity.organization_id
+                        })
+                })
+                .filter_map(|a| store.stored_credential(&a.id).ok())
+                .filter(|stored| {
+                    stored.refresh_token != credential.refresh_token
+                        && stored.expires_at.unwrap_or(0) >= credential.expires_at.unwrap_or(0)
+                })
+                .max_by_key(|stored| stored.expires_at.unwrap_or(0));
+            if let Some(newest) = newest {
+                credential = newest;
+            }
+        }
         match store.upsert(
             account.label.clone(),
             account.provider,
@@ -547,6 +574,43 @@ mod tests {
         assert_eq!(
             store.stored_credential(&a.id).unwrap().access_token,
             "new-token"
+        );
+    }
+    #[test]
+    fn a_restored_copy_starts_from_the_newest_generation_saved_elsewhere() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let store = store(&temp.path().join("one"));
+        let a = save(&store, "synthetic-a", "old-token");
+        let info = write(&store, &backups, &keys, 1_000).unwrap().unwrap();
+        // Later: A was removed from default, and its copy in "work" was renewed since.
+        store.remove(&a.id).unwrap();
+        let mut newer = oauth("synthetic-a", "new-token");
+        newer.expires_at = newer.expires_at.map(|t| t + 3600);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                newer,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let restored = restore(&store, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.added, 1);
+        let back = store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .into_iter()
+            .find(|x| x.pool == "default")
+            .unwrap();
+        assert_eq!(
+            store.stored_credential(&back.id).unwrap().access_token,
+            "new-token",
+            "never the spent generation from the backup"
         );
     }
     #[test]

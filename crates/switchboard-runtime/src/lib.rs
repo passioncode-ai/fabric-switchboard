@@ -476,10 +476,16 @@ impl Owner {
         let control = control::ControlHandle::start(runtime.clone()).await?;
         // Only the real data folder is backed up: a `--data-dir` scratch store must never
         // write into the operator's backup folder with the operator's key.
-        if native_sources && default_root().ok().as_deref() == Some(runtime.root.as_path()) {
+        let default_store = default_root().ok().as_deref() == Some(runtime.root.as_path());
+        if native_sources && default_store {
             if let Some(dir) = backup_dir() {
                 runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
             }
+        }
+        // One renewer per lineage: only the owner of the real data folder spends refresh
+        // tokens. A `--data-dir` store holding the same accounts would be a second renewer.
+        if native_sources && !default_store {
+            runtime.refresh.set_grants(false);
         }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         Ok(Self {
@@ -838,6 +844,10 @@ fn activate_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
+    // A renewal of this account is in flight: its stored token is being spent right now.
+    if refresh.is_some_and(|state| state.in_flight(store, id)) {
+        return Err(refresh::RENEWING.into());
+    }
     // An account Claude Swap renews: its newest generation may be in Swap's files, not here —
     // take it first, or Claude Code would get a token Swap already spent (audit P2-3).
     if let Some(state) = refresh {

@@ -376,6 +376,13 @@ fn sync_live_sources(
             let Ok(old) = store.stored_credential(&account.id) else {
                 continue;
             };
+            // A copy already newer than Claude Code's item (a renewal Switchboard stored while
+            // writing it back failed, or Claude Swap's) is never moved back.
+            if old.refresh_token != profile.credential.refresh_token
+                && old.expires_at.unwrap_or(0) > profile.credential.expires_at.unwrap_or(0)
+            {
+                continue;
+            }
             if old.access_token == profile.credential.access_token
                 && old.refresh_token == profile.credential.refresh_token
                 && old.id_token == profile.credential.id_token
@@ -448,12 +455,20 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         } else {
             None
         };
-        let decision = runtime.store.rotation_decision_with(
-            policy,
-            current.as_deref(),
-            now(),
-            &runtime.limits.limited_ids(now()),
-        )?;
+        // A rejected sign-in is never a candidate: activation would refuse it every pass and
+        // the next eligible account would never be tried.
+        let mut excluded = runtime.limits.limited_ids(now());
+        excluded.extend(
+            runtime
+                .refresh
+                .sign_in_required(&runtime.store)
+                .into_iter()
+                .filter(|id| current.as_deref() != Some(id.as_str())),
+        );
+        let decision =
+            runtime
+                .store
+                .rotation_decision_with(policy, current.as_deref(), now(), &excluded)?;
         let mut reason = decision.reason;
         if let Some(id) = decision.candidate_id.as_deref() {
             let result = if policy.target == "managed" {
@@ -668,6 +683,27 @@ mod tests {
         runtime.refresh.set_swap_switching(false);
         rotate(&runtime, true).unwrap();
         assert_eq!(reason(&runtime), "switched");
+    }
+    #[tokio::test]
+    async fn rotation_skips_a_rejected_sign_in_for_the_next_eligible_account() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 5.0);
+        quota(&runtime.store, &c.id, 20.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        // b looks freest but its lineage was rejected.
+        runtime.refresh.mark_dead_for_test(&runtime.store, &b.id);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+        assert_eq!(
+            events(&runtime.store, "activation"),
+            [(Some(c.id), "completed".to_string())]
+        );
     }
     #[tokio::test]
     async fn native_rotation_switches_to_an_expired_but_renewable_account() {
@@ -924,6 +960,36 @@ mod tests {
         assert_eq!(
             store.stored_credential(&a.id).unwrap().access_token,
             "rotated-access"
+        );
+    }
+    #[test]
+    fn background_sync_never_moves_a_newer_copy_back() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        // Switchboard holds a renewal Claude Code's item never received.
+        let mut newer = credential("synthetic-a");
+        newer.access_token = "renewed".into();
+        newer.refresh_token = Some("renewed-r".into());
+        newer.expires_at = newer.expires_at.map(|t| t + 3600);
+        let a = store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                newer,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let state = crate::refresh::RefreshState::default();
+        state.set_owner("synthetic-a-refresh", identity("synthetic-a"));
+        sync_live_sources(&store, signed_in, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "renewed"
         );
     }
     #[test]
