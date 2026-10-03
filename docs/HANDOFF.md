@@ -1,3 +1,14 @@
+# In progress — Switchboard v0.5.2-beta.1 release (2026-10-03)
+
+`main` `e4c2a0d` carries 0.5.2 ([#21](https://github.com/passioncode-ai/fabric-switchboard/pull/21): `invalid_client` hold, created config skips onboarding; comparison rows #16 and #19–#22 closed — [PLAN-0.5 §0.5.2](PLAN-0.5.md#052--the-last-rows-of-the-comparison)). Gate exit 0, 245 tests, coverage 86.21 %. The notarized build was started; no tag or GitHub release exists yet. Fabric's claude-code 2.1.288 repin landed (`afb62b8`), so the workspace sync can publish.
+
+**Exact next task:**
+1. Check `artifacts/Fabric-Switchboard-0.5.2-*` and their receipts; rerun `scripts/build_macos.py … --notary-profile fabric-notary` and `build_windows_cross.py` if missing.
+2. Then follow the 0.5.1 steps in [release-0.5.md](evidence/release-0.5.md#release-v051-beta1-2026-10-03) for `v0.5.2-beta.1`: `SHA256SUMS`, tag on `e4c2a0d`, `gh release`, anonymous verification, site (`update-switchboard-release.mjs`), install with 0.5.1 kept for rollback, `knowledge/products.md`.
+3. Finally `launchctl kickstart gui/$(id -u)/ai.passioncode.fabric-workspace-sync` and confirm `node scripts/workspace.mjs lag` shows fabric-switchboard `current`.
+
+---
+
 # Released — Switchboard v0.5.1-beta.1: Claude Swap parity and review fixes (2026-10-03)
 
 **Start here:** [handoffs/2026-10-03-switchboard-0.5.1.md](handoffs/2026-10-03-switchboard-0.5.1.md).
