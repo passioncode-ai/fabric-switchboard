@@ -18,6 +18,7 @@ use unicode_normalization::UnicodeNormalization;
 const CAP: usize = 1024 * 1024;
 const SECRET_CAP: usize = 64 * 1024;
 const UNAVAILABLE: &str = "External sign-in unavailable or its files are unsafe.";
+#[derive(Clone)]
 pub struct CapturedProfile {
     pub provider: Provider,
     pub kind: AuthKind,
@@ -33,7 +34,13 @@ pub struct ImportBatch {
 
 trait Reader {
     fn read(&self, path: &Path, cap: usize) -> Result<Option<Vec<u8>>, String>;
+    /// An item Claude Code created through `/usr/bin/security`, which therefore trusts it.
     fn keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String>;
+    /// An item another program created through its own keyring library (Codex): read without
+    /// any dialog — an item that does not trust Switchboard reads as refused.
+    fn foreign_keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        self.keychain(service, account)
+    }
 }
 struct Native;
 fn checked_path(path: &Path) -> Result<(), String> {
@@ -182,6 +189,10 @@ impl Reader for Native {
             let _ = (service, account);
             Ok(None)
         }
+    }
+    #[cfg(target_os = "macos")]
+    fn foreign_keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        switchboard_core::external_keychain::read_external_quietly(service, account)
     }
 }
 struct Context {
@@ -403,7 +414,7 @@ fn codex_auth(reader: &dyn Reader, c: &Context) -> Result<Option<Vec<u8>>, Strin
             Sha256::digest(canonical.to_string_lossy().as_bytes())
         )[..16]
     );
-    if let Some(value) = reader.keychain("Codex Auth", &key)? {
+    if let Some(value) = reader.foreign_keychain("Codex Auth", &key)? {
         return Ok(Some(value));
     }
     if mode == "auto" {
@@ -484,7 +495,41 @@ fn capture(
     Ok(result)
 }
 pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
-    capture(&Native, provider, &context(provider, None)?)
+    let result = capture(&Native, provider, &context(provider, None)?);
+    if provider == Provider::Claude {
+        remember_current(&result);
+    }
+    result
+}
+/// The Claude sign-in read by the monitor's background passes. Each read is two
+/// `/usr/bin/security` processes (the item is read twice to refuse a torn pair), so the
+/// background reuses one for `CURRENT_TTL`; Switchboard's own writes forget it at once, and
+/// explicit operations read afresh. An external change (a `/login`) is seen within the TTL.
+pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, String> {
+    if provider == Provider::Claude {
+        if let Ok(cache) = CURRENT.lock() {
+            if let Some((at, result)) = cache.as_ref() {
+                if at.elapsed() < CURRENT_TTL {
+                    return result.clone();
+                }
+            }
+        }
+    }
+    capture_current(provider)
+}
+const CURRENT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+static CURRENT: std::sync::Mutex<Option<(std::time::Instant, Result<CapturedProfile, String>)>> =
+    std::sync::Mutex::new(None);
+fn remember_current(result: &Result<CapturedProfile, String>) {
+    if let Ok(mut cache) = CURRENT.lock() {
+        *cache = Some((std::time::Instant::now(), result.clone()));
+    }
+}
+/// Drops the cached Claude sign-in: after any write to it, and before an explicit operation.
+pub fn forget_current() {
+    if let Ok(mut cache) = CURRENT.lock() {
+        *cache = None;
+    }
 }
 pub fn capture_at(provider: Provider, home: &Path) -> Result<CapturedProfile, String> {
     capture(&Native, provider, &context(provider, Some(home))?)
@@ -1306,7 +1351,9 @@ impl LiveItem for LiveLock {
     }
     fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;
-        write_live(&Native, &self.context, auth)?;
+        let written = write_live(&Native, &self.context, auth);
+        forget_current();
+        written?;
         self.locks.ensure()
     }
 }
@@ -1327,6 +1374,15 @@ pub fn activate_claude(
     expected_current: Option<&ExternalIdentity>,
     preserve: &mut dyn FnMut(&Outgoing<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
+    // Whatever happens below, the sign-in may have changed: nobody reads a stale copy.
+    struct Forget;
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            forget_current();
+        }
+    }
+    let _forget = Forget;
+    forget_current();
     let c = context(Provider::Claude, None)?;
     checked_path(&c.home)?;
     refuse_own_home(&c.home)?;
@@ -2062,6 +2118,25 @@ mod tests {
         assert_eq!(swap_activity("", None), SwapActivity::default());
     }
     #[test]
+    fn the_background_reuses_one_claude_read_until_switchboard_writes() {
+        // Only the cache is exercised: a miss would read the real sign-in, which tests never do.
+        let profile =
+            claude_profile(&auth("cached"), &config("cached@example.test"), None).unwrap();
+        remember_current(&Ok(profile));
+        let hit = capture_current_cached(Provider::Claude).unwrap();
+        assert_eq!(hit.credential.access_token, "cached");
+        remember_current(&Err("No current Claude sign-in found.".into()));
+        assert_eq!(
+            capture_current_cached(Provider::Claude).err().unwrap(),
+            "No current Claude sign-in found."
+        );
+        forget_current();
+        assert!(
+            CURRENT.lock().unwrap().is_none(),
+            "a write leaves nothing stale behind"
+        );
+    }
+    #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {
         let data = tempfile::tempdir().unwrap();
         let root = data.path().join("ai.passioncode.fabric-switchboard");
@@ -2335,6 +2410,71 @@ mod tests {
             b"cli_auth_credentials_store = 'auto'\n[features]\nsecret_auth_storage = true",
         );
         assert!(capture(&f, Provider::Codex, &c).is_err());
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn codexs_keychain_item_is_read_only_the_quiet_way() {
+        // Codex writes its item through its own keyring library; `/usr/bin/security` is not
+        // on its access list, so reading it that way would make macOS ask. Only the quiet path
+        // may be taken, and a refusal is reported, never retried loudly.
+        struct QuietOnly {
+            base: Fixture,
+            loud: Cell<usize>,
+            refuse: bool,
+        }
+        impl Reader for QuietOnly {
+            fn read(&self, p: &Path, cap: usize) -> Result<Option<Vec<u8>>, String> {
+                self.base.read(p, cap)
+            }
+            fn keychain(&self, _: &str, _: &str) -> Result<Option<Vec<u8>>, String> {
+                self.loud.set(self.loud.get() + 1);
+                Ok(None)
+            }
+            fn foreign_keychain(&self, s: &str, a: &str) -> Result<Option<Vec<u8>>, String> {
+                if self.refuse {
+                    return Err(switchboard_core::external_keychain::EXTERNAL_REFUSED.into());
+                }
+                self.base.keychain(s, a)
+            }
+        }
+        let mut c = ctx();
+        c.mac = true;
+        c.home = "/fixture/codex".into();
+        let reader = |refuse| {
+            let base = Fixture::new();
+            base.put(
+                &c.home.join("config.toml"),
+                b"cli_auth_credentials_store = 'keyring'",
+            );
+            let key = format!(
+                "cli|{}",
+                &format!("{:x}", Sha256::digest(c.home.to_string_lossy().as_bytes()))[..16]
+            );
+            base.keys.borrow_mut().insert(
+                ("Codex Auth".into(), key),
+                br#"{"tokens":{"access_token":"quiet","account_id":"current"}}"#.to_vec(),
+            );
+            QuietOnly {
+                base,
+                loud: Cell::new(0),
+                refuse,
+            }
+        };
+        let quiet = reader(false);
+        assert_eq!(
+            capture(&quiet, Provider::Codex, &c)
+                .unwrap()
+                .credential
+                .access_token,
+            "quiet"
+        );
+        assert_eq!(quiet.loud.get(), 0);
+        let refused = reader(true);
+        assert_eq!(
+            capture(&refused, Provider::Codex, &c).err().unwrap(),
+            switchboard_core::external_keychain::EXTERNAL_REFUSED
+        );
+        assert_eq!(refused.loud.get(), 0);
     }
     #[test]
     fn source_drift_is_not_captured_under_unchanged_index() {

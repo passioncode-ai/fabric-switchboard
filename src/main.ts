@@ -254,6 +254,7 @@ function renderAgents(main: HTMLElement) {
   const setup = el('section', 'about-panel'); setup.append(el('h2', '', 'Connect an agent'));
   if (agentSetupError || !agentSetup) setup.append(el('p', 'form-note', agentSetupError ? 'Agent setup is unavailable. Refresh to retry.' : 'Reading agent setup…'));
   else {
+    if (agentSetup.translocated) setup.append(el('p', 'form-note', 'macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.'));
     setup.append(el('p', 'form-note', agentSetup.cli_path ? `Command-line tool: ${agentSetup.cli_path}` : 'The switchboard command-line tool was not found on PATH.'));
     if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button('Link switchboard into ~/.local/bin', () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, 'The command-line tool is linked. Agents and plugins can now start switchboard mcp.', 'link-cli'), 'button primary', 'link-cli'));
     setup.append(copyable('Claude Code', agentSetup.commands.claude_code, 'copy-claude'), copyable('Codex CLI', agentSetup.commands.codex, 'copy-codex'), copyable('Claude Code plugin (tools and the switching-accounts skill)', agentSetup.commands.claude_plugin, 'copy-plugin'));

@@ -12,5 +12,7 @@ tauri-build = { version = "2", features = [] }
 switchboard-runtime = { path = "../crates/switchboard-runtime" }
 switchboard-core = { path = "../crates/switchboard-core" }
 tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "~2.4.0"
+tokio.workspace = true
 serde_json.workspace = true
 tempfile = "3"

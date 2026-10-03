@@ -168,7 +168,7 @@ pub(crate) fn no_live() -> Result<Box<dyn external::LiveItem>, String> {
     Err("External sign-in unavailable or its files are unsafe.".into())
 }
 pub(crate) const NATIVE: NativeSources = NativeSources {
-    current: external::capture_current,
+    current: external::capture_current_cached,
     activate: external::activate_claude,
     live: external::lock_live,
     swap: external::read_claude_swap,
@@ -423,6 +423,7 @@ impl Runtime {
         }
     }
     fn invalidate_current(&self) {
+        external::forget_current();
         if let Ok(mut cache) = self.current_cache.lock() {
             cache.generation = cache.generation.wrapping_add(1);
             cache.entry = None;
@@ -443,6 +444,8 @@ impl Runtime {
             cache.generation
         };
         // Reading may wait on an OS credential prompt; invalidation must not wait for it.
+        // The window shows what is signed in now: its own 30 s cache is the only one.
+        external::forget_current();
         let value = observe_current(&self.store, self.native.current);
         let mut cache = self
             .current_cache
@@ -543,6 +546,7 @@ async fn execute(
             label,
             pool,
         } => {
+            external::forget_current();
             if provider == Provider::Claude {
                 refresh::learn_live_owner(&store, native, refresh_state).await;
             }
@@ -597,6 +601,8 @@ async fn execute(
             )
         }
         Operation::ActivateNative { id } => {
+            // A switch the user asked for starts from what is signed in now.
+            external::forget_current();
             // The target is inactive by definition; an expired token is renewed first so
             // Claude Code starts on a live one. A failed refresh still activates: Claude
             // Code renews from the refresh token itself.

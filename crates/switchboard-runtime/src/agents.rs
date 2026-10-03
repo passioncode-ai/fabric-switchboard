@@ -10,11 +10,25 @@ const CLI_NAME: &str = "switchboard.exe";
 #[cfg(not(windows))]
 const CLI_NAME: &str = "switchboard";
 
-/// The CLI shipped inside the desktop bundle, beside its executable.
+/// The CLI shipped inside the desktop bundle, beside its executable. None while macOS runs the
+/// app from a temporary translocated copy: a path into it disappears when the app quits.
 pub fn bundled_cli() -> Option<PathBuf> {
     let current = std::env::current_exe().ok()?.canonicalize().ok()?;
     let candidate = current.parent()?.join(CLI_NAME);
-    (candidate.is_file() && candidate != current).then_some(candidate)
+    (candidate.is_file() && candidate != current && !translocated(&candidate)).then_some(candidate)
+}
+/// macOS App Translocation: an app opened straight from a download runs from a read-only copy
+/// under a random `/AppTranslocation/` folder that is gone after it quits.
+pub fn translocated(path: &Path) -> bool {
+    path.components()
+        .any(|c| c.as_os_str() == "AppTranslocation")
+}
+/// The running desktop app is a translocated copy.
+pub fn running_translocated() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|p| translocated(&p))
 }
 fn user_bin() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
@@ -44,6 +58,7 @@ pub fn setup() -> Value {
         "bundled_cli": bundled,
         "linked_cli": linked,
         "can_link": cfg!(unix) && bundled.is_some(),
+        "translocated": running_translocated(),
         "commands": {
             "claude_code": format!("claude mcp add --scope user switchboard -- {command} mcp"),
             "codex": format!("codex mcp add switchboard -- {command} mcp"),
@@ -146,6 +161,23 @@ mod setup_tests {
         assert_eq!(
             shell_quote("/it's; rm -rf ~/switchboard"),
             r#"'/it'\''s; rm -rf ~/switchboard'"#
+        );
+    }
+    #[test]
+    fn a_translocated_copy_is_never_linked_or_offered() {
+        assert!(translocated(Path::new(
+            "/private/var/folders/x/T/AppTranslocation/0A1B/d/Fabric Switchboard.app/Contents/MacOS/switchboard"
+        )));
+        assert!(!translocated(Path::new(
+            "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard"
+        )));
+        assert!(!translocated(Path::new(
+            "/Users/x/AppTranslocationNotes/switchboard"
+        )));
+        assert_eq!(
+            setup()["translocated"],
+            false,
+            "a test binary is not translocated"
         );
     }
     #[test]

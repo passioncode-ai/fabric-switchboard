@@ -37,22 +37,34 @@ impl MonitorHandle {
                     break;
                 };
                 let time = now();
+                // With no saved Claude OAuth account there is nothing of Claude Code's to keep
+                // current: no Keychain read, no Claude Swap read, no transcript scan.
+                let claude = native_sources && claude_oauth_saved(&runtime.store);
                 if native_sources
                     && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
                 {
                     // Network first, outside the lock: who owns a lineage not seen before.
-                    crate::refresh::learn_live_owner(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                    )
-                    .await;
+                    if claude {
+                        crate::refresh::learn_live_owner(
+                            &runtime.store,
+                            runtime.native,
+                            &runtime.refresh,
+                        )
+                        .await;
+                    }
                     // Claude Swap's files are read outside the lock; adopting its newer
                     // generations happens under it, with the live sync.
-                    let activity = crate::external::claude_swap_activity();
+                    // Claude Swap only ever matters for saved Claude accounts.
+                    let activity = if claude {
+                        crate::external::claude_swap_activity()
+                    } else {
+                        crate::external::SwapActivity::default()
+                    };
                     let running = activity.running;
                     runtime.refresh.set_swap_switching(activity.switching);
-                    let signature = crate::external::claude_swap_signature();
+                    let signature = claude
+                        .then(crate::external::claude_swap_signature)
+                        .flatten();
                     let due = crate::refresh::swap_read_due(
                         running,
                         swap_was_running,
@@ -85,12 +97,14 @@ impl MonitorHandle {
                     let _mutation = runtime.mutations.lock().await;
                     // Claude Code left its token expired: renew it under Claude Code's locks so
                     // managed sessions and quota checks on that account keep working.
-                    crate::refresh::renew_idle_live(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                    )
-                    .await;
+                    if claude {
+                        crate::refresh::renew_idle_live(
+                            &runtime.store,
+                            runtime.native,
+                            &runtime.refresh,
+                        )
+                        .await;
+                    }
                     crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
                     sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();
@@ -100,7 +114,7 @@ impl MonitorHandle {
                     let _ = runtime.maybe_backup(time, false);
                 }
                 if time - last_limit_scan >= 30 || time < last_limit_scan {
-                    scan_limits(&runtime, native_sources, time);
+                    scan_limits(&runtime, claude, time);
                     last_limit_scan = time;
                 }
                 let Ok(snapshot) = runtime.store.snapshot() else {
@@ -131,7 +145,7 @@ impl MonitorHandle {
                     )
                     .await;
                 }
-                if native_sources {
+                if claude && native_rotation_on(&runtime.store) {
                     // A native switch files the live lineage under its account: know its owner
                     // first (network, outside the lock; at most once a minute per lineage).
                     crate::refresh::learn_live_owner(
@@ -331,6 +345,22 @@ async fn renew_due(runtime: &Runtime) {
 
 /// Adopt only a profile already captured by the operator. The ordinary client
 /// owns refresh; a new login never silently adds or enables an account.
+/// A saved Claude OAuth account exists: the only reason to look at Claude Code's sign-in.
+fn claude_oauth_saved(store: &Store) -> bool {
+    store.snapshot().is_ok_and(|s| {
+        s.accounts
+            .iter()
+            .any(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+    })
+}
+/// Automatic switching of the ordinary Claude Code is on somewhere.
+fn native_rotation_on(store: &Store) -> bool {
+    store.snapshot().is_ok_and(|s| {
+        s.policies
+            .iter()
+            .any(|p| p.enabled && p.target == "claude_cli")
+    })
+}
 fn sync_live_sources(
     store: &Store,
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
@@ -661,6 +691,18 @@ mod tests {
                 [(Some(b.id), detail.1.to_string())]
             );
         }
+    }
+    #[tokio::test]
+    async fn without_saved_claude_accounts_the_monitor_leaves_claude_code_alone() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        assert!(!claude_oauth_saved(&runtime.store));
+        assert!(!native_rotation_on(&runtime.store));
+        save(&runtime.store, "synthetic-a", "default");
+        assert!(claude_oauth_saved(&runtime.store));
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        assert!(native_rotation_on(&runtime.store));
     }
     #[tokio::test]
     async fn native_rotation_leaves_switching_to_an_auto_switching_claude_swap() {

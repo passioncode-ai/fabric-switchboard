@@ -12,16 +12,50 @@ fn frontend_ready(app: tauri::AppHandle, mode: State<'_, SmokeMode>) {
     }
 }
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
-use switchboard_runtime::{default_root, Operation, Owner};
+use switchboard_runtime::{default_root, Operation, Owner, Runtime};
 use tauri::{Manager, State};
 
+/// The owner of the store. Started at launch; when that fails — another Switchboard instance,
+/// `switchboard serve` or a CLI command holds the store — every request reports why and the
+/// next one tries again, so Retry recovers without restarting the app.
+struct Slot {
+    start: Box<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
+    smoke: bool,
+    owner: tokio::sync::Mutex<Option<Owner>>,
+}
+const STORE_BUSY: &str = "Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.";
+impl Slot {
+    async fn runtime(&self) -> Result<std::sync::Arc<Runtime>, String> {
+        let mut owner = self.owner.lock().await;
+        if owner.is_none() {
+            let root = (self.start)()?;
+            let started = if self.smoke {
+                Owner::start(root, Arc::new(switchboard_core::MemoryVault::default())).await
+            } else {
+                Owner::desktop(root).await
+            };
+            *owner = Some(started.map_err(|error| {
+                if error == "Another Switchboard instance owns this account storage" {
+                    STORE_BUSY.to_string()
+                } else {
+                    error
+                }
+            })?);
+        }
+        owner
+            .as_ref()
+            .map(|o| o.runtime.clone())
+            .ok_or_else(|| STORE_BUSY.to_string())
+    }
+}
+
 #[tauri::command]
-async fn snapshot(state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::Snapshot).await
+async fn snapshot(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Snapshot).await
 }
 #[tauri::command]
 async fn current_accounts(
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
     mode: State<'_, SmokeMode>,
 ) -> Result<Value, String> {
     if mode.0.is_some() {
@@ -30,17 +64,22 @@ async fn current_accounts(
             "codex": {"status":"missing", "identity":null, "account_id":null}
         }));
     }
-    state.runtime.execute(Operation::CurrentAccounts).await
+    state
+        .runtime()
+        .await?
+        .execute(Operation::CurrentAccounts)
+        .await
 }
 #[tauri::command]
 async fn capture_current(
     provider: Provider,
     label: Option<String>,
     pool: String,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::CaptureCurrent {
             provider,
             label,
@@ -49,26 +88,36 @@ async fn capture_current(
         .await
 }
 #[tauri::command]
-async fn import_claude_swap(pool: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn import_claude_swap(pool: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::ImportClaudeSwap { pool })
         .await
 }
 #[tauri::command]
-async fn activate_native(id: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn activate_native(id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::ActivateNative { id })
         .await
 }
 #[tauri::command]
-async fn set_policy(policy: RotationPolicy, state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::SetPolicy { policy }).await
+async fn set_policy(policy: RotationPolicy, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SetPolicy { policy })
+        .await
 }
 #[tauri::command]
-async fn monitor_status(state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::MonitorStatus).await
+async fn monitor_status(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::MonitorStatus)
+        .await
 }
 #[tauri::command]
 async fn add_account(
@@ -77,10 +126,11 @@ async fn add_account(
     kind: AuthKind,
     pool: String,
     secret: String,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::Add {
             label,
             provider,
@@ -95,42 +145,49 @@ async fn update_account(
     id: String,
     label: String,
     enabled: bool,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::Update { id, label, enabled })
         .await
 }
 #[tauri::command]
-async fn remove_account(id: String, state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::Remove { id }).await
+async fn remove_account(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Remove { id })
+        .await
 }
 #[tauri::command]
 async fn select_account(
     provider: Provider,
     pool: String,
     id: String,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::Select { provider, pool, id })
         .await
 }
 #[tauri::command]
-async fn runtime_status(state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::Status).await
+async fn runtime_status(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Status).await
 }
 #[tauri::command]
 async fn launch_account(
     id: String,
     mode: String,
     working_directory: String,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::Launch {
             id,
             mode,
@@ -143,10 +200,11 @@ async fn begin_login(
     provider: Provider,
     label: String,
     pool: String,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::BeginLogin {
             provider,
             label,
@@ -155,44 +213,52 @@ async fn begin_login(
         .await
 }
 #[tauri::command]
-async fn finish_login(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn finish_login(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::FinishLogin { login_id })
         .await
 }
 #[tauri::command]
-async fn login_status(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn login_status(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::LoginStatus { login_id })
         .await
 }
 #[tauri::command]
-async fn backups(state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::Backups).await
+async fn backups(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Backups).await
 }
 #[tauri::command]
-async fn backup_now(state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::BackupNow).await
+async fn backup_now(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::BackupNow).await
 }
 #[tauri::command]
-async fn restore_backup(file: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn restore_backup(file: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::RestoreBackup { file })
         .await
 }
 #[tauri::command]
-async fn cancel_login(login_id: String, state: State<'_, Owner>) -> Result<Value, String> {
+async fn cancel_login(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::CancelLogin { login_id })
         .await
 }
 #[tauri::command]
-async fn probe_usage(id: String, state: State<'_, Owner>) -> Result<Value, String> {
-    state.runtime.execute(Operation::Usage { id }).await
+async fn probe_usage(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Usage { id })
+        .await
 }
 #[tauri::command]
 async fn set_project_rule(
@@ -201,10 +267,11 @@ async fn set_project_rule(
     target: String,
     enabled: bool,
     expires_at: Option<i64>,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::SetProjectRule {
             path,
             account_id,
@@ -218,10 +285,11 @@ async fn set_project_rule(
 async fn remove_project_rule(
     path: std::path::PathBuf,
     provider: Provider,
-    state: State<'_, Owner>,
+    state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
-        .runtime
+        .runtime()
+        .await?
         .execute(Operation::RemoveProjectRule { path, provider })
         .await
 }
@@ -235,7 +303,20 @@ fn link_cli() -> Result<Value, String> {
 }
 fn main() {
     let smoke = std::env::args().any(|argument| argument == "--smoke-test");
-    let result = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // A second launch (double-click on Windows, `open -n` on macOS) focuses this window
+    // instead of starting another owner that would find the store locked. The packaged smoke
+    // check runs beside an installed app on purpose, with its own temporary store.
+    if !smoke {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+    let result = builder
         .setup(move |app| {
             let temporary = if smoke {
                 Some(
@@ -246,17 +327,19 @@ fn main() {
             } else {
                 None
             };
-            let owner = if let Some(directory) = &temporary {
-                tauri::async_runtime::block_on(Owner::start(
-                    directory.path().to_owned(),
-                    Arc::new(switchboard_core::MemoryVault::default()),
-                ))
-            } else {
-                let root = default_root().map_err(std::io::Error::other)?;
-                tauri::async_runtime::block_on(Owner::desktop(root))
-            }
-            .map_err(std::io::Error::other)?;
-            app.manage(owner);
+            let smoke_root = temporary.as_ref().map(|t| t.path().to_owned());
+            let slot = Slot {
+                start: Box::new(move || match &smoke_root {
+                    Some(root) => Ok(root.clone()),
+                    None => default_root(),
+                }),
+                smoke,
+                owner: tokio::sync::Mutex::new(None),
+            };
+            // Start now so the monitor runs from launch; a failure is reported by the first
+            // request instead of aborting the app (Tauri turns a setup error into a crash).
+            let _ = tauri::async_runtime::block_on(slot.runtime());
+            app.manage(slot);
             app.manage(SmokeMode(temporary));
             Ok(())
         })
