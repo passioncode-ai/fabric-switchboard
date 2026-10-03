@@ -54,11 +54,11 @@ extern "C" {
     ) -> i32;
 }
 
-/// The release team. A fork signs with its own team by setting this at build time.
-const SIGNING_TEAM: &str = match option_env!("SWITCHBOARD_SIGNING_TEAM") {
-    Some(team) => team,
-    None => "KJ35UYYL22",
-};
+/// The release team, given at build time and never written in the code: the release workflow
+/// passes `vars.APPLE_TEAM_ID`, `build_macos.py` the signing identity's team, and a fork its
+/// own. A build without it trusts no team and keeps to the development namespace
+/// (docs/KEYCHAIN.md).
+const SIGNING_TEAM: Option<&str> = option_env!("SWITCHBOARD_SIGNING_TEAM");
 /// Where the release is installed, and the CLI it carries (`build_macos.py`).
 const INSTALLED_APP: &str = "/Applications/Fabric Switchboard.app";
 const BUNDLED_CLI: &str = "Contents/MacOS/switchboard";
@@ -295,20 +295,30 @@ impl Backend for MacKeychain {
 }
 
 fn team_requirement() -> Option<SecRequirement> {
-    let valid = SIGNING_TEAM.len() == 10
-        && SIGNING_TEAM
+    requirement_for(SIGNING_TEAM)
+}
+
+/// A team id is ten characters, uppercase letters and digits; anything else is no team.
+fn requirement_for(team: Option<&str>) -> Option<SecRequirement> {
+    let team = team?;
+    let valid = team.len() == 10
+        && team
             .bytes()
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
     if !valid {
         return None;
     }
-    format!("anchor apple generic and certificate leaf[subject.OU] = \"{SIGNING_TEAM}\"")
+    format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"")
         .parse()
         .ok()
 }
 
 fn detect_build() -> (Build, Trust) {
-    let Some(requirement) = team_requirement() else {
+    detect_build_for(team_requirement())
+}
+
+fn detect_build_for(requirement: Option<SecRequirement>) -> (Build, Trust) {
+    let Some(requirement) = requirement else {
         return (Build::Development, Trust::CallerOnly);
     };
     let signed = SecCode::for_self(Flags::NONE)
@@ -595,5 +605,29 @@ mod tests {
     #[test]
     fn unsigned_test_binaries_are_development_builds() {
         assert_eq!(detect_build().0, Build::Development);
+    }
+
+    /// The team is never a literal in the code: without `SWITCHBOARD_SIGNING_TEAM` at build
+    /// time there is no team to trust, and the build keeps to the development namespace.
+    #[test]
+    fn a_build_without_the_team_variable_trusts_no_team() {
+        if option_env!("SWITCHBOARD_SIGNING_TEAM").is_none() {
+            assert!(team_requirement().is_none());
+        }
+        let (build, trust) = detect_build_for(requirement_for(None));
+        assert_eq!(build, Build::Development);
+        assert!(matches!(trust, Trust::CallerOnly));
+    }
+
+    #[test]
+    fn only_a_well_formed_team_id_becomes_a_requirement() {
+        // Synthetic ids: the shape matters, not the team.
+        for malformed in ["", "ABC", "abcde12345", "ABCDE1234!", "ABCDE123456"] {
+            assert!(requirement_for(Some(malformed)).is_none(), "{malformed:?}");
+        }
+        assert!(requirement_for(Some("ABCDE12345")).is_some());
+        // A team this test binary is not signed by still leaves it a development build.
+        let (build, _) = detect_build_for(requirement_for(Some("ABCDE12345")));
+        assert_eq!(build, Build::Development);
     }
 }

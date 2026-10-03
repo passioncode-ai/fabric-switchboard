@@ -6,21 +6,21 @@ Find the selected release and platform links on the [Switchboard download page](
 
 ## Before opening a download
 
-Compare the archive's SHA-256 with `SHA256SUMS-0.4.1.txt` on the release, the release notes or the [0.4.1 release record](evidence/release-0.4.1.md#archive-checksums). A matching checksum identifies the downloaded bytes; it does not establish notarization or platform acceptance. If it differs, do not open the archive; download it again from the release page.
-
-For example, from the directory containing the archive:
-
-macOS Terminal:
+Releases made by the [release workflow](DISTRIBUTION.md#how-a-release-happens) (after 0.5.3-beta.1) carry three proofs beside the archives: `SHA256SUMS`, its signature `SHA256SUMS.asc` made with the [PassionCode.ai release key](https://github.com/passioncode-ai/.github/blob/main/release-signing/passioncode-release-signing.asc), and a Sigstore build-provenance attestation for every file. From the directory holding the downloads:
 
 ```sh
-shasum -a 256 -c SHA256SUMS-0.4.1.txt --ignore-missing   # or: shasum -a 256 Fabric-Switchboard-0.4.1-macos-universal.zip
+gpg --verify SHA256SUMS.asc SHA256SUMS          # "Good signature" from the release key
+shasum -a 256 -c SHA256SUMS --ignore-missing     # OK for each archive you downloaded
+gh attestation verify Fabric-Switchboard-X.Y.Z-macos-universal.zip -R passioncode-ai/fabric-switchboard
 ```
 
-Windows PowerShell:
+Windows PowerShell, comparing with the line for the archive in `SHA256SUMS`:
 
 ```powershell
-Get-FileHash .\Fabric-Switchboard-0.4.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\Fabric-Switchboard-X.Y.Z-windows-x64.zip -Algorithm SHA256
 ```
+
+Releases up to 0.5.3-beta.1 were built by hand and carry `SHA256SUMS-X.Y.Z.txt` instead (`shasum -a 256 -c SHA256SUMS-X.Y.Z.txt --ignore-missing`); the release records list them, for example the [0.4.1 release record](evidence/release-0.4.1.md#archive-checksums). A matching checksum identifies the downloaded bytes; it does not establish notarization or platform acceptance. If it differs, do not open the archive; download it again from the release page.
 
 ## macOS
 
@@ -49,7 +49,7 @@ The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe
 3. Follow the installer prompts. The desktop app requires Microsoft WebView2; the installer handles its bootstrapper when needed. An internet connection may be needed for that runtime download.
 4. Open Fabric Switchboard from the Start menu. The separate CLI is optional and can stay in the extracted folder. In PowerShell, change to that folder and run `.\switchboard.exe --help` to inspect commands.
 
-**Current beta limit:** these binaries are **unsigned and cross-built**. Execution and installation on a Windows machine have **not been verified**. SmartScreen or another Windows protection may block them. If blocked, keep the protection in place and wait for a signed, verified release or [report the exact warning](https://github.com/passioncode-ai/fabric-switchboard/issues).
+**Current beta limit:** the Windows binaries are **not Authenticode signed**. Up to 0.5.3-beta.1 they were cross-built on a Mac; from the next release they are built natively on a Windows runner, where the storage and runtime tests run, and the release receipt says `windows_authenticode: NOT_SIGNED` until signing is switched on ([DISTRIBUTION.md](DISTRIBUTION.md#windows-windows-job-windows-latest)). Installation and use on a Windows desktop have **not been verified**. SmartScreen or another Windows protection may block them. If blocked, keep the protection in place and wait for a signed, verified release or [report the exact warning](https://github.com/passioncode-ai/fabric-switchboard/issues).
 
 ## Start a session
 
