@@ -983,7 +983,13 @@ mod tests {
         let mut reservation = Reservation::new(&home).unwrap();
         reservation.committed = true;
         let output = Command::new("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
             .arg(&script_path)
             .env("ANTHROPIC_API_KEY", "synthetic-conflicting-key")
             .output()
