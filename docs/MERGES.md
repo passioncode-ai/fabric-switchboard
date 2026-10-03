@@ -4,6 +4,12 @@
 
 Written by `agent_sync.py merge`. Entries newer than 7 days keep their detail; older ones are compacted to one line each on the next write. Read it before starting work: it is the shortest answer to *what landed while I was on my branch*.
 
+### 2026-10-03T10:51:03Z · `switchboard-0.5.3-board` · agent/switchboard-0.5.3-board → main · `a8936c2`
+- run: r-74550f2ee
+- files: 2 (2 files changed, 24 insertions(+), 14 deletions(-))
+- conflicts: none
+- summary: SB-24 done; 0.5.3 handoff
+
 ### 2026-10-03T10:38:02Z · `switchboard-0.5.3-record` · agent/switchboard-0.5.3-record → main · `fbd9a44`
 - run: r-74550f2ee
 - files: 4 (4 files changed, 130 insertions(+))
