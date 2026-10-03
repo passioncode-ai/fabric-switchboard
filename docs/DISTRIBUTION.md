@@ -17,7 +17,7 @@ Execution receipts of releases before this workflow, built and notarized by hand
 
 **Rehearsal.** Push `vX.Y.Z-rc.N` on the commit (the push trigger ignores `-rc` tags), then `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`. Everything above runs, approvals included, but no release is created: the signed set and its notes are kept as the workflow artifact `signed-release-vX.Y.Z-rc.N` for 14 days. A Windows build of a commit is made the same way; the manual `build-windows.yml` workflow it replaces is removed.
 
-**Prereleases.** The push trigger starts only for `vX.Y.Z`. The `-beta.N` tags used up to 0.5.3 do not start it; a dispatch on such a tag with `publish=true` would publish it, but the shared workflow does not mark a release as a prerelease, so whether betas continue as tags is the operator's decision.
+**Prereleases.** The push trigger starts only for `vX.Y.Z`. A `-beta.N` tag is published by dispatch: `gh workflow run release.yml --ref vX.Y.Z-beta.N -f publish=true`, with the same approvals. The organization's publish workflow (`prerelease: auto`) marks `-alpha`, `-beta` and `-preview` tags as prereleases. `v0.5.3-beta.2` was released this way (run 37157469157).
 
 ## What the workflow does
 
