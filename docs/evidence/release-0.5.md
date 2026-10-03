@@ -224,3 +224,29 @@ Report rows #16 and #20 ([PLAN-0.5 §0.5.2](../PLAN-0.5.md#052--the-last-rows-of
 
 The renewal-refused caption was not rendered in a browser. It is one conditional `usage-caption`
 beside the Claude Swap caption, and `npm run build` type-checks it.
+
+### Release v0.5.2-beta.1 (2026-10-03)
+
+| Step | Result |
+|---|---|
+| Source | `main` `e4c2a0d` (merge of [#21](https://github.com/passioncode-ai/fabric-switchboard/pull/21)); built in a detached clean worktree. A first build in the working checkout refused attestation (`Source changed during build`) because a branch was switched under it; it was discarded, not shipped |
+| macOS | `build_macos.py --arch universal --notary-profile …` exit 0, [receipt](build-0.5.2-macos-universal.json): `x86_64 arm64`, clean source `e4c2a0d`, notary `d6a85a26-ca18-4f15-bbf3-80e4c91892b5` **Accepted**, staple validated |
+| Windows | `build_windows_cross.py` exit 0 from the same worktree, [receipt](build-0.5.2-windows-x64.json); unsigned, native run NOT_RUN |
+| GitHub | tag `v0.5.2-beta.1` = `e4c2a0d`, [prerelease](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.2-beta.1) with 2 ZIPs, 2 receipts, `SHA256SUMS-0.5.2.txt`; [publication receipt](publication-0.5.2.json) |
+| Anonymous download | both archives `OK` against the sums; app `accepted, source=Notarized Developer ID`; CLI `switchboard 0.5.2` |
+| Website | `passioncode-ai.github.io` `4f68dd7` ([PR #30](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/30), check passed; merged on GitHub because agent-sync could not check out `main`, which another worktree holds), deployed; download routes 302 to the 0.5.2 archives, fetched hash equal, `release.json` `0.5.2-beta.1` |
+| Local install | 0.5.1 kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.5.1-2026-10-03/`; 0.5.2 from the verified download, `spctl` accepted |
+
+On the operator's Mac after install (2026-10-03, 03:12 onward):
+- `SecurityAgent`: 0 entries since the install.
+- Monitor: running; `renewal_blocked` false; `claude_swap_accounts` 0, because Claude Swap is no
+  longer running (no process, no LaunchAgent).
+- Backups: 15 accounts, 0 missing, own, openable.
+- `sign_in_required` holds **one account**: its rejected lineage is in `renewal-state.json`, and
+  usage health is failed since about 02:54. The provider answered `invalid_grant` for that token.
+  - Hypothesis, not verified: Claude Swap renewed this account after Switchboard's last pass and
+    then stopped, so Switchboard renewed from a token that was already spent. Verifying it would
+    mean reading Claude Swap's credential store, which tests must not do (AGENTS.md).
+  - Board SB-21 records it.
+  - Recovery is the operator's: *Sign in again* on that row, or a Claude Swap re-import if its
+    backup holds a newer sign-in.

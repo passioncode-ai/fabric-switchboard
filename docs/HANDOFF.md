@@ -1,3 +1,14 @@
+# Released — Switchboard v0.5.2-beta.1 (2026-10-03)
+
+[v0.5.2-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.2-beta.1) is published from `e4c2a0d`.
+- **What it adds** ([#21](https://github.com/passioncode-ai/fabric-switchboard/pull/21)): an `invalid_client` answer holds every renewal without blaming an account, and a config the switch creates skips onboarding. Comparison rows #16 and #19–#22 are closed in [PLAN-0.5 §0.5.2](PLAN-0.5.md#052--the-last-rows-of-the-comparison).
+- **Release:** notary `d6a85a26-…` Accepted; site `4f68dd7`; installed in `/Applications`, with 0.5.1 kept for rollback.
+- **Live check after install:** 0 `SecurityAgent` entries. One account reads *Sign in again* right after Claude Swap stopped (board SB-21; record in [release-0.5.md](evidence/release-0.5.md#release-v052-beta1-2026-10-03)).
+
+**Exact next task:** SB-21, so that Switchboard also takes a newer generation from Claude Swap's files after Swap stops. Before it, the operator recovers the one account (*Sign in again*). After it comes SB-15.
+
+---
+
 # Released — Switchboard v0.5.1-beta.1: Claude Swap parity and review fixes (2026-10-03)
 
 **Start here:** [handoffs/2026-10-03-switchboard-0.5.1.md](handoffs/2026-10-03-switchboard-0.5.1.md).
