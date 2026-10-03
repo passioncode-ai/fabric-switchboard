@@ -114,8 +114,10 @@ impl RefreshState {
     /// The offline CLI's state: no grant is ever made; rejected lineages come from the owner's
     /// journal, which it reads but does not need to write.
     pub(crate) fn offline(journal: std::path::PathBuf) -> Self {
-        let mut state = Self::default();
-        state.grants = false;
+        let state = Self {
+            grants: false,
+            ..Self::default()
+        };
         state.remember_in(journal);
         state
     }
