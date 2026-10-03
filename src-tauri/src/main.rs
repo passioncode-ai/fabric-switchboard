@@ -23,6 +23,7 @@ struct Slot {
     smoke: bool,
     owner: tokio::sync::Mutex<Option<Owner>>,
 }
+const STARTUP_FAILED: &str = "Switchboard could not start its account service. Retry; if it keeps failing, quit and reopen Switchboard.";
 const STORE_BUSY: &str = "Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.";
 impl Slot {
     async fn runtime(&self) -> Result<std::sync::Arc<Runtime>, String> {
@@ -38,7 +39,9 @@ impl Slot {
                 if error == "Another Switchboard instance owns this account storage" {
                     STORE_BUSY.to_string()
                 } else {
-                    error
+                    // Start-up internals (proxy, control socket, data folder) are not the
+                    // user's vocabulary; what they can do is the same for each.
+                    STARTUP_FAILED.to_string()
                 }
             })?);
         }
@@ -338,8 +341,21 @@ fn main() {
             };
             // Start now so the monitor runs from launch; a failure is reported by the first
             // request instead of aborting the app (Tauri turns a setup error into a crash).
-            let _ = tauri::async_runtime::block_on(slot.runtime());
+            let started = tauri::async_runtime::block_on(slot.runtime()).is_ok();
             app.manage(slot);
+            if !started {
+                // Keep trying in the background as well: renewals, rotation and backups must
+                // resume once the store is free even while the window stays hidden.
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        if handle.state::<Slot>().runtime().await.is_ok() {
+                            break;
+                        }
+                    }
+                });
+            }
             app.manage(SmokeMode(temporary));
             Ok(())
         })

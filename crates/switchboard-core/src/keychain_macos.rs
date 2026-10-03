@@ -380,8 +380,9 @@ pub fn read_external_quietly(service: &str, account: &str) -> Result<Option<Vec<
         Read::Failed => Err("Keychain unavailable. Unlock it, then retry.".into()),
     }
 }
+/// Keychain answers the same way whether it is locked or the item does not trust Switchboard.
 pub const EXTERNAL_REFUSED: &str =
-    "Keychain does not let Switchboard read this sign-in without asking. Use official sign-in to add the account.";
+    "Keychain is locked or does not let Switchboard read this sign-in without asking. Unlock it and retry, or add the account with official sign-in.";
 
 #[cfg(test)]
 mod tests {

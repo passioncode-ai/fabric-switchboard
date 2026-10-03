@@ -58,7 +58,8 @@ pub(crate) struct RefreshState {
     /// Where rejected lineages are remembered across restarts (fingerprints only).
     journal: Mutex<Option<std::path::PathBuf>>,
     /// Identities (`account_id`) a running Claude Swap holds: it renews them, Switchboard does not.
-    swap_held: Mutex<std::collections::HashSet<String>>,
+    /// Identity (`account_id`) → its email, for the accounts a running Claude Swap holds.
+    swap_held: Mutex<HashMap<String, Option<String>>>,
     /// The refresh token a grant spent → its successor, until every holder has it. Shared with
     /// the grant task, which records the successor before anyone can drop it.
     stash: Arc<Mutex<HashMap<String, Kept>>>,
@@ -70,6 +71,8 @@ pub(crate) struct RefreshState {
     client_rejected: Mutex<Option<i64>>,
     /// Claude Swap switches Claude Code by itself; native rotation leaves switching to it.
     swap_switching: std::sync::atomic::AtomicBool,
+    /// Claude Swap ran at the monitor's last look.
+    swap_running: std::sync::atomic::AtomicBool,
     /// False for the offline CLI and a `--data-dir` owner: they never spend a refresh token.
     grants: std::sync::atomic::AtomicBool,
     /// Refresh tokens a grant is spending right now (the grant outlives a cancelled caller).
@@ -107,6 +110,7 @@ impl RefreshState {
             profile_tried: Mutex::new(None),
             client_rejected: Mutex::new(None),
             swap_switching: Default::default(),
+            swap_running: Default::default(),
             grants: std::sync::atomic::AtomicBool::new(true),
             in_flight: Default::default(),
             stash: Arc::new(Mutex::new(HashMap::new())),
@@ -164,9 +168,22 @@ impl RefreshState {
             .and_then(|c| c.refresh_token)
             .is_some_and(|token| self.in_flight.lock().is_ok_and(|f| f.contains(&token)))
     }
-    pub(crate) fn set_swap_switching(&self, switching: bool) {
+    pub(crate) fn set_swap_activity(&self, running: bool, switching: bool) {
+        self.swap_running
+            .store(running, std::sync::atomic::Ordering::SeqCst);
         self.swap_switching
             .store(switching, std::sync::atomic::Ordering::SeqCst);
+    }
+    #[cfg(test)]
+    pub(crate) fn set_swap_switching(&self, switching: bool) {
+        self.set_swap_activity(switching, switching);
+    }
+    #[cfg(test)]
+    pub(crate) fn hold_for_test(&self, account: &str) {
+        self.swap_held
+            .lock()
+            .unwrap()
+            .insert(account.into(), Some(format!("{account}@example.invalid")));
     }
     pub(crate) fn swap_switching(&self) -> bool {
         self.swap_switching
@@ -323,7 +340,12 @@ pub(crate) async fn ensure_fresh(
         .external_identity
         .as_ref()
         .and_then(|i| i.account_id.as_ref())
-        .is_some_and(|id| state.swap_held.lock().is_ok_and(|held| held.contains(id)))
+        .is_some_and(|id| {
+            state
+                .swap_held
+                .lock()
+                .is_ok_and(|held| held.contains_key(id))
+        })
     {
         return Outcome::NotNeeded;
     }
@@ -535,6 +557,9 @@ fn is_active(
     account: &Account,
     credential: &Credential,
 ) -> bool {
+    // Never decided on a remembered sign-in: another tool may have switched Claude Code to
+    // this very account a moment ago, and renewing it then would spend Claude Code's token.
+    crate::external::forget_current();
     match (native.current)(Provider::Claude) {
         Ok(current) => {
             state.note_active(&current.identity);
@@ -774,8 +799,8 @@ pub(crate) async fn renew_idle_live(
 pub(crate) enum SwapView {
     NotRunning,
     Unreadable,
-    /// Running: the profiles read, and how many rows could not be read this pass.
-    Profiles(Vec<crate::external::CapturedProfile>, usize),
+    /// Running: the profiles read, and the emails of rows that could not be read this pass.
+    Profiles(Vec<crate::external::CapturedProfile>, Vec<String>),
     /// Not running, but its files hold sign-ins it may have renewed before it stopped: take the
     /// newer ones, hold nothing (board SB-21).
     Stopped(Vec<crate::external::CapturedProfile>),
@@ -806,7 +831,7 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
         // Running, but its files could not be read this pass (it was writing them): what it
         // held last time it still holds — clearing it would start a second renewer.
         SwapView::Unreadable => return 0,
-        SwapView::Profiles(profiles, failed) => (profiles, failed),
+        SwapView::Profiles(profiles, failed_emails) => (profiles, failed_emails),
         SwapView::Stopped(profiles) => {
             if let Ok(mut held) = state.swap_held.lock() {
                 held.clear();
@@ -814,17 +839,22 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
             return adopt_newer(store, state, profiles, None);
         }
     };
-    let (profiles, failed) = profiles;
-    let mut held = std::collections::HashSet::new();
+    let (profiles, failed_emails) = profiles;
+    let mut held = HashMap::new();
     let updated = adopt_newer(store, state, profiles, Some(&mut held));
     if let Ok(mut current) = state.swap_held.lock() {
         // A row that could not be read (Swap rewrites it exactly when it renews that account)
-        // is still Swap's: what it held stays held until a pass reads every row.
-        if failed > 0 {
-            current.extend(held);
-        } else {
-            *current = held;
+        // is still Swap's: that account stays held. Only that one — a row broken for good, or
+        // an account removed from Swap, must not keep anything held forever.
+        for (account, email) in current.drain() {
+            if email
+                .as_deref()
+                .is_some_and(|e| failed_emails.iter().any(|f| f.eq_ignore_ascii_case(e)))
+            {
+                held.entry(account).or_insert(email);
+            }
         }
+        *current = held;
     }
     updated
 }
@@ -835,7 +865,7 @@ fn adopt_newer(
     store: &Store,
     state: &RefreshState,
     profiles: Vec<crate::external::CapturedProfile>,
-    mut held: Option<&mut std::collections::HashSet<String>>,
+    mut held: Option<&mut HashMap<String, Option<String>>>,
 ) -> usize {
     let mut updated = 0;
     for profile in profiles {
@@ -843,7 +873,7 @@ fn adopt_newer(
             continue;
         };
         if let Some(held) = held.as_deref_mut() {
-            held.insert(id);
+            held.insert(id, profile.identity.email.clone());
         }
         if lineage(store, state, &profile.identity, &profile.credential) == Lineage::Foreign {
             continue;
@@ -888,29 +918,45 @@ pub(crate) fn catch_up_with_claude_swap(
     native: NativeSources,
     id: &str,
 ) -> Result<(), String> {
-    let Some(account) = store
+    let Some((account, email)) = store
         .snapshot()?
         .accounts
         .into_iter()
         .find(|a| a.id == id)
         .and_then(|a| a.external_identity)
-        .and_then(|i| i.account_id)
-        .filter(|account| state.swap_held.lock().is_ok_and(|h| h.contains(account)))
+        .and_then(|i| i.account_id.map(|account| (account, i.email)))
+        .filter(|(account, _)| {
+            state
+                .swap_held
+                .lock()
+                .is_ok_and(|h| h.contains_key(account))
+        })
     else {
         return Ok(());
     };
     let batch = (native.swap)().map_err(|_| SWAP_BUSY.to_string())?;
-    let failed = batch.failed;
     // Its own row is the one Swap is rewriting: the stored copy may be the spent generation.
-    if failed > 0
-        && !batch
-            .profiles
-            .iter()
-            .any(|p| p.identity.account_id.as_deref() == Some(account.as_str()))
+    let listed = batch
+        .profiles
+        .iter()
+        .any(|p| p.identity.account_id.as_deref() == Some(account.as_str()));
+    if !listed
+        && email.as_deref().is_some_and(|e| {
+            batch
+                .failed_emails
+                .iter()
+                .any(|f| f.eq_ignore_ascii_case(e))
+        })
     {
         return Err(SWAP_BUSY.into());
     }
-    follow_claude_swap(store, state, SwapView::Profiles(batch.profiles, failed));
+    // Swap stopped since the monitor last looked: take its last generations, hold nothing.
+    let view = if state.swap_running.load(std::sync::atomic::Ordering::SeqCst) {
+        SwapView::Profiles(batch.profiles, batch.failed_emails)
+    } else {
+        SwapView::Stopped(batch.profiles)
+    };
+    follow_claude_swap(store, state, view);
     Ok(())
 }
 pub(crate) fn swap_held(state: &RefreshState) -> usize {
@@ -1674,7 +1720,7 @@ mod tests {
             label: "b".into(),
         };
         assert_eq!(
-            follow_claude_swap(&store, &state, SwapView::Profiles(vec![profile], 0)),
+            follow_claude_swap(&store, &state, SwapView::Profiles(vec![profile], vec![])),
             2,
             "both pools follow"
         );
@@ -1825,6 +1871,7 @@ mod tests {
                 label: "b".into(),
             }],
             failed: 0,
+            failed_emails: vec![],
             skipped: 0,
         })
     }
@@ -1832,6 +1879,7 @@ mod tests {
         Ok(crate::external::ImportBatch {
             profiles: vec![],
             failed: 1,
+            failed_emails: vec!["synthetic-b@example.invalid".into()],
             skipped: 0,
         })
     }
@@ -1840,6 +1888,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = store_with(root.path(), &[("synthetic-b", "default")]);
         let state = RefreshState::default();
+        state.set_swap_activity(true, false);
         let b = id_of(&store, "synthetic-b", "default");
         let fresh = NativeSources {
             swap: swap_with_newer_b,
@@ -1855,7 +1904,7 @@ mod tests {
                 .as_deref(),
             Some("synthetic-b-refresh")
         );
-        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        state.hold_for_test("synthetic-b");
         catch_up_with_claude_swap(&store, &state, fresh, &b).unwrap();
         assert_eq!(
             store
@@ -1906,9 +1955,13 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = store_with(root.path(), &[("synthetic-b", "default")]);
         let state = RefreshState::at(url);
-        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        state.hold_for_test("synthetic-b");
         // Swap is rewriting b's row this pass: it is missing from the profiles read.
-        follow_claude_swap(&store, &state, SwapView::Profiles(vec![], 1));
+        follow_claude_swap(
+            &store,
+            &state,
+            SwapView::Profiles(vec![], vec!["synthetic-b@example.invalid".into()]),
+        );
         assert_eq!(swap_held(&state), 1);
         let b = id_of(&store, "synthetic-b", "default");
         assert_eq!(
@@ -1917,8 +1970,84 @@ mod tests {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0, "no second renewer");
         // A pass that reads every row and no longer lists it releases it.
-        follow_claude_swap(&store, &state, SwapView::Profiles(vec![], 0));
+        follow_claude_swap(&store, &state, SwapView::Profiles(vec![], vec![]));
         assert_eq!(swap_held(&state), 0);
+    }
+    #[test]
+    fn a_switch_after_claude_swap_stopped_takes_its_generation_and_holds_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::default();
+        // Held at the monitor's last look; Swap has stopped since.
+        state.hold_for_test("synthetic-b");
+        state.set_swap_activity(false, false);
+        let b = id_of(&store, "synthetic-b", "default");
+        let native = NativeSources {
+            swap: swap_with_newer_b,
+            ..SIGNED_IN_A
+        };
+        catch_up_with_claude_swap(&store, &state, native, &b).unwrap();
+        assert_eq!(
+            store
+                .stored_credential(&b)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("swap-renewed")
+        );
+        assert_eq!(
+            swap_held(&state),
+            0,
+            "a stopped Swap renews nothing: Switchboard does"
+        );
+    }
+    #[test]
+    fn only_the_unreadable_rows_account_stays_held() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[("synthetic-b", "default"), ("synthetic-c", "default")],
+        );
+        let state = RefreshState::default();
+        state.hold_for_test("synthetic-b");
+        state.hold_for_test("synthetic-c");
+        // c's row is broken for good (another email), b was removed from Swap: neither is held
+        // forever — only an account whose own row failed this pass stays held.
+        follow_claude_swap(
+            &store,
+            &state,
+            SwapView::Profiles(vec![], vec!["someone-else@example.invalid".into()]),
+        );
+        assert_eq!(swap_held(&state), 0);
+        state.hold_for_test("synthetic-b");
+        follow_claude_swap(
+            &store,
+            &state,
+            SwapView::Profiles(vec![], vec!["SYNTHETIC-B@example.invalid".into()]),
+        );
+        assert_eq!(swap_held(&state), 1, "matched case-insensitively");
+    }
+    #[test]
+    fn switching_to_an_account_swap_no_longer_lists_is_not_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::default();
+        state.hold_for_test("synthetic-b");
+        let b = id_of(&store, "synthetic-b", "default");
+        fn swap_without_b() -> Result<crate::external::ImportBatch, String> {
+            Ok(crate::external::ImportBatch {
+                profiles: vec![],
+                failed: 1,
+                failed_emails: vec!["someone-else@example.invalid".into()],
+                skipped: 0,
+            })
+        }
+        let native = NativeSources {
+            swap: swap_without_b,
+            ..SIGNED_IN_A
+        };
+        catch_up_with_claude_swap(&store, &state, native, &b).unwrap();
+        assert_eq!(swap_held(&state), 0, "released: Swap no longer has it");
     }
     #[test]
     fn a_stopped_claude_swap_still_hands_over_what_it_renewed_last() {
@@ -1932,7 +2061,7 @@ mod tests {
             ],
         );
         let state = RefreshState::default();
-        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        state.hold_for_test("synthetic-b");
         let profile =
             |account: &str, refresh: &str, expires: i64| crate::external::CapturedProfile {
                 provider: Provider::Claude,

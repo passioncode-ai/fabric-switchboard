@@ -530,7 +530,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Save or sign in to an account in the app → the CLI and later signed updates read it with no dialog.
 2. Open the app after updating from 0.4 or earlier → each account saved by an earlier version moves to shared storage; macOS asks at most once per account, and not at all for accounts the installed app could already read.
 3. An agent uses the CLI before the app has moved an account → the CLI shows no dialog and says to open the app once.
-**Alt paths:** Deny in the dialog → the account stays where it was and the app does not ask again until restart. A development build never reads the user's accounts. Codex keeps its sign-in in the Keychain (`keyring`/`auto`) → it is read without a dialog; an item that does not trust Switchboard reads “Keychain does not let Switchboard read this sign-in without asking. Use official sign-in to add the account.” instead of asking every minute (0.5.3).
+**Alt paths:** Deny in the dialog → the account stays where it was and the app does not ask again until restart. A development build never reads the user's accounts. Codex keeps its sign-in in the Keychain (`keyring`/`auto`) → it is read without a dialog; an item that does not trust Switchboard reads “Keychain is locked or does not let Switchboard read this sign-in without asking. Unlock it and retry, or add the account with official sign-in.” instead of asking every minute (0.5.3).
 **Expected result:** After the move, no Keychain dialog during ordinary use by the app or the CLI.
 **UI elements:** macOS Keychain dialog (app only), status/error message.
 **States covered:** moved silently, moved after one consent, declined, CLI before the move, development build.

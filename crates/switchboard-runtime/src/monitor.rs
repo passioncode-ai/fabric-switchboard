@@ -61,7 +61,9 @@ impl MonitorHandle {
                         crate::external::SwapActivity::default()
                     };
                     let running = activity.running;
-                    runtime.refresh.set_swap_switching(activity.switching);
+                    runtime
+                        .refresh
+                        .set_swap_activity(activity.running, activity.switching);
                     let signature = claude
                         .then(crate::external::claude_swap_signature)
                         .flatten();
@@ -72,9 +74,12 @@ impl MonitorHandle {
                         swap_last_signature,
                     );
                     let read = due.then(crate::external::read_claude_swap);
+                    // After a stop, a row that could not be read may hold Swap's last renewal:
+                    // read again next pass rather than mark the files as seen.
+                    let partial = matches!(&read, Some(Ok(batch)) if !running && batch.failed > 0);
                     let swap = match (running, read) {
                         (true, Some(Ok(batch))) => {
-                            crate::refresh::SwapView::Profiles(batch.profiles, batch.failed)
+                            crate::refresh::SwapView::Profiles(batch.profiles, batch.failed_emails)
                         }
                         (true, _) => crate::refresh::SwapView::Unreadable,
                         (false, Some(Ok(batch))) => {
@@ -85,11 +90,12 @@ impl MonitorHandle {
                     // A failed read (Swap was writing its files) is repeated next pass: neither
                     // the files nor the stop are marked as seen.
                     let failed = due
-                        && matches!(
-                            swap,
-                            crate::refresh::SwapView::Unreadable
-                                | crate::refresh::SwapView::NotRunning
-                        );
+                        && (partial
+                            || matches!(
+                                swap,
+                                crate::refresh::SwapView::Unreadable
+                                    | crate::refresh::SwapView::NotRunning
+                            ));
                     if !failed {
                         swap_last_signature = signature;
                         swap_was_running = Some(running);

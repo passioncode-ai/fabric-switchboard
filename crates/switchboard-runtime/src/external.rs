@@ -29,6 +29,8 @@ pub struct CapturedProfile {
 pub struct ImportBatch {
     pub profiles: Vec<CapturedProfile>,
     pub failed: usize,
+    /// The email of each row that could not be read, where the row named one.
+    pub failed_emails: Vec<String>,
     pub skipped: usize,
 }
 
@@ -506,30 +508,54 @@ pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
 /// background reuses one for `CURRENT_TTL`; Switchboard's own writes forget it at once, and
 /// explicit operations read afresh. An external change (a `/login`) is seen within the TTL.
 pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, String> {
-    if provider == Provider::Claude {
-        if let Ok(cache) = CURRENT.lock() {
+    if provider != Provider::Claude {
+        return capture_current(provider);
+    }
+    CURRENT.get_or(|| capture_current(provider))
+}
+const CURRENT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+/// One remembered read and when it was made.
+struct CurrentCache(
+    std::sync::Mutex<Option<(std::time::Instant, Result<CapturedProfile, String>)>>,
+);
+impl CurrentCache {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+    /// The remembered read while it is younger than the TTL, otherwise `read()` remembered.
+    fn get_or(
+        &self,
+        read: impl FnOnce() -> Result<CapturedProfile, String>,
+    ) -> Result<CapturedProfile, String> {
+        if let Ok(cache) = self.0.lock() {
             if let Some((at, result)) = cache.as_ref() {
                 if at.elapsed() < CURRENT_TTL {
                     return result.clone();
                 }
             }
         }
+        let result = read();
+        self.remember(&result);
+        result
     }
-    capture_current(provider)
+    fn remember(&self, result: &Result<CapturedProfile, String>) {
+        if let Ok(mut cache) = self.0.lock() {
+            *cache = Some((std::time::Instant::now(), result.clone()));
+        }
+    }
+    fn forget(&self) {
+        if let Ok(mut cache) = self.0.lock() {
+            *cache = None;
+        }
+    }
 }
-const CURRENT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
-static CURRENT: std::sync::Mutex<Option<(std::time::Instant, Result<CapturedProfile, String>)>> =
-    std::sync::Mutex::new(None);
+static CURRENT: CurrentCache = CurrentCache::new();
 fn remember_current(result: &Result<CapturedProfile, String>) {
-    if let Ok(mut cache) = CURRENT.lock() {
-        *cache = Some((std::time::Instant::now(), result.clone()));
-    }
+    CURRENT.remember(result);
 }
 /// Drops the cached Claude sign-in: after any write to it, and before an explicit operation.
 pub fn forget_current() {
-    if let Ok(mut cache) = CURRENT.lock() {
-        *cache = None;
-    }
+    CURRENT.forget();
 }
 pub fn capture_at(provider: Provider, home: &Path) -> Result<CapturedProfile, String> {
     capture(&Native, provider, &context(provider, Some(home))?)
@@ -556,6 +582,7 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
     let mut batch = ImportBatch {
         profiles: vec![],
         failed: 0,
+        failed_emails: Vec::new(),
         skipped: 0,
     };
     for (slot, row) in accounts {
@@ -673,7 +700,16 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
         })();
         match result {
             Ok(profile) => batch.profiles.push(profile),
-            Err(_) => batch.failed += 1,
+            Err(_) => {
+                batch.failed += 1;
+                if let Some(email) = row
+                    .get("email")
+                    .and_then(Value::as_str)
+                    .filter(|s| segment(s))
+                {
+                    batch.failed_emails.push(email.to_ascii_lowercase());
+                }
+            }
         }
     }
     if reader.read(&root.join("sequence.json"), CAP)?.as_deref() != Some(sequence.as_slice()) {
@@ -2119,22 +2155,31 @@ mod tests {
     }
     #[test]
     fn the_background_reuses_one_claude_read_until_switchboard_writes() {
-        // Only the cache is exercised: a miss would read the real sign-in, which tests never do.
-        let profile =
-            claude_profile(&auth("cached"), &config("cached@example.test"), None).unwrap();
-        remember_current(&Ok(profile));
-        let hit = capture_current_cached(Provider::Claude).unwrap();
-        assert_eq!(hit.credential.access_token, "cached");
-        remember_current(&Err("No current Claude sign-in found.".into()));
+        // Its own cache: the process-wide one is shared with tests that forget it.
+        let cache = CurrentCache::new();
+        let reads = Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            claude_profile(&auth("cached"), &config("cached@example.test"), None)
+        };
         assert_eq!(
-            capture_current_cached(Provider::Claude).err().unwrap(),
-            "No current Claude sign-in found."
+            cache.get_or(read).unwrap().credential.access_token,
+            "cached"
         );
-        forget_current();
-        assert!(
-            CURRENT.lock().unwrap().is_none(),
-            "a write leaves nothing stale behind"
+        assert_eq!(
+            cache.get_or(read).unwrap().credential.access_token,
+            "cached"
         );
+        assert_eq!(reads.get(), 1, "the second request reuses the first read");
+        // A signed-out state is remembered too, for the same time.
+        cache.forget();
+        cache.remember(&Err("No current Claude sign-in found.".into()));
+        assert!(cache.get_or(read).is_err());
+        assert_eq!(reads.get(), 1);
+        // After Switchboard writes, the next request reads again.
+        cache.forget();
+        cache.get_or(read).unwrap();
+        assert_eq!(reads.get(), 2);
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {

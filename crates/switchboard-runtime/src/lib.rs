@@ -982,6 +982,9 @@ fn replace_native(
     if !account.enabled {
         return Err("Account is disabled".into());
     }
+    // A switch is decided on what is signed in now, never on a remembered read: a stale one
+    // could call the target "already in use" and record a switch that never happened.
+    external::forget_current();
     // A renewed generation that could not be stored yet is the only valid one.
     if let Some(state) = refresh {
         match refresh::adopt_stash(store, state, &account.id) {
