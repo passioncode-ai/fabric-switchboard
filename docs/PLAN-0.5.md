@@ -192,3 +192,54 @@ Recorded, not built:
 - **#21** the adoption delay is a live measurement: board SB-06.
 - **#22** a `.prev` copy is declined. Backups keep ten generations, and kept successors cover the
   renewal gap.
+
+## 0.5.3 — sessions are never lost; the app stays quiet
+
+Operator request, 2026-10-03, paraphrased from Russian:
+- Make the token handling right, because all of the work rests on it.
+- Sessions must never be lost and must always stay current, including while Claude Swap runs in
+  the background.
+- Review the desktop app's architecture, build and permissions, so that there are no redundant
+  services, no errors, and no pop-ups or system messages that bother the user.
+
+How the run worked:
+- **Two independent read-only audits:**
+  - token custody: 3 P1 · 5 P2 · 6 P3, three of them proven by scratch tests;
+  - desktop: 3 P1 · 4 P2 · 4 P3, with a process count measured on the running app.
+- **Board SB-21**, observed on the operator's Mac, was taken into the run.
+- **No new operator decision was needed.** The one judgement call is the division of work with
+  Claude Swap, below. It follows the operator's own goal (manage correctly beside Claude Swap)
+  and changes nothing in Claude Swap's files.
+
+**Division of work with Claude Swap:**
+- When it **runs**, it renews the accounts it holds, and Switchboard follows its generations.
+- When it **switches** Claude Code automatically, Switchboard's native rotation holds.
+- When it **has stopped**, Switchboard takes whatever Swap renewed last and renews those accounts
+  itself.
+- Switchboard never writes to Claude Swap's files.
+
+| REQ | Requirement (audit finding) | Verified by |
+|---|---|---|
+| REQ-51 | Claude Swap's last renewals are taken after it stops; reads happen on start, on stop, on change and while it runs (SB-21) | `a_stopped_claude_swap_still_hands_over_what_it_renewed_last`, `claude_swaps_files_are_read_when_they_can_hold_something_new`, `claude_swaps_files_change_their_signature`, `a_dead_copy_comes_back_when_claude_swap_holds_its_successor` |
+| REQ-52 | An unreadable Swap row keeps its hold (token P1-1) | `a_claude_swap_row_that_could_not_be_read_stays_held` (mutation-checked) |
+| REQ-53 | The offline CLI/MCP never spends; a `--data-dir` owner never spends (token P1-2, P3) | `the_offline_cli_never_spends_a_refresh_token`, `the_offline_cli_still_refuses_a_lineage_the_owner_saw_rejected` (mutation-checked) |
+| REQ-54 | Import never moves an account backwards and never imports a foreign lineage (token P1-3) | `importing_from_claude_swap_never_moves_an_account_backwards` (mutation-checked) |
+| REQ-55 | Capture refuses a foreign lineage, and an unattributed one over a saved copy (token P2-1) | `capturing_another_accounts_lineage_under_this_name_is_refused`, `capturing_an_unattributed_sign_in_never_overwrites_a_saved_copy` (mutation-checked) |
+| REQ-56 | A successor issued to a saved account with an older lineage still reaches it (token P2-2) | `a_successor_issued_to_a_saved_account_with_an_older_lineage_still_reaches_it` |
+| REQ-57 | Switching to an account Swap holds catches up with Swap first; refused while its row is unreadable (token P2-3) | `switching_to_an_account_claude_swap_renews_takes_its_newest_generation_first` |
+| REQ-58 | Native rotation holds while Claude Swap switches automatically; a leftover plist is not "running" (token P2-4, P3) | `native_rotation_leaves_switching_to_an_auto_switching_claude_swap`, `claude_swap_switching_is_told_from_merely_running` |
+| REQ-59 | One grant per refresh token, released on every exit; no switch to an account mid-renewal (token P3) | `an_account_whose_renewal_is_in_flight_is_not_switched_to`, `a_refused_client_holds_every_renewal_without_blaming_an_account` (caught a leak in the first ordering) |
+| REQ-60 | Live sync never moves a newer copy back; rotation never picks a rejected sign-in; restore starts from the newest generation (token P3) | `background_sync_never_moves_a_newer_copy_back`, `rotation_skips_a_rejected_sign_in_for_the_next_eligible_account`, `a_restored_copy_starts_from_the_newest_generation_saved_elsewhere` (all mutation-checked) |
+| REQ-61 | A busy store never crashes the app; Retry recovers; a second launch focuses the first (desktop P1-1) | `src-tauri` `Slot` (build + gate); live check after install |
+| REQ-62 | Codex's Keychain item is read without any dialog (desktop P1-3) | `codexs_keychain_item_is_read_only_the_quiet_way` |
+| REQ-63 | Background Keychain reads cut: 30 s reuse, nothing without a saved Claude OAuth account, owner lookup only with native rotation on (desktop P1-2, P2) | `the_background_reuses_one_claude_read_until_switchboard_writes`, `without_saved_claude_accounts_the_monitor_leaves_claude_code_alone`; process count on the installed app |
+| REQ-64 | A translocated copy is never linked or written into agent configs; About says to move the app (desktop P2) | `a_translocated_copy_is_never_linked_or_offered` |
+| REQ-65 | Release profile LTO + one codegen unit + strip (desktop P3) | bundle size before/after in evidence |
+| REQ-66 | Docs, scenarios, strings and evidence in the same change; full gate green | `scripts/check_docs.py`, `./scripts/check.sh` |
+
+Not built:
+- **The renewal successor is not persisted.** It is held only while the vault refuses to store
+  it, and persisting it elsewhere would mean plaintext; documented in ACCOUNTS-AND-ROTATION.
+- **`security` waits on async threads** (desktop P3) → board SB-23. Far fewer calls now; moving
+  them to a blocking pool is a refactor across every native read.
+- **Windows Authenticode** stays SB-03, an operator decision.

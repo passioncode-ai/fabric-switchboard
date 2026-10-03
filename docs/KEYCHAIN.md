@@ -152,3 +152,17 @@ the legacy items already trusted the app, so step 1 predicts none.
 ## Related items added in 0.5
 
 Not account storage, and outside the design above: the backup key `ai.passioncode.fabric-switchboard.backup-key` / `v1` and Claude Code's own `Claude Code-credentials` items are reached only through `/usr/bin/security`, so they trust that executable rather than the app ([PLAN-0.5](PLAN-0.5.md), [OPERATIONS](OPERATIONS.md)).
+
+## Items other programs own (0.5.3)
+
+Which path reads an item depends on who created it, because an item trusts its creator:
+
+| Item | Created by | Read by Switchboard through | Why |
+|---|---|---|---|
+| `Claude Code-credentials` (+ a custom-home suffix) | Claude Code via `/usr/bin/security` | `/usr/bin/security` | the item trusts that executable; no dialog |
+| backup key `ai.passioncode.fabric-switchboard.backup-key` | Switchboard via `/usr/bin/security` | `/usr/bin/security` | same |
+| `Codex Auth` (`cli|<hash>`, Codex `keyring`/`auto` mode) | Codex through its own keyring library | Security.framework with user interaction **off** (`switchboard_core::external_keychain::read_external_quietly`) | the item trusts Codex only; `/usr/bin/security` would make macOS ask on every read, and the background read it every minute. With interaction off an untrusted item reads as refused — *Keychain does not let Switchboard read this sign-in without asking. Use official sign-in to add the account.* — and nothing is shown (`codexs_keychain_item_is_read_only_the_quiet_way`) |
+
+Each `/usr/bin/security` read is a process. Claude Code's item is read twice per capture (a torn
+config/credential pair is refused), so the monitor reuses one capture for 30 seconds and reads
+nothing of Claude Code's when no Claude OAuth account is saved ([OPERATIONS](OPERATIONS.md#053-quiet-by-design)).
