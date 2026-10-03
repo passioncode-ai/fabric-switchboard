@@ -250,3 +250,52 @@ On the operator's Mac after install (2026-10-03, 03:12 onward):
   - Board SB-21 records it.
   - Recovery is the operator's: *Sign in again* on that row, or a Claude Swap re-import if its
     backup holds a newer sign-in.
+
+## 0.5.3
+
+Scope: [PLAN-0.5 §0.5.3](../PLAN-0.5.md#053--sessions-are-never-lost-the-app-stays-quiet), REQ-51…REQ-67. Synthetic fixtures only; nothing read or wrote the real Keychain, `~/.claude*`, `~/.codex` or `~/.claude-swap-backup`.
+
+### Checks run (macOS 26.6, arm64, 2026-10-03)
+
+| Command | Result |
+|---|---|
+| `./scripts/check.sh` | exit 0 |
+| Rust tests (inside the gate) | 270 passed, 0 failed, 2 ignored |
+| `node scripts/check-error-vocabulary.mjs` | 238 backend messages: 83 verbatim, 140 mapped, 15 allowlisted |
+| `cargo llvm-cov --workspace --summary-only` | 86.41 % of lines (`refresh.rs` 96.86 %, `backup.rs` 93.00 %, `monitor.rs` 87.22 %, `lib.rs` 84.82 %, `external.rs` 84.18 %) |
+
+### Audits and review
+
+| Pass | Findings | Outcome |
+|---|---|---|
+| Token custody (read-only, 3 findings proven by scratch tests) | P1 ×3, P2 ×5, P3 ×6 | all fixed (REQ-52…60) except the persisted successor, declined with reason |
+| Desktop architecture, measured on the running 0.5.2 app: 30 `security` + 1 `ps` processes in 200 s | P1 ×3, P2 ×4, P3 ×4 | fixed: REQ-61…65; the 1.5 s sign-in poll makes no IPC without a pending sign-in (left as is); blocking `security` on async threads → SB-23; Windows signing stays SB-03 |
+| Review of the 0.5.3 diff | P2 ×3, P3 ×6 | all fixed (REQ-67) |
+
+### Planted-defect checks
+
+Each of the following guards was removed in place, the named test was run, and the source was
+restored. Every one failed:
+
+- live sync newer-copy guard;
+- rotation exclusion of rejected sign-ins;
+- import newest-generation rule;
+- capture lineage refusal;
+- a failed Swap row keeps its hold;
+- offline no-grant;
+- restore newest-generation rule;
+- email-scoped holds;
+- stopped-aware catch-up.
+
+The first version of the stopped-aware catch-up test passed against the planted defect too. It
+was rewritten so that it fails.
+
+`a_refused_client_holds_every_renewal_without_blaming_an_account` found a real leak in the new
+in-flight marking: a token stayed marked forever after an early return. It was fixed before
+commit, with the mark released by a Drop guard.
+
+### Not run
+
+- Live provider acceptance (SB-01, SB-15), and Windows on a Windows host (SB-02).
+- The process count and dialog check are repeated on the operator's Mac after install; that
+  record follows.

@@ -235,6 +235,7 @@ How the run worked:
 | REQ-63 | Background Keychain reads cut: 30 s reuse, nothing without a saved Claude OAuth account, owner lookup only with native rotation on (desktop P1-2, P2) | `the_background_reuses_one_claude_read_until_switchboard_writes`, `without_saved_claude_accounts_the_monitor_leaves_claude_code_alone`; process count on the installed app |
 | REQ-64 | A translocated copy is never linked or written into agent configs; About says to move the app (desktop P2) | `a_translocated_copy_is_never_linked_or_offered` |
 | REQ-65 | Release profile LTO + one codegen unit + strip (desktop P3) | bundle size before/after in evidence |
+| REQ-67 | Review of the 0.5.3 diff (P2 ×3, P3 ×6): fresh reads for "is it in use" and every switch; email-scoped Swap holds; stopped-aware catch-up; partial stopped reads repeated; injectable cache test; STARTUP_FAILED and a background owner retry; honest locked-Keychain message | `only_the_unreadable_rows_account_stays_held`, `switching_to_an_account_swap_no_longer_lists_is_not_refused`, `a_switch_after_claude_swap_stopped_takes_its_generation_and_holds_nothing`, `the_background_reuses_one_claude_read_until_switchboard_writes` (mutation-checked) |
 | REQ-66 | Docs, scenarios, strings and evidence in the same change; full gate green | `scripts/check_docs.py`, `./scripts/check.sh` |
 
 Not built:
