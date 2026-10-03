@@ -982,13 +982,19 @@ mod tests {
         private_write(&script_path, format!("\u{feff}{content}").as_bytes(), false).unwrap();
         let mut reservation = Reservation::new(&home).unwrap();
         reservation.committed = true;
-        let status = Command::new("powershell.exe")
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        let output = Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
             .arg(&script_path)
             .env("ANTHROPIC_API_KEY", "synthetic-conflicting-key")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            output.status.success(),
+            "{:?}\nstdout: {}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(read_regular(&home.join(".completed")).unwrap(), "complete");
         assert!(ensure_idle(&home).is_ok());
     }
@@ -1157,8 +1163,17 @@ mod tests {
         };
         let login = fixture_login(home.clone(), account);
         assert_eq!(login_state(&login), "pending");
-        // A session pid that no longer runs, and no completion marker: the sign-in ended.
+        // A session process that no longer runs, and no completion marker: the sign-in
+        // ended. Each platform's script leaves its own marker.
+        #[cfg(unix)]
         private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+        #[cfg(windows)]
+        private_write(
+            &home.join(".session-process"),
+            br#"{"pid":999999,"created":1}"#,
+            false,
+        )
+        .unwrap();
         assert_eq!(login_state(&login), "ended");
         private_write(&home.join(".completed"), b"complete", false).unwrap();
         assert_eq!(login_state(&login), "complete");
