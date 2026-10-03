@@ -821,3 +821,94 @@ fn a_renewal_goes_only_to_the_owner_the_token_endpoint_named() {
         .unwrap();
     assert_eq!(updated, vec![a.id]);
 }
+
+/// Lifecycle LC-08: a quota check that finds nothing new moves only timestamps. Those stay in
+/// memory until something real changes, the store is flushed, or it closes.
+#[test]
+fn an_unchanged_quota_check_is_not_written_until_something_changes() {
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic");
+    let metadata = || fs::read(root.path().join("accounts.json")).unwrap();
+    let usage = |at: i64, used: f64| Usage {
+        windows: vec![],
+        used_percent: used,
+        observed_at: at,
+        resets_at: Some(now() + 7200),
+        source: "claude_oauth".into(),
+    };
+    let t = now() - 100;
+    store.observe(&a.id, usage(t, 40.0)).unwrap();
+    let writes = store.metadata_writes();
+    let on_disk = metadata();
+    for step in 1..=10 {
+        store.observe(&a.id, usage(t + step, 40.0)).unwrap();
+    }
+    assert_eq!(store.metadata_writes(), writes, "only timestamps moved");
+    assert_eq!(metadata(), on_disk);
+    let usage_of = |s: &Store| s.snapshot().unwrap().accounts[0].usage.clone().unwrap();
+    assert_eq!(
+        usage_of(&store).observed_at,
+        t + 10,
+        "memory has the newest"
+    );
+    // A real change is written at once, carrying the pending timestamps with it.
+    store.observe(&a.id, usage(t + 20, 41.0)).unwrap();
+    assert_eq!(store.metadata_writes(), writes + 1);
+    // A failure with the status unchanged is a timestamp too; a new status is written.
+    store
+        .usage_health(&a.id, "failed", t + 30, t + 210)
+        .unwrap();
+    assert_eq!(store.metadata_writes(), writes + 2, "ok → failed");
+    store
+        .usage_health(&a.id, "failed", t + 40, t + 400)
+        .unwrap();
+    assert_eq!(store.metadata_writes(), writes + 2, "failed → failed");
+    // Flush writes what is pending once, and only once.
+    store.flush().unwrap();
+    assert_eq!(store.metadata_writes(), writes + 3);
+    store.flush().unwrap();
+    assert_eq!(store.metadata_writes(), writes + 3);
+    // Closing the store writes what is still pending.
+    store
+        .usage_health(&a.id, "failed", t + 50, t + 500)
+        .unwrap();
+    assert_eq!(store.metadata_writes(), writes + 3);
+    drop(store);
+    let reopened = Store::open(root.path().into(), vault).unwrap();
+    let health = reopened.snapshot().unwrap().accounts[0]
+        .usage_health
+        .clone()
+        .unwrap();
+    assert_eq!((health.checked_at, health.next_check_at), (t + 50, t + 500));
+}
+
+#[test]
+fn pending_timestamps_are_written_once_they_are_older_than_the_flush_interval() {
+    let (root, _vault, store) = setup();
+    let a = add(&store, "synthetic");
+    let usage = |at: i64| Usage {
+        windows: vec![],
+        used_percent: 10.0,
+        observed_at: at,
+        resets_at: None,
+        source: "claude_oauth".into(),
+    };
+    let t = now() - 100;
+    store.observe(&a.id, usage(t)).unwrap();
+    store.observe(&a.id, usage(t + 1)).unwrap();
+    let writes = store.metadata_writes();
+    store.flush_if_older(now(), 900).unwrap();
+    assert_eq!(
+        store.metadata_writes(),
+        writes,
+        "pending for less than the interval"
+    );
+    store.flush_if_older(now() + 901, 900).unwrap();
+    assert_eq!(store.metadata_writes(), writes + 1);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(
+        disk["snapshot"]["accounts"][0]["usage"]["observed_at"],
+        t + 1
+    );
+}

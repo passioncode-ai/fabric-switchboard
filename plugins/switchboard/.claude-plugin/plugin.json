@@ -3,7 +3,7 @@
   "name": "switchboard",
   "displayName": "Switchboard",
   "description": "Connects a coding agent to Fabric Switchboard: the switchboard MCP server plus the switching-accounts skill for reading status and remaining usage, switching the account of a managed session, and applying optional project rules, with the ordinary Claude Code login changed only on the operator's explicit OK.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "author": {
     "name": "PassionCode.ai",
     "url": "https://passioncode.ai/"

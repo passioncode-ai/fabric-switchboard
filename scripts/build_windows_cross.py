@@ -9,7 +9,10 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import zipfile
+
+from prune_artifacts import prune
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'x86_64-pc-windows-msvc'
@@ -112,6 +115,9 @@ def main():
     receipt.update(archive=archive.name, archive_sha256=sha(archive))
     receipt_path = folder.parent / (folder.name + '-receipt.json')
     receipt_path.write_text(json.dumps(receipt, indent=2) + '\n')
+    # Lifecycle LC-15: this release and the one before stay; older binaries go (receipts stay).
+    for path in prune(ROOT / 'artifacts'):
+        print(f'pruned {path.name}', file=sys.stderr)
     print(json.dumps(receipt, indent=2))
 
 

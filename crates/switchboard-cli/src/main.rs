@@ -9,9 +9,9 @@ use std::{
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
-    control, default_root, execute_offline,
+    arm_hard_exit, control, default_root, execute_offline, oplog,
     projects::{detect_session, Session},
-    rfc3339, Operation, Owner,
+    rfc3339, stop_requested, Operation, Owner, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
 
 #[derive(Parser)]
@@ -65,7 +65,8 @@ enum Command {
         #[arg(long)]
         working_directory: PathBuf,
     },
-    /// Own the vault, inference proxy and private CLI control listener until Ctrl-C.
+    /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
+    /// SIGTERM, then stop within ten seconds.
     Serve,
     /// Optional project rules: a folder starts its sessions on a chosen account.
     Project {
@@ -302,14 +303,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         return Ok(Value::Null);
     }
     if matches!(cli.command, Command::Serve) {
+        if let Some(log) = oplog::Log::default_location() {
+            oplog::install(log);
+        }
         let owner = Owner::native(root).await?;
         let status = owner.runtime.execute(Operation::Status).await?;
         print_value(&json!({"state":"serving", "runtime":status}), cli.json);
-        tokio::signal::ctrl_c()
-            .await
-            .map_err(|_| "Shutdown signal unavailable.")?;
-        drop(owner);
-        return Ok(json!({"state":"stopped"}));
+        // SIGTERM (launchd, `kill`, logout) and SIGINT (Ctrl-C) run the same drain with a
+        // deadline; the backstop ends the process if it overruns (lifecycle LC-01).
+        let signal = stop_requested().await?;
+        arm_hard_exit(HARD_EXIT_AFTER);
+        oplog::event("stop_requested", &[("signal", oplog::Field::Code(signal))]);
+        let stopped = owner.shutdown(DRAIN_DEADLINE).await;
+        return Ok(json!({"state":"stopped", "drained": stopped.drained}));
     }
     let operation = match &cli.command {
         Command::Accounts { command } => match command {

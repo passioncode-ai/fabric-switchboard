@@ -496,66 +496,387 @@ fn capture(
     }
     Ok(result)
 }
+/// An explicit read a person asked for (capture): straight from the source, so a locked
+/// keychain may ask to be unlocked. Its result also becomes what the background reuses.
 pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
-    let result = capture(&Native, provider, &context(provider, None)?);
-    if provider == Provider::Claude {
-        remember_current(&result);
-    }
+    let before = probe_source(provider);
+    let started = unix_now();
+    let result = context(provider, None).and_then(|c| capture(&Native, provider, &c));
+    WATCH.remember(provider, before, probe_source(provider), started, &result);
     result
 }
-/// The Claude sign-in read by the monitor's background passes. Each read is two
-/// `/usr/bin/security` processes (the item is read twice to refuse a torn pair), so the
-/// background reuses one for `CURRENT_TTL`; Switchboard's own writes forget it at once, and
-/// explicit operations read afresh. An external change (a `/login`) is seen within the TTL.
+/// The sign-in as the background sees it (lifecycle LC-04): a quiet probe first — file stamps
+/// and the Keychain item's attributes and access list, nothing decrypted, no process — and a
+/// read only when the source changed since the last one. A locked keychain, an item that would
+/// make macOS ask, or a refusal is remembered as such and never retried in a loop: the probe
+/// backs off up to 30 minutes until the source changes or a person acts (`forget_current`).
 pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, String> {
-    if provider != Provider::Claude {
-        return capture_current(provider);
-    }
-    CURRENT.get_or(|| capture_current(provider))
+    WATCH.get(
+        provider,
+        unix_now,
+        || probe_source(provider),
+        || context(provider, None).and_then(|c| capture(&Native, provider, &c)),
+    )
 }
-const CURRENT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
-/// One remembered read and when it was made.
-struct CurrentCache(
-    std::sync::Mutex<Option<(std::time::Instant, Result<CapturedProfile, String>)>>,
-);
-impl CurrentCache {
-    const fn new() -> Self {
-        Self(std::sync::Mutex::new(None))
+/// A person acted, or Switchboard wrote the sign-in: the next request probes and reads afresh.
+pub fn forget_current() {
+    WATCH.forget();
+}
+/// Background reads of the sign-in sources so far (for the idle budget and its tests).
+pub fn watched_reads() -> u64 {
+    WATCH.reads()
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// One part of a source, as seen without reading a secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Stamp {
+    /// A file: device, inode, length and modification time in nanoseconds; None when absent.
+    File(Option<(u64, u64, u64, i128)>),
+    /// A Keychain item's creation and modification stamps; None when absent.
+    Item(Option<(i64, i64)>),
+}
+/// What a probe of a source found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Probe {
+    Ready {
+        stamps: Vec<Stamp>,
+        /// Reading the source now would make macOS ask (the item does not trust the tool
+        /// the read goes through).
+        consent: bool,
+        /// The newest stamp, Unix seconds. A read in that same second may miss a write in
+        /// it, so such a read is not reused.
+        newest: i64,
+    },
+    /// The keychain holding the item is locked.
+    Locked,
+    /// The source could not be examined.
+    Unavailable,
+}
+
+/// Probe back-off while a source is locked or unavailable: one minute, doubling, at most 30.
+const PROBE_BACKOFF_MIN: i64 = 60;
+const PROBE_BACKOFF_MAX: i64 = 1800;
+
+#[derive(Default)]
+struct Slot {
+    /// The stamps the remembered outcome was read at; None: read again on the next request.
+    stamps: Option<Vec<Stamp>>,
+    outcome: Option<Result<CapturedProfile, String>>,
+    /// While locked or unavailable: no probe before this time.
+    blocked_until: i64,
+    backoff: i64,
+    /// The last state reported to the log, so only changes are logged.
+    reported: &'static str,
+}
+pub(crate) struct Watch {
+    slots: std::sync::Mutex<[Slot; 2]>,
+    reads: std::sync::atomic::AtomicU64,
+}
+fn slot_index(provider: Provider) -> usize {
+    match provider {
+        Provider::Claude => 0,
+        Provider::Codex => 1,
     }
-    /// The remembered read while it is younger than the TTL, otherwise `read()` remembered.
-    fn get_or(
+}
+impl Watch {
+    pub(crate) const fn new() -> Self {
+        const EMPTY: Slot = Slot {
+            stamps: None,
+            outcome: None,
+            blocked_until: 0,
+            backoff: 0,
+            reported: "",
+        };
+        Self {
+            slots: std::sync::Mutex::new([EMPTY, EMPTY]),
+            reads: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+    pub(crate) fn reads(&self) -> u64 {
+        self.reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// The remembered outcome while the source is unchanged; otherwise one read. Held across
+    /// the read, so concurrent requests never start a second one.
+    pub(crate) fn get(
         &self,
+        provider: Provider,
+        clock: impl Fn() -> i64,
+        probe: impl Fn() -> Probe,
         read: impl FnOnce() -> Result<CapturedProfile, String>,
     ) -> Result<CapturedProfile, String> {
-        if let Ok(cache) = self.0.lock() {
-            if let Some((at, result)) = cache.as_ref() {
-                if at.elapsed() < CURRENT_TTL {
-                    return result.clone();
-                }
+        let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let slot = &mut slots[slot_index(provider)];
+        let now = clock();
+        if now < slot.blocked_until {
+            if let Some(outcome) = &slot.outcome {
+                return outcome.clone();
             }
         }
-        let result = read();
-        self.remember(&result);
-        result
-    }
-    fn remember(&self, result: &Result<CapturedProfile, String>) {
-        if let Ok(mut cache) = self.0.lock() {
-            *cache = Some((std::time::Instant::now(), result.clone()));
+        match probe() {
+            Probe::Locked => block(slot, provider, now, "locked", LOCKED),
+            Probe::Unavailable => block(slot, provider, now, "unavailable", UNAVAILABLE),
+            Probe::Ready {
+                stamps,
+                consent,
+                newest,
+            } => {
+                slot.blocked_until = 0;
+                slot.backoff = 0;
+                if slot.stamps.as_ref() == Some(&stamps) {
+                    if let Some(outcome) = &slot.outcome {
+                        return outcome.clone();
+                    }
+                }
+                if consent {
+                    // Reading would ask; the background never does. Remembered until the item
+                    // changes (a new write may trust the tool again) or a person acts.
+                    let outcome: Result<CapturedProfile, String> = Err(NEEDS_ACCESS.into());
+                    slot.stamps = Some(stamps);
+                    slot.outcome = Some(outcome.clone());
+                    report(slot, provider, "needs_access");
+                    return outcome;
+                }
+                let started = now;
+                self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let result = read();
+                let after = probe();
+                settle(
+                    slot,
+                    Probe::Ready {
+                        stamps,
+                        consent,
+                        newest,
+                    },
+                    after,
+                    started,
+                    &result,
+                );
+                report(slot, provider, outcome_code(&result));
+                result
+            }
         }
     }
-    fn forget(&self) {
-        if let Ok(mut cache) = self.0.lock() {
-            *cache = None;
+    /// An explicit read's result, with the probes taken around it.
+    fn remember(
+        &self,
+        provider: Provider,
+        before: Probe,
+        after: Probe,
+        started: i64,
+        result: &Result<CapturedProfile, String>,
+    ) {
+        let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        let slot = &mut slots[slot_index(provider)];
+        slot.blocked_until = 0;
+        slot.backoff = 0;
+        settle(slot, before, after, started, result);
+        report(slot, provider, outcome_code(result));
+    }
+    pub(crate) fn forget(&self) {
+        let mut slots = self.slots.lock().unwrap_or_else(|p| p.into_inner());
+        for slot in slots.iter_mut() {
+            slot.stamps = None;
+            slot.outcome = None;
+            slot.blocked_until = 0;
+            slot.backoff = 0;
         }
     }
 }
-static CURRENT: CurrentCache = CurrentCache::new();
-fn remember_current(result: &Result<CapturedProfile, String>) {
-    CURRENT.remember(result);
+/// Keeps a read's outcome; it is reused only while the source keeps the stamps it was read at,
+/// unchanged across the read and settled before it started.
+fn settle(
+    slot: &mut Slot,
+    before: Probe,
+    after: Probe,
+    started: i64,
+    result: &Result<CapturedProfile, String>,
+) {
+    slot.outcome = Some(result.clone());
+    slot.stamps = match (before, after) {
+        (Probe::Ready { stamps, newest, .. }, Probe::Ready { stamps: later, .. })
+            if stamps == later && newest < started =>
+        {
+            Some(stamps)
+        }
+        _ => None,
+    };
 }
-/// Drops the cached Claude sign-in: after any write to it, and before an explicit operation.
-pub fn forget_current() {
-    CURRENT.forget();
+fn block(
+    slot: &mut Slot,
+    provider: Provider,
+    now: i64,
+    code: &'static str,
+    text: &str,
+) -> Result<CapturedProfile, String> {
+    slot.backoff = (slot.backoff * 2).clamp(PROBE_BACKOFF_MIN, PROBE_BACKOFF_MAX);
+    slot.blocked_until = now + slot.backoff;
+    slot.stamps = None;
+    let outcome: Result<CapturedProfile, String> = Err(text.into());
+    slot.outcome = Some(outcome.clone());
+    report(slot, provider, code);
+    outcome
+}
+fn outcome_code(result: &Result<CapturedProfile, String>) -> &'static str {
+    match result {
+        Ok(_) => "available",
+        Err(error) if error.starts_with("No current ") => "absent",
+        Err(_) => "refused",
+    }
+}
+/// Logs a change of a source's state as codes only (lifecycle LC-12).
+fn report(slot: &mut Slot, provider: Provider, code: &'static str) {
+    if slot.reported != code {
+        slot.reported = code;
+        crate::oplog::event(
+            "credential_source",
+            &[
+                ("provider", crate::oplog::Field::Code(provider.as_str())),
+                ("state", crate::oplog::Field::Code(code)),
+            ],
+        );
+    }
+}
+/// The keychain is locked: the background waits for it to be unlocked rather than asking.
+const LOCKED: &str = switchboard_core::security_cli::UNAVAILABLE;
+/// The item would make macOS ask before Switchboard may read it.
+#[cfg(target_os = "macos")]
+const NEEDS_ACCESS: &str = switchboard_core::external_keychain::EXTERNAL_REFUSED;
+#[cfg(not(target_os = "macos"))]
+const NEEDS_ACCESS: &str = UNAVAILABLE;
+static WATCH: Watch = Watch::new();
+
+/// The quiet probe of a provider's sign-in source in this environment.
+fn probe_source(provider: Provider) -> Probe {
+    match context(provider, None) {
+        Ok(c) => probe_context(provider, &c, &NativeProbe),
+        Err(_) => Probe::Unavailable,
+    }
+}
+/// An item's stamps and whether `/usr/bin/security` may read it, None when absent; or the
+/// reason it cannot be examined.
+type ItemLook = Result<Option<((i64, i64), bool)>, Probe>;
+/// How a probe looks at files and Keychain items; tests substitute their own.
+trait Inspector {
+    fn file(&self, path: &Path) -> Stamp;
+    /// (stamps, trusted by `/usr/bin/security`) or the reason it cannot be examined.
+    fn item(&self, service: &str, account: &str) -> ItemLook;
+}
+struct NativeProbe;
+impl Inspector for NativeProbe {
+    fn file(&self, path: &Path) -> Stamp {
+        Stamp::File(file_stamp(path))
+    }
+    fn item(&self, service: &str, account: &str) -> ItemLook {
+        #[cfg(target_os = "macos")]
+        {
+            use switchboard_core::external_keychain::{probe_external, ItemProbe};
+            match probe_external(service, account, Some(Path::new("/usr/bin/security"))) {
+                ItemProbe::Absent => Ok(None),
+                ItemProbe::Present {
+                    stamp,
+                    tool_trusted,
+                } => Ok(Some((stamp, tool_trusted))),
+                ItemProbe::Locked => Err(Probe::Locked),
+                ItemProbe::Unavailable => Err(Probe::Unavailable),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (service, account);
+            Ok(None)
+        }
+    }
+}
+fn file_stamp(path: &Path) -> Option<(u64, u64, u64, i128)> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    let nanos = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i128)
+        .unwrap_or(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.dev(), meta.ino(), meta.len(), nanos))
+    }
+    #[cfg(not(unix))]
+    {
+        Some((0, 0, meta.len(), nanos))
+    }
+}
+/// Keychain stamps are CFAbsoluteTime bit patterns (seconds since 2001-01-01).
+fn item_seconds(bits: i64) -> i64 {
+    f64::from_bits(bits as u64) as i64 + 978_307_200
+}
+fn stamp_seconds(stamp: &Stamp) -> i64 {
+    match stamp {
+        Stamp::File(Some((_, _, _, nanos))) => (*nanos / 1_000_000_000) as i64,
+        Stamp::Item(Some((created, modified))) => {
+            item_seconds(*created).max(item_seconds(*modified))
+        }
+        _ => 0,
+    }
+}
+/// Everything a read of this provider's sign-in looks at: Claude's config, its Keychain item
+/// (read through `/usr/bin/security`, so its trust decides `consent`) and its file fallback;
+/// Codex's config, its `auth.json` and its keyring item (read in-process, quietly).
+fn probe_context(provider: Provider, c: &Context, inspector: &dyn Inspector) -> Probe {
+    let mut stamps = Vec::new();
+    let mut consent = false;
+    let mut item = |service: &str, account: &str, through_tool: bool| -> Result<(), Probe> {
+        let found = inspector.item(service, account)?;
+        if through_tool {
+            consent |= found.as_ref().is_some_and(|(_, trusted)| !trusted);
+        }
+        stamps.push(Stamp::Item(found.map(|(stamp, _)| stamp)));
+        Ok(())
+    };
+    let result = if provider == Provider::Claude {
+        if c.mac {
+            item(&c.service, &c.user, true)
+        } else {
+            Ok(())
+        }
+    } else if c.mac {
+        let canonical = c.home.canonicalize().unwrap_or_else(|_| c.home.clone());
+        let key = format!(
+            "cli|{}",
+            &format!(
+                "{:x}",
+                Sha256::digest(canonical.to_string_lossy().as_bytes())
+            )[..16]
+        );
+        item("Codex Auth", &key, false)
+    } else {
+        Ok(())
+    };
+    if let Err(blocked) = result {
+        return blocked;
+    }
+    let files: Vec<PathBuf> = if provider == Provider::Claude {
+        vec![
+            c.config.clone(),
+            c.home.join(".config.json"),
+            c.home.join(".credentials.json"),
+        ]
+    } else {
+        vec![c.home.join("config.toml"), c.home.join("auth.json")]
+    };
+    stamps.extend(files.iter().map(|f| inspector.file(f)));
+    let newest = stamps.iter().map(stamp_seconds).max().unwrap_or(0);
+    Probe::Ready {
+        stamps,
+        consent,
+        newest,
+    }
 }
 pub fn capture_at(provider: Provider, home: &Path) -> Result<CapturedProfile, String> {
     capture(&Native, provider, &context(provider, Some(home))?)
@@ -727,28 +1048,109 @@ pub struct SwapActivity {
     /// switching on): a second automatic switcher would fight it.
     pub switching: bool,
 }
-/// Reads the process list once. A leftover LaunchAgent plist proves nothing: the menu bar
-/// runs as `cswap menubar` and is seen in the process list like every other mode.
+impl SwapActivity {
+    /// Claude Swap as a synthetic owner sees it: not running.
+    pub fn none() -> Self {
+        Self::default()
+    }
+}
+/// Reads the process table once, in-process — no `ps` is spawned on the monitor's timer
+/// (lifecycle LC-08). A leftover LaunchAgent plist proves nothing: the menu bar runs as
+/// `cswap menubar` and is seen in the process table like every other mode.
 pub fn claude_swap_activity() -> SwapActivity {
-    #[cfg(unix)]
-    {
-        let processes = std::process::Command::new("/bin/ps")
-            .args(["-axo", "args="])
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .unwrap_or_default();
-        let settings = dirs::home_dir()
-            .map(|h| h.join(".claude-swap-backup/menubar_settings.json"))
-            .and_then(|path| Native.read(&path, CAP).ok().flatten())
-            .and_then(|bytes| String::from_utf8(bytes).ok());
-        swap_activity(&processes, settings.as_deref())
+    let processes = process_lines().join("\n");
+    let settings = dirs::home_dir()
+        .map(|h| h.join(".claude-swap-backup/menubar_settings.json"))
+        .and_then(|path| Native.read(&path, CAP).ok().flatten())
+        .and_then(|bytes| String::from_utf8(bytes).ok());
+    swap_activity(&processes, settings.as_deref())
+}
+/// The command lines of this user's processes, one per process, arguments joined by spaces.
+#[cfg(target_os = "macos")]
+fn process_lines() -> Vec<String> {
+    const PROC_UID_ONLY: u32 = 4;
+    let uid = unsafe { libc::geteuid() };
+    let mut pids = vec![0i32; 4096];
+    let bytes = unsafe {
+        libc::proc_listpids(
+            PROC_UID_ONLY,
+            uid,
+            pids.as_mut_ptr().cast(),
+            (pids.len() * std::mem::size_of::<i32>()) as i32,
+        )
+    };
+    if bytes <= 0 {
+        return vec![];
     }
-    #[cfg(not(unix))]
-    {
-        SwapActivity::default()
+    pids.truncate(bytes as usize / std::mem::size_of::<i32>());
+    let mut lines = Vec::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    for pid in pids.into_iter().filter(|p| *p > 0) {
+        let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+        let mut size = buffer.len();
+        let status = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                3,
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if status != 0 {
+            continue;
+        }
+        if let Some(line) = procargs_line(&buffer[..size]) {
+            lines.push(line);
+        }
     }
+    lines
+}
+/// `KERN_PROCARGS2`: argc (i32), the executable path, NUL padding, then argc arguments.
+#[cfg(any(target_os = "macos", test))]
+fn procargs_line(data: &[u8]) -> Option<String> {
+    let argc = i32::from_ne_bytes(data.get(..4)?.try_into().ok()?);
+    let rest = &data[4..];
+    let path_end = rest.iter().position(|b| *b == 0)?;
+    let mut at = path_end;
+    while rest.get(at) == Some(&0) {
+        at += 1;
+    }
+    let args: Vec<String> = rest[at..]
+        .split(|b| *b == 0)
+        .take(argc.max(0) as usize)
+        .map(|a| String::from_utf8_lossy(a).into_owned())
+        .collect();
+    (!args.is_empty()).then(|| args.join(" "))
+}
+#[cfg(target_os = "linux")]
+fn process_lines() -> Vec<String> {
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return vec![];
+    };
+    entries
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+        })
+        .filter_map(|e| fs::read(e.path().join("cmdline")).ok())
+        .map(|raw| {
+            raw.split(|b| *b == 0)
+                .filter(|a| !a.is_empty())
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_lines() -> Vec<String> {
+    vec![]
 }
 pub fn claude_swap_running() -> bool {
     claude_swap_activity().running
@@ -2153,33 +2555,240 @@ mod tests {
         );
         assert_eq!(swap_activity("", None), SwapActivity::default());
     }
+    fn ready(stamp: i64, consent: bool) -> Probe {
+        Probe::Ready {
+            stamps: vec![Stamp::File(Some((1, 2, 3, stamp as i128 * 1_000_000_000)))],
+            consent,
+            newest: stamp,
+        }
+    }
+    /// Lifecycle LC-04's check: a refusing source is read once and reported once — an hour
+    /// of 30-second passes reuses the refusal instead of asking again.
     #[test]
-    fn the_background_reuses_one_claude_read_until_switchboard_writes() {
-        // Its own cache: the process-wide one is shared with tests that forget it.
-        let cache = CurrentCache::new();
+    fn a_refusing_source_is_read_once_in_an_hour_of_passes_not_in_a_loop() {
+        let watch = Watch::new();
+        let reads = Cell::new(0);
+        let start = 1_000_000;
+        for pass in 0..120 {
+            let result = watch.get(
+                Provider::Claude,
+                || start + pass * 30,
+                || ready(start - 100, false),
+                || {
+                    reads.set(reads.get() + 1);
+                    Err(UNAVAILABLE.to_string())
+                },
+            );
+            assert_eq!(result.err().unwrap(), UNAVAILABLE);
+        }
+        assert_eq!(reads.get(), 1);
+        assert_eq!(watch.reads(), 1);
+        // An unchanged signed-in source is reused the same way.
+        watch.forget();
+        for pass in 0..120 {
+            let profile = watch
+                .get(
+                    Provider::Claude,
+                    || start + pass * 30,
+                    || ready(start - 100, false),
+                    || {
+                        reads.set(reads.get() + 1);
+                        claude_profile(&auth("watched"), &config("w@example.test"), None)
+                    },
+                )
+                .unwrap();
+            assert_eq!(profile.credential.access_token, "watched");
+        }
+        assert_eq!(reads.get(), 2, "one read after the person acted, then none");
+    }
+    #[test]
+    fn a_locked_keychain_is_never_read_and_its_probe_backs_off_to_half_an_hour() {
+        let watch = Watch::new();
+        let probes = Cell::new(0);
+        let start = 1_000_000;
+        for pass in 0..120 {
+            let result = watch.get(
+                Provider::Claude,
+                || start + pass * 30,
+                || {
+                    probes.set(probes.get() + 1);
+                    Probe::Locked
+                },
+                || panic!("a locked keychain is never read: reading it would ask"),
+            );
+            assert_eq!(result.err().unwrap(), LOCKED);
+        }
+        // Probes at 0, 60, 180, 420, 900 and 1860 s: the back-off doubles from one minute to
+        // 30, so the next would be at 3660 s, after this hour.
+        assert_eq!(probes.get(), 6);
+        // Unlocked: the next probe after the back-off reads once.
+        let reads = Cell::new(0);
+        let unlocked = start + 3660;
+        watch
+            .get(
+                Provider::Claude,
+                || unlocked,
+                || ready(start - 100, false),
+                || {
+                    reads.set(reads.get() + 1);
+                    claude_profile(&auth("unlocked"), &config("u@example.test"), None)
+                },
+            )
+            .unwrap();
+        assert_eq!(reads.get(), 1);
+    }
+    #[test]
+    fn an_item_that_would_ask_is_not_read_until_it_changes_or_a_person_acts() {
+        let watch = Watch::new();
+        let start = 1_000_000;
+        for pass in 0..10 {
+            let result = watch.get(
+                Provider::Claude,
+                || start + pass * 30,
+                || ready(start - 100, true),
+                || panic!("never read from the background: macOS would ask"),
+            );
+            assert_eq!(result.err().unwrap(), NEEDS_ACCESS);
+        }
+        // Rewritten by a binary the tool trusts again: read once.
         let reads = Cell::new(0);
         let read = || {
             reads.set(reads.get() + 1);
-            claude_profile(&auth("cached"), &config("cached@example.test"), None)
+            claude_profile(&auth("again"), &config("a@example.test"), None)
         };
-        assert_eq!(
-            cache.get_or(read).unwrap().credential.access_token,
-            "cached"
-        );
-        assert_eq!(
-            cache.get_or(read).unwrap().credential.access_token,
-            "cached"
-        );
-        assert_eq!(reads.get(), 1, "the second request reuses the first read");
-        // A signed-out state is remembered too, for the same time.
-        cache.forget();
-        cache.remember(&Err("No current Claude sign-in found.".into()));
-        assert!(cache.get_or(read).is_err());
+        watch
+            .get(
+                Provider::Claude,
+                || start + 400,
+                || ready(start + 300, false),
+                read,
+            )
+            .unwrap();
         assert_eq!(reads.get(), 1);
-        // After Switchboard writes, the next request reads again.
-        cache.forget();
-        cache.get_or(read).unwrap();
-        assert_eq!(reads.get(), 2);
+    }
+    #[test]
+    fn a_changed_source_is_read_again_and_a_read_in_the_writes_second_is_not_reused() {
+        let watch = Watch::new();
+        let reads = Cell::new(0);
+        let get = |now: i64, stamp: i64| {
+            watch
+                .get(
+                    Provider::Claude,
+                    || now,
+                    || ready(stamp, false),
+                    || {
+                        reads.set(reads.get() + 1);
+                        claude_profile(&auth("x"), &config("x@example.test"), None)
+                    },
+                )
+                .unwrap()
+        };
+        get(1_000, 900);
+        get(1_030, 900);
+        assert_eq!(reads.get(), 1);
+        // Claude Code wrote at 1 040; a read in that same second could miss a second write in
+        // it, so the next request reads again, and the one after reuses.
+        get(1_040, 1_040);
+        get(1_070, 1_040);
+        get(1_100, 1_040);
+        assert_eq!(reads.get(), 3);
+        // The source changed between the probe and the read's end: not reused either.
+        let flips = Cell::new(0);
+        watch.forget();
+        watch
+            .get(
+                Provider::Claude,
+                || 2_000,
+                || {
+                    flips.set(flips.get() + 1);
+                    ready(1_500 + flips.get(), false)
+                },
+                || claude_profile(&auth("x"), &config("x@example.test"), None),
+            )
+            .unwrap();
+        let again = Cell::new(false);
+        watch
+            .get(
+                Provider::Claude,
+                || 2_030,
+                || ready(1_502, false),
+                || {
+                    again.set(true);
+                    claude_profile(&auth("x"), &config("x@example.test"), None)
+                },
+            )
+            .unwrap();
+        assert!(again.get(), "changed during the read: read again");
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_process_table_is_read_in_process_and_includes_this_test() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            process_lines().iter().any(|line| line.contains(&name)),
+            "this test process is in the table"
+        );
+    }
+    #[test]
+    fn procargs_are_parsed_into_one_command_line() {
+        let mut data = 3i32.to_ne_bytes().to_vec();
+        data.extend_from_slice(b"/usr/bin/python3\0\0\0python3\0-m\0claude_swap\0ENV=x\0");
+        assert_eq!(procargs_line(&data).unwrap(), "python3 -m claude_swap");
+        assert_eq!(procargs_line(b"\0\0"), None);
+    }
+    struct FakeInspector {
+        item: ItemLook,
+    }
+    impl Inspector for FakeInspector {
+        fn file(&self, path: &Path) -> Stamp {
+            Stamp::File(
+                path.ends_with(".claude.json")
+                    .then_some((1, 2, 3, 4_000_000_000)),
+            )
+        }
+        fn item(&self, _: &str, _: &str) -> ItemLook {
+            self.item.clone()
+        }
+    }
+    #[test]
+    fn a_probe_names_consent_lock_and_the_files_a_read_would_use() {
+        let c = mac_ctx();
+        let probe = |item| probe_context(Provider::Claude, &c, &FakeInspector { item });
+        let Probe::Ready {
+            stamps,
+            consent,
+            newest,
+        } = probe(Ok(Some(((1, 1), true))))
+        else {
+            panic!("ready");
+        };
+        assert!(!consent);
+        assert_eq!(
+            stamps.len(),
+            4,
+            "the item, the config, .config.json, .credentials.json"
+        );
+        // The item's stamp (Keychain's epoch, 2001) is newer than the config's (1970 + 4 s).
+        assert_eq!(newest, 978_307_200);
+        assert!(matches!(
+            probe(Ok(Some(((1, 1), false)))),
+            Probe::Ready { consent: true, .. }
+        ));
+        assert!(matches!(
+            probe(Ok(None)),
+            Probe::Ready { consent: false, .. }
+        ));
+        assert_eq!(probe(Err(Probe::Locked)), Probe::Locked);
+        // Codex reads its keyring item in-process and quietly: an untrusted item asks nothing.
+        let codex = probe_context(
+            Provider::Codex,
+            &c,
+            &FakeInspector {
+                item: Ok(Some(((1, 1), false))),
+            },
+        );
+        assert!(matches!(codex, Probe::Ready { consent: false, .. }));
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {

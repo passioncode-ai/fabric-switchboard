@@ -319,7 +319,12 @@ fn main() {
             }
         }));
     }
-    let result = builder
+    if !smoke {
+        if let Some(log) = switchboard_runtime::oplog::Log::default_location() {
+            switchboard_runtime::oplog::install(log);
+        }
+    }
+    let built = builder
         .setup(move |app| {
             let temporary = if smoke {
                 Some(
@@ -357,6 +362,19 @@ fn main() {
                 });
             }
             app.manage(SmokeMode(temporary));
+            // SIGTERM (logout, `kill`, an updater) and SIGINT end the app the way Quit does:
+            // through the exit event below, which drains the owner (lifecycle LC-01).
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(signal) = switchboard_runtime::stop_requested().await {
+                    switchboard_runtime::oplog::event(
+                        "stop_requested",
+                        &[("signal", switchboard_runtime::oplog::Field::Code(signal))],
+                    );
+                    switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
+                    handle.exit(0);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -387,9 +405,22 @@ fn main() {
             agent_setup,
             link_cli
         ])
-        .run(tauri::generate_context!());
-    if result.is_err() {
+        .build(tauri::generate_context!());
+    let Ok(app) = built else {
         eprintln!("Fabric Switchboard could not start. Check app-data permissions, another running instance and native vault access.");
         std::process::exit(1);
-    }
+    };
+    app.run(|handle, event| {
+        // Every quit path — Quit, Cmd-Q, the last window closing, a signal — ends here: the
+        // owner stops its timers, finishes or abandons work in flight by the deadline,
+        // removes its descriptor and releases the store (lifecycle LC-01).
+        if let tauri::RunEvent::Exit = event {
+            switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
+            let slot = handle.state::<Slot>();
+            let owner = tauri::async_runtime::block_on(async { slot.owner.lock().await.take() });
+            if let Some(owner) = owner {
+                tauri::async_runtime::block_on(owner.shutdown(switchboard_runtime::DRAIN_DEADLINE));
+            }
+        }
+    });
 }
