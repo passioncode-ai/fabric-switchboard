@@ -92,4 +92,11 @@ jobs:
       - name: The build leaves the source tree as checked out
         run: |
           $changed = git status --porcelain --untracked-files=all
-          if ($changed) { $changed | ForEach-Object { Write-Host $_ }; Write-Host "::error::the build changed the source tree"; exit 1 }
+          if ($changed) {
+            $changed | ForEach-Object { Write-Host $_ }
+            # What changed, for a public source tree: line endings, then content.
+            git ls-files --eol -m
+            Write-Host "--- ignoring carriage returns:"; git diff --ignore-cr-at-eol --stat
+            Write-Host "--- the diff:"; git diff --stat; git diff -- src-tauri/Cargo.toml
+            Write-Host "::error::the build changed the source tree"; exit 1
+          }
