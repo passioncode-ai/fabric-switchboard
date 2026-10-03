@@ -1,0 +1,41 @@
+{
+  "version": "0.5.3",
+  "commit": "21d005cb698d5a6d24f12d08ab818b171e868b85",
+  "source_clean": true,
+  "toolchain": {
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "node": "v26.8.2",
+    "macos": "26.6.2",
+    "sdk": "27.0"
+  },
+  "architectures": {
+    "cli": [
+      "x86_64",
+      "arm64"
+    ],
+    "app": [
+      "x86_64",
+      "arm64"
+    ]
+  },
+  "developer_id_identity": "Developer ID Application: Sergei Viktorovich Sheleg (KJ35UYYL22)",
+  "signing_certificate_sha1": "4E9DE832FB92D08CFD02B215BE1E0EF9B1E854CE",
+  "signature_verified": true,
+  "native_startup": {
+    "status": "PASS",
+    "version": "0.5.3",
+    "mode": "temporary store, memory vault, native IPC and bundled frontend",
+    "real_provider_auth": "NOT_READ"
+  },
+  "notarization": {
+    "id": "be798b70-863f-4ba6-b29e-c8be73221675",
+    "status": "Accepted",
+    "exit_code": 0,
+    "gatekeeper_accepted": true,
+    "archive_app_staple_validated": true
+  },
+  "cli_sha256": "c0d3cf30c4159cd6e95eee31cbc37d8748721dcfe1f1a3c154cd06ff30ba58d2",
+  "archive_sha256": "fb44e6460e40e4357f332d6e922bf1ce529de5ca14d72214bb3ed4a49768f67e",
+  "archive": "Fabric-Switchboard-0.5.3-macos-universal.zip",
+  "folder": "Fabric-Switchboard-0.5.3-macos-universal"
+}
