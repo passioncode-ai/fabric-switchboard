@@ -89,14 +89,31 @@ def capture(args):
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
 
 
+#: How many changed paths a refusal names before it summarises the rest.
+LISTED = 40
+
+
+def dirty_tree_message(porcelain: str) -> str:
+    """The refusal for a tree the build changed, naming each path and its status code.
+
+    Names only, never contents: `git status --porcelain` prints `XY path`, or
+    `XY old -> new` for a rename, so a run that refuses says what to look at."""
+    entries = [line.rstrip() for line in porcelain.splitlines() if line.strip()]
+    named = '; '.join(entries[:LISTED])
+    more = f'; and {len(entries) - LISTED} more' if len(entries) > LISTED else ''
+    return (f'The source tree changed during the build; no receipt issued. '
+            f'{len(entries)} path(s): {named}{more}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--authenticode', choices=['SIGNED', 'NOT_SIGNED'], required=True)
     parser.add_argument('--signatures', type=Path, help='Get-AuthenticodeSignature report (JSON), required with SIGNED')
     parser.add_argument('--native-tests', choices=['PASS'], required=True, help='The native fixtures this job ran before packaging')
     args = parser.parse_args()
-    if capture(['git', 'status', '--porcelain']):
-        raise SystemExit('The source tree changed during the build; no receipt issued.')
+    changed = capture(['git', 'status', '--porcelain', '--untracked-files=all'])
+    if changed:
+        raise SystemExit(dirty_tree_message(changed))
     version = json.loads((ROOT / 'package.json').read_text())['version']
     signatures = json.loads(args.signatures.read_text(encoding='utf-8-sig')) if args.signatures else None
     if isinstance(signatures, dict):  # PowerShell writes a single object for a one-item list
