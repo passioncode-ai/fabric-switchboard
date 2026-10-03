@@ -299,3 +299,32 @@ commit, with the mark released by a Drop guard.
 - Live provider acceptance (SB-01, SB-15), and Windows on a Windows host (SB-02).
 - The process count and dialog check are repeated on the operator's Mac after install; that
   record follows.
+
+### Release v0.5.3-beta.1 (2026-10-03)
+
+| Step | Result |
+|---|---|
+| Source | `main` `21d005c` (merge of [#22](https://github.com/passioncode-ai/fabric-switchboard/pull/22)), built in a detached clean worktree |
+| macOS | `build_macos.py --arch universal --notary-profile …` exit 0, [receipt](build-0.5.3-macos-universal.json): `x86_64 arm64`, clean source `21d005c`, notary `be798b70-863f-4ba6-b29e-c8be73221675` **Accepted**, staple validated |
+| Windows | `build_windows_cross.py` exit 0 from the same worktree, [receipt](build-0.5.3-windows-x64.json); unsigned, native run NOT_RUN |
+| Size (release profile: LTO, one codegen unit, stripped) | app executable 20.5 MB (0.5.2: 32.9 MB), CLI 10.9 MB (18.1 MB); bundle 31 MB (49 MB) |
+| GitHub | tag `v0.5.3-beta.1` = `21d005c`, [prerelease](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1), [publication receipt](publication-0.5.3.json) |
+| Anonymous download | both archives `OK` against the sums; app `accepted, source=Notarized Developer ID`; CLI `switchboard 0.5.3` |
+| Website | `passioncode-ai.github.io` `8a13743` ([PR #33](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/33), check passed), deployed; routes 302 to 0.5.3, fetched hash equal |
+| Local install | 0.5.2 kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.5.2-2026-10-03/`; 0.5.3 from the verified download, `spctl` accepted |
+
+On the operator's Mac after install (2026-10-03, 12:33 onward):
+- **Background processes**, using the desktop audit's method — child processes of the app sampled
+  every 0.2 s for 200 s, which is a lower bound:
+  - 0.5.3: **1** `security` and no `ps`;
+  - 0.5.2: 30 `security` and 1 `ps`.
+- **Keychain dialogs:** `SecurityAgent` logged 0 entries since the install.
+- **Monitor:** running. `claude_swap_switching` is false and `renewal_blocked` is false. Claude Swap
+  is not running. Rotation reads `cooldown`.
+- **Activity log:** `usage observed` ×18 and no failure.
+- **Backups:** 15 accounts, 0 missing.
+- **The account that read *Sign in again*** still does.
+  - Since 0.5.3 Switchboard takes newer generations from Claude Swap's files after Swap stops. So
+    Swap's files do not hold a newer sign-in for this account, and the hypothesis recorded under
+    0.5.2 (Swap renewed it last, then stopped) is **not confirmed**.
+  - Recovery is the operator's: *Sign in again* on that row.
