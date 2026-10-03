@@ -4,9 +4,9 @@
 # it on (AZURE_SIGNING_ENABLED; docs/DISTRIBUTION.md). Then attested (Sigstore), summed,
 # GPG-signed and published by the organization's shared workflow.
 #
-# Signing happens only here, in the protected `release` environment: approved by
-# release-approvers, never by whoever pushed the tag (passioncode-ai/.github
-# release-signing/README.md). A build signed anywhere else is a debug build and is never
+# Signing happens only here, in the protected `release` environment: approved by a
+# person from release-approvers, who may be whoever pushed the tag; an agent never
+# approves (passioncode-ai/.github release-signing/README.md). A build signed anywhere else is a debug build and is never
 # published. A published release is never rewritten: a fix is a new tag.
 #
 # Release:    merge the release PR (versions + a `## X.Y.Z` CHANGELOG section), then push an

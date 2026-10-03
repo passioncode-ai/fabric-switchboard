@@ -181,7 +181,7 @@ existing does not mean it passed.
 
 A release is a `vX.Y.Z` tag on the merged release commit. The tag starts
 [`release.yml`](.github/workflows/release.yml) in the protected `release` environment: a member
-of `release-approvers` other than the tag's author approves; the macOS app and CLI are signed
+of `release-approvers` approves (whoever pushed the tag may; an agent never does); the macOS app and CLI are signed
 with the organization's CI Developer ID and notarized (the app stapled); Windows is built
 natively (Authenticode signing through Azure Artifact Signing is ready but switched off until
 the account exists, and the receipt says `windows_authenticode: NOT_SIGNED`); then every file
