@@ -141,6 +141,8 @@ pub(crate) struct NativeSources {
     pub(crate) activate: Activate,
     /// Claude Code's live credential item under its locks, for renewing it while idle.
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
+    /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
+    pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -155,7 +157,12 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
+    swap: no_swap,
 };
+/// Claude Swap as a synthetic owner sees it: absent.
+pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
+    Err("Claude Swap profiles not found.".into())
+}
 /// The live sign-in of a synthetic owner: never reachable.
 pub(crate) fn no_live() -> Result<Box<dyn external::LiveItem>, String> {
     Err("External sign-in unavailable or its files are unsafe.".into())
@@ -164,6 +171,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     current: external::capture_current,
     activate: external::activate_claude,
     live: external::lock_live,
+    swap: external::read_claude_swap,
 };
 
 pub struct Runtime {
@@ -503,7 +511,10 @@ async fn execute(
 ) -> Result<Value, String> {
     let native = runtime.map_or(NATIVE, |r| r.native);
     // The offline CLI owns the store for one command; its refresh bookkeeping is its own.
-    let offline_refresh = refresh::RefreshState::default();
+    // It never spends a refresh token: it cannot see Claude Swap's holds or a running owner's
+    // state, and its kept successors would die with it (audit P1-2). Rejected lineages are
+    // still refused, from the owner's journal.
+    let offline_refresh = refresh::RefreshState::offline(root.join("renewal-state.json"));
     let refresh_state = runtime.map_or(&offline_refresh, |r| &r.refresh);
     let needs_owner = || {
         runtime.ok_or_else(|| {
@@ -610,6 +621,7 @@ async fn execute(
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
             "claude_swap_accounts": refresh::swap_held(refresh_state),
             "renewal_blocked": refresh_state.renewal_blocked(),
+            "claude_swap_switching": refresh_state.swap_switching(),
         })),
         Operation::Add {
             label,
@@ -820,6 +832,11 @@ fn activate_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
+    // An account Claude Swap renews: its newest generation may be in Swap's files, not here —
+    // take it first, or Claude Code would get a token Swap already spent (audit P2-3).
+    if let Some(state) = refresh {
+        refresh::catch_up_with_claude_swap(store, state, native, id)?;
+    }
     // A lineage the provider rejected would sign every ordinary `claude` session out.
     if refresh.is_some_and(|state| state.is_dead(store, id)) {
         return Err(refresh::SIGN_IN.into());
@@ -1098,6 +1115,7 @@ pub(crate) mod fixtures {
                 current,
                 activate,
                 live: no_live,
+                swap: no_swap,
             },
         )
         .await

@@ -49,7 +49,9 @@ impl MonitorHandle {
                     .await;
                     // Claude Swap's files are read outside the lock; adopting its newer
                     // generations happens under it, with the live sync.
-                    let running = crate::external::claude_swap_running();
+                    let activity = crate::external::claude_swap_activity();
+                    let running = activity.running;
+                    runtime.refresh.set_swap_switching(activity.switching);
                     let signature = crate::external::claude_swap_signature();
                     let due = crate::refresh::swap_read_due(
                         running,
@@ -60,7 +62,7 @@ impl MonitorHandle {
                     let read = due.then(crate::external::read_claude_swap);
                     let swap = match (running, read) {
                         (true, Some(Ok(batch))) => {
-                            crate::refresh::SwapView::Profiles(batch.profiles)
+                            crate::refresh::SwapView::Profiles(batch.profiles, batch.failed)
                         }
                         (true, _) => crate::refresh::SwapView::Unreadable,
                         (false, Some(Ok(batch))) => {
@@ -421,6 +423,12 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
     let mut decisions = Vec::new();
     let snapshot = runtime.store.snapshot()?;
     for policy in snapshot.policies.iter().filter(|p| p.enabled) {
+        // Claude Swap switches Claude Code by itself: two automatic switchers would undo each
+        // other's choice. Manual switches and managed routes are unaffected.
+        if policy.target == "claude_cli" && runtime.refresh.swap_switching() {
+            decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":"claude_swap_switching","candidate_id":null}));
+            continue;
+        }
         let current = if policy.target == "managed" {
             snapshot
                 .routes
@@ -640,6 +648,28 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn native_rotation_leaves_switching_to_an_auto_switching_claude_swap() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        runtime.refresh.set_swap_switching(true);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "claude_swap_switching");
+        assert!(
+            events(&runtime.store, "activation").is_empty(),
+            "nothing switched"
+        );
+        // Swap stops switching (or quits): Switchboard's rotation runs again.
+        runtime.refresh.set_swap_switching(false);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+    }
+    #[tokio::test]
     async fn native_rotation_switches_to_an_expired_but_renewable_account() {
         use crate::fixtures::*;
         let root = tempfile::tempdir().unwrap();
@@ -728,6 +758,7 @@ mod tests {
             current: signed_in,
             activate: activates,
             live: crate::no_live,
+            swap: crate::no_swap,
         };
         let lock = tokio::sync::Mutex::new(());
         assert_eq!(

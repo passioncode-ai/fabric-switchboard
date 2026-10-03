@@ -68,6 +68,10 @@ pub(crate) struct RefreshState {
     profile_tried: Mutex<Option<(String, i64)>>,
     /// When the token endpoint last refused the client itself (`invalid_client`).
     client_rejected: Mutex<Option<i64>>,
+    /// Claude Swap switches Claude Code by itself; native rotation leaves switching to it.
+    swap_switching: std::sync::atomic::AtomicBool,
+    /// False for the offline CLI: it never spends a refresh token.
+    grants: bool,
 }
 impl Default for RefreshState {
     fn default() -> Self {
@@ -100,10 +104,20 @@ impl RefreshState {
             owners: Mutex::new(HashMap::new()),
             profile_tried: Mutex::new(None),
             client_rejected: Mutex::new(None),
+            swap_switching: Default::default(),
+            grants: true,
             stash: Arc::new(Mutex::new(HashMap::new())),
             swap_held: Mutex::new(Default::default()),
             journal: Mutex::new(None),
         }
+    }
+    /// The offline CLI's state: no grant is ever made; rejected lineages come from the owner's
+    /// journal, which it reads but does not need to write.
+    pub(crate) fn offline(journal: std::path::PathBuf) -> Self {
+        let mut state = Self::default();
+        state.grants = false;
+        state.remember_in(journal);
+        state
     }
     /// Remembers rejected lineages in `path` (a private file in the data folder) and loads the
     /// ones recorded before: a restart must not spend one more grant on a dead token.
@@ -134,6 +148,14 @@ impl RefreshState {
     #[cfg(test)]
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;
+    }
+    pub(crate) fn set_swap_switching(&self, switching: bool) {
+        self.swap_switching
+            .store(switching, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn swap_switching(&self) -> bool {
+        self.swap_switching
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
     /// True while renewals are held because the provider refused the client itself.
     pub(crate) fn renewal_blocked(&self) -> bool {
@@ -332,6 +354,9 @@ async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Fa
     let Some(consumed) = credential.refresh_token.clone() else {
         return Err(Failure::Transient);
     };
+    if !state.grants {
+        return Err(Failure::Transient);
+    }
     // The client itself was refused: every grant would fail the same way until it is fixed.
     if state.renewal_blocked() {
         return Err(Failure::Systemic);
@@ -656,7 +681,8 @@ pub(crate) async fn renew_idle_live(
 pub(crate) enum SwapView {
     NotRunning,
     Unreadable,
-    Profiles(Vec<crate::external::CapturedProfile>),
+    /// Running: the profiles read, and how many rows could not be read this pass.
+    Profiles(Vec<crate::external::CapturedProfile>, usize),
     /// Not running, but its files hold sign-ins it may have renewed before it stopped: take the
     /// newer ones, hold nothing (board SB-21).
     Stopped(Vec<crate::external::CapturedProfile>),
@@ -687,7 +713,7 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
         // Running, but its files could not be read this pass (it was writing them): what it
         // held last time it still holds — clearing it would start a second renewer.
         SwapView::Unreadable => return 0,
-        SwapView::Profiles(profiles) => profiles,
+        SwapView::Profiles(profiles, failed) => (profiles, failed),
         SwapView::Stopped(profiles) => {
             if let Ok(mut held) = state.swap_held.lock() {
                 held.clear();
@@ -695,10 +721,17 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
             return adopt_newer(store, state, profiles, None);
         }
     };
+    let (profiles, failed) = profiles;
     let mut held = std::collections::HashSet::new();
     let updated = adopt_newer(store, state, profiles, Some(&mut held));
     if let Ok(mut current) = state.swap_held.lock() {
-        *current = held;
+        // A row that could not be read (Swap rewrites it exactly when it renews that account)
+        // is still Swap's: what it held stays held until a pass reads every row.
+        if failed > 0 {
+            current.extend(held);
+        } else {
+            *current = held;
+        }
     }
     updated
 }
@@ -749,6 +782,41 @@ fn adopt_newer(
         }
     }
     updated
+}
+pub(crate) const SWAP_BUSY: &str = "Claude Swap is updating this account. Retry in a moment.";
+/// Before switching to `id`: when Claude Swap renews that account, read its profiles now and
+/// take a newer generation, so Claude Code never receives a token Swap already spent. Refused
+/// while Swap's files cannot be read.
+pub(crate) fn catch_up_with_claude_swap(
+    store: &Store,
+    state: &RefreshState,
+    native: NativeSources,
+    id: &str,
+) -> Result<(), String> {
+    let Some(account) = store
+        .snapshot()?
+        .accounts
+        .into_iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.external_identity)
+        .and_then(|i| i.account_id)
+        .filter(|account| state.swap_held.lock().is_ok_and(|h| h.contains(account)))
+    else {
+        return Ok(());
+    };
+    let batch = (native.swap)().map_err(|_| SWAP_BUSY.to_string())?;
+    let failed = batch.failed;
+    // Its own row is the one Swap is rewriting: the stored copy may be the spent generation.
+    if failed > 0
+        && !batch
+            .profiles
+            .iter()
+            .any(|p| p.identity.account_id.as_deref() == Some(account.as_str()))
+    {
+        return Err(SWAP_BUSY.into());
+    }
+    follow_claude_swap(store, state, SwapView::Profiles(batch.profiles, failed));
+    Ok(())
 }
 pub(crate) fn swap_held(state: &RefreshState) -> usize {
     state.swap_held.lock().map(|h| h.len()).unwrap_or(0)
@@ -993,16 +1061,19 @@ mod tests {
         current: signed_in,
         activate: activates,
         live: crate::no_live,
+        swap: crate::no_swap,
     };
     const SIGNED_OUT: NativeSources = NativeSources {
         current: signed_out,
         activate: activates,
         live: crate::no_live,
+        swap: crate::no_swap,
     };
     const UNREADABLE: NativeSources = NativeSources {
         current: unreadable,
         activate: activates,
         live: crate::no_live,
+        swap: crate::no_swap,
     };
 
     #[tokio::test]
@@ -1210,6 +1281,7 @@ mod tests {
             current: signed_in,
             activate: never,
             live: crate::no_live,
+            swap: crate::no_swap,
         };
         assert_eq!(
             crate::activate_native(&store, &b, None, native, Some(&state)).unwrap_err(),
@@ -1507,7 +1579,7 @@ mod tests {
             label: "b".into(),
         };
         assert_eq!(
-            follow_claude_swap(&store, &state, SwapView::Profiles(vec![profile])),
+            follow_claude_swap(&store, &state, SwapView::Profiles(vec![profile], 0)),
             2,
             "both pools follow"
         );
@@ -1537,6 +1609,112 @@ mod tests {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
+    #[tokio::test]
+    async fn the_offline_cli_never_spends_a_refresh_token() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"x","expires_in":28800,"refresh_token":"y"}),
+        ))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::offline(root.path().join("renewal-state.json"));
+        state.set_endpoint(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        assert_ne!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            store
+                .stored_credential(&b)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-b-refresh")
+        );
+    }
+    #[tokio::test]
+    async fn the_offline_cli_still_refuses_a_lineage_the_owner_saw_rejected() {
+        let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let journal = root.path().join("renewal-state.json");
+        let owner = RefreshState::at(url);
+        owner.remember_in(journal.clone());
+        let b = id_of(&store, "synthetic-b", "default");
+        ensure_fresh(&store, SIGNED_IN_A, &owner, &b, false).await;
+        assert!(RefreshState::offline(journal).is_dead(&store, &b));
+    }
+    fn swap_with_newer_b() -> Result<crate::external::ImportBatch, String> {
+        let mut credential = expired("synthetic-b");
+        credential.access_token = "swap-access".into();
+        credential.refresh_token = Some("swap-renewed".into());
+        credential.expires_at = Some(now() + 28800);
+        Ok(crate::external::ImportBatch {
+            profiles: vec![crate::external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential,
+                identity: identity("synthetic-b"),
+                label: "b".into(),
+            }],
+            failed: 0,
+            skipped: 0,
+        })
+    }
+    fn swap_rewriting_b() -> Result<crate::external::ImportBatch, String> {
+        Ok(crate::external::ImportBatch {
+            profiles: vec![],
+            failed: 1,
+            skipped: 0,
+        })
+    }
+    #[test]
+    fn switching_to_an_account_claude_swap_renews_takes_its_newest_generation_first() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::default();
+        let b = id_of(&store, "synthetic-b", "default");
+        let fresh = NativeSources {
+            swap: swap_with_newer_b,
+            ..SIGNED_IN_A
+        };
+        // Not held by Swap: nothing is read.
+        catch_up_with_claude_swap(&store, &state, fresh, &b).unwrap();
+        assert_eq!(
+            store
+                .stored_credential(&b)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-b-refresh")
+        );
+        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        catch_up_with_claude_swap(&store, &state, fresh, &b).unwrap();
+        assert_eq!(
+            store
+                .stored_credential(&b)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("swap-renewed")
+        );
+        // Swap is rewriting b's own row, or its files cannot be read: refused, not guessed.
+        let rewriting = NativeSources {
+            swap: swap_rewriting_b,
+            ..SIGNED_IN_A
+        };
+        assert_eq!(
+            catch_up_with_claude_swap(&store, &state, rewriting, &b).unwrap_err(),
+            SWAP_BUSY
+        );
+        assert_eq!(
+            catch_up_with_claude_swap(&store, &state, SIGNED_IN_A, &b).unwrap_err(),
+            SWAP_BUSY
+        );
+    }
     #[test]
     fn claude_swaps_files_are_read_when_they_can_hold_something_new() {
         let sig = Some((3, 100, 7));
@@ -1553,6 +1731,30 @@ mod tests {
         assert!(swap_read_due(false, Some(false), moved, sig));
         // No Claude Swap folder at all: never.
         assert!(!swap_read_due(false, None, None, None));
+    }
+    #[tokio::test]
+    async fn a_claude_swap_row_that_could_not_be_read_stays_held() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"x","expires_in":28800,"refresh_token":"y"}),
+        ))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(url);
+        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        // Swap is rewriting b's row this pass: it is missing from the profiles read.
+        follow_claude_swap(&store, &state, SwapView::Profiles(vec![], 1));
+        assert_eq!(swap_held(&state), 1);
+        let b = id_of(&store, "synthetic-b", "default");
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
+            Outcome::NotNeeded
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no second renewer");
+        // A pass that reads every row and no longer lists it releases it.
+        follow_claude_swap(&store, &state, SwapView::Profiles(vec![], 0));
+        assert_eq!(swap_held(&state), 0);
     }
     #[test]
     fn a_stopped_claude_swap_still_hands_over_what_it_renewed_last() {
@@ -1718,6 +1920,7 @@ mod tests {
         current: idle_a,
         activate: activates,
         live: fake_live,
+        swap: crate::no_swap,
     };
     fn idle_setup(item: Value) -> (tempfile::TempDir, Arc<Store>) {
         LIVE.with(|l| *l.borrow_mut() = Some(serde_json::to_vec(&item).unwrap()));

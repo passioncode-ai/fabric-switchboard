@@ -97,6 +97,7 @@ const safeErrors = new Set([
   'The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.',
   'Switchboard could not confirm which account Claude Code is signed in to. Check the connection, or use Claude Code once, then retry.',
   'Sign-in not found. Start again.',
+  'Claude Swap is updating this account. Retry in a moment.',
   'Usage checks are rate limited by the provider. Switchboard waits before the next one.',
   'This backup was made with another key and cannot be opened on this machine.',
   'Choose a backup from the backup folder.',

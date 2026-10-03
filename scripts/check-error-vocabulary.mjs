@@ -32,6 +32,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime lib.rs no_swap(): the synthetic owners' Claude Swap source. Its only caller,
+  // refresh::catch_up_with_claude_swap, replaces any error with SWAP_BUSY before it returns.
+  'Claude Swap profiles not found.': 'replaced by SWAP_BUSY',
   // runtime lib.rs default_root(): read only at start-up (src-tauri main.rs setup) and by
   // the CLI. A failure stops the app before a window exists, and --data-dir is a CLI flag.
   'App-data directory unavailable. Use --data-dir with an absolute private directory.': 'start-up and CLI only',

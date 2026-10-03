@@ -636,40 +636,78 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
     }
     Ok(batch)
 }
-/// Claude Swap is running (its TUI, `cswap auto` or its menu-bar agent) and so renews the
-/// accounts it holds. Two renewers of one lineage spend each other's refresh token.
-pub fn claude_swap_running() -> bool {
-    let agent = dirs::home_dir()
-        .map(|h| h.join("Library/LaunchAgents/com.cswap.menubar.plist"))
-        .is_some_and(|p| p.exists());
-    if agent {
-        return true;
-    }
+/// What Claude Swap is doing on this Mac.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SwapActivity {
+    /// A Claude Swap process runs (its TUI, `cswap auto`, its menu bar): it renews the
+    /// accounts it holds, and two renewers of one lineage spend each other's refresh token.
+    pub running: bool,
+    /// It switches Claude Code by itself (`cswap auto`, or the menu bar with automatic
+    /// switching on): a second automatic switcher would fight it.
+    pub switching: bool,
+}
+/// Reads the process list once. A leftover LaunchAgent plist proves nothing: the menu bar
+/// runs as `cswap menubar` and is seen in the process list like every other mode.
+pub fn claude_swap_activity() -> SwapActivity {
     #[cfg(unix)]
     {
-        std::process::Command::new("/bin/ps")
+        let processes = std::process::Command::new("/bin/ps")
             .args(["-axo", "args="])
             .stderr(std::process::Stdio::null())
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
-            .is_some_and(|out| out.lines().any(running_swap_line))
+            .unwrap_or_default();
+        let settings = dirs::home_dir()
+            .map(|h| h.join(".claude-swap-backup/menubar_settings.json"))
+            .and_then(|path| Native.read(&path, CAP).ok().flatten())
+            .and_then(|bytes| String::from_utf8(bytes).ok());
+        swap_activity(&processes, settings.as_deref())
     }
     #[cfg(not(unix))]
     {
-        false
+        SwapActivity::default()
     }
+}
+pub fn claude_swap_running() -> bool {
+    claude_swap_activity().running
+}
+fn swap_activity(processes: &str, menubar_settings: Option<&str>) -> SwapActivity {
+    let menubar_switches = menubar_settings
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|v| v.get("auto_switch_enabled").and_then(Value::as_bool))
+        .unwrap_or(false);
+    let mut activity = SwapActivity::default();
+    for line in processes.lines().filter(|l| running_swap_line(l)) {
+        activity.running = true;
+        match swap_subcommand(line) {
+            Some("auto") => activity.switching = true,
+            Some("menubar") if menubar_switches => activity.switching = true,
+            _ => {}
+        }
+    }
+    activity
+}
+/// The first word after Claude Swap's own program word that is not a flag: its subcommand.
+fn swap_subcommand(line: &str) -> Option<&str> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let program = words.iter().take(3).position(|word| is_swap_word(word))?;
+    words[program + 1..]
+        .iter()
+        .find(|word| !word.starts_with('-'))
+        .copied()
+}
+fn is_swap_word(word: &str) -> bool {
+    let name = word.rsplit('/').next().unwrap_or(word);
+    name == "cswap"
+        || name == "claude-swap"
+        || word == "claude_swap"
+        || word.ends_with("claude_swap/__main__.py")
 }
 /// A process line that is Claude Swap itself, not something merely mentioning it.
 fn running_swap_line(line: &str) -> bool {
     // The program and its script or `-m` module: never a word later on the command line.
-    line.split_whitespace().take(3).any(|word| {
-        let name = word.rsplit('/').next().unwrap_or(word);
-        name == "cswap"
-            || name == "claude-swap"
-            || word == "claude_swap"
-            || word.ends_with("claude_swap/__main__.py")
-    })
+    line.split_whitespace().take(3).any(is_swap_word)
 }
 /// `claudeAiOauth.expiresAt` of a credential, 0 when absent.
 fn expires(auth: &[u8]) -> i64 {
@@ -1995,6 +2033,33 @@ mod tests {
         fs::create_dir_all(root.join("sessions/1-a")).unwrap();
         fs::write(root.join("sessions/1-a/.credentials.json"), b"x").unwrap();
         assert_ne!(swap_signature_at(&root).unwrap(), second);
+    }
+    #[test]
+    fn claude_swap_switching_is_told_from_merely_running() {
+        let ps = "/usr/libexec/foo\n/Users/x/.local/bin/cswap\n";
+        assert_eq!(
+            swap_activity(ps, None),
+            SwapActivity {
+                running: true,
+                switching: false
+            }
+        );
+        let auto = "/opt/homebrew/bin/python3 -m claude_swap auto --interval 60\n";
+        assert!(swap_activity(auto, None).switching);
+        let script = "python3 /x/claude_swap/__main__.py --verbose auto\n";
+        assert!(swap_activity(script, None).switching);
+        // The menu bar switches only when its own setting says so.
+        let menubar = "/Users/x/.local/bin/cswap menubar\n";
+        assert!(!swap_activity(menubar, None).switching);
+        assert!(!swap_activity(menubar, Some(r#"{"auto_switch_enabled": false}"#)).switching);
+        assert!(swap_activity(menubar, Some(r#"{"auto_switch_enabled": true}"#)).switching);
+        assert!(!swap_activity(menubar, Some("not json")).switching);
+        // A word later on someone else's command line is not Claude Swap.
+        assert_eq!(
+            swap_activity("vim notes-about-cswap auto\n", None),
+            SwapActivity::default()
+        );
+        assert_eq!(swap_activity("", None), SwapActivity::default());
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {
