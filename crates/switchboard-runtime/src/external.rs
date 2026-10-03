@@ -18,6 +18,7 @@ use unicode_normalization::UnicodeNormalization;
 const CAP: usize = 1024 * 1024;
 const SECRET_CAP: usize = 64 * 1024;
 const UNAVAILABLE: &str = "External sign-in unavailable or its files are unsafe.";
+#[derive(Clone)]
 pub struct CapturedProfile {
     pub provider: Provider,
     pub kind: AuthKind,
@@ -28,12 +29,20 @@ pub struct CapturedProfile {
 pub struct ImportBatch {
     pub profiles: Vec<CapturedProfile>,
     pub failed: usize,
+    /// The email of each row that could not be read, where the row named one.
+    pub failed_emails: Vec<String>,
     pub skipped: usize,
 }
 
 trait Reader {
     fn read(&self, path: &Path, cap: usize) -> Result<Option<Vec<u8>>, String>;
+    /// An item Claude Code created through `/usr/bin/security`, which therefore trusts it.
     fn keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String>;
+    /// An item another program created through its own keyring library (Codex): read without
+    /// any dialog — an item that does not trust Switchboard reads as refused.
+    fn foreign_keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        self.keychain(service, account)
+    }
 }
 struct Native;
 fn checked_path(path: &Path) -> Result<(), String> {
@@ -182,6 +191,10 @@ impl Reader for Native {
             let _ = (service, account);
             Ok(None)
         }
+    }
+    #[cfg(target_os = "macos")]
+    fn foreign_keychain(&self, service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+        switchboard_core::external_keychain::read_external_quietly(service, account)
     }
 }
 struct Context {
@@ -403,7 +416,7 @@ fn codex_auth(reader: &dyn Reader, c: &Context) -> Result<Option<Vec<u8>>, Strin
             Sha256::digest(canonical.to_string_lossy().as_bytes())
         )[..16]
     );
-    if let Some(value) = reader.keychain("Codex Auth", &key)? {
+    if let Some(value) = reader.foreign_keychain("Codex Auth", &key)? {
         return Ok(Some(value));
     }
     if mode == "auto" {
@@ -484,7 +497,65 @@ fn capture(
     Ok(result)
 }
 pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
-    capture(&Native, provider, &context(provider, None)?)
+    let result = capture(&Native, provider, &context(provider, None)?);
+    if provider == Provider::Claude {
+        remember_current(&result);
+    }
+    result
+}
+/// The Claude sign-in read by the monitor's background passes. Each read is two
+/// `/usr/bin/security` processes (the item is read twice to refuse a torn pair), so the
+/// background reuses one for `CURRENT_TTL`; Switchboard's own writes forget it at once, and
+/// explicit operations read afresh. An external change (a `/login`) is seen within the TTL.
+pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, String> {
+    if provider != Provider::Claude {
+        return capture_current(provider);
+    }
+    CURRENT.get_or(|| capture_current(provider))
+}
+const CURRENT_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+/// One remembered read and when it was made.
+struct CurrentCache(
+    std::sync::Mutex<Option<(std::time::Instant, Result<CapturedProfile, String>)>>,
+);
+impl CurrentCache {
+    const fn new() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+    /// The remembered read while it is younger than the TTL, otherwise `read()` remembered.
+    fn get_or(
+        &self,
+        read: impl FnOnce() -> Result<CapturedProfile, String>,
+    ) -> Result<CapturedProfile, String> {
+        if let Ok(cache) = self.0.lock() {
+            if let Some((at, result)) = cache.as_ref() {
+                if at.elapsed() < CURRENT_TTL {
+                    return result.clone();
+                }
+            }
+        }
+        let result = read();
+        self.remember(&result);
+        result
+    }
+    fn remember(&self, result: &Result<CapturedProfile, String>) {
+        if let Ok(mut cache) = self.0.lock() {
+            *cache = Some((std::time::Instant::now(), result.clone()));
+        }
+    }
+    fn forget(&self) {
+        if let Ok(mut cache) = self.0.lock() {
+            *cache = None;
+        }
+    }
+}
+static CURRENT: CurrentCache = CurrentCache::new();
+fn remember_current(result: &Result<CapturedProfile, String>) {
+    CURRENT.remember(result);
+}
+/// Drops the cached Claude sign-in: after any write to it, and before an explicit operation.
+pub fn forget_current() {
+    CURRENT.forget();
 }
 pub fn capture_at(provider: Provider, home: &Path) -> Result<CapturedProfile, String> {
     capture(&Native, provider, &context(provider, Some(home))?)
@@ -511,6 +582,7 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
     let mut batch = ImportBatch {
         profiles: vec![],
         failed: 0,
+        failed_emails: Vec::new(),
         skipped: 0,
     };
     for (slot, row) in accounts {
@@ -628,7 +700,16 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
         })();
         match result {
             Ok(profile) => batch.profiles.push(profile),
-            Err(_) => batch.failed += 1,
+            Err(_) => {
+                batch.failed += 1;
+                if let Some(email) = row
+                    .get("email")
+                    .and_then(Value::as_str)
+                    .filter(|s| segment(s))
+                {
+                    batch.failed_emails.push(email.to_ascii_lowercase());
+                }
+            }
         }
     }
     if reader.read(&root.join("sequence.json"), CAP)?.as_deref() != Some(sequence.as_slice()) {
@@ -636,40 +717,78 @@ fn import(reader: &dyn Reader, root: &Path, mac: bool) -> Result<ImportBatch, St
     }
     Ok(batch)
 }
-/// Claude Swap is running (its TUI, `cswap auto` or its menu-bar agent) and so renews the
-/// accounts it holds. Two renewers of one lineage spend each other's refresh token.
-pub fn claude_swap_running() -> bool {
-    let agent = dirs::home_dir()
-        .map(|h| h.join("Library/LaunchAgents/com.cswap.menubar.plist"))
-        .is_some_and(|p| p.exists());
-    if agent {
-        return true;
-    }
+/// What Claude Swap is doing on this Mac.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SwapActivity {
+    /// A Claude Swap process runs (its TUI, `cswap auto`, its menu bar): it renews the
+    /// accounts it holds, and two renewers of one lineage spend each other's refresh token.
+    pub running: bool,
+    /// It switches Claude Code by itself (`cswap auto`, or the menu bar with automatic
+    /// switching on): a second automatic switcher would fight it.
+    pub switching: bool,
+}
+/// Reads the process list once. A leftover LaunchAgent plist proves nothing: the menu bar
+/// runs as `cswap menubar` and is seen in the process list like every other mode.
+pub fn claude_swap_activity() -> SwapActivity {
     #[cfg(unix)]
     {
-        std::process::Command::new("/bin/ps")
+        let processes = std::process::Command::new("/bin/ps")
             .args(["-axo", "args="])
             .stderr(std::process::Stdio::null())
             .output()
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
-            .is_some_and(|out| out.lines().any(running_swap_line))
+            .unwrap_or_default();
+        let settings = dirs::home_dir()
+            .map(|h| h.join(".claude-swap-backup/menubar_settings.json"))
+            .and_then(|path| Native.read(&path, CAP).ok().flatten())
+            .and_then(|bytes| String::from_utf8(bytes).ok());
+        swap_activity(&processes, settings.as_deref())
     }
     #[cfg(not(unix))]
     {
-        false
+        SwapActivity::default()
     }
+}
+pub fn claude_swap_running() -> bool {
+    claude_swap_activity().running
+}
+fn swap_activity(processes: &str, menubar_settings: Option<&str>) -> SwapActivity {
+    let menubar_switches = menubar_settings
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .and_then(|v| v.get("auto_switch_enabled").and_then(Value::as_bool))
+        .unwrap_or(false);
+    let mut activity = SwapActivity::default();
+    for line in processes.lines().filter(|l| running_swap_line(l)) {
+        activity.running = true;
+        match swap_subcommand(line) {
+            Some("auto") => activity.switching = true,
+            Some("menubar") if menubar_switches => activity.switching = true,
+            _ => {}
+        }
+    }
+    activity
+}
+/// The first word after Claude Swap's own program word that is not a flag: its subcommand.
+fn swap_subcommand(line: &str) -> Option<&str> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let program = words.iter().take(3).position(|word| is_swap_word(word))?;
+    words[program + 1..]
+        .iter()
+        .find(|word| !word.starts_with('-'))
+        .copied()
+}
+fn is_swap_word(word: &str) -> bool {
+    let name = word.rsplit('/').next().unwrap_or(word);
+    name == "cswap"
+        || name == "claude-swap"
+        || word == "claude_swap"
+        || word.ends_with("claude_swap/__main__.py")
 }
 /// A process line that is Claude Swap itself, not something merely mentioning it.
 fn running_swap_line(line: &str) -> bool {
     // The program and its script or `-m` module: never a word later on the command line.
-    line.split_whitespace().take(3).any(|word| {
-        let name = word.rsplit('/').next().unwrap_or(word);
-        name == "cswap"
-            || name == "claude-swap"
-            || word == "claude_swap"
-            || word.ends_with("claude_swap/__main__.py")
-    })
+    line.split_whitespace().take(3).any(is_swap_word)
 }
 /// `claudeAiOauth.expiresAt` of a credential, 0 when absent.
 fn expires(auth: &[u8]) -> i64 {
@@ -723,6 +842,44 @@ fn session_credential(
         }
     }
     None
+}
+/// A cheap fingerprint of Claude Swap's files — their count, total size and newest change — so
+/// the monitor reads them again only when something there moved. None: no backup folder.
+pub fn claude_swap_signature() -> Option<(u64, u64, u128)> {
+    let root = dirs::home_dir()?.join(".claude-swap-backup");
+    swap_signature_at(&root)
+}
+fn swap_signature_at(root: &Path) -> Option<(u64, u64, u128)> {
+    if !root.is_dir() {
+        return None;
+    }
+    let mut files = vec![root.join("sequence.json")];
+    for dir in ["credentials", "configs"] {
+        if let Ok(entries) = fs::read_dir(root.join(dir)) {
+            files.extend(entries.flatten().map(|e| e.path()));
+        }
+    }
+    if let Ok(entries) = fs::read_dir(root.join("sessions")) {
+        for entry in entries.flatten() {
+            files.push(entry.path().join(".credentials.json"));
+            files.push(entry.path().join(".claude.json"));
+        }
+    }
+    let (mut count, mut size, mut newest) = (0u64, 0u64, 0u128);
+    for file in files {
+        // symlink_metadata: a link is not followed out of Claude Swap's folder.
+        let Ok(meta) = fs::symlink_metadata(&file) else {
+            continue;
+        };
+        count += 1;
+        size += meta.len();
+        if let Ok(modified) = meta.modified() {
+            if let Ok(since) = modified.duration_since(std::time::UNIX_EPOCH) {
+                newest = newest.max(since.as_nanos());
+            }
+        }
+    }
+    Some((count, size, newest))
 }
 pub fn read_claude_swap() -> Result<ImportBatch, String> {
     let root = dirs::home_dir()
@@ -1230,7 +1387,9 @@ impl LiveItem for LiveLock {
     }
     fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;
-        write_live(&Native, &self.context, auth)?;
+        let written = write_live(&Native, &self.context, auth);
+        forget_current();
+        written?;
         self.locks.ensure()
     }
 }
@@ -1251,6 +1410,15 @@ pub fn activate_claude(
     expected_current: Option<&ExternalIdentity>,
     preserve: &mut dyn FnMut(&Outgoing<'_>) -> Result<(), String>,
 ) -> Result<(), String> {
+    // Whatever happens below, the sign-in may have changed: nobody reads a stale copy.
+    struct Forget;
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            forget_current();
+        }
+    }
+    let _forget = Forget;
+    forget_current();
     let c = context(Provider::Claude, None)?;
     checked_path(&c.home)?;
     refuse_own_home(&c.home)?;
@@ -1939,6 +2107,81 @@ mod tests {
         assert!(!config_lock.exists(), "released on drop");
     }
     #[test]
+    fn claude_swaps_files_change_their_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".claude-swap-backup");
+        assert_eq!(swap_signature_at(&root), None, "no folder, nothing to read");
+        fs::create_dir_all(root.join("credentials")).unwrap();
+        fs::write(root.join("sequence.json"), b"{}").unwrap();
+        let first = swap_signature_at(&root).unwrap();
+        assert_eq!(
+            swap_signature_at(&root).unwrap(),
+            first,
+            "stable while untouched"
+        );
+        fs::write(root.join("credentials/.creds-1-a.enc"), b"renewed").unwrap();
+        assert_ne!(swap_signature_at(&root).unwrap(), first);
+        let second = swap_signature_at(&root).unwrap();
+        fs::create_dir_all(root.join("sessions/1-a")).unwrap();
+        fs::write(root.join("sessions/1-a/.credentials.json"), b"x").unwrap();
+        assert_ne!(swap_signature_at(&root).unwrap(), second);
+    }
+    #[test]
+    fn claude_swap_switching_is_told_from_merely_running() {
+        let ps = "/usr/libexec/foo\n/Users/x/.local/bin/cswap\n";
+        assert_eq!(
+            swap_activity(ps, None),
+            SwapActivity {
+                running: true,
+                switching: false
+            }
+        );
+        let auto = "/opt/homebrew/bin/python3 -m claude_swap auto --interval 60\n";
+        assert!(swap_activity(auto, None).switching);
+        let script = "python3 /x/claude_swap/__main__.py --verbose auto\n";
+        assert!(swap_activity(script, None).switching);
+        // The menu bar switches only when its own setting says so.
+        let menubar = "/Users/x/.local/bin/cswap menubar\n";
+        assert!(!swap_activity(menubar, None).switching);
+        assert!(!swap_activity(menubar, Some(r#"{"auto_switch_enabled": false}"#)).switching);
+        assert!(swap_activity(menubar, Some(r#"{"auto_switch_enabled": true}"#)).switching);
+        assert!(!swap_activity(menubar, Some("not json")).switching);
+        // A word later on someone else's command line is not Claude Swap.
+        assert_eq!(
+            swap_activity("vim notes-about-cswap auto\n", None),
+            SwapActivity::default()
+        );
+        assert_eq!(swap_activity("", None), SwapActivity::default());
+    }
+    #[test]
+    fn the_background_reuses_one_claude_read_until_switchboard_writes() {
+        // Its own cache: the process-wide one is shared with tests that forget it.
+        let cache = CurrentCache::new();
+        let reads = Cell::new(0);
+        let read = || {
+            reads.set(reads.get() + 1);
+            claude_profile(&auth("cached"), &config("cached@example.test"), None)
+        };
+        assert_eq!(
+            cache.get_or(read).unwrap().credential.access_token,
+            "cached"
+        );
+        assert_eq!(
+            cache.get_or(read).unwrap().credential.access_token,
+            "cached"
+        );
+        assert_eq!(reads.get(), 1, "the second request reuses the first read");
+        // A signed-out state is remembered too, for the same time.
+        cache.forget();
+        cache.remember(&Err("No current Claude sign-in found.".into()));
+        assert!(cache.get_or(read).is_err());
+        assert_eq!(reads.get(), 1);
+        // After Switchboard writes, the next request reads again.
+        cache.forget();
+        cache.get_or(read).unwrap();
+        assert_eq!(reads.get(), 2);
+    }
+    #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {
         let data = tempfile::tempdir().unwrap();
         let root = data.path().join("ai.passioncode.fabric-switchboard");
@@ -2212,6 +2455,71 @@ mod tests {
             b"cli_auth_credentials_store = 'auto'\n[features]\nsecret_auth_storage = true",
         );
         assert!(capture(&f, Provider::Codex, &c).is_err());
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn codexs_keychain_item_is_read_only_the_quiet_way() {
+        // Codex writes its item through its own keyring library; `/usr/bin/security` is not
+        // on its access list, so reading it that way would make macOS ask. Only the quiet path
+        // may be taken, and a refusal is reported, never retried loudly.
+        struct QuietOnly {
+            base: Fixture,
+            loud: Cell<usize>,
+            refuse: bool,
+        }
+        impl Reader for QuietOnly {
+            fn read(&self, p: &Path, cap: usize) -> Result<Option<Vec<u8>>, String> {
+                self.base.read(p, cap)
+            }
+            fn keychain(&self, _: &str, _: &str) -> Result<Option<Vec<u8>>, String> {
+                self.loud.set(self.loud.get() + 1);
+                Ok(None)
+            }
+            fn foreign_keychain(&self, s: &str, a: &str) -> Result<Option<Vec<u8>>, String> {
+                if self.refuse {
+                    return Err(switchboard_core::external_keychain::EXTERNAL_REFUSED.into());
+                }
+                self.base.keychain(s, a)
+            }
+        }
+        let mut c = ctx();
+        c.mac = true;
+        c.home = "/fixture/codex".into();
+        let reader = |refuse| {
+            let base = Fixture::new();
+            base.put(
+                &c.home.join("config.toml"),
+                b"cli_auth_credentials_store = 'keyring'",
+            );
+            let key = format!(
+                "cli|{}",
+                &format!("{:x}", Sha256::digest(c.home.to_string_lossy().as_bytes()))[..16]
+            );
+            base.keys.borrow_mut().insert(
+                ("Codex Auth".into(), key),
+                br#"{"tokens":{"access_token":"quiet","account_id":"current"}}"#.to_vec(),
+            );
+            QuietOnly {
+                base,
+                loud: Cell::new(0),
+                refuse,
+            }
+        };
+        let quiet = reader(false);
+        assert_eq!(
+            capture(&quiet, Provider::Codex, &c)
+                .unwrap()
+                .credential
+                .access_token,
+            "quiet"
+        );
+        assert_eq!(quiet.loud.get(), 0);
+        let refused = reader(true);
+        assert_eq!(
+            capture(&refused, Provider::Codex, &c).err().unwrap(),
+            switchboard_core::external_keychain::EXTERNAL_REFUSED
+        );
+        assert_eq!(refused.loud.get(), 0);
     }
     #[test]
     fn source_drift_is_not_captured_under_unchanged_index() {

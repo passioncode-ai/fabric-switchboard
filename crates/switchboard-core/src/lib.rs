@@ -5,6 +5,11 @@ mod credential;
 mod keychain;
 #[cfg(target_os = "macos")]
 mod keychain_macos;
+/// Reading items other programs own, without a dialog (macOS).
+#[cfg(target_os = "macos")]
+pub mod external_keychain {
+    pub use crate::keychain_macos::{read_external_quietly, EXTERNAL_REFUSED};
+}
 mod persistence;
 pub mod private_fs;
 mod projects;

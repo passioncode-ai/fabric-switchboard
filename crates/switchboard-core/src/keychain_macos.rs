@@ -364,6 +364,26 @@ fn signed_by_team(path: &Path, requirement: &SecRequirement) -> bool {
             .is_ok()
 }
 
+/// Reads a generic-password item another program owns (Codex's "Codex Auth") from the default
+/// keychain list without ever showing a dialog: an item that does not trust Switchboard reads
+/// as refused. Ok(None): no such item. Spawning `/usr/bin/security` would instead make macOS
+/// ask — that executable is not on such an item's access list either.
+pub fn read_external_quietly(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+    let backend = MacKeychain {
+        file: None,
+        trust: Trust::CallerOnly,
+    };
+    match backend.read(service, account, false) {
+        Read::Found(data) => Ok(Some(data)),
+        Read::Absent => Ok(None),
+        Read::Refused => Err(EXTERNAL_REFUSED.into()),
+        Read::Failed => Err("Keychain unavailable. Unlock it, then retry.".into()),
+    }
+}
+/// Keychain answers the same way whether it is locked or the item does not trust Switchboard.
+pub const EXTERNAL_REFUSED: &str =
+    "Keychain is locked or does not let Switchboard read this sign-in without asking. Unlock it and retry, or add the account with official sign-in.";
+
 #[cfg(test)]
 mod tests {
     //! Live checks against a throwaway keychain file; the user's keychains are not touched

@@ -141,6 +141,8 @@ pub(crate) struct NativeSources {
     pub(crate) activate: Activate,
     /// Claude Code's live credential item under its locks, for renewing it while idle.
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
+    /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
+    pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -155,15 +157,21 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
+    swap: no_swap,
 };
+/// Claude Swap as a synthetic owner sees it: absent.
+pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
+    Err("Claude Swap profiles not found.".into())
+}
 /// The live sign-in of a synthetic owner: never reachable.
 pub(crate) fn no_live() -> Result<Box<dyn external::LiveItem>, String> {
     Err("External sign-in unavailable or its files are unsafe.".into())
 }
 pub(crate) const NATIVE: NativeSources = NativeSources {
-    current: external::capture_current,
+    current: external::capture_current_cached,
     activate: external::activate_claude,
     live: external::lock_live,
+    swap: external::read_claude_swap,
 };
 
 pub struct Runtime {
@@ -415,6 +423,7 @@ impl Runtime {
         }
     }
     fn invalidate_current(&self) {
+        external::forget_current();
         if let Ok(mut cache) = self.current_cache.lock() {
             cache.generation = cache.generation.wrapping_add(1);
             cache.entry = None;
@@ -435,6 +444,8 @@ impl Runtime {
             cache.generation
         };
         // Reading may wait on an OS credential prompt; invalidation must not wait for it.
+        // The window shows what is signed in now: its own 30 s cache is the only one.
+        external::forget_current();
         let value = observe_current(&self.store, self.native.current);
         let mut cache = self
             .current_cache
@@ -468,10 +479,16 @@ impl Owner {
         let control = control::ControlHandle::start(runtime.clone()).await?;
         // Only the real data folder is backed up: a `--data-dir` scratch store must never
         // write into the operator's backup folder with the operator's key.
-        if native_sources && default_root().ok().as_deref() == Some(runtime.root.as_path()) {
+        let default_store = default_root().ok().as_deref() == Some(runtime.root.as_path());
+        if native_sources && default_store {
             if let Some(dir) = backup_dir() {
                 runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
             }
+        }
+        // One renewer per lineage: only the owner of the real data folder spends refresh
+        // tokens. A `--data-dir` store holding the same accounts would be a second renewer.
+        if native_sources && !default_store {
+            runtime.refresh.set_grants(false);
         }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         Ok(Self {
@@ -503,7 +520,10 @@ async fn execute(
 ) -> Result<Value, String> {
     let native = runtime.map_or(NATIVE, |r| r.native);
     // The offline CLI owns the store for one command; its refresh bookkeeping is its own.
-    let offline_refresh = refresh::RefreshState::default();
+    // It never spends a refresh token: it cannot see Claude Swap's holds or a running owner's
+    // state, and its kept successors would die with it (audit P1-2). Rejected lineages are
+    // still refused, from the owner's journal.
+    let offline_refresh = refresh::RefreshState::offline(root.join("renewal-state.json"));
     let refresh_state = runtime.map_or(&offline_refresh, |r| &r.refresh);
     let needs_owner = || {
         runtime.ok_or_else(|| {
@@ -526,7 +546,27 @@ async fn execute(
             label,
             pool,
         } => {
+            external::forget_current();
+            if provider == Provider::Claude {
+                refresh::learn_live_owner(&store, native, refresh_state).await;
+            }
             let captured = (native.current)(provider)?;
+            // A sign-in that is another account's lineage never lands under this name, and one
+            // nothing attributes never overwrites a copy already saved (audit P2-1).
+            if provider == Provider::Claude && captured.kind == AuthKind::OAuth {
+                if let Err(refusal) = refresh::filable(
+                    &store,
+                    refresh_state,
+                    &captured.identity,
+                    &captured.credential,
+                ) {
+                    let saved =
+                        !matching_accounts(&store, provider, &captured.identity)?.is_empty();
+                    if refusal == refresh::FOREIGN_LIVE || saved {
+                        return Err(refusal);
+                    }
+                }
+            }
             let account = store.upsert(
                 label.unwrap_or(captured.label),
                 provider,
@@ -550,30 +590,19 @@ async fn execute(
             {
                 return Err("Label or pool is invalid".into());
             }
-            let batch = external::read_claude_swap()?;
-            let mut imported = Vec::new();
-            let mut failed = batch.failed;
-            for profile in batch.profiles {
-                match store.upsert(
-                    profile.label,
-                    profile.provider,
-                    profile.kind,
-                    pool.clone(),
-                    profile.credential,
-                    Some(profile.identity),
-                ) {
-                    Ok(account) => imported.push(account),
-                    Err(_) => failed += 1,
-                }
-            }
+            let batch = (native.swap)()?;
+            let (imported, failed, skipped) =
+                import_profiles(&store, refresh_state, &pool, batch.profiles);
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
             Ok(
-                json!({"imported": imported, "failed": failed, "skipped": batch.skipped, "claude_swap_running": external::claude_swap_running()}),
+                json!({"imported": imported, "failed": batch.failed + failed, "skipped": batch.skipped + skipped, "claude_swap_running": external::claude_swap_running()}),
             )
         }
         Operation::ActivateNative { id } => {
+            // A switch the user asked for starts from what is signed in now.
+            external::forget_current();
             // The target is inactive by definition; an expired token is renewed first so
             // Claude Code starts on a live one. A failed refresh still activates: Claude
             // Code renews from the refresh token itself.
@@ -610,6 +639,7 @@ async fn execute(
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
             "claude_swap_accounts": refresh::swap_held(refresh_state),
             "renewal_blocked": refresh_state.renewal_blocked(),
+            "claude_swap_switching": refresh_state.swap_switching(),
         })),
         Operation::Add {
             label,
@@ -820,6 +850,15 @@ fn activate_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
+    // A renewal of this account is in flight: its stored token is being spent right now.
+    if refresh.is_some_and(|state| state.in_flight(store, id)) {
+        return Err(refresh::RENEWING.into());
+    }
+    // An account Claude Swap renews: its newest generation may be in Swap's files, not here —
+    // take it first, or Claude Code would get a token Swap already spent (audit P2-3).
+    if let Some(state) = refresh {
+        refresh::catch_up_with_claude_swap(store, state, native, id)?;
+    }
     // A lineage the provider rejected would sign every ordinary `claude` session out.
     if refresh.is_some_and(|state| state.is_dead(store, id)) {
         return Err(refresh::SIGN_IN.into());
@@ -884,6 +923,53 @@ fn adopt_live(store: &Store, native: NativeSources, state: &refresh::RefreshStat
         Some(live.identity),
     );
 }
+/// Claude Swap profiles into `pool`, never moving an account backwards: an identity already
+/// saved with a newer generation (another refresh token that expires no earlier) keeps — and
+/// seeds a new copy with — that generation, and another account's lineage is not imported
+/// (audit P1-3). Returns (imported, failed, skipped).
+fn import_profiles(
+    store: &Store,
+    state: &refresh::RefreshState,
+    pool: &str,
+    profiles: Vec<external::CapturedProfile>,
+) -> (Vec<Account>, usize, usize) {
+    let (mut imported, mut failed, mut skipped) = (Vec::new(), 0, 0);
+    for profile in profiles {
+        let mut credential = profile.credential;
+        if profile.kind == AuthKind::OAuth && profile.identity.account_id.is_some() {
+            if refresh::lineage(store, state, &profile.identity, &credential)
+                == refresh::Lineage::Foreign
+            {
+                skipped += 1;
+                continue;
+            }
+            let newest = matching_accounts(store, profile.provider, &profile.identity)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|copy| store.stored_credential(&copy.id).ok())
+                .filter(|stored| {
+                    stored.refresh_token != credential.refresh_token
+                        && stored.expires_at.unwrap_or(0) >= credential.expires_at.unwrap_or(0)
+                })
+                .max_by_key(|stored| stored.expires_at.unwrap_or(0));
+            if let Some(newest) = newest {
+                credential = newest;
+            }
+        }
+        match store.upsert(
+            profile.label,
+            profile.provider,
+            profile.kind,
+            pool.to_owned(),
+            credential,
+            Some(profile.identity),
+        ) {
+            Ok(account) => imported.push(account),
+            Err(_) => failed += 1,
+        }
+    }
+    (imported, failed, skipped)
+}
 pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
 fn replace_native(
     store: &Store,
@@ -896,6 +982,9 @@ fn replace_native(
     if !account.enabled {
         return Err("Account is disabled".into());
     }
+    // A switch is decided on what is signed in now, never on a remembered read: a stale one
+    // could call the target "already in use" and record a switch that never happened.
+    external::forget_current();
     // A renewed generation that could not be stored yet is the only valid one.
     if let Some(state) = refresh {
         match refresh::adopt_stash(store, state, &account.id) {
@@ -1098,6 +1187,7 @@ pub(crate) mod fixtures {
                 current,
                 activate,
                 live: no_live,
+                swap: no_swap,
             },
         )
         .await
@@ -1527,6 +1617,135 @@ mod owner_tests {
         assert_eq!(
             runtime.store.stored_credential(&b.id).unwrap().access_token,
             "synthetic-b-token"
+        );
+    }
+    #[tokio::test]
+    async fn capturing_another_accounts_lineage_under_this_name_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), a_named_b_held, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        save(&runtime.store, "synthetic-b", "default");
+        assert_eq!(
+            runtime
+                .execute(Operation::CaptureCurrent {
+                    provider: Provider::Claude,
+                    label: None,
+                    pool: "default".into()
+                })
+                .await
+                .unwrap_err(),
+            refresh::FOREIGN_LIVE
+        );
+        assert_eq!(
+            runtime.store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-token",
+            "A keeps its own lineage"
+        );
+    }
+    #[tokio::test]
+    async fn capturing_an_unattributed_sign_in_never_overwrites_a_saved_copy() {
+        let root = tempfile::tempdir().unwrap();
+        // Signed in as synthetic-a; nothing attributes its token (provider unreachable).
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let capture = || Operation::CaptureCurrent {
+            provider: Provider::Claude,
+            label: None,
+            pool: "default".into(),
+        };
+        // A first capture of a new account is allowed: nothing can be overwritten.
+        let first = runtime.execute(capture()).await.unwrap();
+        let id = first["id"].as_str().unwrap().to_owned();
+        // The saved copy now holds that lineage: a second capture is Own and goes through.
+        runtime.execute(capture()).await.unwrap();
+        // A saved copy with a different, unattributed lineage is not overwritten.
+        let mut other = credential("synthetic-a");
+        other.refresh_token = Some("an-older-lineage".into());
+        runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                other,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        assert_eq!(
+            runtime.execute(capture()).await.unwrap_err(),
+            refresh::UNCONFIRMED_LIVE
+        );
+        assert_eq!(
+            runtime
+                .store
+                .stored_credential(&id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("an-older-lineage")
+        );
+    }
+    #[test]
+    fn importing_from_claude_swap_never_moves_an_account_backwards() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let state = refresh::RefreshState::default();
+        // Switchboard renewed A to a generation only it holds.
+        let mut newest = credential("synthetic-a");
+        newest.refresh_token = Some("a-g5".into());
+        newest.expires_at = Some(5_000_000_000);
+        let a = store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                newest,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        save(&store, "synthetic-b", "default");
+        let profile = |account: &str, refresh: &str, expires: i64| external::CapturedProfile {
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            credential: {
+                let mut c = credential(account);
+                c.refresh_token = Some(refresh.into());
+                c.expires_at = Some(expires);
+                c
+            },
+            identity: identity(account),
+            label: account.into(),
+        };
+        let (imported, failed, skipped) = import_profiles(
+            &store,
+            &state,
+            "work",
+            vec![
+                // Swap's spent G1 of A.
+                profile("synthetic-a", "a-g1", 1_000),
+                // B's own refresh token under C's name: another account's lineage.
+                profile("synthetic-c", "synthetic-b-refresh", 9_000_000_000),
+            ],
+        );
+        assert_eq!((imported.len(), failed, skipped), (1, 0, 1));
+        assert_eq!(
+            store
+                .stored_credential(&a.id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("a-g5"),
+            "the newer generation stays"
+        );
+        assert_eq!(
+            store
+                .stored_credential(&imported[0].id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("a-g5"),
+            "a new copy in another pool starts from the newest generation"
         );
     }
     #[tokio::test]

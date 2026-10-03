@@ -90,3 +90,13 @@ Behaviour: [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md); decisions and REQ 
 
 - `MonitorStatus` adds `renewal_blocked: bool` — true for an hour after the token endpoint answered `invalid_client`; no renewal is attempted meanwhile. Nothing new is journaled, so a 0.5.1 binary still opens the store.
 - A `~/.claude.json` created by a native switch carries `hasCompletedOnboarding: true`.
+
+## 0.5.3 additions
+
+- `MonitorStatus` adds `claude_swap_switching: bool`; decision reason `claude_swap_switching`. `agent_setup()` adds `translocated: bool`.
+- New refusals in the error vocabulary: `RENEWING`, `SWAP_BUSY`, `STORE_BUSY` and `STARTUP_FAILED` (desktop only, `src-tauri/src/main.rs`; every other owner start-up error is replaced by the latter), `EXTERNAL_REFUSED` (core `external_keychain`).
+- `ImportBatch` adds `failed_emails` (lower-cased); `SwapView::Profiles(profiles, failed_emails)`; Claude Swap holds are kept per identity with its email.
+- `NativeSources` adds `swap: fn() -> Result<external::ImportBatch, String>` (synthetic owners: `no_swap`). `external::claude_swap_activity() -> SwapActivity { running, switching }`, `claude_swap_signature()`, `capture_current_cached` (30 s, Claude only) and `forget_current()`.
+- `RefreshState::offline(journal)`: no grants; `set_grants(false)` for a `--data-dir` owner. `refresh::catch_up_with_claude_swap` runs inside `activate_native`, the function every switch path shares.
+- `switchboard_core::external_keychain::read_external_quietly(service, account)` (macOS): a generic-password item read with Keychain interaction off.
+- Desktop: the `Owner` lives in a `Slot` started at launch and retried by the next request when that failed; `tauri-plugin-single-instance` `~2.4.0` (Tauri stays 2.11.6). Release profile: LTO, one codegen unit, stripped.

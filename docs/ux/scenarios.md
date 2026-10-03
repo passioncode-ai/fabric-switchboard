@@ -245,11 +245,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Reopen the app → Persisted accounts and routes load; proxy gets new capability.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. Opening Switchboard again while it runs focuses the open window (0.5.3). The store is held by `switchboard serve`, a running command or a window opened with `open -n` → the window opens and reads “Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.”; Retry starts it once the store is free — the app no longer quits unexpectedly (0.5.3).
 **Expected result:** Persisted accounts and routes load; proxy gets new capability.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
-**Errors & recovery:** Corrupt or future-schema metadata and second instance are explicit errors.
+**Errors & recovery:** Corrupt or future-schema metadata is an explicit error; a second instance focuses the first.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
 **Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
@@ -428,7 +428,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. With two or more switchable Claude accounts and no native policy on, the Automatic switching bar offers Turn on for Claude Code → one click enables the `claude_cli` policy for the pool holding most of them with the defaults below, and the bar reads “Automatic switching is on” with the latest decision (0.5). Stop turns it off in one click.
 2. For other boundaries, the ⚙ menu → New policy… or Edit … → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
-**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop rotation → the saved policy is disabled in one action. Codex cannot select the native Claude target.
+**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop rotation → the saved policy is disabled in one action. Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and native rotation holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
 **Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
 **UI elements:** Automatic switching bar, Turn on / Stop, ⚙ settings menu, policy dialog with numeric fields, enabled checkbox and target selector, latest decision.
 **States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
@@ -510,7 +510,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Open Agents → what agents can do, and the CLI location or “not found”.
 2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
 3. Copy the Claude Code, Codex or Claude Code plugin command and run it in a terminal.
-**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice.
+**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3).
 **Expected result:** The agent's `switchboard_status` names its session; switching a managed session takes effect from the next request; the global Claude Code login needs `global: true`.
 **UI elements:** capability panel, link button, command rows with Copy.
 **States covered:** loading, unavailable, CLI missing, linked.
@@ -530,7 +530,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Save or sign in to an account in the app → the CLI and later signed updates read it with no dialog.
 2. Open the app after updating from 0.4 or earlier → each account saved by an earlier version moves to shared storage; macOS asks at most once per account, and not at all for accounts the installed app could already read.
 3. An agent uses the CLI before the app has moved an account → the CLI shows no dialog and says to open the app once.
-**Alt paths:** Deny in the dialog → the account stays where it was and the app does not ask again until restart. A development build never reads the user's accounts.
+**Alt paths:** Deny in the dialog → the account stays where it was and the app does not ask again until restart. A development build never reads the user's accounts. Codex keeps its sign-in in the Keychain (`keyring`/`auto`) → it is read without a dialog; an item that does not trust Switchboard reads “Keychain is locked or does not let Switchboard read this sign-in without asking. Unlock it and retry, or add the account with official sign-in.” instead of asking every minute (0.5.3).
 **Expected result:** After the move, no Keychain dialog during ordinary use by the app or the CLI.
 **UI elements:** macOS Keychain dialog (app only), status/error message.
 **States covered:** moved silently, moved after one consent, declined, CLI before the move, development build.

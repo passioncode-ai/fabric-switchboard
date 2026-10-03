@@ -56,7 +56,10 @@ pub fn agent_cli() -> Option<PathBuf> {
     if current.file_name().is_some_and(|n| n == CLI_NAME) {
         return Some(current);
     }
+    // Never a translocated copy beside a desktop app opened from its download folder: an MCP
+    // entry pointing into it breaks once the app quits.
     let mut candidates = vec![current.parent()?.join(CLI_NAME)];
+    candidates.retain(|p| !crate::agents::translocated(p));
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(CLI_NAME)));
     }

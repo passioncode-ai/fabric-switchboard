@@ -28,41 +28,89 @@ impl MonitorHandle {
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut last_source_sync = 0;
             let mut last_limit_scan = 0;
+            // What the previous pass saw of Claude Swap: whether it ran, and its files.
+            let mut swap_was_running: Option<bool> = None;
+            let mut swap_last_signature = None;
             loop {
                 interval.tick().await;
                 let Some(runtime) = weak.upgrade() else {
                     break;
                 };
                 let time = now();
+                // With no saved Claude OAuth account there is nothing of Claude Code's to keep
+                // current: no Keychain read, no Claude Swap read, no transcript scan.
+                let claude = native_sources && claude_oauth_saved(&runtime.store);
                 if native_sources
                     && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
                 {
                     // Network first, outside the lock: who owns a lineage not seen before.
-                    crate::refresh::learn_live_owner(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                    )
-                    .await;
+                    if claude {
+                        crate::refresh::learn_live_owner(
+                            &runtime.store,
+                            runtime.native,
+                            &runtime.refresh,
+                        )
+                        .await;
+                    }
                     // Claude Swap's files are read outside the lock; adopting its newer
                     // generations happens under it, with the live sync.
-                    let swap = if !crate::external::claude_swap_running() {
-                        crate::refresh::SwapView::NotRunning
+                    // Claude Swap only ever matters for saved Claude accounts.
+                    let activity = if claude {
+                        crate::external::claude_swap_activity()
                     } else {
-                        match crate::external::read_claude_swap() {
-                            Ok(batch) => crate::refresh::SwapView::Profiles(batch.profiles),
-                            Err(_) => crate::refresh::SwapView::Unreadable,
-                        }
+                        crate::external::SwapActivity::default()
                     };
+                    let running = activity.running;
+                    runtime
+                        .refresh
+                        .set_swap_activity(activity.running, activity.switching);
+                    let signature = claude
+                        .then(crate::external::claude_swap_signature)
+                        .flatten();
+                    let due = crate::refresh::swap_read_due(
+                        running,
+                        swap_was_running,
+                        signature,
+                        swap_last_signature,
+                    );
+                    let read = due.then(crate::external::read_claude_swap);
+                    // After a stop, a row that could not be read may hold Swap's last renewal:
+                    // read again next pass rather than mark the files as seen.
+                    let partial = matches!(&read, Some(Ok(batch)) if !running && batch.failed > 0);
+                    let swap = match (running, read) {
+                        (true, Some(Ok(batch))) => {
+                            crate::refresh::SwapView::Profiles(batch.profiles, batch.failed_emails)
+                        }
+                        (true, _) => crate::refresh::SwapView::Unreadable,
+                        (false, Some(Ok(batch))) => {
+                            crate::refresh::SwapView::Stopped(batch.profiles)
+                        }
+                        (false, _) => crate::refresh::SwapView::NotRunning,
+                    };
+                    // A failed read (Swap was writing its files) is repeated next pass: neither
+                    // the files nor the stop are marked as seen.
+                    let failed = due
+                        && (partial
+                            || matches!(
+                                swap,
+                                crate::refresh::SwapView::Unreadable
+                                    | crate::refresh::SwapView::NotRunning
+                            ));
+                    if !failed {
+                        swap_last_signature = signature;
+                        swap_was_running = Some(running);
+                    }
                     let _mutation = runtime.mutations.lock().await;
                     // Claude Code left its token expired: renew it under Claude Code's locks so
                     // managed sessions and quota checks on that account keep working.
-                    crate::refresh::renew_idle_live(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                    )
-                    .await;
+                    if claude {
+                        crate::refresh::renew_idle_live(
+                            &runtime.store,
+                            runtime.native,
+                            &runtime.refresh,
+                        )
+                        .await;
+                    }
                     crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
                     sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
                     runtime.invalidate_current();
@@ -72,7 +120,7 @@ impl MonitorHandle {
                     let _ = runtime.maybe_backup(time, false);
                 }
                 if time - last_limit_scan >= 30 || time < last_limit_scan {
-                    scan_limits(&runtime, native_sources, time);
+                    scan_limits(&runtime, claude, time);
                     last_limit_scan = time;
                 }
                 let Ok(snapshot) = runtime.store.snapshot() else {
@@ -103,7 +151,7 @@ impl MonitorHandle {
                     )
                     .await;
                 }
-                if native_sources {
+                if claude && native_rotation_on(&runtime.store) {
                     // A native switch files the live lineage under its account: know its owner
                     // first (network, outside the lock; at most once a minute per lineage).
                     crate::refresh::learn_live_owner(
@@ -303,6 +351,22 @@ async fn renew_due(runtime: &Runtime) {
 
 /// Adopt only a profile already captured by the operator. The ordinary client
 /// owns refresh; a new login never silently adds or enables an account.
+/// A saved Claude OAuth account exists: the only reason to look at Claude Code's sign-in.
+fn claude_oauth_saved(store: &Store) -> bool {
+    store.snapshot().is_ok_and(|s| {
+        s.accounts
+            .iter()
+            .any(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+    })
+}
+/// Automatic switching of the ordinary Claude Code is on somewhere.
+fn native_rotation_on(store: &Store) -> bool {
+    store.snapshot().is_ok_and(|s| {
+        s.policies
+            .iter()
+            .any(|p| p.enabled && p.target == "claude_cli")
+    })
+}
 fn sync_live_sources(
     store: &Store,
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
@@ -348,6 +412,13 @@ fn sync_live_sources(
             let Ok(old) = store.stored_credential(&account.id) else {
                 continue;
             };
+            // A copy already newer than Claude Code's item (a renewal Switchboard stored while
+            // writing it back failed, or Claude Swap's) is never moved back.
+            if old.refresh_token != profile.credential.refresh_token
+                && old.expires_at.unwrap_or(0) > profile.credential.expires_at.unwrap_or(0)
+            {
+                continue;
+            }
             if old.access_token == profile.credential.access_token
                 && old.refresh_token == profile.credential.refresh_token
                 && old.id_token == profile.credential.id_token
@@ -395,6 +466,12 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
     let mut decisions = Vec::new();
     let snapshot = runtime.store.snapshot()?;
     for policy in snapshot.policies.iter().filter(|p| p.enabled) {
+        // Claude Swap switches Claude Code by itself: two automatic switchers would undo each
+        // other's choice. Manual switches and managed routes are unaffected.
+        if policy.target == "claude_cli" && runtime.refresh.swap_switching() {
+            decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":"claude_swap_switching","candidate_id":null}));
+            continue;
+        }
         let current = if policy.target == "managed" {
             snapshot
                 .routes
@@ -414,12 +491,20 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         } else {
             None
         };
-        let decision = runtime.store.rotation_decision_with(
-            policy,
-            current.as_deref(),
-            now(),
-            &runtime.limits.limited_ids(now()),
-        )?;
+        // A rejected sign-in is never a candidate: activation would refuse it every pass and
+        // the next eligible account would never be tried.
+        let mut excluded = runtime.limits.limited_ids(now());
+        excluded.extend(
+            runtime
+                .refresh
+                .sign_in_required(&runtime.store)
+                .into_iter()
+                .filter(|id| current.as_deref() != Some(id.as_str())),
+        );
+        let decision =
+            runtime
+                .store
+                .rotation_decision_with(policy, current.as_deref(), now(), &excluded)?;
         let mut reason = decision.reason;
         if let Some(id) = decision.candidate_id.as_deref() {
             let result = if policy.target == "managed" {
@@ -614,6 +699,61 @@ mod tests {
         }
     }
     #[tokio::test]
+    async fn without_saved_claude_accounts_the_monitor_leaves_claude_code_alone() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        assert!(!claude_oauth_saved(&runtime.store));
+        assert!(!native_rotation_on(&runtime.store));
+        save(&runtime.store, "synthetic-a", "default");
+        assert!(claude_oauth_saved(&runtime.store));
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        assert!(native_rotation_on(&runtime.store));
+    }
+    #[tokio::test]
+    async fn native_rotation_leaves_switching_to_an_auto_switching_claude_swap() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        runtime.refresh.set_swap_switching(true);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "claude_swap_switching");
+        assert!(
+            events(&runtime.store, "activation").is_empty(),
+            "nothing switched"
+        );
+        // Swap stops switching (or quits): Switchboard's rotation runs again.
+        runtime.refresh.set_swap_switching(false);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+    }
+    #[tokio::test]
+    async fn rotation_skips_a_rejected_sign_in_for_the_next_eligible_account() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 5.0);
+        quota(&runtime.store, &c.id, 20.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        // b looks freest but its lineage was rejected.
+        runtime.refresh.mark_dead_for_test(&runtime.store, &b.id);
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+        assert_eq!(
+            events(&runtime.store, "activation"),
+            [(Some(c.id), "completed".to_string())]
+        );
+    }
+    #[tokio::test]
     async fn native_rotation_switches_to_an_expired_but_renewable_account() {
         use crate::fixtures::*;
         let root = tempfile::tempdir().unwrap();
@@ -702,6 +842,7 @@ mod tests {
             current: signed_in,
             activate: activates,
             live: crate::no_live,
+            swap: crate::no_swap,
         };
         let lock = tokio::sync::Mutex::new(());
         assert_eq!(
@@ -867,6 +1008,36 @@ mod tests {
         assert_eq!(
             store.stored_credential(&a.id).unwrap().access_token,
             "rotated-access"
+        );
+    }
+    #[test]
+    fn background_sync_never_moves_a_newer_copy_back() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        // Switchboard holds a renewal Claude Code's item never received.
+        let mut newer = credential("synthetic-a");
+        newer.access_token = "renewed".into();
+        newer.refresh_token = Some("renewed-r".into());
+        newer.expires_at = newer.expires_at.map(|t| t + 3600);
+        let a = store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                newer,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let state = crate::refresh::RefreshState::default();
+        state.set_owner("synthetic-a-refresh", identity("synthetic-a"));
+        sync_live_sources(&store, signed_in, &state);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "renewed"
         );
     }
     #[test]

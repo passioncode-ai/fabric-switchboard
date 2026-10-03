@@ -32,3 +32,5 @@ Humanization: on, own pass; each message names the effect and the next action; n
 0.5.1–0.5.2 automatic switching captions (operator-brief; effect and recovery):
 - “Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.”
 - “Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.” — shown while `MonitorStatus.renewal_blocked` (the token endpoint answered `invalid_client`).
+- “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” — rotation decision `claude_swap_switching` (0.5.3): `cswap auto` runs, or Claude Swap's menu bar runs with its automatic switching on.
+- “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.” — About → Connect agents while the app runs translocated (0.5.3).

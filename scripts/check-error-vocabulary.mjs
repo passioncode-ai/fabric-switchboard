@@ -25,27 +25,30 @@ const EXCLUDED_FILES = {
   'crates/switchboard-proxy/src/tests.rs': 'test module',
   // Loopback control socket. Its client errors (control::request) reach only the CLI and
   // MCP server; the desktop app answers requests and never sends one. Its listener errors
-  // fail Owner::start, which stops the app before a window exists (src-tauri main.rs
-  // prints its own start-up message to stderr).
+  // fail Owner::start, which the desktop Slot (src-tauri main.rs) replaces with
+  // STARTUP_FAILED before any reply.
   'crates/switchboard-runtime/src/control.rs': 'CLI/MCP control client and owner start-up; never a renderer reply',
 };
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
-  // runtime lib.rs default_root(): read only at start-up (src-tauri main.rs setup) and by
-  // the CLI. A failure stops the app before a window exists, and --data-dir is a CLI flag.
-  'App-data directory unavailable. Use --data-dir with an absolute private directory.': 'start-up and CLI only',
+  // runtime lib.rs no_swap(): the synthetic owners' Claude Swap source. Its only caller,
+  // refresh::catch_up_with_claude_swap, replaces any error with SWAP_BUSY before it returns.
+  'Claude Swap profiles not found.': 'replaced by SWAP_BUSY',
+  // runtime lib.rs default_root(): read at owner start-up and by the CLI. In the desktop
+  // app the Slot replaces every start-up error with STARTUP_FAILED; --data-dir is a CLI flag.
+  'App-data directory unavailable. Use --data-dir with an absolute private directory.': 'start-up (STARTUP_FAILED) and CLI only',
   // runtime lib.rs needs_owner(): only the offline CLI runs without an owner. The desktop
   // app always executes operations through its own Owner, so this never answers the UI.
   "Start the desktop app or 'switchboard serve' before login or launch.": 'offline CLI only',
   // core persistence.rs secure_root(): the desktop app's root comes from default_root(),
   // which is always absolute; only a relative CLI --data-dir reaches this check.
   'Account storage path must be absolute': 'CLI --data-dir only',
-  // proxy lib.rs ProxyHandle::start_at(): runs inside Owner::start; a failure stops the app
-  // before a window exists (main.rs prints its own start-up message).
-  'Local proxy could not start.': 'owner start-up only',
-  'Local proxy address unavailable.': 'owner start-up only',
-  'HTTP client unavailable.': 'owner start-up only',
+  // proxy lib.rs ProxyHandle::start_at(): runs inside Owner::start; the desktop Slot replaces
+  // a start-up failure with STARTUP_FAILED (src-tauri main.rs).
+  'Local proxy could not start.': 'owner start-up only (STARTUP_FAILED)',
+  'Local proxy address unavailable.': 'owner start-up only (STARTUP_FAILED)',
+  'HTTP client unavailable.': 'owner start-up only (STARTUP_FAILED)',
   // runtime external.rs import(): per-profile Claude Swap failures inside the row closure.
   // Each is counted in ImportBatch.failed and never returned; the UI reports the count and
   // tells the operator to check those profiles in Claude Swap.

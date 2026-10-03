@@ -2,7 +2,7 @@
 members = ["crates/switchboard-core", "crates/switchboard-proxy", "src-tauri", "crates/switchboard-runtime", "crates/switchboard-cli"]
 resolver = "2"
 [workspace.package]
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 license = "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial"
 repository = "https://github.com/passioncode-ai/fabric-switchboard"
@@ -13,3 +13,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Shipped binaries: one optimisation unit with link-time optimisation and no symbol tables.
+# Smaller and faster; crash reports from the field are not collected, so no symbols are lost.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
