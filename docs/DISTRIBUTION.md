@@ -2,7 +2,7 @@
 
 Installing a downloaded ZIP? Start with [INSTALL.md](INSTALL.md). This document is for building, signing and releasing the artifacts.
 
-**Published builds are made only by the [release workflow](../.github/workflows/release.yml)**, in this repository's protected GitHub `release` environment, under the organization's rules ([passioncode-ai/.github release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)). A member of `release-approvers` approves every signing run, and the person who pushed the tag cannot; administrators cannot bypass it. Nobody's laptop holds a release key. A build signed anywhere else (a laptop, a fork, a dispatch on a branch) is a **debug build** and is never published or attached to a release.
+**Published builds are made only by the [release workflow](../.github/workflows/release.yml)**, in this repository's protected GitHub `release` environment, under the organization's rules ([passioncode-ai/.github release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)). A member of `release-approvers` approves every signing run, and that may be the person who pushed the tag (operator decision, 2026-10-03); an agent never approves a release run, even when its account could; administrators cannot bypass it. Nobody's laptop holds a release key. A build signed anywhere else (a laptop, a fork, a dispatch on a branch) is a **debug build** and is never published or attached to a release.
 
 Execution receipts of releases before this workflow, built and notarized by hand: [0.5](evidence/release-0.5.md), [0.4.1](evidence/release-0.4.1.md), [0.4.0](evidence/release-0.4.md); [0.3.1](evidence/release-0.3.1.md) and [0.2](evidence/release-0.2.md) are historical. A command written here is not by itself evidence that it ran.
 
@@ -11,7 +11,7 @@ Execution receipts of releases before this workflow, built and notarized by hand
 1. Merge the release pull request: the version in `package.json`, `src-tauri/tauri.conf.json` and the workspace `Cargo.toml`, and a `## X.Y.Z` section in [CHANGELOG.md](../CHANGELOG.md) that becomes the release notes. While Windows signing is off, that section must say `windows_authenticode: NOT_SIGNED`; the workflow refuses to publish otherwise.
 2. Push an annotated tag on the merge commit: `git tag -a vX.Y.Z <merge commit> -m "Fabric Switchboard X.Y.Z" && git push origin vX.Y.Z`.
 3. `release.yml` starts. `preflight` checks that the tag names the version being built and that the CHANGELOG section exists. The `macos` and `windows` jobs wait for the `release` environment.
-4. Someone from `release-approvers` other than the tag's author opens the run and approves (**Review deployments**). The jobs build, sign, notarize and package.
+4. Someone from `release-approvers`, whoever pushed the tag included, opens the run and approves (**Review deployments**). The jobs build, sign, notarize and package.
 5. `publish` (the organization's [release-publish workflow](https://github.com/passioncode-ai/.github/blob/main/.github/workflows/release-publish.yml), `@v1`) waits for a second approval because it holds the GPG key. It attests every file with Sigstore build provenance, writes `SHA256SUMS` and `SHA256SUMS.asc` (the organization's release key), then creates the release as a draft and publishes it once every file is up.
 6. A published release is never rewritten. A wrong release is fixed with a new tag.
 

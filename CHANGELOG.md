@@ -10,10 +10,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - **Releases are built and signed only in GitHub Actions.** A `vX.Y.Z` tag starts
   `.github/workflows/release.yml` in the protected `release` environment; a member of
-  `release-approvers` other than the tag's author approves. macOS: the universal app and CLI are
-  signed with the organization's CI Developer ID, the app is notarized and stapled, and the
-  standalone CLI is notarized on its own (a bare executable cannot be stapled; the receipt names
-  both submissions). Windows: built natively on `windows-latest`, with Azure Artifact Signing
+  `release-approvers` approves (whoever pushed the tag may; an agent never does). macOS: the
+  universal app and CLI are signed with the organization's CI Developer ID, the app is notarized
+  and stapled, and the standalone CLI is notarized on its own (a bare executable cannot be
+  stapled; the receipt names both submissions). Windows: built natively on `windows-latest`, with Azure Artifact Signing
   ready behind `AZURE_SIGNING_ENABLED`, which is off for now. Every file is attested (Sigstore),
   summed in `SHA256SUMS` and signed with the organization's release key (`SHA256SUMS.asc`).
   Building and signing on a laptop remain for debugging and are never published.
