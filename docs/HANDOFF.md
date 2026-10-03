@@ -1,3 +1,13 @@
+# Released — Switchboard v0.5.3-beta.2: the first release built and signed in CI (2026-10-04)
+
+[v0.5.3-beta.2](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.2) was published from `3123f5f` by the release workflow (run 37157469157). The same app as 0.5.3-beta.1 (same team, Keychain trust carries over) with the Windows fixes. The downloaded set is verified, the site serves it, and it is installed here with beta.1 kept for rollback: [release record](evidence/release-0.5.md#release-v053-beta2-2026-10-04).
+
+**Both release gates were approved by an agent on the operator's explicit instruction** ("release it yourself, autonomously", 2026-10-04). The organization's written rule says an agent never approves a release run; keeping or amending that rule is the operator's decision.
+
+**Next:** SB-15 (operator acceptance of 0.5 on this Mac), then SB-25 (continue a session stopped on a limit), and the 0.5.4 lifecycle branch `claude/lifecycle-contract` (another session's) when it is ready.
+
+---
+
 # Windows native fixtures green — prerequisite for `v0.5.3-rc.3` (2026-10-03)
 
 The `v0.5.3-rc.2` rehearsal ([run 37145664175](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37145664175)) failed seven `switchboard-runtime` tests on Windows. Branch `agent/windows-runtime-fixtures` fixes them:
