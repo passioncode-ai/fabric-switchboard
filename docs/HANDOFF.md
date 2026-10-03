@@ -1,3 +1,18 @@
+# Windows native fixtures green — prerequisite for `v0.5.3-rc.3` (2026-10-03)
+
+The `v0.5.3-rc.2` rehearsal ([run 37145664175](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37145664175)) failed seven `switchboard-runtime` tests on Windows. Branch `agent/windows-runtime-fixtures` fixes them:
+- **Product:** `control::CONNECT_TIMEOUT` is 5 s (was 2 s). Windows refuses a dead loopback port only after about 2 s of SYN retries, so a stale `control.json` returned *did not complete* instead of the lock-guarded fallback.
+- **Behaviour unchanged:** Codex's `secret_auth_storage` default no longer reads the build target; a non-macOS context is refused either way.
+- **Fixtures:** drive-absolute paths, the heartbeat's directory open, PowerShell quote doubling, the `.session-process` marker, and the native script test comparing resolved paths (TEMP is an 8.3 short path on hosted runners).
+- **Clippy 1.99** (`unnecessary_sort_by`) in `backup.rs` and `limits.rs`; it broke the nightly macOS job.
+- **`nightly.yml` gains a `windows` job** running the release job's native fixtures without the release environment.
+
+**Verified:** [run 37147791274](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37147791274) on `2370767` — `checks` (macos-14) success, `windows` success. Locally: `./scripts/check.sh` (272 passed); `cargo +1.99.0 clippy --workspace --all-targets -- -D warnings` clean.
+
+**Next:** merge the PR; the peer session cuts `v0.5.3-rc.3` and a `release-approvers` member approves the rehearsal.
+
+---
+
 # Released — Switchboard v0.5.3-beta.1: sessions never lost beside Claude Swap; a quiet desktop (2026-10-03)
 
 [v0.5.3-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1) was published from `21d005c`.

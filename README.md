@@ -174,8 +174,9 @@ cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned
 | `src` | TypeScript interface and the clearly labelled demo |
 | `docs` | research, specification, scenarios, contracts and evidence |
 
-Full hosted CI runs nightly; push and pull requests do not run the full suite. A workflow
-existing does not mean it passed.
+Full hosted CI runs nightly — the macOS gate and build, and the native Windows fixtures —
+and push and pull requests do not run the full suite. A workflow existing does not mean it
+passed.
 
 ## Releases
 

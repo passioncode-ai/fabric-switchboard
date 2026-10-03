@@ -1,4 +1,4 @@
-name: Nightly macOS checks
+name: Nightly checks
 on:
   schedule:
     - cron: '0 21 * * *'
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nightly-macos
+  group: nightly
   cancel-in-progress: false
 jobs:
   clock:
@@ -47,3 +47,23 @@ jobs:
       - run: npm ci
       - run: ./scripts/check.sh
       - run: npm run app:build
+  # The native Windows fixtures the release job runs, without the release environment: a
+  # Windows-only defect then surfaces the night it lands, not at the next rehearsal.
+  windows:
+    needs: clock
+    if: needs.clock.outputs.run == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Native storage and runtime fixtures
+        run: |
+          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

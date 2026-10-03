@@ -975,20 +975,58 @@ mod tests {
         let home = temp.path().join("O'Brien δοκιμή");
         private_dir(&home).unwrap();
         let provider = home.join("synthetic-provider.ps1");
-        private_write(&provider, b"if ($env:ANTHROPIC_API_KEY) { exit 9 }\nif ($env:CODEX_HOME -ne (Get-Location).Path) { exit 8 }\nexit 0\n", false).unwrap();
+        // The provider reports what it was started with; the paths are compared below
+        // as the file system resolves them, because the same directory has more than
+        // one spelling on Windows (an 8.3 short name in TEMP on a hosted runner).
+        private_write(
+            &provider,
+            b"if ($env:ANTHROPIC_API_KEY) { exit 9 }\n\
+              [IO.File]::WriteAllText((Join-Path $env:CODEX_HOME 'seen-home'), $env:CODEX_HOME)\n\
+              [IO.File]::WriteAllText((Join-Path $env:CODEX_HOME 'seen-cwd'), (Get-Location).ProviderPath)\n\
+              exit 0\n",
+            false,
+        )
+        .unwrap();
         let env = BTreeMap::from([("CODEX_HOME".into(), home.to_string_lossy().into_owned())]);
         let content = windows_script(&home, &provider, &[], &env, true, &home);
         let script_path = home.join("test.ps1");
         private_write(&script_path, format!("\u{feff}{content}").as_bytes(), false).unwrap();
         let mut reservation = Reservation::new(&home).unwrap();
         reservation.committed = true;
-        let status = Command::new("powershell.exe")
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        let output = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ])
             .arg(&script_path)
             .env("ANTHROPIC_API_KEY", "synthetic-conflicting-key")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            output.status.success(),
+            "{:?}\nstdout: {}\nstderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let resolved = |name: &str| {
+            let seen = read_regular(&home.join(name)).unwrap();
+            std::fs::canonicalize(&seen).unwrap_or_else(|e| panic!("{name} {seen:?}: {e}"))
+        };
+        let expected = std::fs::canonicalize(&home).unwrap();
+        assert_eq!(
+            resolved("seen-home"),
+            expected,
+            "CODEX_HOME is the managed home"
+        );
+        assert_eq!(
+            resolved("seen-cwd"),
+            expected,
+            "the provider runs in the working directory"
+        );
         assert_eq!(read_regular(&home.join(".completed")).unwrap(), "complete");
         assert!(ensure_idle(&home).is_ok());
     }
@@ -1157,8 +1195,17 @@ mod tests {
         };
         let login = fixture_login(home.clone(), account);
         assert_eq!(login_state(&login), "pending");
-        // A session pid that no longer runs, and no completion marker: the sign-in ended.
+        // A session process that no longer runs, and no completion marker: the sign-in
+        // ended. Each platform's script leaves its own marker.
+        #[cfg(unix)]
         private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+        #[cfg(windows)]
+        private_write(
+            &home.join(".session-process"),
+            br#"{"pid":999999,"created":1}"#,
+            false,
+        )
+        .unwrap();
         assert_eq!(login_state(&login), "ended");
         private_write(&home.join(".completed"), b"complete", false).unwrap();
         assert_eq!(login_state(&login), "complete");

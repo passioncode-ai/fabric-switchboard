@@ -158,10 +158,13 @@ mod setup_tests {
     #[test]
     fn a_hostile_cli_path_stays_one_shell_word() {
         assert_eq!(shell_quote("/plain/switchboard"), "'/plain/switchboard'");
-        assert_eq!(
-            shell_quote("/it's; rm -rf ~/switchboard"),
+        // POSIX shells close the quote around an escaped one; PowerShell doubles it.
+        let expected = if cfg!(windows) {
+            "'/it''s; rm -rf ~/switchboard'"
+        } else {
             r#"'/it'\''s; rm -rf ~/switchboard'"#
-        );
+        };
+        assert_eq!(shell_quote("/it's; rm -rf ~/switchboard"), expected);
     }
     #[test]
     fn a_translocated_copy_is_never_linked_or_offered() {
