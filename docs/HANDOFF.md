@@ -9,7 +9,14 @@ The `v0.5.3-rc.2` rehearsal ([run 37145664175](https://github.com/passioncode-ai
 
 **Verified:** [run 37147791274](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37147791274) on `2370767` — `checks` (macos-14) success, `windows` success. Locally: `./scripts/check.sh` (272 passed); `cargo +1.99.0 clippy --workspace --all-targets -- -D warnings` clean.
 
-**Next:** merge the PR; the peer session cuts `v0.5.3-rc.3` and a `release-approvers` member approves the rehearsal.
+Merged as `979c31e` (#28). The `v0.5.3-rc.3` rehearsal ([run 37148716778](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37148716778)) then passed the Windows tests and refused the receipt: *the source tree changed during the build*. Measured in nightly [run 37151375816](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37151375816): `src-tauri/Cargo.toml` was reported modified with no content diff. The `windows-latest` checkout (`core.autocrlf=true`) wrote CRLF, and `tauri build` rewrote the manifest with LF. Fixed on `agent/windows-clean-tree`:
+- `.gitattributes` `* text=auto eol=lf`;
+- `package_windows.py` names the changed paths;
+- the nightly `windows` job runs the unsigned release build and checks the tree is clean.
+
+Verified in [run 37152183420](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37152183420) on `f21acd4`: the tree is clean after the build; `windows` and `checks` both succeed.
+
+**Next:** the peer session cuts `v0.5.3-rc.4` and a `release-approvers` member approves the rehearsal.
 
 ---
 
