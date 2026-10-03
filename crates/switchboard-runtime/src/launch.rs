@@ -975,7 +975,18 @@ mod tests {
         let home = temp.path().join("O'Brien δοκιμή");
         private_dir(&home).unwrap();
         let provider = home.join("synthetic-provider.ps1");
-        private_write(&provider, b"if ($env:ANTHROPIC_API_KEY) { exit 9 }\nif ($env:CODEX_HOME -ne (Get-Location).Path) { exit 8 }\nexit 0\n", false).unwrap();
+        // The provider reports what it was started with; the paths are compared below
+        // as the file system resolves them, because the same directory has more than
+        // one spelling on Windows (an 8.3 short name in TEMP on a hosted runner).
+        private_write(
+            &provider,
+            b"if ($env:ANTHROPIC_API_KEY) { exit 9 }\n\
+              [IO.File]::WriteAllText((Join-Path $env:CODEX_HOME 'seen-home'), $env:CODEX_HOME)\n\
+              [IO.File]::WriteAllText((Join-Path $env:CODEX_HOME 'seen-cwd'), (Get-Location).ProviderPath)\n\
+              exit 0\n",
+            false,
+        )
+        .unwrap();
         let env = BTreeMap::from([("CODEX_HOME".into(), home.to_string_lossy().into_owned())]);
         let content = windows_script(&home, &provider, &[], &env, true, &home);
         let script_path = home.join("test.ps1");
@@ -1000,6 +1011,21 @@ mod tests {
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
+        );
+        let resolved = |name: &str| {
+            let seen = read_regular(&home.join(name)).unwrap();
+            std::fs::canonicalize(&seen).unwrap_or_else(|e| panic!("{name} {seen:?}: {e}"))
+        };
+        let expected = std::fs::canonicalize(&home).unwrap();
+        assert_eq!(
+            resolved("seen-home"),
+            expected,
+            "CODEX_HOME is the managed home"
+        );
+        assert_eq!(
+            resolved("seen-cwd"),
+            expected,
+            "the provider runs in the working directory"
         );
         assert_eq!(read_regular(&home.join(".completed")).unwrap(), "complete");
         assert!(ensure_idle(&home).is_ok());
