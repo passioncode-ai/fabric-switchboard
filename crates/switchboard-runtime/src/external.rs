@@ -724,6 +724,44 @@ fn session_credential(
     }
     None
 }
+/// A cheap fingerprint of Claude Swap's files — their count, total size and newest change — so
+/// the monitor reads them again only when something there moved. None: no backup folder.
+pub fn claude_swap_signature() -> Option<(u64, u64, u128)> {
+    let root = dirs::home_dir()?.join(".claude-swap-backup");
+    swap_signature_at(&root)
+}
+fn swap_signature_at(root: &Path) -> Option<(u64, u64, u128)> {
+    if !root.is_dir() {
+        return None;
+    }
+    let mut files = vec![root.join("sequence.json")];
+    for dir in ["credentials", "configs"] {
+        if let Ok(entries) = fs::read_dir(root.join(dir)) {
+            files.extend(entries.flatten().map(|e| e.path()));
+        }
+    }
+    if let Ok(entries) = fs::read_dir(root.join("sessions")) {
+        for entry in entries.flatten() {
+            files.push(entry.path().join(".credentials.json"));
+            files.push(entry.path().join(".claude.json"));
+        }
+    }
+    let (mut count, mut size, mut newest) = (0u64, 0u64, 0u128);
+    for file in files {
+        // symlink_metadata: a link is not followed out of Claude Swap's folder.
+        let Ok(meta) = fs::symlink_metadata(&file) else {
+            continue;
+        };
+        count += 1;
+        size += meta.len();
+        if let Ok(modified) = meta.modified() {
+            if let Ok(since) = modified.duration_since(std::time::UNIX_EPOCH) {
+                newest = newest.max(since.as_nanos());
+            }
+        }
+    }
+    Some((count, size, newest))
+}
 pub fn read_claude_swap() -> Result<ImportBatch, String> {
     let root = dirs::home_dir()
         .ok_or("User home unavailable.")?
@@ -1937,6 +1975,26 @@ mod tests {
         assert!(config_lock.is_dir());
         drop(locks);
         assert!(!config_lock.exists(), "released on drop");
+    }
+    #[test]
+    fn claude_swaps_files_change_their_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".claude-swap-backup");
+        assert_eq!(swap_signature_at(&root), None, "no folder, nothing to read");
+        fs::create_dir_all(root.join("credentials")).unwrap();
+        fs::write(root.join("sequence.json"), b"{}").unwrap();
+        let first = swap_signature_at(&root).unwrap();
+        assert_eq!(
+            swap_signature_at(&root).unwrap(),
+            first,
+            "stable while untouched"
+        );
+        fs::write(root.join("credentials/.creds-1-a.enc"), b"renewed").unwrap();
+        assert_ne!(swap_signature_at(&root).unwrap(), first);
+        let second = swap_signature_at(&root).unwrap();
+        fs::create_dir_all(root.join("sessions/1-a")).unwrap();
+        fs::write(root.join("sessions/1-a/.credentials.json"), b"x").unwrap();
+        assert_ne!(swap_signature_at(&root).unwrap(), second);
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {

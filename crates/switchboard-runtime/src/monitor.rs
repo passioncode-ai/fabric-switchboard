@@ -28,6 +28,9 @@ impl MonitorHandle {
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut last_source_sync = 0;
             let mut last_limit_scan = 0;
+            // What the previous pass saw of Claude Swap: whether it ran, and its files.
+            let mut swap_was_running: Option<bool> = None;
+            let mut swap_last_signature = None;
             loop {
                 interval.tick().await;
                 let Some(runtime) = weak.upgrade() else {
@@ -46,14 +49,37 @@ impl MonitorHandle {
                     .await;
                     // Claude Swap's files are read outside the lock; adopting its newer
                     // generations happens under it, with the live sync.
-                    let swap = if !crate::external::claude_swap_running() {
-                        crate::refresh::SwapView::NotRunning
-                    } else {
-                        match crate::external::read_claude_swap() {
-                            Ok(batch) => crate::refresh::SwapView::Profiles(batch.profiles),
-                            Err(_) => crate::refresh::SwapView::Unreadable,
+                    let running = crate::external::claude_swap_running();
+                    let signature = crate::external::claude_swap_signature();
+                    let due = crate::refresh::swap_read_due(
+                        running,
+                        swap_was_running,
+                        signature,
+                        swap_last_signature,
+                    );
+                    let read = due.then(crate::external::read_claude_swap);
+                    let swap = match (running, read) {
+                        (true, Some(Ok(batch))) => {
+                            crate::refresh::SwapView::Profiles(batch.profiles)
                         }
+                        (true, _) => crate::refresh::SwapView::Unreadable,
+                        (false, Some(Ok(batch))) => {
+                            crate::refresh::SwapView::Stopped(batch.profiles)
+                        }
+                        (false, _) => crate::refresh::SwapView::NotRunning,
                     };
+                    // A failed read (Swap was writing its files) is repeated next pass: neither
+                    // the files nor the stop are marked as seen.
+                    let failed = due
+                        && matches!(
+                            swap,
+                            crate::refresh::SwapView::Unreadable
+                                | crate::refresh::SwapView::NotRunning
+                        );
+                    if !failed {
+                        swap_last_signature = signature;
+                        swap_was_running = Some(running);
+                    }
                     let _mutation = runtime.mutations.lock().await;
                     // Claude Code left its token expired: renew it under Claude Code's locks so
                     // managed sessions and quota checks on that account keep working.

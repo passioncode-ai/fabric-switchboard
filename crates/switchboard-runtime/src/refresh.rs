@@ -657,6 +657,20 @@ pub(crate) enum SwapView {
     NotRunning,
     Unreadable,
     Profiles(Vec<crate::external::CapturedProfile>),
+    /// Not running, but its files hold sign-ins it may have renewed before it stopped: take the
+    /// newer ones, hold nothing (board SB-21).
+    Stopped(Vec<crate::external::CapturedProfile>),
+}
+/// Whether Claude Swap's files are read this pass: always while it runs; once when Switchboard
+/// starts and once when Swap stops (its last renewals are in them); otherwise only when the
+/// files changed. Reading is not free — a session sign-in is a `/usr/bin/security` call.
+pub(crate) fn swap_read_due(
+    running: bool,
+    was_running: Option<bool>,
+    signature: Option<(u64, u64, u128)>,
+    last_signature: Option<(u64, u64, u128)>,
+) -> bool {
+    running || signature.is_some() && (was_running != Some(false) || signature != last_signature)
 }
 /// Coexistence with a running Claude Swap (report §P1-5). Records the identities it holds so
 /// Switchboard does not renew them, and takes its newer generation of each into every stored
@@ -674,14 +688,37 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
         // held last time it still holds — clearing it would start a second renewer.
         SwapView::Unreadable => return 0,
         SwapView::Profiles(profiles) => profiles,
+        SwapView::Stopped(profiles) => {
+            if let Ok(mut held) = state.swap_held.lock() {
+                held.clear();
+            }
+            return adopt_newer(store, state, profiles, None);
+        }
     };
     let mut held = std::collections::HashSet::new();
+    let updated = adopt_newer(store, state, profiles, Some(&mut held));
+    if let Ok(mut current) = state.swap_held.lock() {
+        *current = held;
+    }
+    updated
+}
+/// Takes each profile's generation into every stored copy of its identity when it is newer
+/// (another refresh token that expires later) and not another account's lineage; `held`
+/// collects the identities seen. Returns how many copies were updated.
+fn adopt_newer(
+    store: &Store,
+    state: &RefreshState,
+    profiles: Vec<crate::external::CapturedProfile>,
+    mut held: Option<&mut std::collections::HashSet<String>>,
+) -> usize {
     let mut updated = 0;
     for profile in profiles {
         let Some(id) = profile.identity.account_id.clone() else {
             continue;
         };
-        held.insert(id);
+        if let Some(held) = held.as_deref_mut() {
+            held.insert(id);
+        }
         if lineage(store, state, &profile.identity, &profile.credential) == Lineage::Foreign {
             continue;
         }
@@ -710,9 +747,6 @@ pub(crate) fn follow_claude_swap(store: &Store, state: &RefreshState, swap: Swap
                 updated += 1;
             }
         }
-    }
-    if let Ok(mut current) = state.swap_held.lock() {
-        *current = held;
     }
     updated
 }
@@ -1502,6 +1536,105 @@ mod tests {
             Outcome::Refreshed
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn claude_swaps_files_are_read_when_they_can_hold_something_new() {
+        let sig = Some((3, 100, 7));
+        let moved = Some((3, 120, 9));
+        // While it runs: every pass.
+        assert!(swap_read_due(true, Some(true), sig, sig));
+        // Switchboard just started: once, whatever Swap is doing.
+        assert!(swap_read_due(false, None, sig, None));
+        // It just stopped: its last renewals are in the files.
+        assert!(swap_read_due(false, Some(true), sig, sig));
+        // Stopped and untouched: nothing new to read.
+        assert!(!swap_read_due(false, Some(false), sig, sig));
+        // Stopped, but its files changed (a cswap command ran): read.
+        assert!(swap_read_due(false, Some(false), moved, sig));
+        // No Claude Swap folder at all: never.
+        assert!(!swap_read_due(false, None, None, None));
+    }
+    #[test]
+    fn a_stopped_claude_swap_still_hands_over_what_it_renewed_last() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[
+                ("synthetic-b", "default"),
+                ("synthetic-b", "work"),
+                ("synthetic-c", "default"),
+            ],
+        );
+        let state = RefreshState::default();
+        state.swap_held.lock().unwrap().insert("synthetic-b".into());
+        let profile =
+            |account: &str, refresh: &str, expires: i64| crate::external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: {
+                    let mut c = expired(account);
+                    c.access_token = format!("{refresh}-access");
+                    c.refresh_token = Some(refresh.into());
+                    c.expires_at = Some(expires);
+                    c
+                },
+                identity: identity(account),
+                label: account.into(),
+            };
+        let updated = follow_claude_swap(
+            &store,
+            &state,
+            SwapView::Stopped(vec![
+                // Renewed by Swap just before it stopped: newer than Switchboard's copies.
+                profile("synthetic-b", "swap-last", now() + 28800),
+                // Older than what Switchboard holds: never taken.
+                profile("synthetic-c", "swap-old", EXPIRED - 1),
+            ]),
+        );
+        assert_eq!(updated, 2, "both pools of synthetic-b");
+        assert_eq!(swap_held(&state), 0, "nothing is held once it stopped");
+        for pool in ["default", "work"] {
+            let c = store
+                .stored_credential(&id_of(&store, "synthetic-b", pool))
+                .unwrap();
+            assert_eq!(c.refresh_token.as_deref(), Some("swap-last"));
+        }
+        let c = store
+            .stored_credential(&id_of(&store, "synthetic-c", "default"))
+            .unwrap();
+        assert_eq!(c.refresh_token.as_deref(), Some("synthetic-c-refresh"));
+    }
+    #[tokio::test]
+    async fn a_dead_copy_comes_back_when_claude_swap_holds_its_successor() {
+        let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        // Swap renewed b and stopped; Switchboard's grant on the spent token was rejected.
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await,
+            Outcome::SignInRequired
+        );
+        let mut newer = expired("synthetic-b");
+        newer.refresh_token = Some("swap-successor".into());
+        newer.expires_at = Some(now() + 28800);
+        follow_claude_swap(
+            &store,
+            &state,
+            SwapView::Stopped(vec![crate::external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: newer,
+                identity: identity("synthetic-b"),
+                label: "b".into(),
+            }]),
+        );
+        assert!(
+            !state.is_dead(&store, &b),
+            "the successor replaces the spent token"
+        );
+        assert!(state.sign_in_required(&store).is_empty());
     }
     #[tokio::test]
     async fn a_rejected_lineage_is_remembered_across_restarts() {
