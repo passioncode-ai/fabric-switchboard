@@ -34,6 +34,10 @@ struct Descriptor {
     protocol: u8,
     address: SocketAddr,
     token: String,
+    /// The owner's process: a client treats a descriptor whose owner is gone as stale
+    /// (lifecycle LC-01). Absent in descriptors written before 0.5.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pid: Option<u32>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
@@ -49,7 +53,7 @@ struct Control {
     slots: Arc<Semaphore>,
 }
 pub struct ControlHandle {
-    task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
     descriptor: PathBuf,
 }
 impl ControlHandle {
@@ -68,6 +72,7 @@ impl ControlHandle {
                 protocol: 1,
                 address,
                 token: token.clone(),
+                pid: Some(std::process::id()),
             })
             .map_err(|_| "Control metadata unavailable.")?,
         )?;
@@ -84,14 +89,48 @@ impl ControlHandle {
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
-        Ok(Self { task, descriptor })
+        Ok(Self {
+            task: Some(task),
+            descriptor,
+        })
+    }
+    /// Stops answering and removes the descriptor; returns once the listener — and the runtime
+    /// it holds — is gone, so the store's lock is released with it (lifecycle LC-01).
+    pub async fn close(mut self) {
+        let _ = std::fs::remove_file(&self.descriptor);
+        if let Some(task) = self.task.take() {
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
 impl Drop for ControlHandle {
     fn drop(&mut self) {
         // Store remains locked by the server's Runtime until abort is processed.
-        self.task.abort();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
         let _ = std::fs::remove_file(&self.descriptor);
+    }
+}
+/// Whether the process that wrote a descriptor still runs. Unknown counts as running, so the
+/// descriptor is proved as before.
+fn owner_alive(pid: Option<u32>) -> bool {
+    #[cfg(unix)]
+    {
+        let Some(pid) = pid.and_then(|p| libc::pid_t::try_from(p).ok()) else {
+            return true;
+        };
+        if pid <= 0 {
+            return true;
+        }
+        let result = unsafe { libc::kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
     }
 }
 fn proof(token: &str, nonce: &str) -> String {
@@ -196,6 +235,11 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         || !descriptor.token.bytes().all(|b| b.is_ascii_hexdigit())
     {
         return Err("Unsafe control metadata. Expected a private loopback capability.".into());
+    }
+    // The owner that wrote it is gone: nothing answers for it, whatever holds the port now.
+    // The offline path that follows still takes the store's exclusive lock.
+    if !owner_alive(descriptor.pid) {
+        return Ok(None);
     }
     let stream = match tokio::time::timeout(
         Duration::from_secs(2),
@@ -466,6 +510,7 @@ mod tests {
             protocol: 1,
             address: listener.local_addr().unwrap(),
             token: "a".repeat(64),
+            pid: None,
         };
         drop(listener);
         private_fs::private_write(&tmp.path().join(FILE), &serde_json::to_vec(&desc).unwrap())
@@ -486,6 +531,7 @@ mod tests {
             protocol: 1,
             address: listener.local_addr().unwrap(),
             token: "a".repeat(64),
+            pid: None,
         };
         private_fs::private_write(
             &tmp.path().join(FILE),
@@ -521,6 +567,64 @@ mod tests {
         assert!(!leaked.load(Ordering::SeqCst));
         task.abort();
     }
+    /// Lifecycle LC-01: a descriptor left by an owner that died says so by its pid. Even with
+    /// its old port reused by another program, the CLI goes offline (under the store lock)
+    /// instead of refusing until the app starts again.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_descriptor_whose_owner_died_is_stale_even_when_its_port_was_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut gone = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let dead = gone.id();
+        gone.wait().unwrap();
+        // Another program now answers on the old port.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = Router::new().fallback(|| async {
+            Json(Hello {
+                proof: "0".repeat(64),
+            })
+        });
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let write = |pid: Option<u32>| {
+            private_fs::private_write(
+                &tmp.path().join(FILE),
+                &serde_json::to_vec(&Descriptor {
+                    protocol: 1,
+                    address,
+                    token: "a".repeat(64),
+                    pid,
+                })
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        write(Some(dead));
+        assert!(request(tmp.path(), &Operation::Snapshot)
+            .await
+            .unwrap()
+            .is_none());
+        // A live owner's descriptor is still proved, and a wrong proof still refused.
+        write(Some(std::process::id()));
+        assert!(request(tmp.path(), &Operation::Snapshot)
+            .await
+            .unwrap_err()
+            .contains("authentication refused"));
+        // A descriptor from before pids were recorded keeps the old behaviour.
+        write(None);
+        assert!(request(tmp.path(), &Operation::Snapshot)
+            .await
+            .unwrap_err()
+            .contains("authentication refused"));
+        task.abort();
+    }
+    #[tokio::test]
+    async fn the_descriptor_names_the_owners_pid() {
+        let (_tmp, _owner, desc) = fixture().await;
+        assert_eq!(desc.pid, Some(std::process::id()));
+    }
     #[tokio::test]
     async fn proved_connection_close_never_reconnects_to_send_a_secret() {
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -532,6 +636,7 @@ mod tests {
             protocol: 1,
             address: listener.local_addr().unwrap(),
             token: "a".repeat(64),
+            pid: None,
         };
         private_fs::private_write(
             &tmp.path().join(FILE),

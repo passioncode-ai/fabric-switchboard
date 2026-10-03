@@ -8,7 +8,9 @@ mod keychain_macos;
 /// Reading items other programs own, without a dialog (macOS).
 #[cfg(target_os = "macos")]
 pub mod external_keychain {
-    pub use crate::keychain_macos::{read_external_quietly, EXTERNAL_REFUSED};
+    pub use crate::keychain_macos::{
+        probe_external, read_external_quietly, ItemProbe, EXTERNAL_REFUSED,
+    };
 }
 mod persistence;
 pub mod private_fs;
@@ -169,6 +171,10 @@ pub struct Store {
     state: Mutex<Snapshot>,
     /// Counts changes a backup must capture: credentials, accounts and policies — not quota.
     changes: std::sync::atomic::AtomicU64,
+    /// Metadata publications written to disk, for the idle budget (lifecycle LC-08).
+    writes: std::sync::atomic::AtomicU64,
+    /// Since when memory holds timestamps not yet on disk (0: nothing pending).
+    pending_since: std::sync::atomic::AtomicI64,
 }
 
 pub(crate) fn now() -> i64 {
@@ -277,6 +283,17 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         _ => false,
     }
 }
+/// Two observations report the same quota: everything but when it was observed.
+fn same_quota(a: &Usage, b: &Usage) -> bool {
+    a.used_percent == b.used_percent
+        && a.resets_at == b.resets_at
+        && a.source == b.source
+        && a.windows.len() == b.windows.len()
+        && a.windows.iter().zip(&b.windows).all(|(x, y)| {
+            x.name == y.name && x.used_percent == y.used_percent && x.resets_at == y.resets_at
+        })
+}
+
 pub(crate) fn append_event(s: &mut Snapshot, action: &str, id: Option<&str>, detail: &str) {
     s.events.push(Event {
         at: now(),
@@ -351,6 +368,13 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     Ok(())
 }
 
+/// Closing the store writes timestamps still held in memory.
+impl Drop for Store {
+    fn drop(&mut self) {
+        let _ = self.flush();
+    }
+}
+
 impl Store {
     pub fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, String> {
         let (lock, state) = persistence::open(&root)?;
@@ -360,6 +384,8 @@ impl Store {
             vault,
             state: Mutex::new(state),
             changes: Default::default(),
+            writes: Default::default(),
+            pending_since: Default::default(),
         })
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
@@ -371,7 +397,46 @@ impl Store {
         validate_snapshot(&candidate)?;
         persistence::write(&self.root, &candidate)?;
         *state = candidate;
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.pending_since
+            .store(0, std::sync::atomic::Ordering::SeqCst);
         Ok(())
+    }
+    /// Takes a candidate that differs from the current state only in timestamps into memory
+    /// without writing it; the next publication or flush carries it to disk (LC-08).
+    fn hold(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
+        validate_snapshot(&candidate)?;
+        *state = candidate;
+        let _ = self.pending_since.compare_exchange(
+            0,
+            now().max(1),
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        Ok(())
+    }
+    /// Metadata publications written to disk since the store opened.
+    pub fn metadata_writes(&self) -> u64 {
+        self.writes.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// Writes timestamps held only in memory, if any.
+    pub fn flush(&self) -> Result<(), String> {
+        let mut state = self.lock()?;
+        if self.pending_since.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Ok(());
+        }
+        let current = state.clone();
+        self.publish(&mut state, current)
+    }
+    /// Writes pending timestamps once they have waited `max_age` seconds; a crash then loses
+    /// at most that much quota bookkeeping, never an account, credential or setting.
+    pub fn flush_if_older(&self, now: i64, max_age: i64) -> Result<(), String> {
+        let since = self.pending_since.load(std::sync::atomic::Ordering::SeqCst);
+        if since == 0 || now - since < max_age {
+            return Ok(());
+        }
+        self.flush()
     }
     pub fn snapshot(&self) -> Result<Snapshot, String> {
         Ok(self.lock()?.clone())
@@ -757,7 +822,15 @@ impl Store {
                 return Err("Credential changed during usage check".into());
             }
         }
+        // The same verdict again only moves its timestamps (lifecycle LC-08).
+        let same_status = a
+            .usage_health
+            .as_ref()
+            .is_some_and(|old| old.status == health.status);
         a.usage_health = Some(health);
+        if same_status {
+            return self.hold(&mut state, candidate);
+        }
         self.publish(&mut state, candidate)
     }
     pub fn update(&self, id: &str, label: String, enabled: bool) -> Result<(), String> {
@@ -946,6 +1019,7 @@ impl Store {
         } else {
             usage.observed_at.saturating_add(180)
         };
+        let was_ok = a.usage_health.as_ref().is_some_and(|h| h.status == "ok");
         a.usage_health = Some(UsageHealth {
             status: "ok".into(),
             checked_at: usage.observed_at,
@@ -959,7 +1033,13 @@ impl Store {
                 usage = merged;
             }
         }
+        // A check that found the quota exactly as it was moves only timestamps: kept in memory,
+        // no journal entry, no write (lifecycle LC-08).
+        let unchanged = was_ok && a.usage.as_ref().is_some_and(|old| same_quota(old, &usage));
         a.usage = Some(usage);
+        if unchanged {
+            return self.hold(&mut state, candidate);
+        }
         // Per-request header observations would evict account history from the ring.
         if !headers {
             append_event(&mut candidate, "usage", Some(id), "observed");

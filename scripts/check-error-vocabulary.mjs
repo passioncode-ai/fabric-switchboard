@@ -28,10 +28,16 @@ const EXCLUDED_FILES = {
   // fail Owner::start, which the desktop Slot (src-tauri main.rs) replaces with
   // STARTUP_FAILED before any reply.
   'crates/switchboard-runtime/src/control.rs': 'CLI/MCP control client and owner start-up; never a renderer reply',
+  // Lifecycle log (LC-12). Log::event discards every write error: logging never fails or
+  // answers a caller.
+  'crates/switchboard-runtime/src/oplog.rs': 'log writes; errors are dropped inside Log::event',
 };
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime lib.rs stop_requested(): awaited by `switchboard serve` (CLI output) and by the
+  // desktop app's signal task, which ignores an error; never a renderer reply.
+  'Shutdown signal unavailable.': 'serve CLI and the desktop signal task only',
   // runtime lib.rs no_swap(): the synthetic owners' Claude Swap source. Its only caller,
   // refresh::catch_up_with_claude_swap, replaces any error with SWAP_BUSY before it returns.
   'Claude Swap profiles not found.': 'replaced by SWAP_BUSY',

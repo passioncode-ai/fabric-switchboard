@@ -164,5 +164,29 @@ Which path reads an item depends on who created it, because an item trusts its c
 | `Codex Auth` (`cli|<hash>`, Codex `keyring`/`auto` mode) | Codex through its own keyring library | Security.framework with user interaction **off** (`switchboard_core::external_keychain::read_external_quietly`) | the item trusts Codex only; `/usr/bin/security` would make macOS ask on every read, and the background read it every minute. With interaction off an untrusted item reads as refused — *Keychain is locked or does not let Switchboard read this sign-in without asking. Unlock it and retry, or add the account with official sign-in.* — and nothing is shown (`codexs_keychain_item_is_read_only_the_quiet_way`) |
 
 Each `/usr/bin/security` read is a process. Claude Code's item is read twice per capture (a torn
-config/credential pair is refused), so the monitor reuses one capture for 30 seconds and reads
-nothing of Claude Code's when no Claude OAuth account is saved ([OPERATIONS](OPERATIONS.md#053-quiet-by-design)).
+config/credential pair is refused), and nothing of Claude Code's is read when no Claude OAuth
+account is saved ([OPERATIONS](OPERATIONS.md#053-quiet-by-design)).
+
+**Since 0.5.4 the background never runs `security … -w` on a timer (lifecycle LC-04).** Every
+background request first probes the source in-process with user interaction off
+(`switchboard_core::external_keychain::probe_external`): the item's creation and modification
+stamps and its access list — is `/usr/bin/security` on the decrypt list and, where the item has
+one, in an `apple-tool:`/`apple:` partition — plus the stamps of the config and fallback files.
+Nothing is decrypted and nothing is spawned. The capture is read again only when a stamp moved;
+a read in the same second as the newest write is not reused, so a second write in that second
+cannot hide. Every outcome is remembered, refused and absent included:
+
+| Probe says | Background does | Until |
+|---|---|---|
+| unchanged since the last read | reuses that read's outcome (sign-in, signed out or refused) | a stamp moves, or a person acts |
+| keychain locked | reads nothing, reports *Keychain unavailable. Unlock it and allow access, then retry.*; probes again after 1, 2, 4 … 30 minutes | unlocked, or a person acts |
+| the item would make macOS ask (not trusted for `/usr/bin/security`) | reads nothing, reports the Codex refusal sentence above | the item is rewritten, or a person acts |
+
+"A person acts" is an explicit operation — capture, activation, a launch, sign-in — which
+clears the remembered state; **Capture** reads straight from the source, so a locked keychain
+may ask to be unlocked then and only then. Each change of state is logged as a code
+(`credential_source`, [OPERATIONS](OPERATIONS.md#054-lifecycle)). Tests:
+`a_refusing_source_is_read_once_in_an_hour_of_passes_not_in_a_loop`,
+`a_locked_keychain_is_never_read_and_its_probe_backs_off_to_half_an_hour`,
+`an_item_that_would_ask_is_not_read_until_it_changes_or_a_person_acts`,
+`a_probe_reads_no_secret_and_tells_absent_trusted_untrusted_and_locked` (throwaway keychain).

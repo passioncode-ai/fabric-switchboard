@@ -136,3 +136,21 @@ export function loginOutcome(errorText: string): LoginOutcome {
   if (errorText === LOGIN_FORGOTTEN) return 'forgotten';
   return 'retry';
 }
+
+export interface Timers { set: (fn: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
+const browserTimers: Timers = { set: (fn, ms) => setInterval(fn, ms), clear: (handle) => clearInterval(handle as ReturnType<typeof setInterval>) };
+/**
+ * A repeating timer that exists only while `sync(true)` says it should (lifecycle LC-08): the
+ * sign-in poll wakes the window only while a sign-in waits, never as a permanent interval.
+ * `sync` is idempotent, so it can be called on every render.
+ */
+export function intervalWhile(tick: () => void, ms: number, timers: Timers = browserTimers) {
+  let handle: unknown;
+  return {
+    sync(active: boolean) {
+      if (active && handle === undefined) handle = timers.set(tick, ms);
+      else if (!active && handle !== undefined) { timers.clear(handle); handle = undefined; }
+    },
+    get running() { return handle !== undefined; },
+  };
+}

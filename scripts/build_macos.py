@@ -3,6 +3,7 @@
 import argparse
 import os
 from smoke_native import verify as verify_native_startup
+from prune_artifacts import prune, unregister_app
 import hashlib
 import json
 from pathlib import Path
@@ -148,7 +149,10 @@ def main():
     run(['npm', 'exec', 'tauri', 'build', '--', '--target', target, '--bundles', 'app', '--no-sign', '--ci', '--', '--locked'])
     folder.mkdir(parents=True)
     app = folder / 'Fabric Switchboard.app'
-    shutil.copytree(ROOT/'target'/target/'release/bundle/macos/Fabric Switchboard.app', app)
+    built = ROOT/'target'/target/'release/bundle/macos/Fabric Switchboard.app'
+    shutil.copytree(built, app)
+    # The bundle under target/ is a build intermediate; it must not answer `open -b` (LC-15).
+    unregister_app(built)
     cli = folder/'switchboard'
     targets = ('aarch64-apple-darwin', 'x86_64-apple-darwin') if args.arch == 'universal' else (target,)
     for item in targets:
@@ -187,6 +191,9 @@ def main():
     save(receipt_path, receipt)
     if args.notary_profile:
         receipt = notarize(receipt_path, args.notary_profile)
+    # Lifecycle LC-15: this release and the one before stay; older binaries go (receipts stay).
+    for path in prune(ARTIFACTS):
+        print(f'pruned {path.name}', file=sys.stderr)
     print(json.dumps(receipt, indent=2))
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -120,7 +120,11 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
 }
 
 /** Returns false when a background render found nothing to change and left the DOM alone. */
+// A pending official sign-in finishes on its own once Terminal reports completion; the poll
+// exists only while one waits (lifecycle LC-08).
+const loginPoll = intervalWhile(() => { void pollLogin(); }, 1500);
 function render(options: { background?: boolean } = {}): boolean {
+  loginPoll.sync(pendingLogin?.state === 'pending');
   const openDetails = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map((details) => details.querySelector<HTMLElement>('summary')?.dataset.focus));
   const shell = el('div', 'shell');
   const commit = () => {
@@ -766,8 +770,6 @@ if (demo) { const { createDemoAdapter } = await import('./demo'); adapter = crea
 void reload();
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
-// A pending official sign-in finishes on its own once Terminal reports completion.
-setInterval(() => { void pollLogin(); }, 1500);
 // Menus close on Escape and on a click anywhere outside them.
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
 document.addEventListener('click', (event) => { if (openMenu && !(event.target as HTMLElement | null)?.closest('.menu-root')) { openMenu = null; render(); } });

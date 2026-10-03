@@ -365,3 +365,58 @@ fn offline_backup_never_writes_and_restore_takes_only_backup_names() {
         .to_string()
         .contains("Choose a backup from the backup folder."));
 }
+
+/// Lifecycle LC-01's check for `switchboard serve`: SIGTERM and SIGINT each end an idle owner
+/// inside the deadline, with its descriptor removed and the stop logged as codes. The store is
+/// empty, so nothing of the real Claude Code or Codex sign-in is read.
+#[cfg(unix)]
+#[test]
+fn serve_stops_on_sigterm_and_sigint_within_the_deadline() {
+    use std::time::{Duration, Instant};
+    for signal in ["-TERM", "-INT"] {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = tmp.path().join("logs");
+        let data = tmp.path().join("data");
+        let mut child = binary()
+            .arg("--data-dir")
+            .arg(&data)
+            .args(["--json", "serve"])
+            .env("SWITCHBOARD_LOG_DIR", &logs)
+            .env("SWITCHBOARD_BACKUP_DIR", tmp.path().join("backups"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let descriptor = data.join("control.json");
+        let started = Instant::now();
+        while !descriptor.exists() {
+            assert!(started.elapsed() < Duration::from_secs(20), "serve started");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let status = Command::new("/bin/kill")
+            .args([signal, &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let asked = Instant::now();
+        let exit = loop {
+            if let Some(exit) = child.try_wait().unwrap() {
+                break exit;
+            }
+            assert!(
+                asked.elapsed() < Duration::from_secs(5),
+                "{signal}: an idle owner exits within five seconds"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert!(exit.success(), "{signal}: graceful, not killed: {exit:?}");
+        assert!(!descriptor.exists(), "{signal}: descriptor removed");
+        let mut out = String::new();
+        std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut out).unwrap();
+        assert!(out.contains("\"stopped\""), "{out}");
+        let log = std::fs::read_to_string(logs.join("switchboard.log")).unwrap();
+        assert!(log.contains("\"owner_started\""), "{log}");
+        assert!(log.contains("\"owner_stopped\""), "{log}");
+        assert!(log.contains("\"drained\""), "{log}");
+    }
+}

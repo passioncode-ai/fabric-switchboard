@@ -1,3 +1,13 @@
+# In review — Switchboard 0.5.4: lifecycle contract (2026-10-03)
+
+**Start here:** [handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md](handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md) (board SB-25), branch `claude/lifecycle-contract`.
+
+No `security -w` on a timer (quiet probe, read on change); 30 s idle cadence with no timer spawns and writes only on change; stable proxy port and token across restarts; one drain for Quit, last window, `SIGTERM` and `SIGINT` with descriptor cleanup; a bounded log in `~/Library/Logs/Fabric Switchboard/`; SB-23; build pruning; [AGENTS.md → Lifecycle](../AGENTS.md#lifecycle).
+
+**Exact next task:** after v0.5.3-beta.1 is out, review and land SB-25, then release 0.5.4 and run the on-Mac checks listed in the handoff.
+
+---
+
 # In progress — Switchboard v0.5.3-beta.1: sessions never lost beside Claude Swap; a quiet desktop (2026-10-03)
 
 **Start here:** [PLAN-0.5 §0.5.3](PLAN-0.5.md#053--sessions-are-never-lost-the-app-stays-quiet) (REQ-51…67) and [release-0.5 §0.5.3](evidence/release-0.5.md#053).

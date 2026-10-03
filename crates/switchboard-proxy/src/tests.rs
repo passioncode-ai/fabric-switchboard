@@ -47,7 +47,7 @@ async fn start(store: Arc<Store>, url: String) -> ProxyHandle {
     start_with(store, url, Timeouts::default()).await
 }
 async fn start_with(store: Arc<Store>, url: String, timeouts: Timeouts) -> ProxyHandle {
-    ProxyHandle::start_at(store, url.clone(), url.clone(), url, timeouts)
+    ProxyHandle::start_at(store, url.clone(), url.clone(), url, timeouts, None, None)
         .await
         .unwrap()
 }

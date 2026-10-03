@@ -150,4 +150,23 @@ check(() => {
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 3, 'status poll, finish and cancel each classify');
 });
 
-console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start, sign-in outcomes.`);
+// Lifecycle LC-08: the sign-in poll runs only while a sign-in waits; without one, no timer wakes.
+check(() => {
+  const timers = new Map(); let next = 0;
+  const fake = { set: (fn, ms) => { const id = ++next; timers.set(id, { fn, ms }); return id; }, clear: (id) => { timers.delete(id); } };
+  let ticks = 0;
+  const poll = logic.intervalWhile(() => { ticks += 1; }, 1500, fake);
+  assert.equal(timers.size, 0, 'nothing pending: no timer at all');
+  poll.sync(true); poll.sync(true);
+  assert.equal(timers.size, 1, 'one timer however often render syncs');
+  assert.equal([...timers.values()][0].ms, 1500);
+  [...timers.values()][0].fn(); assert.equal(ticks, 1);
+  poll.sync(false);
+  assert.equal(timers.size, 0, 'the sign-in ended: the timer is cleared');
+  assert.equal(poll.running, false);
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert(!/setInterval\(\(\) => \{ void pollLogin\(\); \}, 1500\)/.test(main), 'no permanent sign-in timer');
+  assert(main.includes('loginPoll.sync('), 'render keeps the poll in step with the pending sign-in');
+});
+
+console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start, sign-in outcomes, sign-in poll only while pending.`);

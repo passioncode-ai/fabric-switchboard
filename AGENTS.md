@@ -49,6 +49,54 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). The implementation contract is [doc
   reserved yet; a register that gains one is declared under `idRegisters` and taken with
   `agent_sync.py reserve <REG>`.
 
+## Lifecycle
+
+How Fabric Switchboard starts, idles and stops — the
+[lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
+(LC-01…LC-15) applied here. The checks named below run in `./scripts/check.sh`.
+
+| Process or resource | Who starts it | Cadence / while no window | Who stops it |
+|---|---|---|---|
+| Desktop app `/Applications/Fabric Switchboard.app` (bundle id `ai.passioncode.fabric-switchboard`) | the person (Finder, `open`), or the local-lifecycle broker target `switchboard.desktop` | a GUI app: no LaunchAgent, no login item, no menu-bar item. Closing the last window quits it; a second launch focuses the running window (`tauri-plugin-single-instance`) | Quit, Cmd-Q, last window, `SIGTERM`/`SIGINT`: one drain (`Owner::shutdown`), 8 s deadline, hard exit at 10 s (LC-01) |
+| `switchboard serve` (headless owner) | the person | same owner as the app, no window | `SIGTERM` or `SIGINT`, same drain and deadlines |
+| `switchboard mcp` (stdio, one per agent session) | the agent host, from the plugin's `.mcp.json` | no timers of its own; opens the store per call when no owner runs | stdin EOF ends it (`crates/switchboard-cli/tests/mcp.rs`, "End of input ends the server") |
+| Managed-mode proxy `127.0.0.1:<port>` | the owner | the port and token are recorded in `proxy.json` (0600) and reused at every start, so a managed session survives a restart or an update; a port another program took moves the proxy and repoints the generated files in `runtimes/` (LC-11) | the owner's drain: streams get ≤ 2 s |
+| Control listener `127.0.0.1:<ephemeral>` | the owner | discovered per call from `control.json` (0600: address, token, owner pid) | the owner's drain removes `control.json`; a descriptor whose pid is dead is stale and the CLI goes offline under the store lock |
+| Store lock `instance.lock` (`flock`) | the owner, offline CLI commands | held while owning | released with the store; the kernel releases it after a crash |
+| Background monitor | the owner | one pass every 30 s. Sign-in sources are probed quietly (file stamps, the Keychain item's attributes and access list; nothing decrypted, nothing spawned) and read only when they changed (LC-04). Quota checks every 180 s per enabled OAuth account, at most 4 per pass; source sync every 180 s; renewals from a schedule rebuilt only when credentials change; Claude Swap seen in the process table in-process (no `ps`) | stops first in the drain; the pass in flight gets the deadline |
+| Child processes | the owner | `/usr/bin/security` only when a sign-in source changed or a person acted, never on a timer, never from the background when the keychain is locked or the item would ask; `/usr/bin/open -a Terminal` on launch. Terminal sessions are not children and outlive the app by design | each `security` call is bounded (5 s, killed and reaped) and runs as a blocking section (SB-23) |
+| Writes | the owner | `accounts.json` only on change: a quota check that finds nothing new stays in memory, flushed every 15 min and at stop; encrypted backups only after a credential, account or policy change (≥ 60 s apart) and once a day, newest 10 kept | — |
+| Log `~/Library/Logs/Fabric Switchboard/switchboard.log` | the app and `serve` | lifecycle events and credential-source states, codes and numbers only; 5 files × 5 MB, 0600 (LC-12) | rotation |
+| Window timers | the renderer | metadata refresh every 60 s, skipped while hidden; the sign-in poll (1.5 s) exists only while a sign-in waits | the window |
+
+Launchd labels owned: none (the app appears under LaunchServices' generated
+`application.ai.passioncode.fabric-switchboard.*` label like any GUI app). Ports owned: the
+recorded proxy port and one ephemeral control port, both loopback.
+
+**Idle budget.** With nothing changing, an hour of background passes reads no sign-in, writes
+no metadata and no backup, and reads at most one stored credential per pass (native
+rotation's current account) plus one per source sync —
+`monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` counts it on a fake
+clock (before 0.5.4: every account's credential every 10 s, a `security` pair every 30 s and a
+`ps` every 180 s). Targets for the installed app: average CPU < 0.2 %, RSS ≤ 250 MB including the
+WebKit helpers; measured on a release, not by the gate.
+
+**Residency.** Background rotation, renewal and backups run only while the app or `serve`
+runs. Closing the window quits the app; that is the declared residency until a menu-bar or
+login-item mode is decided (product decision, not taken here). Managed sessions keep working
+across a quit and relaunch because the proxy address and token are stable.
+
+**Build output and caches (LC-15).** Release artefacts live in `artifacts/`
+(`Fabric-Switchboard-<version>-<platform>-<arch>` folders and ZIPs). `scripts/build_macos.py`
+and `scripts/build_windows_cross.py` prune it after every build to the current and the previous
+release of each kind (`scripts/prune_artifacts.py`, tested by `scripts/test_prune_artifacts.py`),
+unregister removed and intermediate app bundles from LaunchServices, and keep the small receipt
+JSONs. Caches that are not releases — Cargo `target/` (or `$CARGO_TARGET_DIR`), `dist/`,
+`src-tauri/gen/`, `node_modules/.cache` — have a cap of **10 GB for `target/`**; when it is
+passed, run `cargo clean --profile dev` (drops debug and test builds, keeps nothing a release
+needs), then `cargo clean` if it is still over. An agent that built runs this before ending its
+run when the cap is passed.
+
 ## Organisation
 
 This repository is one of the `passioncode-ai` repositories. **The org map and onboarding live in
