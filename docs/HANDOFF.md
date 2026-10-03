@@ -1,21 +1,31 @@
-# In progress — Switchboard v0.5.3-beta.1: sessions never lost beside Claude Swap; a quiet desktop (2026-10-03)
+# Released — Switchboard v0.5.3-beta.1: sessions never lost beside Claude Swap; a quiet desktop (2026-10-03)
 
-**Start here:** [PLAN-0.5 §0.5.3](PLAN-0.5.md#053--sessions-are-never-lost-the-app-stays-quiet) (REQ-51…67) and [release-0.5 §0.5.3](evidence/release-0.5.md#053).
+[v0.5.3-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1) was published from `21d005c`.
 
-Operator request: get the tokens right, never lose a session, and keep sign-ins current even while Claude Swap runs in the background; audit the desktop app's architecture, build and permissions so that nothing is redundant and nothing pops up.
+**Scope:** [PLAN-0.5 §0.5.3](PLAN-0.5.md#053--sessions-are-never-lost-the-app-stays-quiet), REQ-51…67. It covers two audits and a review, all fixed with tests.
 
-What was done:
-- **Audits:** two independent read-only audits (token custody; desktop) and a review of the diff. All P1 and P2 findings are fixed with tests and checked against planted defects.
-- **Claude Swap coexistence:** running → its accounts are held and followed; auto-switching → native rotation holds; stopped → its last renewals are taken. Holds are scoped to the unreadable row's email.
-- **Token custody:** no writer moves an account backwards. One grant runs per token, released on every exit. The offline CLI never spends.
-- **Desktop:** a busy store never crashes the app, and a second launch focuses the first. Codex is read quietly. Background Keychain reads are reused for 30 s and skipped without saved Claude accounts. Translocated copies are handled. The release profile is optimised.
+**Release:**
+- notary `be798b70-…` Accepted;
+- site `8a13743`;
+- installed in `/Applications`; 0.5.2 is kept for rollback.
 
-Gate exit 0 (270 tests); coverage 86.41 %.
+**Measured on the operator's Mac** ([record](evidence/release-0.5.md#release-v053-beta1-2026-10-03)):
+- 0 `SecurityAgent` entries;
+- 1 `security` process in 200 s (0.5.2: 30);
+- the bundle is 31 MB (0.5.2: 49 MB).
 
-**Exact next task:** SB-24.
-1. Release v0.5.3-beta.1 from `main`, following [the 0.5.2 steps](evidence/release-0.5.md#release-v052-beta1-2026-10-03).
-2. Install it, then repeat the desktop audit's 200 s process count and the `SecurityAgent` check on the operator's Mac.
-3. Check whether the account that read *Sign in again* recovered from Claude Swap's files.
+**Not confirmed:** the one account that reads *Sign in again* did not recover from Claude Swap's files. The SB-21 hypothesis is not confirmed; the operator has to sign in again on that row.
+
+**A parallel run builds 0.5.4 lifecycle work on top of 0.5.3** (Fabric session, branch `claude/lifecycle-contract`). It covers:
+- a stable proxy port;
+- SIGTERM with `control.json` cleanup;
+- a rotated log;
+- an idle cadence;
+- SB-23.
+
+**Next:**
+1. The agent-memory design in Project Observatory (DEC-0250, PB-137; Fabric ADR-0105). Its module M9 here is switching through a new session: the `claude --resume` probe first.
+2. Then SB-15.
 
 ---
 
