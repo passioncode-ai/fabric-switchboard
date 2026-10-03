@@ -32,6 +32,17 @@ def valid(name):
 class Authenticode(unittest.TestCase):
     FILES = ['switchboard.exe', f'Fabric Switchboard_{VERSION}_x64-setup.exe']
 
+    def test_a_changed_tree_is_refused_by_name(self):
+        message = package_windows.dirty_tree_message(
+            ' M src-tauri/Cargo.toml\n?? src-tauri/gen/x.json\nR  a.txt -> b.txt\n')
+        self.assertIn('no receipt issued', message)
+        self.assertIn('3 path(s)', message)
+        for name in ('M src-tauri/Cargo.toml', '?? src-tauri/gen/x.json', 'R  a.txt -> b.txt'):
+            self.assertIn(name, message)
+        many = '\n'.join(f' M f{i}' for i in range(package_windows.LISTED + 5))
+        self.assertIn('and 5 more', package_windows.dirty_tree_message(many))
+        self.assertNotIn(f'f{package_windows.LISTED}', package_windows.dirty_tree_message(many))
+
     def test_unsigned_is_said_plainly(self):
         record = package_windows.authenticode_record('NOT_SIGNED', None, self.FILES)
         self.assertEqual(record, {'status': 'NOT_SIGNED', 'reason': package_windows.NOT_SIGNED_REASON})

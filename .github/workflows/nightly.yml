@@ -47,23 +47,56 @@ jobs:
       - run: npm ci
       - run: ./scripts/check.sh
       - run: npm run app:build
-  # The native Windows fixtures the release job runs, without the release environment: a
-  # Windows-only defect then surfaces the night it lands, not at the next rehearsal.
+  # The release job's Windows path without the release environment and without signing:
+  # its native fixtures, its build and its clean-tree rule. A Windows-only defect then
+  # surfaces the night it lands, not at the next rehearsal.
   windows:
     needs: clock
     if: needs.clock.outputs.run == 'true'
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
       - name: Rust stable
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+      - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
           cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: The fixtures leave the source tree as checked out
+        run: |
+          $changed = git status --porcelain --untracked-files=all
+          if ($changed) { $changed | ForEach-Object { Write-Host $_ }; Write-Host "::error::the fixtures changed the source tree"; exit 1 }
+      - name: Build the CLI, the desktop executable and the installer, unsigned
+        run: |
+          $env:RUSTFLAGS = '-C target-feature=+crt-static'
+          cargo build --release --locked -p switchboard-cli --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:RUSTFLAGS
+          npm exec tauri build -- --no-bundle --ci -- --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm exec tauri bundle -- --bundles nsis --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The release job refuses a receipt for a tree its build changed (package_windows.py).
+      - name: The build leaves the source tree as checked out
+        run: |
+          $changed = git status --porcelain --untracked-files=all
+          if ($changed) {
+            $changed | ForEach-Object { Write-Host $_ }
+            # What changed, for a public source tree: line endings, then content.
+            git ls-files --eol -m
+            Write-Host "--- ignoring carriage returns:"; git diff --ignore-cr-at-eol --stat
+            Write-Host "--- the diff:"; git diff --stat; git diff -- src-tauri/Cargo.toml
+            Write-Host "::error::the build changed the source tree"; exit 1
+          }
