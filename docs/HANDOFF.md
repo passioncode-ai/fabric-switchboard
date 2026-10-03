@@ -16,7 +16,7 @@ Merged as `979c31e` (#28). The `v0.5.3-rc.3` rehearsal ([run 37148716778](https:
 
 Verified in [run 37152183420](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37152183420) on `f21acd4`: the tree is clean after the build; `windows` and `checks` both succeed.
 
-**Next:** the peer session cuts `v0.5.3-rc.4` and a `release-approvers` member approves the rehearsal.
+**Outcome:** rehearsal `v0.5.3-rc.4` (run 37152992597, publish=false) was approved on the operator's instruction and is fully green: preflight, macOS, Windows, publish. The downloaded set checks out: the GPG `SHA256SUMS.asc` signature is good with the org key `63B3…B6A7`, sums 4/4 OK, attestations 4/4 (`gh attestation verify <file> --owner passioncode-ai --signer-repo passioncode-ai/.github`), the quarantined macOS app is accepted as "Notarized Developer ID", and the Windows receipt says `windows_authenticode: NOT_SIGNED` (Azure identity validation is pending). **Next:** a real `v0.5.x` tag is the operator's decision; Windows signing turns on with `AZURE_SIGNING_ENABLED=true` once the certificate profile exists.
 
 ---
 
