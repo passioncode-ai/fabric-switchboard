@@ -354,7 +354,10 @@ async function pollLogin() {
   busy = true; clock.begin();
   try {
     const account = await adapter.finishLogin(login.id);
-    await loginSaved(`${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
+    // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
+    await loginSaved(account.login_cleanup === 'pending'
+      ? `${account.label} added to ${providerName(account.provider)} · ${account.pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.`
+      : `${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
   } catch (error) {
     const text = safeError(error); const outcome = loginOutcome(text);
     // The owner saved the account and released the sign-in; only its staging folder is left.

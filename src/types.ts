@@ -47,7 +47,8 @@ export interface Adapter {
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
-  finishLogin(loginId: string): Promise<Account>;
+  /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
+  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending' }>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;
