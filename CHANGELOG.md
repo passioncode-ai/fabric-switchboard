@@ -8,27 +8,27 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- `switchboard uninstall` shows what Switchboard created on this Mac and, with `--yes`, removes
-  it: saved accounts' credentials, the old unused vault key, the `~/.local/bin` link and the data
-  folder's own files. Backups and the Claude Code and Codex sign-ins are never touched.
-- Finishing a sign-in whose temporary folder could not be removed now reports the account as
-  added (with a note) instead of an error, and finishing it again returns the same account; the
-  folder is removed on the next try.
-
-## 0.5.4-beta.2 — 2026-10-04
+## 0.5.4-beta.3 — 2026-10-05
 
 Switchboard now stays quiet while nothing changes, and it respects every limit the providers
 report: no quota check before the time a provider asked for, no feature limit mistaken for the
 whole account, no estimated hold shown as a reset. Signed by the same team (`KJ35UYYL22`) as
 0.5.3, so the Keychain's trust carries over.
-(The `v0.5.4-beta.1` tag never became a release: its run stopped before building, when the
-Windows runner could not read these notes.)
+(The `v0.5.4-beta.1` and `v0.5.4-beta.2` tags never became releases: their runs stopped in the
+Windows job — first on the encoding of these notes, then on a Windows build error — and both
+are fixed here.)
 
 **Windows:** windows_authenticode: NOT_SIGNED. The archive is built natively but not
 Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
 
 ### Quota, limits and accounts
 
+- `switchboard uninstall` shows what Switchboard created on this Mac and, with `--yes`, removes
+  it: saved accounts' credentials, the old unused vault key, the `~/.local/bin` link and the data
+  folder's own files. Backups and the Claude Code and Codex sign-ins are never touched.
+- Finishing a sign-in whose temporary folder could not be removed now reports the account as
+  added (with a note) instead of an error, and finishing it again returns the same account; the
+  folder is removed on the next try.
 - An account held after a limit error shows whether the time is the provider's own reset
   (*Limit resets*) or an estimate (*Retry hold until*). Holds survive a restart, and a new
   Claude Code session's limit is charged to the account it runs on even when its reset time
