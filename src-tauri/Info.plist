@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The owner's quota checks, renewals, backups and managed proxy run in this process, which
+	     often has no visible window (SB-30): App Nap must not throttle them. -->
+	<key>LSAppNapIsDisabled</key>
+	<true/>
+</dict>
+</plist>

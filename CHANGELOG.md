@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `--background` starts the app without showing its window or taking focus (and, on macOS,
+  without a Dock icon), as the local lifecycle broker does for apps it keeps running; opening it
+  again shows the window. Unknown launch arguments are ignored, and App Nap no longer slows the
+  account service while no window is open.
 - An account held after a limit error shows whether the time is the provider's own reset
   (*Limit resets*) or an estimate (*Retry hold until*). Holds survive a restart, and a new
   Claude Code session's limit is charged to the account it runs on even when its reset time
