@@ -104,6 +104,10 @@ export function accountReset(usage: Usage): number | null {
   const worst = windows.reduce((a, b) => (b.used_percent > a.used_percent ? b : a));
   return worst.resets_at ?? null;
 }
+/** How a limit's time reads: the provider's reported reset, or an estimated retry hold (SB-41). */
+export function limitLabel(limit: Pick<AccountLimit, 'until' | 'resets_at'>): string {
+  return typeof limit.resets_at === 'number' && limit.resets_at === limit.until ? 'Limit resets' : 'Retry hold until';
+}
 /** A window that limits one metered feature, not the account (core `FEATURE_WINDOW_PREFIX`, SB-40). */
 export function isFeatureWindow(window: Pick<UsageWindow, 'name'>): boolean {
   return window.name.startsWith('feature_');

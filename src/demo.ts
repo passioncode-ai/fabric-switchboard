@@ -73,7 +73,7 @@ export function createDemoAdapter(): Adapter {
   const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];
   return {
     async currentAccounts() { return structuredClone(current); },
-    async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired], limited: [{ account_id: 'demo-claude-east', until: now() + 5400, source: 'claude_code' }] }; },
+    async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired], limited: [{ account_id: 'demo-claude-east', until: now() + 5400, source: 'claude_code', kind: 'unknown', resets_at: null, confidence: 'inferred', scope: 'unknown' }, ...(new URLSearchParams(location.search).get('quota-review') === '1' ? [{ account_id: 'demo-claude-summit', until: now() + 10800, source: 'claude_code' as const, kind: 'quota' as const, resets_at: now() + 10800, confidence: 'inferred' as const, scope: 'unknown' as const }] : [])] }; },
     async captureCurrent(input) {
       await pause();
       const source = current[input.provider];

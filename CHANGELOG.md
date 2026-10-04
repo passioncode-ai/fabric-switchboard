@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An account held after a limit error shows whether the time is the provider's own reset
+  (*Limit resets*) or an estimate (*Retry hold until*). Holds survive a restart, and a new
+  Claude Code session's limit is charged to the account it runs on even when its reset time
+  happens to match another account's.
 - Codex accounts show the limits the Codex app itself reads beyond the two usage windows: a
   personal spend limit, a workspace out of credits or at its usage limit, and each feature's
   own limit. A limit on one feature no longer marks the whole account as used up; spend and

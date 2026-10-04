@@ -39,6 +39,7 @@ The server works out which session asks from its own environment, first match wi
 | `routes` | `"<provider>:<pool>" → {account_id, label}` — who handles the next request |
 | `rules.active`, `rules.total`, `rules.for_this_folder` | active rules (`path`, `provider`, `target`, `state`, `expires_at` in RFC 3339, `account`), the count of all rules, and the resolution for the server's folder |
 | `rotation[]` | `provider`, `pool`, `target`, `enabled`, `threshold_percent`, `last_decision` |
+| `limited[]` | accounts held after a provider limit error: `account_id`, `until` (when it may be tried again, Unix seconds), `resets_at` (the provider's own reset, or null when `until` is an estimated hold; a reset more than seven days out is held seven days, so `until` can be earlier), `kind` (`quota` when Claude Code named a subscription window — see `limit_type` — else `unknown`), `limit_type`, `confidence` (`attributed` for a managed request, `inferred` for a Claude Code transcript), `scope` (`unknown`: a shared organisation budget is not ruled out), `source`, `observed_at`, `event_id`. A hold is not a reset; never present `until` as one when `resets_at` is null |
 
 ### `switchboard_accounts` — `provider?: "claude" | "codex"`
 

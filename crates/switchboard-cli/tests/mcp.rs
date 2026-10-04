@@ -242,7 +242,10 @@ async fn managed_session_reads_usage_and_switches_only_inside_its_pool() {
         "switchboard_switch",
         json!({"account_id": ids[0], "target": "claude_cli"}),
     );
-    assert!(error && message.as_str().unwrap().contains("global: true"));
+    assert!(
+        error && message.as_str().unwrap().contains("global: true"),
+        "{message}"
+    );
     let (error, _) = agent.tool("switchboard_switch", json!({"account_id": ids[1]}));
     assert!(!error);
     assert_eq!(

@@ -1,3 +1,15 @@
+# SB-41 — typed, attributable limit evidence (2026-10-04)
+
+**Start here:** [run record](runs/2026-10-04-sb-41-limit-evidence/README.md); contract in
+[CONTRACTS](CONTRACTS.md#typed-attributable-limit-evidence-sb-41-2026-10-04). Limit holds now carry
+kind, the provider's reset apart from the estimated hold, confidence and an unknown scope; a new
+session's limit is charged to the account it runs on even with an equal reset; holds survive a
+restart (`limit-evidence.json`). Gate exit 0, 346 Rust tests. SB-25 still needs SB-06's live probe;
+the code side of its prerequisites (SB-41) is in place. **Next autonomous tasks:** SB-30, SB-43,
+SB-42, issue #36, SB-29, SB-07.
+
+---
+
 # SB-40 — Codex limits beyond the two windows (2026-10-04)
 
 **Start here:** [run record](runs/2026-10-04-sb-40-codex-limits/README.md); contract in

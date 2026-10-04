@@ -41,6 +41,7 @@ Quota ordering/countdown (Status: proposed; operator-authorized implementation; 
 - `quota.reset`: “Resets {date}”, “Reported reset {date}” for stale/failed history, “Quota windows reset {date}” for exhausted windows, “Reset time unavailable”.
 - `quota.next_check` (SB-39): “Next check {date}” under “Check failed” on a row with no stored observation — the same caption the quota disclosure already shows; it includes any wait the provider asked for. The refusal during that wait reuses `USAGE_RATE_LIMITED`.
 - `quota.feature` (SB-40): “{feature} · primary feature limit” / “{feature} · secondary feature limit” for a window that limits one metered feature; the row percentage is the account's own (“Usage unknown” when only feature limits were reported). CLI: “account usage unknown (only feature limits reported)”.
+- `quota.limit_reset` (SB-41): “Limit resets {date}” when the provider reported the reset; an estimated hold keeps “Retry hold until {date}”.
 - `quota.hold`: “Retry hold until {date}”; a hold can be estimated and is not a quota reset. Badge “Limit reached” replaces the combined old badge.
 - `quota.remaining`: “{days}d {hours}h {minutes}m remaining”, “<1m remaining”, “Due · awaiting check”, “Time unavailable”. Zero elapsed time never confirms usable quota.
 Humanization: on — own pass; operational state strings reviewed, no decorative rewrites.
