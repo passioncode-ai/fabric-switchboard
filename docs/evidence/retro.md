@@ -38,6 +38,12 @@
    worst-case sum written in the spec. Source: runs 2026-10-04 (SB-40, SB-41). Retire after two
    runs touching unverified behaviour pass review with no finding of this class.
 
+8. **Before a release, the other platform is compiled.** `cargo xwin check` and `clippy` for
+   `x86_64-pc-windows-msvc` (core, proxy, runtime, cli) run before a tag when the nightly has not
+   covered the merged changes; every script a release job runs reads text as UTF-8. Source: run
+   2026-10-05 (two release runs stopped in the Windows job). Retire after three releases whose
+   first run succeeds on both platforms.
+
 ## Run stamps
 
 | Date | Run | Commit | Diverged |
@@ -47,9 +53,26 @@
 | 2026-10-03 | PLAN-0.5 §0.5.1 Claude Swap parity and review fixes | `13a8712` | yes — entry below |
 | 2026-10-04 | SB-39 provider not-before for every quota check (+ SB-44) | `6d67fbe` | yes — entry below |
 | 2026-10-04 | SB-40 Codex limits beyond the two windows | `585c255` | yes — entry below |
-| 2026-10-04 | SB-41 typed, attributable limit evidence | this branch | yes — entry below |
+| 2026-10-04 | SB-41 typed, attributable limit evidence | `64068c0` | yes — entry below |
+| 2026-10-05 | SB-30, SB-43, SB-42, SB-46, SB-29, release v0.5.4-beta.3 | `d918734` | yes — entry below |
 
 ## Recent log
+
+### 2026-10-05 — the release found what no gate had compiled
+
+- **Symptom:** `v0.5.4-beta.1` stopped in the Windows preflight (`UnicodeDecodeError`: the notes
+  read as cp1252) and `v0.5.4-beta.2` in the Windows fixtures (`E0433`: `external.rs` referred to
+  the Unix-only `security_cli`, broken since #23). Neither published; `beta.3` succeeded.
+- **Surfaced at:** stage 7, the release workflow. **Owned by:** stage 6 — no step between #23 and
+  the release compiled the Windows target, and the nightly had not run on the merged changes.
+- **Root cause:** a Unix-only module reached from shared code, and a release script relying on the
+  runner's default encoding; the local gate runs on macOS only.
+- **Fix:** code (#43, #45) with a locale test; Windows cross-check before tagging; standing
+  instruction 8.
+- **Also:** SB-30's first review proved "no focus" was assumed from the API, not measured — the
+  measurement (`lsappinfo front` polling) showed Accessory still came forward; Prohibited fixed it.
+  Standing instruction 7 covers this class (an unverified behaviour taken as fact).
+
 
 ### 2026-10-04 — SB-40 and SB-41: a bound that was not computed, a heuristic that froze an open question
 
