@@ -57,6 +57,16 @@ On Windows use an absolute drive or UNC project path, quoted if it contains spac
 
 Select another same-pool account while the managed response streams: the current response keeps its snapshot; the next request sees the new account. `Ctrl-C` or `SIGTERM` in `serve` stops the owner within ten seconds. Since 0.5.4 the proxy keeps its port and token across restarts, so a managed client launched earlier works again once an owner is back. Only one owner may hold a data root.
 
+## Uninstall
+
+```sh
+switchboard uninstall              # the plan; nothing changes
+switchboard uninstall --yes        # remove credentials, the CLI link and the data folder's own entries
+switchboard uninstall --keep-data --yes
+```
+
+Quit the app and `serve` first (the store is opened exclusively). What is and is not removed: [OPERATIONS → uninstall](OPERATIONS.md#corrupt-metadata-backup-and-uninstall) (SB-29).
+
 ## Usage, output and failures
 
 ```sh

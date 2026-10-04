@@ -11,6 +11,7 @@ mod monitor;
 pub mod oplog;
 pub mod projects;
 mod refresh;
+pub mod uninstall;
 mod usage_gate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
