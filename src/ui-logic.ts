@@ -25,6 +25,13 @@ export function canProbe(account: Pick<Account, 'kind'>): boolean {
   return account.kind === 'oauth';
 }
 
+/** When the monitor next checks a row whose last check failed, or null. A provider wait
+ * (SB-39) is part of this time; no caller checks earlier. */
+export function failedNextCheck(account: Pick<Account, 'enabled' | 'kind' | 'usage_health'>): number | null {
+  const health = account.usage_health;
+  return monitorChecks(account) && health?.status === 'failed' ? health.next_check_at : null;
+}
+
 export interface Freshness {
   /** Too old for automatic rotation, or a reported reset time has already passed. */
   stale: boolean;

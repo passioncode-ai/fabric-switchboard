@@ -11,7 +11,7 @@ use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
     arm_hard_exit, control, default_root, execute_offline, oplog,
     projects::{detect_session, Session},
-    rfc3339, stop_requested, Operation, Owner, DRAIN_DEADLINE, HARD_EXIT_AFTER,
+    rfc3339, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
 
 #[derive(Parser)]
@@ -306,12 +306,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         if let Some(log) = oplog::Log::default_location() {
             oplog::install(log);
         }
+        // SIGTERM (launchd, `kill`, logout) and SIGINT (Ctrl-C) run the same drain with a
+        // deadline; the backstop ends the process if it overruns (lifecycle LC-01). Caught
+        // before the owner publishes `control.json`, so a stop during start-up drains too.
+        let signals = StopSignals::listen()?;
         let owner = Owner::native(root).await?;
         let status = owner.runtime.execute(Operation::Status).await?;
         print_value(&json!({"state":"serving", "runtime":status}), cli.json);
-        // SIGTERM (launchd, `kill`, logout) and SIGINT (Ctrl-C) run the same drain with a
-        // deadline; the backstop ends the process if it overruns (lifecycle LC-01).
-        let signal = stop_requested().await?;
+        let signal = signals.requested().await?;
         arm_hard_exit(HARD_EXIT_AFTER);
         oplog::event("stop_requested", &[("signal", oplog::Field::Code(signal))]);
         let stopped = owner.shutdown(DRAIN_DEADLINE).await;

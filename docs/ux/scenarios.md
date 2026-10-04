@@ -414,10 +414,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Expected result:** Measured zero is distinct from unavailable, missing, stale or reset quota. The last check and next retry are visible only for accounts the monitor actually checks.
 **UI elements:** quota summary, progress, window disclosure, reset timestamps, source, health status, Check usage.
 **States covered:** loading, unknown, unavailable, stale, failed, success
-**Errors & recovery:** A sanitized check failure preserves the last good result and marks ineligibility; retry manually or wait for the scheduled retry.
+**Errors & recovery:** A sanitized check failure preserves the last good result and marks ineligibility; retry manually or wait for the scheduled retry. When the provider answered a check with “too many requests”, Check usage answers “Usage checks are rate limited by the provider. Switchboard waits before the next one.” at once until the provider's wait ends — in the app, the CLI and MCP alike — and a failed row without an observation shows “Next check {date}” (SB-39). An ordinary failure can be retried at once.
 **Status:** validated
 **Meaning:** follows the operator-authorized v0.3 plan; scenario approval does not establish real-provider acceptance.
-**Coverage:** Window/reset disclosure, stale fixture and failed/unavailable quota states observed in browser on 2026-09-26; reset-passed and not-monitored states observed on 2026-09-29 ([design 0.4 evidence](../evidence/design-0.4.md)), rules in `scripts/test-ui-logic.mjs`. Fixture data is synthetic; authenticated provider evidence is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
+**Coverage:** Window/reset disclosure, stale fixture and failed/unavailable quota states observed in browser on 2026-09-26; reset-passed and not-monitored states observed on 2026-09-29 ([design 0.4 evidence](../evidence/design-0.4.md)), rules in `scripts/test-ui-logic.mjs`. The provider-wait row (“Check failed · Next check {date}”, Check usage refused at once) observed with `?demo=1&quota-review=1` on 2026-10-04 at 1280 CSS px light and dark and at 740 CSS px (SB-39, [run](../runs/2026-10-04-sb-39-quota-deadline/README.md)). Fixture data is synthetic; authenticated provider evidence is separate. Implementation: [interface](../../src/main.ts), [adapter](../../src/adapter.ts), [synthetic fixtures](../../src/demo.ts).
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 

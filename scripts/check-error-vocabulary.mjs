@@ -35,8 +35,8 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
-  // runtime lib.rs stop_requested(): awaited by `switchboard serve` (CLI output) and by the
-  // desktop app's signal task, which ignores an error; never a renderer reply.
+  // runtime lib.rs StopSignals (listen/requested): used by `switchboard serve` (CLI output) and
+  // by the desktop app's signal task, which ignores an error; never a renderer reply.
   'Shutdown signal unavailable.': 'serve CLI and the desktop signal task only',
   // runtime lib.rs no_swap(): the synthetic owners' Claude Swap source. Its only caller,
   // refresh::catch_up_with_claude_swap, replaces any error with SWAP_BUSY before it returns.

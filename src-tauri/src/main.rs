@@ -344,6 +344,11 @@ fn main() {
                 smoke,
                 owner: tokio::sync::Mutex::new(None),
             };
+            // SIGTERM and SIGINT are caught before the owner starts and publishes its control
+            // descriptor, so a stop during start-up drains as Quit does (LC-01).
+            let signals = tauri::async_runtime::block_on(async {
+                switchboard_runtime::StopSignals::listen()
+            });
             // Start now so the monitor runs from launch; a failure is reported by the first
             // request instead of aborting the app (Tauri turns a setup error into a crash).
             let started = tauri::async_runtime::block_on(slot.runtime()).is_ok();
@@ -366,7 +371,10 @@ fn main() {
             // through the exit event below, which drains the owner (lifecycle LC-01).
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Ok(signal) = switchboard_runtime::stop_requested().await {
+                let Ok(signals) = signals else {
+                    return;
+                };
+                if let Ok(signal) = signals.requested().await {
                     switchboard_runtime::oplog::event(
                         "stop_requested",
                         &[("signal", switchboard_runtime::oplog::Field::Code(signal))],

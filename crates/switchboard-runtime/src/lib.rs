@@ -11,6 +11,7 @@ mod monitor;
 pub mod oplog;
 pub mod projects;
 mod refresh;
+mod usage_gate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -213,6 +214,8 @@ pub struct Runtime {
     native: NativeSources,
     refresh: refresh::RefreshState,
     limits: limits::LimitState,
+    /// Provider not-before per account, and one quota request per account at a time (SB-39).
+    usage_gate: usage_gate::UsageGate,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
     backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
     backup_folder: Mutex<Option<PathBuf>>,
@@ -252,6 +255,8 @@ impl Runtime {
         let proxy = start_proxy(&root, store.clone()).await?;
         let refresh = refresh::RefreshState::default();
         refresh.remember_in(root.join("renewal-state.json"));
+        let usage_gate =
+            usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -264,6 +269,7 @@ impl Runtime {
             native,
             refresh,
             limits: limits::LimitState::default(),
+            usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
@@ -285,6 +291,22 @@ impl Runtime {
                 | Operation::Backups
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
+        }
+        // A quota check reads the network and writes only its own observation; it takes the
+        // owner transaction only for a renewal, as the background pass does, so a slow
+        // provider never holds every other operation (SB-39).
+        if let Operation::Usage { id } = &operation {
+            return Ok(json!(
+                monitor::check(
+                    &self.store,
+                    self.native,
+                    &self.refresh,
+                    id,
+                    Some(&self.mutations),
+                    &self.usage_gate,
+                )
+                .await?
+            ));
         }
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
@@ -563,26 +585,57 @@ pub fn arm_hard_exit(after: std::time::Duration) {
 }
 /// Resolves on the first stop request the process receives: `SIGTERM` or `SIGINT` (Unix),
 /// Ctrl-C (elsewhere). Names the signal as a code for the log.
-pub async fn stop_requested() -> Result<&'static str, String> {
+/// SIGTERM and SIGINT (Ctrl-C on Windows), caught from the moment `listen` returns. An owner
+/// creates this before it publishes its control descriptor: a stop that arrives during start-up
+/// then runs the drain instead of the signal's default action, which would end the process
+/// with the descriptor left behind (lifecycle LC-01).
+pub struct StopSignals {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut terminate =
-            signal(SignalKind::terminate()).map_err(|_| "Shutdown signal unavailable.")?;
-        let mut interrupt =
-            signal(SignalKind::interrupt()).map_err(|_| "Shutdown signal unavailable.")?;
-        Ok(tokio::select! {
-            _ = terminate.recv() => "sigterm",
-            _ = interrupt.recv() => "sigint",
-        })
+    terminate: tokio::signal::unix::Signal,
+    #[cfg(unix)]
+    interrupt: tokio::signal::unix::Signal,
+}
+impl StopSignals {
+    /// Must be called inside a Tokio runtime.
+    pub fn listen() -> Result<Self, String> {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            Ok(Self {
+                terminate: signal(SignalKind::terminate())
+                    .map_err(|_| "Shutdown signal unavailable.")?,
+                interrupt: signal(SignalKind::interrupt())
+                    .map_err(|_| "Shutdown signal unavailable.")?,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(Self {})
+        }
     }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .map_err(|_| "Shutdown signal unavailable.")?;
-        Ok("ctrl_c")
+    /// Waits for the first stop and names it.
+    pub async fn requested(mut self) -> Result<&'static str, String> {
+        #[cfg(unix)]
+        {
+            Ok(tokio::select! {
+                _ = self.terminate.recv() => "sigterm",
+                _ = self.interrupt.recv() => "sigint",
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &mut self;
+            tokio::signal::ctrl_c()
+                .await
+                .map_err(|_| "Shutdown signal unavailable.")?;
+            Ok("ctrl_c")
+        }
     }
+}
+/// Waits for SIGTERM or SIGINT, listening only from this call on; `StopSignals` listens from
+/// earlier.
+pub async fn stop_requested() -> Result<&'static str, String> {
+    StopSignals::listen()?.requested().await
 }
 
 /// How an owner's shutdown ended (lifecycle LC-01).
@@ -652,6 +705,11 @@ impl Owner {
             control,
             monitor,
         } = self;
+        // No refresh grant starts once the drain begins: a quota check in flight holds no
+        // transaction (SB-39), and a grant it began after the drain would leave the provider's
+        // new token only in this exiting process's memory. A grant already sent still records
+        // its successor before returning.
+        runtime.refresh.set_grants(false);
         let mut drained = monitor.stop(left(deadline)).await;
         control.close().await;
         // The operation in flight holds the owner's transaction; taking it means it finished,
@@ -848,10 +906,25 @@ async fn execute(
             store.select_with_cooldown(provider, &pool, &id, monitor::now())?;
             Ok(Value::Null)
         }
-        // The owner transaction is already held here, so the refresh takes no second lock.
-        Operation::Usage { id } => Ok(json!(
-            monitor::check(&store, native, refresh_state, &id, None).await?
-        )),
+        // Only the offline CLI reaches this arm (`Runtime::execute` answers a quota check
+        // before taking its transaction); it owns the store alone, so no lock is needed. It
+        // honours the owner's recorded provider waits and records its own.
+        Operation::Usage { id } => {
+            let offline_gate;
+            let gate = match runtime {
+                Some(runtime) => &runtime.usage_gate,
+                None => {
+                    offline_gate = usage_gate::UsageGate::kept_in(
+                        root.join(usage_gate::HOLDS_FILE),
+                        monitor::now(),
+                    );
+                    &offline_gate
+                }
+            };
+            Ok(json!(
+                monitor::check(&store, native, refresh_state, &id, None, gate).await?
+            ))
+        }
         Operation::Launch {
             id,
             mode,
@@ -2173,5 +2246,356 @@ mod lifecycle_tests {
         assert!(!stopped.drained);
         assert!(started.elapsed() < Duration::from_secs(3));
         assert!(!tmp.path().join("control.json").exists());
+    }
+
+    /// A quota check in flight at quit holds no transaction, so the drain does not wait for it;
+    /// if the provider then rejects the token, the check must not spend the refresh token after
+    /// the drain (SB-39 seam review).
+    #[tokio::test]
+    async fn a_quota_check_left_running_at_quit_spends_no_refresh_token() {
+        use axum::{
+            http::StatusCode,
+            routing::{get, post},
+            Router,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let tmp = tempfile::tempdir().unwrap();
+        // Claude Code reads as signed out, so nothing marks the account as the one in use and
+        // a rejected token would be renewed.
+        let runtime =
+            fixtures::runtime(tmp.path(), fixtures::signed_out, fixtures::activates).await;
+        let owner = Owner {
+            runtime: runtime.clone(),
+            control: control::ControlHandle::start(runtime.clone())
+                .await
+                .unwrap(),
+            monitor: monitor::MonitorHandle::start(&runtime, false),
+        };
+        let account = fixtures::save(&runtime.store, "synthetic-a", "default");
+        let probes = Arc::new(AtomicUsize::new(0));
+        let grants = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let (p, g, s) = (probes.clone(), grants.clone(), gate.clone());
+        let app = Router::new()
+            .route(
+                "/api/oauth/usage",
+                get(move || {
+                    let (p, s) = (p.clone(), s.clone());
+                    async move {
+                        p.fetch_add(1, Ordering::SeqCst);
+                        s.acquire().await.unwrap().forget();
+                        StatusCode::UNAUTHORIZED
+                    }
+                }),
+            )
+            .route(
+                "/token",
+                post(move || {
+                    let g = g.clone();
+                    async move {
+                        g.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::BAD_REQUEST
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let base = format!("http://{address}");
+        *runtime.usage_gate.origins.lock().unwrap() = Some((base.clone(), base.clone()));
+        runtime.refresh.set_endpoint(format!("{base}/token"));
+        let check = {
+            let (runtime, id) = (runtime.clone(), account.id.clone());
+            tokio::spawn(async move { runtime.execute(Operation::Usage { id }).await })
+        };
+        while probes.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        // A background pass may have joined the stuck check and be abandoned at the deadline;
+        // what matters is what happens after the drain.
+        let started = std::time::Instant::now();
+        owner.shutdown(Duration::from_secs(2)).await;
+        assert!(started.elapsed() < Duration::from_secs(3));
+        // The provider answers after the drain: the token is rejected.
+        gate.add_permits(10);
+        assert!(check.await.unwrap().is_err());
+        assert_eq!(
+            grants.load(Ordering::SeqCst),
+            0,
+            "no grant after the drain began"
+        );
+    }
+}
+
+/// SB-39 end to end: the provider's not-before holds for every caller, a check never holds the
+/// owner's transaction, and same-account checks share one request.
+#[cfg(test)]
+mod usage_gate_tests {
+    use super::*;
+    use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
+    use fixtures::*;
+    use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+    use switchboard_core::MemoryVault;
+
+    struct Upstream {
+        calls: Arc<AtomicUsize>,
+        status: Arc<AtomicU16>,
+        retry_after: Arc<Mutex<&'static str>>,
+        hold: Arc<tokio::sync::Semaphore>,
+    }
+    /// A synthetic Claude usage endpoint: answers `status` (200 with a quota body), counts
+    /// requests, and waits for a permit when `hold` has none.
+    async fn upstream(runtime: &Runtime) -> Upstream {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let status = Arc::new(AtomicU16::new(200));
+        let retry_after = Arc::new(Mutex::new("600"));
+        let hold = Arc::new(tokio::sync::Semaphore::new(1_000));
+        let (c, s, r, h) = (
+            calls.clone(),
+            status.clone(),
+            retry_after.clone(),
+            hold.clone(),
+        );
+        let app = Router::new().route(
+            "/api/oauth/usage",
+            get(move || {
+                let (c, s, r, h) = (c.clone(), s.clone(), r.clone(), h.clone());
+                async move {
+                    c.fetch_add(1, Ordering::SeqCst);
+                    h.acquire().await.unwrap().forget();
+                    match s.load(Ordering::SeqCst) {
+                        200 => {
+                            axum::Json(json!({"five_hour":{"utilization":42.0,"resets_at":null}}))
+                                .into_response()
+                        }
+                        429 => (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            [("retry-after", *r.lock().unwrap())],
+                            "upstream detail that must not leak",
+                        )
+                            .into_response(),
+                        code => StatusCode::from_u16(code).unwrap().into_response(),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let base = format!("http://{address}");
+        *runtime.usage_gate.origins.lock().unwrap() = Some((base.clone(), base));
+        Upstream {
+            calls,
+            status,
+            retry_after,
+            hold,
+        }
+    }
+    async fn usage(runtime: &Runtime, id: &str) -> Result<Value, String> {
+        runtime.execute(Operation::Usage { id: id.into() }).await
+    }
+
+    #[tokio::test]
+    async fn no_caller_checks_before_the_providers_not_before() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+
+        up.status.store(429, Ordering::SeqCst);
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        // The desktop, the CLI and MCP all send this operation: none of them reaches the
+        // provider again inside its wait, even once it would answer.
+        up.status.store(200, Ordering::SeqCst);
+        for _ in 0..3 {
+            assert_eq!(
+                usage(&runtime, &a.id).await.unwrap_err(),
+                switchboard_proxy::USAGE_RATE_LIMITED
+            );
+        }
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        // The background leaves the row out of its pass, and its schedule is past the wait.
+        let health = runtime.store.snapshot().unwrap().accounts[0]
+            .usage_health
+            .clone()
+            .unwrap();
+        assert!(health.next_check_at - health.checked_at >= 600);
+        assert!(runtime.usage_gate.held(&a.id, monitor::now()));
+        // Nothing of the provider's answer is kept: the file has times and a fingerprint.
+        let file = std::fs::read_to_string(root.path().join(usage_gate::HOLDS_FILE)).unwrap();
+        assert!(!file.contains("synthetic-a-token") && !file.contains("upstream detail"));
+    }
+
+    #[tokio::test]
+    async fn the_first_check_after_the_wait_is_one_request() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+        up.status.store(429, Ordering::SeqCst);
+        *up.retry_after.lock().unwrap() = "1";
+        assert!(usage(&runtime, &a.id).await.is_err());
+        up.status.store(200, Ordering::SeqCst);
+        assert!(usage(&runtime, &a.id).await.is_err());
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(2_100)).await;
+        assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
+        assert_eq!(up.calls.load(Ordering::SeqCst), 2);
+        assert!(
+            !runtime.usage_gate.has_hold(&a.id),
+            "a passed wait is forgotten"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wait_is_kept_even_when_its_health_record_cannot_be_written() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+        // An observation stamped a little ahead of the clock makes the failed-health write
+        // refuse ("older than the stored observation").
+        let ahead = monitor::now() + 30;
+        let observation = switchboard_proxy::parse_usage_at(
+            Provider::Claude,
+            &json!({"five_hour":{"utilization":10.0,"resets_at":null}}),
+            ahead,
+        )
+        .unwrap();
+        runtime.store.observe(&a.id, observation).unwrap();
+        up.status.store(429, Ordering::SeqCst);
+        assert!(usage(&runtime, &a.id).await.is_err());
+        up.status.store(200, Ordering::SeqCst);
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_failure_leaves_a_manual_retry_open() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+        up.status.store(503, Ordering::SeqCst);
+        assert!(usage(&runtime, &a.id).await.is_err());
+        up.status.store(200, Ordering::SeqCst);
+        assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
+        assert_eq!(up.calls.load(Ordering::SeqCst), 2);
+        assert!(!runtime.usage_gate.has_hold(&a.id));
+    }
+
+    #[tokio::test]
+    async fn a_new_sign_in_is_checked_despite_the_old_tokens_wait() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+        up.status.store(429, Ordering::SeqCst);
+        assert!(usage(&runtime, &a.id).await.is_err());
+        // The same account signs in again: a new credential generation.
+        let mut renewed = credential("synthetic-a");
+        renewed.access_token = "synthetic-a-renewed".into();
+        runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                renewed,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.accounts[0].usage_health.is_none());
+        up.status.store(200, Ordering::SeqCst);
+        assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
+        assert_eq!(up.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn same_account_checks_share_one_request_and_hold_no_transaction() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let up = upstream(&runtime).await;
+        // The provider is slow: requests wait until a permit is given.
+        let held = up.hold.acquire_many(1_000).await.unwrap();
+        held.forget();
+        let first = {
+            let (runtime, id) = (runtime.clone(), a.id.clone());
+            tokio::spawn(async move { usage(&runtime, &id).await })
+        };
+        while up.calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        let second = {
+            let (runtime, id) = (runtime.clone(), a.id.clone());
+            tokio::spawn(async move { usage(&runtime, &id).await })
+        };
+        // The second caller asks while the first check is still waiting on the provider.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        // Any other operation proceeds while the provider is still answering.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.execute(Operation::Update {
+                id: a.id.clone(),
+                label: "renamed".into(),
+                enabled: true,
+            }),
+        )
+        .await
+        .expect("a quota check does not hold the owner's transaction")
+        .unwrap();
+        up.hold.add_permits(1_000);
+        assert_eq!(first.await.unwrap().unwrap()["used_percent"], 42.0);
+        assert_eq!(second.await.unwrap().unwrap()["used_percent"], 42.0);
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_offline_cli_honours_a_wait_the_owner_recorded() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        // An expired token: whatever happens, this test never reaches the network.
+        let mut expired = credential("synthetic-a");
+        expired.expires_at = Some(1_000);
+        let a = store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired.clone(),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let now = monitor::now();
+        store.usage_health(&a.id, "failed", now, now + 900).unwrap();
+        usage_gate::UsageGate::kept_in(root.path().join(usage_gate::HOLDS_FILE), now).hold(
+            &a.id,
+            &expired,
+            now,
+            now + 900,
+        );
+        let answer = execute(
+            store.clone(),
+            root.path(),
+            None,
+            Operation::Usage { id: a.id.clone() },
+        )
+        .await;
+        assert_eq!(answer.unwrap_err(), switchboard_proxy::USAGE_RATE_LIMITED);
     }
 }
