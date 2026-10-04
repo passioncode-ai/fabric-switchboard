@@ -144,7 +144,8 @@ export function createDemoAdapter(): Adapter {
       if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account.updated', existing.id, 'Synthetic sign-in renewed'); return structuredClone(existing); }
       const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
       state.accounts.push(item); log('account.added', item.id, 'Synthetic sign-in account added');
-      if (input.provider === 'codex') throw new Error('Account saved; isolated login cleanup needs attention.');
+      // Like the owner since SB-42: a saved account with its temporary folder still to remove.
+      if (input.provider === 'codex') return { ...structuredClone(item), login_cleanup: 'pending' as const };
       return structuredClone(item);
     },
     // Like the owner, an unknown or already finished sign-in cannot be cancelled.

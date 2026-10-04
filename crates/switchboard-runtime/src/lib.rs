@@ -208,6 +208,10 @@ pub struct Runtime {
     logins: Mutex<HashMap<String, launch::Login>>,
     /// Saved sign-ins whose staging home could not be removed yet.
     stale_logins: Mutex<Vec<launch::Login>>,
+    /// Sign-ins that saved their account (SB-42): login id → account, newest last, at most
+    /// `COMPLETED_LOGINS`. A repeated Finish returns the same account without capturing again;
+    /// they hold no sign-in slot.
+    completed_logins: Mutex<std::collections::VecDeque<(String, Account)>>,
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
@@ -237,6 +241,9 @@ pub fn backup_dir() -> Option<PathBuf> {
     }
     dirs::data_dir().map(|d| d.join("Fabric Switchboard Backups"))
 }
+/// Saved sign-ins remembered for a repeated Finish (SB-42).
+const COMPLETED_LOGINS: usize = 16;
+
 #[derive(Default)]
 struct CurrentCache {
     generation: u64,
@@ -264,6 +271,7 @@ impl Runtime {
             root,
             logins: Mutex::new(HashMap::new()),
             stale_logins: Mutex::new(Vec::new()),
+            completed_logins: Mutex::new(std::collections::VecDeque::new()),
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
@@ -335,14 +343,32 @@ impl Runtime {
             json!({"login_id": id, "message": "Finish official sign-in in Terminal, then finish sign-in in Switchboard."}),
         )
     }
-    fn finish_login(&self, id: &str) -> Result<Account, String> {
+    /// Saves the signed-in account and cleans its staging home. The result is the account with
+    /// `login_cleanup: "done" | "pending"`: a saved account is a success even when the staging
+    /// home could not be removed yet (it is retried before the next sign-in and on every repeated
+    /// Finish). A repeated Finish returns the same account and never captures again (SB-42).
+    fn finish_login(&self, id: &str) -> Result<Value, String> {
+        let receipt = |account: &Account, cleaned: bool| {
+            let mut value = json!(account);
+            value["login_cleanup"] = json!(if cleaned { "done" } else { "pending" });
+            value
+        };
         let mut logins = self
             .logins
             .lock()
             .map_err(|_| "Sign-in state unavailable.")?;
-        let login = logins
-            .get_mut(id)
-            .ok_or("Sign-in not found. Start again.")?;
+        let Some(login) = logins.get_mut(id) else {
+            drop(logins);
+            let account = self
+                .completed_logins
+                .lock()
+                .map_err(|_| "Sign-in state unavailable.")?
+                .iter()
+                .find(|(done, _)| done == id)
+                .map(|(_, account)| account.clone())
+                .ok_or("Sign-in not found. Start again.")?;
+            return Ok(receipt(&account, self.retry_cleanup_of(id)));
+        };
         let account = if let Some(account) = &login.saved {
             account.clone()
         } else {
@@ -363,24 +389,51 @@ impl Runtime {
             login.saved = Some(account.clone());
             account
         };
-        let cleaned = launch::clean_login(login);
+        let cleaned = launch::clean_login(login).is_ok();
         // The account is saved: the slot is released even when staging cleanup fails.
         if let Some(login) = logins.remove(id) {
-            if cleaned.is_err() {
+            if !cleaned {
                 if let Ok(mut stale) = self.stale_logins.lock() {
                     stale.push(login);
                 }
             }
         }
+        drop(logins);
+        if let Ok(mut completed) = self.completed_logins.lock() {
+            completed.retain(|(done, _)| done != id);
+            completed.push_back((id.to_owned(), account.clone()));
+            while completed.len() > COMPLETED_LOGINS {
+                completed.pop_front();
+            }
+        }
         self.invalidate_current();
-        cleaned.map(|()| account)
+        Ok(receipt(&account, cleaned))
+    }
+    /// Tries once more to remove a saved sign-in's staging home. True when nothing is left.
+    fn retry_cleanup_of(&self, id: &str) -> bool {
+        let Ok(mut stale) = self.stale_logins.lock() else {
+            return false;
+        };
+        stale.retain(|login| login.id != id || launch::clean_login(login).is_err());
+        !stale.iter().any(|login| login.id == id)
     }
     fn login_status(&self, id: &str) -> Result<Value, String> {
         let logins = self
             .logins
             .lock()
             .map_err(|_| "Sign-in state unavailable.")?;
-        let login = logins.get(id).ok_or("Sign-in not found. Start again.")?;
+        let Some(login) = logins.get(id) else {
+            // A saved sign-in reads as complete; Finish then returns its receipt.
+            let saved = self
+                .completed_logins
+                .lock()
+                .is_ok_and(|completed| completed.iter().any(|(done, _)| done == id));
+            return if saved {
+                Ok(json!({"state": "complete"}))
+            } else {
+                Err("Sign-in not found. Start again.".into())
+            };
+        };
         Ok(json!({"state": launch::login_state(login)}))
     }
     fn retry_login_cleanup(&self) {
@@ -957,7 +1010,7 @@ async fn execute(
             label,
             pool,
         } => needs_owner()?.begin_login(provider, label, pool),
-        Operation::FinishLogin { login_id } => Ok(json!(needs_owner()?.finish_login(&login_id)?)),
+        Operation::FinishLogin { login_id } => needs_owner()?.finish_login(&login_id),
         Operation::LoginStatus { login_id } => needs_owner()?.login_status(&login_id),
         Operation::CancelLogin { login_id } => {
             needs_owner()?.cancel_login(&login_id)?;
@@ -1485,6 +1538,7 @@ mod owner_tests {
         let home = parent.join("login");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("auth.json"), "synthetic-test-file").unwrap();
+        let account_id = account.id.clone();
         let login = launch::fixture_login(home.clone(), account);
         let id = login.id.clone();
         runtime.logins.lock().unwrap().insert(id.clone(), login);
@@ -1495,17 +1549,79 @@ mod owner_tests {
                 login_id: id.clone(),
             })
             .await;
-        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(
-            result.unwrap_err(),
-            "Account saved; isolated login cleanup needs attention."
-        );
-        assert!(runtime.logins.lock().unwrap().is_empty());
+        // SB-42: the account is saved, so Finish succeeds and says the cleanup is pending.
+        let first = result.unwrap();
+        assert_eq!(first["login_cleanup"], "pending");
+        assert_eq!(first["id"], json!(account_id));
+        assert!(runtime.logins.lock().unwrap().is_empty(), "no slot is held");
         assert!(home.exists());
-        // Cleanup is retried before the next sign-in starts.
-        runtime.retry_login_cleanup();
+        // A repeated Finish (another window, a retry) returns the same account, captures
+        // nothing, and the sign-in still reads as complete; the cleanup is still pending.
+        let again = runtime
+            .execute(Operation::FinishLogin {
+                login_id: id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (again["id"].clone(), again["login_cleanup"].clone()),
+            (json!(account_id), json!("pending"))
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::LoginStatus {
+                    login_id: id.clone()
+                })
+                .await
+                .unwrap()["state"],
+            "complete"
+        );
+        // Once the folder can be removed, the next Finish cleans it and says so.
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let done = runtime
+            .execute(Operation::FinishLogin {
+                login_id: id.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(done["login_cleanup"], "done");
         assert!(!home.exists());
         assert!(runtime.stale_logins.lock().unwrap().is_empty());
+        assert_eq!(
+            runtime.store.snapshot().unwrap().accounts.len(),
+            1,
+            "one account, saved once"
+        );
+        // An unknown sign-in is still unknown.
+        assert_eq!(
+            runtime
+                .execute(Operation::FinishLogin {
+                    login_id: "unknown".into()
+                })
+                .await
+                .unwrap_err(),
+            "Sign-in not found. Start again."
+        );
+    }
+    #[test]
+    fn completed_sign_ins_are_bounded() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(fixtures::runtime(root.path(), signed_out, activates));
+        let account = save(&runtime.store, "synthetic-a", "default");
+        for i in 0..(COMPLETED_LOGINS + 5) {
+            let home = root.path().join(format!("staging-{i}"));
+            std::fs::create_dir_all(&home).unwrap();
+            let login = launch::fixture_login(home, account.clone());
+            let id = login.id.clone();
+            runtime.logins.lock().unwrap().insert(id.clone(), login);
+            assert_eq!(runtime.finish_login(&id).unwrap()["login_cleanup"], "done");
+        }
+        assert_eq!(
+            runtime.completed_logins.lock().unwrap().len(),
+            COMPLETED_LOGINS
+        );
     }
     #[tokio::test]
     async fn current_accounts_do_not_wait_behind_a_mutation() {

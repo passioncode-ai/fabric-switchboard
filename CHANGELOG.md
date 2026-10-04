@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Finishing a sign-in whose temporary folder could not be removed now reports the account as
+  added (with a note) instead of an error, and finishing it again returns the same account; the
+  folder is removed on the next try.
+
 ## 0.5.4-beta.2 — 2026-10-04
 
 Switchboard now stays quiet while nothing changes, and it respects every limit the providers

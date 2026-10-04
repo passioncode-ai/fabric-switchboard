@@ -557,7 +557,8 @@ pub(crate) enum Probe {
         /// it, so such a read is not reused.
         newest: i64,
     },
-    /// The keychain holding the item is locked.
+    /// The keychain holding the item is locked (macOS only; elsewhere never produced).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Locked,
     /// The source could not be examined.
     Unavailable,
@@ -747,7 +748,11 @@ fn report(slot: &mut Slot, provider: Provider, code: &'static str) {
     }
 }
 /// The keychain is locked: the background waits for it to be unlocked rather than asking.
+#[cfg(unix)]
 const LOCKED: &str = switchboard_core::security_cli::UNAVAILABLE;
+/// Windows has no `security_cli`; a locked probe is a macOS state, the text kept identical.
+#[cfg(not(unix))]
+const LOCKED: &str = "Keychain unavailable. Unlock it and allow access, then retry.";
 /// The item would make macOS ask before Switchboard may read it.
 #[cfg(target_os = "macos")]
 const NEEDS_ACCESS: &str = switchboard_core::external_keychain::EXTERNAL_REFUSED;

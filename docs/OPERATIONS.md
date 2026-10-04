@@ -37,7 +37,7 @@ Windows private filesystem operations use current-user DACLs, reject reparse poi
 
 ## Interrupted onboarding and launch
 
-Keep the app open during official sign-in. Finish can be retried in the same app lifetime without adding a duplicate if credential storage succeeded but cleanup failed. Cancel refuses while Terminal is running or launch is pending. Close/finish the staged CLI, then retry; it does not terminate the user's process.
+Keep the app open during official sign-in. Finish can be repeated in the same app lifetime: once the account is saved it returns that account again, with `login_cleanup` `done` or `pending`, and never captures a second time; a pending cleanup is retried on each repeat and before the next sign-in (SB-42). Cancel refuses while Terminal is running or launch is pending. Close/finish the staged CLI, then retry; it does not terminate the user's process.
 
 On app crash the in-memory pending-login registry is lost. The app does **not** silently delete leftover login homes or Keychain records at restart. Current recovery is explicit: close the matching Terminal, locate only the UUID under the app's `logins/`, and remove that staging folder and, for Claude, its matching derived Keychain service through Keychain Access after confirming ownership. Never delete the unscoped `Claude Code-credentials` item. Derivation is in `keychain_service` and tested in `service_matches_derived_name`; do not guess it from an account label. Restart sign-in with a new profile. A resumable pending-login registry is a follow-on feature, not current behavior.
 

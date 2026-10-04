@@ -140,7 +140,7 @@ fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Result<(), Stri
     let _ = executable;
     Ok(())
 }
-#[cfg(any(unix, test))]
+#[cfg(unix)]
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
