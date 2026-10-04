@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard uninstall` shows what Switchboard created on this Mac and, with `--yes`, removes
+  it: saved accounts' credentials, the old unused vault key, the `~/.local/bin` link and the data
+  folder's own files. Backups and the Claude Code and Codex sign-ins are never touched.
 - Finishing a sign-in whose temporary folder could not be removed now reports the account as
   added (with a note) instead of an error, and finishing it again returns the same account; the
   folder is removed on the next try.

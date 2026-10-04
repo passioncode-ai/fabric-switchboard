@@ -84,6 +84,17 @@ enum Command {
         #[arg(long)]
         read_only: bool,
     },
+    /// Remove what Switchboard created on this machine: saved accounts' credentials, the
+    /// ~/.local/bin link and its data folder. Shows the plan unless --yes. Backups, their key and
+    /// the ordinary Claude Code and Codex sign-ins are never touched. Quit the app first.
+    Uninstall {
+        /// Keep the data folder (accounts list, settings); remove credentials and the link only.
+        #[arg(long)]
+        keep_data: bool,
+        /// Remove for real; without it nothing changes.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 #[derive(Subcommand)]
 enum Project {
@@ -302,6 +313,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
+    if let Command::Uninstall { keep_data, yes } = cli.command {
+        return switchboard_runtime::uninstall::uninstall(
+            &root,
+            std::sync::Arc::new(switchboard_core::NativeVault::new()),
+            keep_data,
+            yes,
+            &switchboard_runtime::uninstall::places(),
+        );
+    }
     if matches!(cli.command, Command::Serve) {
         if let Some(log) = oplog::Log::default_location() {
             oplog::install(log);
@@ -493,7 +513,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 }
             }
         },
-        Command::Serve | Command::Mcp { .. } => unreachable!(),
+        Command::Serve | Command::Mcp { .. } | Command::Uninstall { .. } => unreachable!(),
     };
     let value = call(&root, operation).await?;
     match &cli.command {
