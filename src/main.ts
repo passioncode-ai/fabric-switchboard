@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, failedNextCheck, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -502,14 +502,19 @@ function usageCell(account: Account) {
   const failed = account.usage_health?.status === 'failed' || account.usage_health?.status === 'unavailable';
   const control = button('', () => { if (quotaOpen.has(account.id)) quotaOpen.delete(account.id); else quotaOpen.add(account.id); render(); restoreFocus(`quota-${account.id}`); }, 'row-usage', `quota-${account.id}`);
   control.setAttribute('aria-expanded', String(quotaOpen.has(account.id)));
-  control.setAttribute('aria-label', `${Math.round(observation.used_percent)}% of the highest quota used${resetPassed ? ' before reset; current usage unknown' : failed ? '; last check failed' : stale ? '; stale observation' : ''}. Show quota windows.`);
-  const meter = el('progress', `usage-meter ${observation.used_percent >= 90 ? 'is-high' : ''}`); meter.max = 100; meter.value = observation.used_percent;
+  // The account's own capacity; a feature limit is shown in the disclosure, not here (SB-40).
+  const accountUsed = accountUsedPercent(observation);
+  const shown = accountUsed ?? 0;
+  control.setAttribute('aria-label', `${accountUsed === null ? 'Account usage unknown' : `${Math.round(shown)}% of the highest quota used`}${resetPassed ? ' before reset; current usage unknown' : failed ? '; last check failed' : stale ? '; stale observation' : ''}. Show quota windows.`);
+  const meter = el('progress', `usage-meter ${shown >= 90 ? 'is-high' : ''}`); meter.max = 100; meter.value = shown;
   meter.setAttribute('aria-label', resetPassed || stale || failed ? 'Last reported quota used' : 'Reported quota used');
   const line = el('span', 'usage-line');
-  line.append(el('strong', '', `${Math.round(observation.used_percent)}%`), el('span', stale || failed ? 'stale' : '', resetPassed ? 'reset since check' : failed ? 'check failed' : stale ? `stale · ${age(observation.observed_at)}` : age(observation.observed_at)));
-  control.append(line, meter); cell.append(control);
+  line.append(el('strong', '', accountUsed === null ? 'Usage unknown' : `${Math.round(shown)}%`), el('span', stale || failed ? 'stale' : '', resetPassed ? 'reset since check' : failed ? 'check failed' : stale ? `stale · ${age(observation.observed_at)}` : age(observation.observed_at)));
+  // Unknown is never drawn as an empty meter: no meter at all (SB-40).
+  if (accountUsed === null) control.append(line); else control.append(line, meter);
+  cell.append(control);
   const quota = quotaOrder(account, { ...quotaContext(), limits: [] });
-  const reset = quota.state === 'blocked' ? quota.until : observation.resets_at;
+  const reset = quota.state === 'blocked' ? quota.until : accountReset(observation);
   if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
   // A hold is not a quota reset; show both when they differ.
   if (reset && (!limit || reset !== limit.until)) cell.append(resetDisplay(reset, stale || failed ? 'Reported reset' : quota.state === 'blocked' ? 'Quota windows reset' : 'Resets'));
@@ -522,7 +527,8 @@ function quotaDetails(account: Account) {
   const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
   for (const window of windows) {
     const reset = windowReset(window.resets_at, now);
-    const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`));
+    const name = 'name' in window && isFeatureWindow(window) ? featureWindowLabel(window.name) : window.name;
+    const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${name} · usage unknown since reset` : `${name} · ${Math.round(window.used_percent)}% used`));
     if (reset) row.append(el('span', 'usage-caption', `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before`));
     else if (window.resets_at) row.append(resetDisplay(window.resets_at));
     else row.append(el('span', 'usage-caption', 'Reset time unavailable'));

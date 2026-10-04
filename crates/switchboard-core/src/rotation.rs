@@ -234,11 +234,18 @@ fn fresh_usage(account: &Account, policy: &RotationPolicy, now: i64) -> Option<f
     if health.status != "ok" || health.checked_at < usage.observed_at || health.checked_at > now
         || usage.observed_at > now || now - usage.observed_at > policy.max_age_seconds
         || now - health.checked_at > policy.max_age_seconds
-        // A reset crossing needs a fresh provider observation, never a guessed zero.
-        || usage.resets_at.is_some_and(|t| t <= now)
-        || usage.windows.iter().any(|w| w.resets_at.is_some_and(|t| t <= now))
+        // A reset crossing needs a fresh provider observation, never a guessed zero. A feature
+        // window's reset says nothing about the account (SB-40); with windows stored, the
+        // aggregate's reset is one of theirs.
+        || (usage.windows.is_empty() && usage.resets_at.is_some_and(|t| t <= now))
+        || usage
+            .windows
+            .iter()
+            .any(|w| !w.is_feature() && w.resets_at.is_some_and(|t| t <= now))
     {
         return None;
     }
-    Some(usage.used_percent)
+    // A feature limit does not stand for the account (SB-40); unknown account capacity is
+    // never eligible.
+    usage.account_used_percent()
 }

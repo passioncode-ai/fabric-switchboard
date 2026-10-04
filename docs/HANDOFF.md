@@ -1,3 +1,15 @@
+# SB-40 — Codex limits beyond the two windows (2026-10-04)
+
+**Start here:** [run record](runs/2026-10-04-sb-40-codex-limits/README.md); contract in
+[CONTRACTS](CONTRACTS.md#codex-limits-beyond-the-primary-and-secondary-windows-sb-40-2026-10-04).
+Codex observations now carry spend control, workspace credit/usage limits, a reached limit no
+window shows, and each metered feature's windows — as ordinary windows, so 0.5.3 still opens the
+store. Rotation, the list, CLI and MCP weigh the account's own windows. Gate exit 0, 337 Rust
+tests. **Exact next autonomous code task:** SB-41 — typed, attributable limit evidence
+(`docs/reports/2026-10-04-system-review/raw/sessions.md` SES-B).
+
+---
+
 # SB-39 — one provider not-before for every quota check (2026-10-04)
 
 **Start here:** [run record](runs/2026-10-04-sb-39-quota-deadline/README.md) (brief, decisions, REQ

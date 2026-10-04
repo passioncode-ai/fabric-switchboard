@@ -713,6 +713,197 @@ async fn probe_usage_from(
     store.observe_credential(&id, &credential, usage.clone())?;
     Ok(usage)
 }
+/// One window's use and reset. A malformed window is an unsupported response.
+fn parse_window(
+    provider: Provider,
+    window: &serde_json::Value,
+    key: &str,
+    observed_at: i64,
+) -> Result<(f64, Option<i64>), String> {
+    let used_percent = window
+        .get(key)
+        .and_then(serde_json::Value::as_f64)
+        .ok_or("Usage response unsupported.")?;
+    if !used_percent.is_finite() || !(0. ..=100.).contains(&used_percent) {
+        return Err("Usage response unsupported.".into());
+    }
+    let reset_key = if provider == Provider::Claude {
+        "resets_at"
+    } else {
+        "reset_at"
+    };
+    let resets_at = if let Some(reset) = window.get(reset_key).filter(|v| !v.is_null()) {
+        Some(parse_reset(reset, observed_at)?)
+    } else if provider == Provider::Codex {
+        match window.get("reset_after_seconds").filter(|v| !v.is_null()) {
+            Some(reset) => {
+                let seconds = reset
+                    .as_i64()
+                    .filter(|n| *n >= 0)
+                    .ok_or("Usage reset unsupported.")?;
+                Some(
+                    observed_at
+                        .checked_add(seconds)
+                        .filter(|t| *t <= 253_402_300_799)
+                        .ok_or("Usage reset unsupported.")?,
+                )
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    Ok((used_percent, resets_at))
+}
+
+/// At most this many feature windows; fewer when the main windows and account-wide blockers
+/// leave less of the store's 16.
+const MAX_FEATURE_WINDOWS: usize = 12;
+
+/// The Codex dimensions beyond the primary and secondary windows, read as the official client
+/// reads them (openai/codex@afb436d, `rate_limit_snapshots_from_payload`; SB-40). Account-wide
+/// blockers become ordinary windows; each metered feature's windows are named
+/// `feature_<feature>_primary|secondary` and do not stand for the account
+/// (`Usage::account_used_percent`). Credits are a purchase measure and are not kept. An unknown
+/// reached-type or a malformed feature entry is skipped, never guessed.
+fn codex_limits(value: &serde_json::Value, observed_at: i64, windows: &mut Vec<UsageWindow>) {
+    let block = |name: &str, windows: &mut Vec<UsageWindow>| {
+        if !windows.iter().any(|w| w.name == name) {
+            windows.push(UsageWindow {
+                name: name.into(),
+                used_percent: 100.0,
+                resets_at: None,
+            });
+        }
+    };
+    // The member's individual spend control: a measured percentage when detailed.
+    if let Some(spend) = value.get("spend_control").filter(|v| v.is_object()) {
+        let reached = spend.get("reached") == Some(&serde_json::Value::Bool(true));
+        // The wire's `used_percent` is an unbounded integer: an overspend reads above 100 and is
+        // clamped, never dropped; its reset is read on its own, so a bad reset loses only itself.
+        let detailed = spend
+            .get("individual_limit")
+            .filter(|v| v.is_object())
+            .and_then(|limit| {
+                let used = limit
+                    .get("used_percent")?
+                    .as_f64()
+                    .filter(|p| p.is_finite())?;
+                let resets_at = parse_window(
+                    Provider::Codex,
+                    &serde_json::json!({"used_percent": 0, "reset_at": limit.get("reset_at"),
+                        "reset_after_seconds": limit.get("reset_after_seconds")}),
+                    "used_percent",
+                    observed_at,
+                )
+                .ok()
+                .and_then(|(_, reset)| reset);
+                Some((used.clamp(0.0, 100.0), resets_at))
+            });
+        match detailed {
+            Some((used_percent, resets_at)) => windows.push(UsageWindow {
+                name: "spend_limit".into(),
+                used_percent: if reached { 100.0 } else { used_percent },
+                resets_at,
+            }),
+            None if reached => block("spend_limit", windows),
+            None => {}
+        }
+    }
+    let reached = value
+        .pointer("/rate_limit_reached_type/type")
+        .and_then(serde_json::Value::as_str);
+    match reached {
+        Some("workspace_owner_credits_depleted" | "workspace_member_credits_depleted") => {
+            block("workspace_credits", windows)
+        }
+        Some("workspace_owner_usage_limit_reached" | "workspace_member_usage_limit_reached") => {
+            block("workspace_usage_limit", windows)
+        }
+        _ => {}
+    }
+    let flag = |pointer: &str, expected: bool| {
+        value.pointer(pointer).and_then(serde_json::Value::as_bool) == Some(expected)
+    };
+    let main_full = windows
+        .iter()
+        .any(|w| matches!(w.name.as_str(), "primary" | "secondary") && w.used_percent >= 100.0);
+    if !main_full
+        && (flag("/rate_limit/limit_reached", true)
+            || flag("/rate_limit/allowed", false)
+            || reached == Some("rate_limit_reached"))
+    {
+        block("limit_reached", windows);
+    }
+    let Some(features) = value
+        .get("additional_rate_limits")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    // Whatever room the main windows and blockers left in the store's 16 (never 17, which would
+    // make the whole observation invalid).
+    let room = MAX_FEATURE_WINDOWS.min(16usize.saturating_sub(windows.len()));
+    let mut scoped: Vec<UsageWindow> = Vec::new();
+    for feature in features {
+        let Some(id) = feature
+            .get("metered_feature")
+            .and_then(serde_json::Value::as_str)
+            .map(feature_id)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        for (slot, pointer) in [
+            ("primary", "/rate_limit/primary_window"),
+            ("secondary", "/rate_limit/secondary_window"),
+        ] {
+            if scoped.len() == room {
+                break;
+            }
+            let name = format!("{}{id}_{slot}", switchboard_core::FEATURE_WINDOW_PREFIX);
+            let Some(window) = feature.pointer(pointer).filter(|v| v.is_object()) else {
+                continue;
+            };
+            let Ok((used_percent, resets_at)) =
+                parse_window(Provider::Codex, window, "used_percent", observed_at)
+            else {
+                continue;
+            };
+            if scoped.iter().any(|w| w.name == name) {
+                continue;
+            }
+            scoped.push(UsageWindow {
+                name,
+                used_percent,
+                resets_at,
+            });
+        }
+    }
+    // A stable order, so a provider listing its features differently is not a quota change
+    // (core `same_quota` compares windows in order; LC-08).
+    scoped.sort_by(|a, b| a.name.cmp(&b.name));
+    windows.extend(scoped);
+}
+
+/// A provider feature id as a window-name fragment: lowercase `[a-z0-9_]`, at most 40 bytes, so
+/// `feature_<id>_secondary` fits the store's 64-byte window names.
+fn feature_id(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            let c = c.to_ascii_lowercase();
+            if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(40)
+        .collect::<String>()
+        .trim_matches('_')
+        .to_owned()
+}
+
 pub fn parse_usage(provider: Provider, value: &serde_json::Value) -> Result<Usage, String> {
     parse_usage_at(provider, value, now())
 }
@@ -747,44 +938,15 @@ pub fn parse_usage_at(
         let Some(window) = value.pointer(path).filter(|v| !v.is_null()) else {
             continue;
         };
-        let used_percent = window
-            .get(key)
-            .and_then(serde_json::Value::as_f64)
-            .ok_or("Usage response unsupported.")?;
-        if !used_percent.is_finite() || !(0. ..=100.).contains(&used_percent) {
-            return Err("Usage response unsupported.".into());
-        }
-        let reset_key = if provider == Provider::Claude {
-            "resets_at"
-        } else {
-            "reset_at"
-        };
-        let resets_at = if let Some(reset) = window.get(reset_key).filter(|v| !v.is_null()) {
-            Some(parse_reset(reset, observed_at)?)
-        } else if provider == Provider::Codex {
-            match window.get("reset_after_seconds").filter(|v| !v.is_null()) {
-                Some(reset) => {
-                    let seconds = reset
-                        .as_i64()
-                        .filter(|n| *n >= 0)
-                        .ok_or("Usage reset unsupported.")?;
-                    Some(
-                        observed_at
-                            .checked_add(seconds)
-                            .filter(|t| *t <= 253_402_300_799)
-                            .ok_or("Usage reset unsupported.")?,
-                    )
-                }
-                None => None,
-            }
-        } else {
-            None
-        };
+        let (used_percent, resets_at) = parse_window(provider, window, key, observed_at)?;
         windows.push(UsageWindow {
             name: name.into(),
             used_percent,
             resets_at,
         });
+    }
+    if provider == Provider::Codex {
+        codex_limits(value, observed_at, &mut windows);
     }
     aggregate_usage(
         windows,

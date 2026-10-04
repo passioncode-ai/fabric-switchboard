@@ -181,6 +181,35 @@ check(() => {
 });
 
 
+// SB-40: a metered feature's limit does not rank or block the account; account-wide blockers do;
+// an observation with only feature windows is unknown, never zero.
+check(() => {
+  const now = 1_000_000;
+  const row = (id, windows) => ({ id, label: id, provider: 'codex', pool: 'default', enabled: true, kind: 'oauth', created_at: 1,
+    usage: { used_percent: Math.max(...windows.map(w => w[1])), observed_at: now - 10, resets_at: now + 3600, source: 'codex_oauth',
+      windows: windows.map(([name, used_percent]) => ({ name, used_percent, resets_at: now + 3600 })) } });
+  const feature = row('feature', [['primary', 30], ['feature_codex_other_primary', 100]]);
+  assert.equal(logic.quotaOrder(feature, { nowSeconds: now }).state, 'available');
+  assert.equal(logic.quotaOrder(feature, { nowSeconds: now }).used, 30);
+  assert.equal(logic.accountUsedPercent(feature.usage), 30);
+  const spend = row('spend', [['primary', 5], ['spend_limit', 100]]);
+  assert.equal(logic.quotaOrder(spend, { nowSeconds: now }).state, 'blocked');
+  const only = row('only', [['feature_codex_other_primary', 0]]);
+  assert.equal(logic.quotaOrder(only, { nowSeconds: now }).state, 'unknown');
+  assert.equal(logic.accountUsedPercent(only.usage), null);
+  assert.equal(logic.accountUsedPercent({ used_percent: 12, observed_at: now, resets_at: null, source: 'claude_oauth' }), 12, 'pre-0.4 observation without windows');
+  assert.equal(logic.featureWindowLabel('feature_codex_other_primary'), 'codex_other · primary feature limit');
+  assert.equal(logic.featureWindowLabel('feature_x'), 'x · feature limit');
+  assert.equal(logic.isFeatureWindow({ name: 'five_hour' }), false);
+  // A feature's reset is neither the account's reset nor a reason to call the account stale.
+  const soon = { ...feature.usage, resets_at: now + 900, windows: [
+    { name: 'primary', used_percent: 30, resets_at: now + 7200 }, { name: 'feature_codex_other_primary', used_percent: 100, resets_at: now - 5 }] };
+  assert.equal(logic.accountReset(soon), now + 7200);
+  assert.equal(logic.usageFreshness(soon, 300, now).resetPassed, false);
+  assert.equal(logic.quotaOrder({ ...feature, usage: soon }, { nowSeconds: now }).state, 'available');
+  assert.equal(logic.accountReset(only.usage), null);
+});
+
 // R3–R5: quota ordering is explicit, conservative and independent of input order.
 check(() => {
   const now = 1_000_000;

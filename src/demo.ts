@@ -60,6 +60,14 @@ export function createDemoAdapter(): Adapter {
     waiting.usage = null;
     waiting.usage_health = { status: 'failed', checked_at: now() - 30, next_check_at: now() + 870 };
     rateLimited.add(waiting.id);
+    // SB-40: one Codex feature is exhausted while the account itself has room.
+    const codex = state.accounts.find(a => a.id === 'demo-codex-work')!;
+    codex.usage!.windows = [
+      { name: 'primary', used_percent: codex.usage!.used_percent, resets_at: now() + 7200 },
+      { name: 'secondary', used_percent: 41, resets_at: now() + 432000 },
+      { name: 'feature_codex_other_primary', used_percent: 100, resets_at: now() + 900 },
+    ];
+    codex.usage!.used_percent = 100;
   }
   const signInRequired = new Set(['demo-claude-meadow']);
   const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];

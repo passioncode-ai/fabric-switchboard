@@ -50,13 +50,18 @@ The server works out which session asks from its own environment, first match wi
 
 `accounts[]` per account: `id`, `label`, `provider`, `pool`, `health`, `checked_at`,
 `next_check_at`, `known`, `fresh`, `lowest_remaining_percent`, `windows[]`
-(`name`, `used_percent`, `remaining_percent`, `resets_at`), `observed_at`, `age_seconds`,
+(`name`, `scope`, `used_percent`, `remaining_percent`, `resets_at`), `observed_at`, `age_seconds`,
 `source`, `reason`. Times are RFC 3339.
 
 - `known: false` — no observation yet, or an API-key account (quota is reported for OAuth
   subscription accounts only). `lowest_remaining_percent` is then null: unknown, not zero.
+- `scope: feature` marks a window that limits one metered feature of a Codex account (named
+  `feature_<feature>_primary|secondary`); `scope: account` windows — including `spend_limit`,
+  `workspace_credits`, `workspace_usage_limit`, `limit_reached` — limit the whole account.
+  `lowest_remaining_percent` covers account windows only, and is null with `known: true` when
+  the provider reported nothing but feature limits: unknown, not zero.
 - `fresh` is false when the observation is older than the pool's freshest enabled rotation
-  policy allows (300 seconds without one), when a window's reset time has passed, or when
+  policy allows (300 seconds without one), when an account window's reset time has passed, or when
   the last check failed.
 - `refresh: true` needs one `account_id` and asks the provider. For an inactive Claude account
   whose token has expired, Switchboard first renews that sign-in itself (0.5); the account the

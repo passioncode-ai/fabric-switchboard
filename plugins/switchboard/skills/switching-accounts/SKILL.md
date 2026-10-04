@@ -89,10 +89,12 @@ From `switchboard_usage`, per account and window:
   when present (a window has reset since the observation). Never present a stale value
   as current.
 - `health: failed` means the last check failed; the numbers are old.
-- Quote `remaining_percent` and `resets_at` as given; the lowest window is
-  `lowest_remaining_percent`. Do not extrapolate how long the quota will last.
+- Quote `remaining_percent` and `resets_at` as given; the lowest account window is
+  `lowest_remaining_percent`; a `scope: feature` window limits only that feature. Do not extrapolate how long the quota will last.
 - `refresh: true` with one `account_id` asks the provider. Within 60 seconds of the last
-  check it returns the earlier observation with a `note`; accept it, do not retry.
+  check it returns the earlier observation with a `note`; accept it, do not retry. While a
+  wait the provider asked for lasts, it is refused (*Usage checks are rate limited by the
+  provider…*); the account's `next_check_at` says when to look again.
   Refresh only when the operator's decision depends on a fresh value.
 
 ## 4. Switch an account

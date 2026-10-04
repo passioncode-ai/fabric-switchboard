@@ -45,7 +45,7 @@ fn tools() -> Vec<(bool, Value)> {
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed pool, isolated, or native), the signed-in CLI accounts, selected accounts per pool, active project rules and automatic rotation. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, and the lowest remaining quota.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. refresh asks the provider for one account and is refused within 60 seconds of its last check, and until the time the provider asked for after answering a check with 429; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account and is refused within 60 seconds of its last check, and until the time the provider asked for after answering a check with 429; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own pool for any managed session; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"Project rule","description":"The optional project rule for a folder, per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
@@ -557,12 +557,27 @@ fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
         .map(|w| {
             let used = w["used_percent"].as_f64().unwrap_or(100.0);
             let resets = w["resets_at"].as_i64();
-            reset_passed |= resets.is_some_and(|t| t <= time);
-            json!({"name": w["name"], "used_percent": used, "remaining_percent": ((100.0 - used) * 10.0).round() / 10.0, "resets_at": resets.map(rfc3339)})
+            let feature = w["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with(switchboard_core::FEATURE_WINDOW_PREFIX));
+            // A feature window's reset does not make the account's figures stale (SB-40).
+            reset_passed |= !feature && resets.is_some_and(|t| t <= time);
+            // A metered feature's limit does not stand for the account (SB-40).
+            let scope = if w["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with(switchboard_core::FEATURE_WINDOW_PREFIX))
+            {
+                "feature"
+            } else {
+                "account"
+            };
+            json!({"name": w["name"], "scope": scope, "used_percent": used, "remaining_percent": ((100.0 - used) * 10.0).round() / 10.0, "resets_at": resets.map(rfc3339)})
         })
         .collect();
+    // The account's remaining capacity; null when only feature limits were reported.
     let lowest = windows
         .iter()
+        .filter(|w| w["scope"] == "account")
         .filter_map(|w| w["remaining_percent"].as_f64())
         .reduce(f64::min);
     let age = (time - observed).max(0);
@@ -598,4 +613,45 @@ pub(crate) fn rule_views(snapshot: &Value, time: i64) -> Vec<Value> {
                 "account": account.map(|a| json!({"id": a["id"], "label": a["label"], "pool": a["pool"]}))})
         })
         .collect()
+}
+
+#[cfg(test)]
+mod usage_view_tests {
+    use super::*;
+
+    /// SB-40: an agent reading `switchboard_usage` sees which window limits one feature, and the
+    /// account's remaining capacity ignores it; only feature limits leave it unknown.
+    #[test]
+    fn feature_windows_are_scoped_and_leave_the_account_minimum_alone() {
+        let time = 2_000_000_000;
+        let account = |windows: Value| {
+            json!({"id": "a", "provider": "codex", "pool": "default", "kind": "oauth",
+                "usage_health": {"status": "ok", "checked_at": time - 10, "next_check_at": time + 170},
+                "usage": {"used_percent": 100.0, "observed_at": time - 10, "resets_at": time + 3600,
+                          "source": "codex_oauth", "windows": windows}})
+        };
+        let snapshot = json!({"policies": []});
+        let view = usage_view(
+            &account(json!([
+                {"name": "primary", "used_percent": 30.0, "resets_at": time + 3600},
+                {"name": "feature_codex_other_primary", "used_percent": 100.0, "resets_at": time + 600}
+            ])),
+            &snapshot,
+            time,
+        );
+        assert_eq!(view["lowest_remaining_percent"], json!(70.0));
+        assert_eq!(view["windows"][0]["scope"], "account");
+        assert_eq!(view["windows"][1]["scope"], "feature");
+        let only = usage_view(
+            &account(
+                json!([{"name": "feature_codex_other_primary", "used_percent": 100.0, "resets_at": time + 600}]),
+            ),
+            &snapshot,
+            time,
+        );
+        assert!(
+            only["lowest_remaining_percent"].is_null(),
+            "unknown, not zero"
+        );
+    }
 }

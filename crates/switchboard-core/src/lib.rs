@@ -123,6 +123,31 @@ pub struct Usage {
     pub resets_at: Option<i64>,
     pub source: String,
 }
+/// Windows named with this prefix measure one metered feature of the account (Codex
+/// `additional_rate_limits`, SB-40), not the account itself. They stay in `windows` and in the
+/// stored `used_percent`, so an older build reads them conservatively.
+pub const FEATURE_WINDOW_PREFIX: &str = "feature_";
+impl UsageWindow {
+    /// True for a window that limits one feature rather than the whole account.
+    pub fn is_feature(&self) -> bool {
+        self.name.starts_with(FEATURE_WINDOW_PREFIX)
+    }
+}
+impl Usage {
+    /// The account's own capacity: the highest use over every window that is not a feature
+    /// limit. `None` when the observation has windows but none of them speaks for the account —
+    /// unknown, never zero. An observation stored without windows (before 0.4) is its aggregate.
+    pub fn account_used_percent(&self) -> Option<f64> {
+        if self.windows.is_empty() {
+            return Some(self.used_percent);
+        }
+        self.windows
+            .iter()
+            .filter(|w| !w.is_feature())
+            .map(|w| w.used_percent)
+            .reduce(f64::max)
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
