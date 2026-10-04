@@ -143,7 +143,7 @@ def checked_receipt(receipt_path):
     receipt_path = receipt_path.resolve()
     if not receipt_path.is_relative_to(ARTIFACTS.resolve()):
         raise SystemExit('Resume receipt must be inside this repository’s artifacts directory.')
-    receipt = json.loads(receipt_path.read_text())
+    receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
     for key in ('archive', 'folder'):
         if Path(receipt[key]).name != receipt[key] or receipt[key] in ('.', '..'):
             raise SystemExit('Invalid artifact receipt paths.')
@@ -323,7 +323,7 @@ def main():
     # process below inherits it.
     team = signing_team(identity_name, os.environ)
     os.environ[TEAM_VARIABLE] = team
-    version = json.loads((ROOT/'package.json').read_text())['version']
+    version = json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
     folder = ARTIFACTS / f'Fabric-Switchboard-{version}-macos-{args.arch}'
     outputs = (folder, Path(str(folder)+'.zip'), folder.parent/(folder.name+'-receipt.json'))
     if any(path.exists() for path in outputs):
