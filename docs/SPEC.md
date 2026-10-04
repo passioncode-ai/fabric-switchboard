@@ -113,7 +113,7 @@ Working copies and generated scripts persist within app-owned directories; isola
 
 Usage preserves supported individual windows/reset times and also reports their maximum utilization. It does not predict future exhaustion. Failed observations preserve previous data and record failed health. OAuth identity strings are source claims, not verified profile facts.
 
-The desktop presents a sanitized startup failure with Retry, and retries owner contention on a bounded cadence (0.5.4). CLI/serve failures remain sanitized terminal errors; metadata repair remains manual (`src-tauri/src/lib.rs`, OPERATIONS Lifecycle). Signature and native-host status are recorded per artifact in [0.2 evidence](evidence/release-0.2.md); historical Apple Silicon validation remains in [0.1 verification](evidence/verification.md). See [operations](OPERATIONS.md) for recovery and [acceptance packet](packets/provider-acceptance.md) for the first live pass.
+The desktop presents a sanitized startup failure with Retry, and retries owner contention on a bounded cadence (0.5.4). CLI/serve failures remain sanitized terminal errors; metadata repair remains manual (`src-tauri/src/main.rs` `Slot`, OPERATIONS Lifecycle). Signature and native-host status are recorded per artifact in [0.2 evidence](evidence/release-0.2.md); historical Apple Silicon validation remains in [0.1 verification](evidence/verification.md). See [operations](OPERATIONS.md) for recovery and [acceptance packet](packets/provider-acceptance.md) for the first live pass.
 
 ## 16. CLI and owner control protocol
 
