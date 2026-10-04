@@ -1,0 +1,92 @@
+{
+  "server": "switchboard 0.5.4",
+  "server_versions": [
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "mode": "read-only, empty scratch data folder, no provider account, no model call",
+  "clients": [
+    {
+      "client": "inspector-cli",
+      "package": "@modelcontextprotocol/inspector@2.9.0",
+      "asked": [
+        "2025-11-25"
+      ],
+      "answered": [
+        "2025-06-18"
+      ],
+      "tools": [
+        "switchboard_status",
+        "switchboard_accounts",
+        "switchboard_usage",
+        "switchboard_project_context"
+      ],
+      "proving_call": "switchboard_usage",
+      "proving_call_error": false,
+      "status": "PASS"
+    },
+    {
+      "client": "typescript-sdk-v1",
+      "package": "@modelcontextprotocol/sdk@1.32.0",
+      "asked": [
+        "2025-11-25"
+      ],
+      "answered": [
+        "2025-06-18"
+      ],
+      "tools": [
+        "switchboard_status",
+        "switchboard_accounts",
+        "switchboard_usage",
+        "switchboard_project_context"
+      ],
+      "proving_call": "switchboard_usage",
+      "proving_call_error": false,
+      "status": "PASS"
+    },
+    {
+      "client": "typescript-client-v2",
+      "package": "@modelcontextprotocol/client@2.3.0",
+      "asked": [
+        "2025-11-25"
+      ],
+      "answered": [
+        "2025-06-18"
+      ],
+      "tools": [
+        "switchboard_status",
+        "switchboard_accounts",
+        "switchboard_usage",
+        "switchboard_project_context"
+      ],
+      "proving_call": "switchboard_usage",
+      "proving_call_error": false,
+      "status": "PASS"
+    },
+    {
+      "client": "python-sdk",
+      "package": "mcp==2.3.0",
+      "asked": [
+        "2025-11-25"
+      ],
+      "answered": [
+        "2025-06-18"
+      ],
+      "tools": [
+        "switchboard_status",
+        "switchboard_accounts",
+        "switchboard_usage",
+        "switchboard_project_context"
+      ],
+      "proving_call": "switchboard_usage",
+      "proving_call_error": false,
+      "status": "PASS"
+    }
+  ],
+  "servers_left_running_after_eof": 0,
+  "not_run": {
+    "claude-code": "needs its user MCP configuration changed or a model call; operator acceptance (SB-15)",
+    "codex-cli": "needs its user MCP configuration changed or a model call; operator acceptance (SB-15)"
+  }
+}
