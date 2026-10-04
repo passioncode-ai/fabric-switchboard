@@ -39,6 +39,7 @@ Quota ordering/countdown (Status: proposed; operator-authorized implementation; 
 - `accounts.order`: “Within each pool: remaining quota first, then shortest wait. Unknown usage follows.”
 - `quota.countdown.pause` / `.resume`: “Pause countdown” / “Resume countdown”; newly appearing timestamps while paused read “Countdown paused”.
 - `quota.reset`: “Resets {date}”, “Reported reset {date}” for stale/failed history, “Quota windows reset {date}” for exhausted windows, “Reset time unavailable”.
+- `quota.next_check` (SB-39): “Next check {date}” under “Check failed” on a row with no stored observation — the same caption the quota disclosure already shows; it includes any wait the provider asked for. The refusal during that wait reuses `USAGE_RATE_LIMITED`.
 - `quota.hold`: “Retry hold until {date}”; a hold can be estimated and is not a quota reset. Badge “Limit reached” replaces the combined old badge.
 - `quota.remaining`: “{days}d {hours}h {minutes}m remaining”, “<1m remaining”, “Due · awaiting check”, “Time unavailable”. Zero elapsed time never confirms usable quota.
 Humanization: on — own pass; operational state strings reviewed, no decorative rewrites.

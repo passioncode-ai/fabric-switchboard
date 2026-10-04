@@ -16,5 +16,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 futures-util = "0.3"
 subtle = "2"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+[features]
+# Lets another crate's tests point the usage probe at a local synthetic upstream. Enabled only
+# through dev-dependencies, so no shipped binary can send a credential anywhere but the fixed
+# provider origins.
+synthetic-origins = []
 [dev-dependencies]
 tempfile = "3"

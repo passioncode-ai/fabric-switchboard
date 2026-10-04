@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, failedNextCheck, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -491,6 +491,9 @@ function usageCell(account: Account) {
   if (!observation) {
     const cell = el('div', 'row-usage');
     cell.append(el('span', 'usage-unknown', account.kind === 'oauth' ? (account.usage_health?.status === 'failed' ? 'Check failed' : 'Usage unknown') : account.kind === 'api_key' ? 'API billing' : 'No quota check'));
+    // Without an observation there is no disclosure to show the schedule; the row says it.
+    const next = failedNextCheck(account);
+    if (next !== null) cell.append(el('span', 'usage-caption', `Next check ${date(next)}`));
     if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
     return cell;
   }

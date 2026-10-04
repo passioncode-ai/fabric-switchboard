@@ -1,3 +1,25 @@
+# SB-39 — one provider not-before for every quota check (2026-10-04)
+
+**Start here:** [run record](runs/2026-10-04-sb-39-quota-deadline/README.md) (brief, decisions, REQ
+table, verification, review rulings); contract in [CONTRACTS](CONTRACTS.md#provider-not-before-for-quota-checks-sb-39-2026-10-04);
+runbook entry in [OPERATIONS](OPERATIONS.md). Board: SB-39 done, SB-44 (stop signals at start-up)
+found by the gate and done.
+
+A provider 429 on a quota check now sets a not-before that the desktop, `switchboard usage`,
+MCP, the offline CLI and the background all honour (`monitor::check` → `UsageGate`), kept in
+`<data>/usage-holds.json` across restarts and bound to the token generation it answered.
+`Retry-After` is read in seconds and every RFC 9110 date form; the six-hour cap became seven
+days. A manual quota check no longer holds the owner's transaction; refresh grants stop at the
+start of the quit drain. Gate: `./scripts/check.sh` exit 0, 327 Rust tests.
+
+**Not released.** Source is 0.5.4 with SB-35…39 and SB-44 under `## Unreleased`; the next release
+is SB-34 (`v0.5.4-beta.1`), which needs the nightly run on the merged `main` and a release
+approver. **Exact next autonomous code task:** SB-40 — Codex additional limits, credits and spend
+control; official schema pinned at `openai/codex@afb436d` (`codex-rs/backend-client/src/client.rs`
+`rate_limit_snapshots_from_payload`, `codex-backend-openapi-models`).
+
+---
+
 # Quota ordering and system review — 2026-10-04
 
 **Start here:** [handoffs/2026-10-04-quota-review.md](handoffs/2026-10-04-quota-review.md).

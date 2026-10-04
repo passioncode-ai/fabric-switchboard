@@ -953,10 +953,24 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
             get(|| async {
                 (
                     StatusCode::TOO_MANY_REQUESTS,
-                    [("retry-after", "Wed, 21 Oct 2026 07:28:00 GMT")],
+                    [("retry-after", "Fri, 31 Dec 9999 23:59:59 GMT")],
                     "",
                 )
             }),
+        )
+        .route(
+            "/past/api/oauth/usage",
+            get(|| async {
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", "Sun, 06 Nov 1994 08:49:37 GMT")],
+                    "",
+                )
+            }),
+        )
+        .route(
+            "/garbled/api/oauth/usage",
+            get(|| async { (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "soon")], "") }),
         )
         .route(
             "/rejected/api/oauth/usage",
@@ -981,7 +995,7 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
         let origin = format!("{base}/{path}");
         let store = store.clone();
         let id = a.id.clone();
-        async move { probe_usage_from(store, id, (&origin, &origin)).await }
+        async move { probe_usage_from(store, id, (&origin, &origin), None).await }
     };
     assert_eq!(
         probe("limited").await.unwrap_err(),
@@ -990,9 +1004,94 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
             rate_limited: Some(Some(1200))
         }
     );
-    assert_eq!(probe("dated").await.unwrap_err().rate_limited, Some(None));
+    // An HTTP-date is a deadline too (RFC 9110 §10.2.3), not a missing value.
+    let dated = probe("dated")
+        .await
+        .unwrap_err()
+        .rate_limited
+        .unwrap()
+        .unwrap();
+    assert!(dated > 0, "a future date is a positive wait, got {dated}");
+    assert_eq!(probe("past").await.unwrap_err().rate_limited, Some(Some(0)));
+    assert_eq!(probe("garbled").await.unwrap_err().rate_limited, Some(None));
     let rejected = probe("rejected").await.unwrap_err();
     assert_eq!(rejected.message, REJECTED);
     assert_eq!(rejected.rate_limited, None);
     assert_eq!(probe("ok").await.unwrap().used_percent, 42.0);
+}
+
+/// RFC 9110 §10.2.3 and §5.6.7: delay-seconds and the three HTTP-date forms, measured against
+/// the receipt time; nothing a provider sends can wrap, go negative or parse as a sign.
+#[test]
+fn retry_after_reads_seconds_and_every_http_date_form() {
+    // 1994-11-06 08:49:37 UTC, the RFC's own example instant.
+    let example = 784_111_777;
+    let received = example - 120;
+    assert_eq!(retry_after_at("120", received), Some(120));
+    assert_eq!(retry_after_at(" 7 ", received), Some(7));
+    assert_eq!(retry_after_at("0", received), Some(0));
+    assert_eq!(
+        retry_after_at("Sun, 06 Nov 1994 08:49:37 GMT", received),
+        Some(120)
+    );
+    assert_eq!(
+        retry_after_at("Sunday, 06-Nov-94 08:49:37 GMT", received),
+        Some(120)
+    );
+    assert_eq!(
+        retry_after_at("Sun Nov  6 08:49:37 1994", received),
+        Some(120)
+    );
+    // A date already past asks for no wait at all; the caller applies its floor.
+    assert_eq!(
+        retry_after_at("Sun, 06 Nov 1994 08:49:37 GMT", example + 5),
+        Some(0)
+    );
+    // Overflow saturates instead of wrapping into a past or negative deadline.
+    assert_eq!(
+        retry_after_at("99999999999999999999999999", received),
+        Some(i64::MAX)
+    );
+    assert_eq!(
+        retry_after_at("Fri, 31 Dec 9999 23:59:59 GMT", received),
+        Some(253_402_300_799 - received)
+    );
+    for bad in [
+        "",
+        "-5",
+        "+5",
+        "1.5",
+        "5s",
+        "soon",
+        "Sun, 06 Nov 1994 08:49:37 PST",
+        "Mon, 06 Nov 1994 08:49:37 GMT",
+    ] {
+        assert_eq!(
+            retry_after_at(bad, received),
+            None,
+            "{bad:?} is not a Retry-After"
+        );
+    }
+}
+
+/// A dated `Retry-After` is measured on the provider's clock when the response carries `Date`:
+/// a local clock three hours ahead cannot turn a two-hour wait into none.
+#[test]
+fn a_dated_retry_after_is_measured_on_the_providers_clock() {
+    let sent = 784_111_777; // Sun, 06 Nov 1994 08:49:37 GMT
+    let mut headers = HeaderMap::new();
+    headers.insert("date", "Sun, 06 Nov 1994 08:49:37 GMT".parse().unwrap());
+    headers.insert(
+        "retry-after",
+        "Sun, 06 Nov 1994 10:49:37 GMT".parse().unwrap(),
+    );
+    assert_eq!(retry_after_seconds(&headers, sent + 3 * 3600), Some(7200));
+    // Without a usable Date the receipt time is all there is.
+    headers.insert("date", "yesterday".parse().unwrap());
+    assert_eq!(retry_after_seconds(&headers, sent + 3600), Some(3600));
+    headers.remove("date");
+    assert_eq!(retry_after_seconds(&headers, sent), Some(7200));
+    // Delay-seconds never depend on either clock.
+    headers.insert("retry-after", "30".parse().unwrap());
+    assert_eq!(retry_after_seconds(&headers, sent + 99_999), Some(30));
 }

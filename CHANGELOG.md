@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- When a provider answers a quota check with “too many requests”, nothing checks that account
+  again before the time it asked for — not the background, not Check usage, not
+  `switchboard usage` or MCP. Its `Retry-After` is read in seconds or as a date and kept whole
+  (up to seven days; 15 minutes when it gives none). The wait survives a restart and ends at
+  once with a new sign-in. A row whose check failed shows when the next check runs. A quota
+  check no longer holds up other actions while the provider answers, and two checks of one
+  account share one request.
+- A `SIGTERM` or `SIGINT` that arrives while the app or `switchboard serve` is still starting
+  now runs the normal drain instead of ending the process with its control file left behind.
 - Account rows show fresh remaining quota first within each pool, followed by the shortest
   known wait. Reset dates include a countdown in days, hours and minutes; Pause countdown
   keeps the displayed duration still. Unknown or stale quota stays labelled.

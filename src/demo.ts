@@ -46,6 +46,7 @@ export function createDemoAdapter(): Adapter {
   const enabled = (id: string) => { const found = account(id); if (!found.enabled) throw new Error('This account is disabled. Enable it before continuing.'); return found; };
   const logins = new Map<string, LoginInput & { started: number }>();
   let signIns = 0;
+  const rateLimited = new Set<string>();
   // Explicit browser-only acceptance fixtures for ordering, multi-window waits and failure.
   if (new URLSearchParams(location.search).get('quota-review') === '1') {
     for (const id of ['demo-claude-east', 'demo-claude-west']) {
@@ -54,6 +55,11 @@ export function createDemoAdapter(): Adapter {
       item.usage = { used_percent: 100, observed_at: now(), resets_at: until, source: 'Synthetic quota review', windows: [{ name: 'Session', used_percent: 100, resets_at: now() + 60 }, { name: 'Weekly', used_percent: 100, resets_at: until }] };
     }
     state.accounts.find(a => a.id === 'demo-claude-south')!.usage_health!.status = 'failed';
+    // SB-39: the provider asked for a 15-minute wait before any check of this row.
+    const waiting = state.accounts.find(a => a.id === 'demo-claude-harbor')!;
+    waiting.usage = null;
+    waiting.usage_health = { status: 'failed', checked_at: now() - 30, next_check_at: now() + 870 };
+    rateLimited.add(waiting.id);
   }
   const signInRequired = new Set(['demo-claude-meadow']);
   const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];
@@ -152,6 +158,6 @@ export function createDemoAdapter(): Adapter {
     async backupNow() { await pause(); const info = { file: `switchboard-backup-${now()}.json`, created_at: now(), accounts: state.accounts.length }; backups.unshift(info); backups.splice(10); return structuredClone(info); },
     async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
-    async probe(id) { await pause(); const item = enabled(id); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage.observed', id, 'Synthetic usage observation'); return structuredClone(usage); },
+    async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage.observed', id, 'Synthetic usage observation'); return structuredClone(usage); },
   };
 }

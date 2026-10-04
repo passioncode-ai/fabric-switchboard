@@ -29,6 +29,17 @@ check(() => {
   assert.equal(logic.canProbe({ kind: 'oauth' }), true);
 });
 
+// SB-39: a failed row without an observation still says when the monitor checks it next —
+// the time a provider's wait ends is part of it; rows the monitor never checks say nothing.
+check(() => {
+  const failed = { status: 'failed', checked_at: 1_000, next_check_at: 1_900 };
+  assert.equal(logic.failedNextCheck({ enabled: true, kind: 'oauth', usage_health: failed }), 1_900);
+  assert.equal(logic.failedNextCheck({ enabled: false, kind: 'oauth', usage_health: failed }), null);
+  assert.equal(logic.failedNextCheck({ enabled: true, kind: 'api_key', usage_health: failed }), null);
+  assert.equal(logic.failedNextCheck({ enabled: true, kind: 'oauth', usage_health: { ...failed, status: 'ok' } }), null);
+  assert.equal(logic.failedNextCheck({ enabled: true, kind: 'oauth', usage_health: null }), null);
+});
+
 // B-12: a passed reset time makes the observation stale regardless of its age.
 check(() => {
   const now = 10_000;

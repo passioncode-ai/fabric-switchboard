@@ -9,6 +9,8 @@ use std::{
 use switchboard_core::{Account, AuthKind, Provider, Store, Usage};
 use tokio::task::JoinHandle;
 
+use crate::usage_gate::UsageGate;
+
 pub const INTERVAL_SECONDS: i64 = 180;
 const MAX_BACKOFF: i64 = 1800;
 /// The background cadence (lifecycle LC-08: nothing polls faster than 30 seconds). Each pass
@@ -117,10 +119,13 @@ impl Pass {
         let Ok(snapshot) = runtime.store.snapshot() else {
             return;
         };
+        runtime
+            .usage_gate
+            .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
         let mut due: Vec<_> = snapshot
             .accounts
             .into_iter()
-            .filter(|a| due(a, time))
+            .filter(|a| due_now(a, time, &runtime.usage_gate))
             .collect();
         // Oldest due first: a failing first row cannot starve another account.
         due.sort_by_key(|a| {
@@ -139,6 +144,7 @@ impl Pass {
                 &runtime.refresh,
                 &account.id,
                 Some(&runtime.mutations),
+                &runtime.usage_gate,
             )
             .await;
         }
@@ -232,6 +238,13 @@ fn due(a: &Account, time: i64) -> bool {
             .is_none_or(|h| h.next_check_at <= time || h.checked_at > time + 60)
 }
 
+/// Due for this pass. A row the provider asked to wait for keeps no slot, even when its
+/// schedule says due (a clock set back); a new credential generation — its usage health
+/// cleared — is checked at once. No credential is read here (LC-04).
+fn due_now(a: &Account, time: i64, gate: &UsageGate) -> bool {
+    due(a, time) && !(a.usage_health.is_some() && gate.held(&a.id, time))
+}
+
 fn backoff(previous: Option<(i64, i64)>) -> i64 {
     previous
         .map(|(checked, next)| {
@@ -243,21 +256,42 @@ fn backoff(previous: Option<(i64, i64)>) -> i64 {
         .unwrap_or(INTERVAL_SECONDS)
 }
 
-/// A usage check the provider answered 429 waits at least this long without `Retry-After`
-/// (Claude Swap waits 900 s too), and at most `MAX_RETRY_AFTER` with one.
-const RATE_LIMIT_FLOOR: i64 = 900;
-const MAX_RETRY_AFTER: i64 = 6 * 3600;
-/// When the next check of a failed account is due. A provider 429 is honoured: its `Retry-After`
-/// (bounded) or the floor, never sooner than the ordinary backoff.
+/// When the background next checks a failed account. A provider 429 is honoured: never before
+/// its not-before (`usage_gate::not_before_delay`), never sooner than the ordinary backoff.
+/// The ordinary backoff paces only the background; a person may check again at once.
 fn failure_delay(previous: Option<(i64, i64)>, rate_limited: Option<Option<i64>>) -> i64 {
     let ordinary = backoff(previous);
     match rate_limited {
         None => ordinary,
-        Some(wait) => ordinary.max(wait.unwrap_or(RATE_LIMIT_FLOOR).min(MAX_RETRY_AFTER)),
+        Some(wait) => ordinary.max(crate::usage_gate::not_before_delay(wait)),
     }
 }
 
-pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
+/// The provider's usage endpoint, sent `credential`; a test gate may name a synthetic one.
+async fn probe_provider(
+    store: Arc<Store>,
+    id: &str,
+    credential: switchboard_core::Credential,
+    gate: &UsageGate,
+) -> Result<Usage, switchboard_proxy::ProbeFailure> {
+    #[cfg(test)]
+    {
+        let synthetic = gate.origins.lock().unwrap().clone();
+        if let Some((claude, codex)) = synthetic {
+            return switchboard_proxy::probe_usage_detailed_at(
+                store,
+                id.to_owned(),
+                credential,
+                (&claude, &codex),
+            )
+            .await;
+        }
+    }
+    let _ = gate;
+    switchboard_proxy::probe_usage_detailed(store, id.to_owned(), credential).await
+}
+
+pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Result<Usage, String> {
     let account = store
         .snapshot()?
         .accounts
@@ -281,7 +315,8 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
             );
         }
     };
-    let result = switchboard_proxy::probe_usage_detailed(store.clone(), id.to_owned()).await;
+    // The hold below binds to this credential: the one the provider actually answered.
+    let result = probe_provider(store.clone(), id, generation.clone(), gate).await;
     let checked = now();
     match result {
         Ok(usage) => Ok(usage),
@@ -293,6 +328,17 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
                     .map(|h| (h.checked_at, h.next_check_at)),
                 failure.rate_limited,
             );
+            // Nobody — desktop, CLI, MCP or this pass — checks again before the provider's
+            // not-before; the hold binds to the token the provider answered. Recorded before the
+            // health write, which can fail (a newer observation, storage) and must not drop it.
+            if let Some(wait) = failure.rate_limited {
+                gate.hold(
+                    id,
+                    &generation,
+                    checked,
+                    checked + crate::usage_gate::not_before_delay(wait),
+                );
+            }
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
             Err(
                 if failure.message == switchboard_proxy::REJECTED
@@ -310,13 +356,16 @@ pub async fn probe(store: Arc<Store>, id: &str) -> Result<Usage, String> {
 
 /// A quota check that first keeps an inactive Claude account's token alive and retries once
 /// after a refresh when the provider rejects the token (Claude Swap's shape, PLAN-0.5 D-2).
-/// `lock` is the owner's mutation lock when the caller does not already hold it.
+/// `lock` is the owner's mutation lock when the caller does not already hold it. Every caller
+/// comes through here, so here the provider's not-before is enforced (SB-39): during it no
+/// renewal and no request is made. Same-account checks share one request.
 pub(crate) async fn check(
     store: &Arc<Store>,
     native: crate::NativeSources,
     refresh: &crate::refresh::RefreshState,
     id: &str,
     lock: Option<&tokio::sync::Mutex<()>>,
+    gate: &UsageGate,
 ) -> Result<Usage, String> {
     let refreshed = |force: bool| async move {
         let _guard = match lock {
@@ -332,22 +381,30 @@ pub(crate) async fn check(
         let _ = store.usage_health(id, "failed", time, time + MAX_BACKOFF);
         Err(SIGN_IN.to_string())
     };
-    let sequence = async {
+    let sequence = || async {
+        if gate.has_hold(id) {
+            if let Ok(credential) = store.stored_credential(id) {
+                if gate.active(id, &credential, now()).is_some() {
+                    return Err(switchboard_proxy::USAGE_RATE_LIMITED.to_string());
+                }
+            }
+        }
         if refreshed(false).await == crate::refresh::Outcome::SignInRequired {
             return dead();
         }
-        match probe(store.clone(), id).await {
+        match probe(store.clone(), id, gate).await {
             Err(error) if error == switchboard_proxy::REJECTED => match refreshed(true).await {
-                crate::refresh::Outcome::Refreshed => probe(store.clone(), id).await,
+                crate::refresh::Outcome::Refreshed => probe(store.clone(), id, gate).await,
                 crate::refresh::Outcome::SignInRequired => dead(),
                 _ => Err(error),
             },
             result => result,
         }
     };
-    // One deadline below the control channel's 30 seconds, so a CLI or MCP caller never
-    // times out while the owner keeps working on its behalf.
-    tokio::time::timeout(CHECK_DEADLINE, sequence)
+    // One deadline below the control channel's 30 seconds, including any wait for a check of
+    // the same account already running, so a CLI or MCP caller never times out while the
+    // owner keeps working on its behalf.
+    tokio::time::timeout(CHECK_DEADLINE, gate.coalesce(id, store.changes(), sequence))
         .await
         .unwrap_or_else(|_| {
             Err(
@@ -904,9 +961,16 @@ mod tests {
         };
         let lock = tokio::sync::Mutex::new(());
         assert_eq!(
-            check(&store, native, &state, &b.id, Some(&lock))
-                .await
-                .unwrap_err(),
+            check(
+                &store,
+                native,
+                &state,
+                &b.id,
+                Some(&lock),
+                &UsageGate::default()
+            )
+            .await
+            .unwrap_err(),
             SIGN_IN
         );
         assert_eq!(state.sign_in_required(&store), vec![b.id.clone()]);
@@ -1104,11 +1168,53 @@ mod tests {
         assert_eq!(failure_delay(None, None), 180);
         // 429 without Retry-After: the 900 s floor.
         assert_eq!(failure_delay(None, Some(None)), 900);
-        // Retry-After longer than the backoff is honoured, bounded at six hours.
+        // Retry-After longer than the backoff is honoured whole — beyond the six hours 0.5.1
+        // allowed — up to the seven-day sanity bound (SB-39).
         assert_eq!(failure_delay(None, Some(Some(2400))), 2400);
-        assert_eq!(failure_delay(None, Some(Some(999_999))), 6 * 3600);
+        assert_eq!(failure_delay(None, Some(Some(9 * 3600))), 9 * 3600);
+        assert_eq!(failure_delay(None, Some(Some(999_999))), 7 * 86_400);
+        // `retry-after: 0` (or a date already past) is no permission to ask again at once.
+        assert_eq!(failure_delay(None, Some(Some(0))), 900);
         // A short Retry-After never makes the check sooner than the backoff already is.
         assert_eq!(failure_delay(Some((100, 1000)), Some(Some(5))), 1800);
+    }
+    #[test]
+    fn a_held_row_takes_no_slot_of_the_pass() {
+        let root = tempfile::tempdir().unwrap();
+        let gate = UsageGate::kept_in(root.path().join(crate::usage_gate::HOLDS_FILE), 10_000);
+        let mut account = switchboard_core::Account {
+            id: "id-a".into(),
+            label: "Synthetic".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            // Stamped ahead of a clock that was set back: the schedule alone says due.
+            usage_health: Some(switchboard_core::UsageHealth {
+                status: "failed".into(),
+                checked_at: 100_000,
+                next_check_at: 100_900,
+            }),
+        };
+        assert!(due_now(&account, 10_000, &gate));
+        gate.hold(
+            "id-a",
+            &crate::fixtures::credential("synthetic-a"),
+            100_000,
+            100_900,
+        );
+        // Held — and rebased on the spot: the background waits the 900 s the provider asked
+        // for from the corrected clock, not the 90 000 s of the correction.
+        assert!(!due_now(&account, 10_000, &gate));
+        assert!(gate.held("id-a", 10_899));
+        assert!(!gate.held("id-a", 10_900));
+        // A new credential generation clears the usage health: checked at once.
+        account.usage_health = None;
+        assert!(due_now(&account, 10_000, &gate));
     }
     #[test]
     fn backoff_is_bounded_and_clock_independent() {
@@ -1132,7 +1238,9 @@ mod tests {
                 Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-api-key").unwrap(),
             )
             .unwrap();
-        assert!(probe(store.clone(), &account.id).await.is_err());
+        assert!(probe(store.clone(), &account.id, &UsageGate::default())
+            .await
+            .is_err());
         let health = store
             .snapshot()
             .unwrap()
@@ -1160,7 +1268,9 @@ mod tests {
             )
             .unwrap();
         vault.delete(&account.id).unwrap();
-        assert!(probe(store.clone(), &account.id).await.is_err());
+        assert!(probe(store.clone(), &account.id, &UsageGate::default())
+            .await
+            .is_err());
         let health = store
             .snapshot()
             .unwrap()

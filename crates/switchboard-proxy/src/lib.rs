@@ -556,7 +556,8 @@ pub const REJECTED: &str = "Provider rejected the credential. Sign in again.";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProbeFailure {
     pub message: String,
-    /// `Some` only for 429: `Some(seconds)` from a numeric `Retry-After`, `Some(None)` without one.
+    /// `Some` only for 429: `Some(seconds)` from `Retry-After` (delay-seconds or an HTTP-date,
+    /// measured at receipt; a past date is `0`), `Some(None)` when it is absent or malformed.
     pub rate_limited: Option<Option<i64>>,
 }
 impl From<String> for ProbeFailure {
@@ -578,27 +579,69 @@ const USAGE_ORIGINS: (&str, &str) = ("https://api.anthropic.com", "https://chatg
 
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
 pub async fn probe_usage(store: Arc<Store>, id: String) -> Result<Usage, String> {
-    probe_usage_detailed(store, id).await.map_err(|f| f.message)
+    probe_usage_from(store, id, USAGE_ORIGINS, None)
+        .await
+        .map_err(|f| f.message)
 }
-/// The quota check with the provider's own wait on 429 (`Retry-After`), for the scheduler.
-pub async fn probe_usage_detailed(store: Arc<Store>, id: String) -> Result<Usage, ProbeFailure> {
-    probe_usage_from(store, id, USAGE_ORIGINS).await
+/// The quota check with the provider's own wait on 429 (`Retry-After`), for the scheduler,
+/// sent with exactly `credential` — the generation the caller binds the answer to.
+pub async fn probe_usage_detailed(
+    store: Arc<Store>,
+    id: String,
+    credential: switchboard_core::Credential,
+) -> Result<Usage, ProbeFailure> {
+    probe_usage_from(store, id, USAGE_ORIGINS, Some(credential)).await
 }
-/// Seconds from a numeric `Retry-After`; an HTTP date or anything malformed is no value.
-fn retry_after_seconds(headers: &HeaderMap) -> Option<i64> {
-    let seconds: i64 = headers
-        .get("retry-after")?
-        .to_str()
-        .ok()?
-        .trim()
-        .parse()
-        .ok()?;
-    (seconds >= 0).then_some(seconds)
+/// The quota check against a synthetic upstream, for tests of crates that depend on this one.
+#[cfg(feature = "synthetic-origins")]
+pub async fn probe_usage_detailed_at(
+    store: Arc<Store>,
+    id: String,
+    credential: switchboard_core::Credential,
+    origins: (&str, &str),
+) -> Result<Usage, ProbeFailure> {
+    probe_usage_from(store, id, origins, Some(credential)).await
+}
+/// The wait a 429 asked for, in seconds. An HTTP-date is measured against the response's own
+/// `Date` when it has a valid one — the provider's clock, so a local clock running ahead cannot
+/// shorten the wait — else against `received_at`.
+fn retry_after_seconds(headers: &HeaderMap, received_at: i64) -> Option<i64> {
+    let sent_at = headers
+        .get("date")
+        .and_then(|v| v.to_str().ok())
+        .and_then(http_date)
+        .unwrap_or(received_at);
+    retry_after_at(headers.get("retry-after")?.to_str().ok()?, sent_at)
+}
+/// An HTTP-date in the IMF-fixdate, RFC 850 or asctime form a recipient must accept
+/// (RFC 9110 §5.6.7), as Unix seconds. A weekday that contradicts the date is no date.
+fn http_date(value: &str) -> Option<i64> {
+    let value = value.trim();
+    [
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%A, %d-%b-%y %H:%M:%S GMT",
+        "%a %b %e %H:%M:%S %Y",
+    ]
+    .iter()
+    .find_map(|format| chrono::NaiveDateTime::parse_from_str(value, format).ok())
+    .map(|t| t.and_utc().timestamp())
+}
+/// `Retry-After` (RFC 9110 §10.2.3) as seconds from `received_at`: delay-seconds, or an
+/// HTTP-date (`http_date`). A date already past is zero; a value too large for `i64`
+/// saturates; a sign, a fraction, another zone or a weekday that does not match its date is no
+/// value at all.
+pub fn retry_after_at(value: &str, received_at: i64) -> Option<i64> {
+    let value = value.trim();
+    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
+        return Some(value.parse().unwrap_or(i64::MAX));
+    }
+    Some(http_date(value)?.saturating_sub(received_at).max(0))
 }
 async fn probe_usage_from(
     store: Arc<Store>,
     id: String,
     origins: (&str, &str),
+    credential: Option<switchboard_core::Credential>,
 ) -> Result<Usage, ProbeFailure> {
     let snapshot = store.snapshot()?;
     let account = snapshot
@@ -609,7 +652,10 @@ async fn probe_usage_from(
     if account.kind != AuthKind::OAuth {
         return Err("Usage unavailable for this credential type.".into());
     }
-    let credential = store.stored_credential(&id)?;
+    let credential = match credential {
+        Some(credential) => credential,
+        None => store.stored_credential(&id)?,
+    };
     if !account.enabled {
         return Err("Account is disabled".into());
     }
@@ -646,7 +692,7 @@ async fn probe_usage_from(
     if response.status().as_u16() == 429 {
         return Err(ProbeFailure {
             message: USAGE_RATE_LIMITED.into(),
-            rate_limited: Some(retry_after_seconds(response.headers())),
+            rate_limited: Some(retry_after_seconds(response.headers(), now())),
         });
     }
     if !response.status().is_success() {
