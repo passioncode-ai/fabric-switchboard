@@ -50,6 +50,17 @@ not used as test fixtures. Synthetic fixtures and local build outputs stay local
 
 ## Checks and exact next task
 
+Implementation receipt: [36828d5](https://github.com/passioncode-ai/fabric-switchboard/commit/36828d5eeeeb72fd64025b6845b4bd0b65a64c15),
+[PR #35](https://github.com/passioncode-ai/fabric-switchboard/pull/35). Remote branch resolved
+to that implementation commit, and a fresh remote clone resolved all three entry points and
+70 Markdown files / 564 relative links with zero errors. This entry's later receipt-only
+commit adds these addresses; check the remote PR for current integration status.
+Commit-addressed source: [ordering](https://github.com/passioncode-ai/fabric-switchboard/blob/36828d5eeeeb72fd64025b6845b4bd0b65a64c15/src/ui-logic.ts#L83),
+[countdowns](https://github.com/passioncode-ai/fabric-switchboard/blob/36828d5eeeeb72fd64025b6845b4bd0b65a64c15/src/main.ts#L272),
+[quota age](https://github.com/passioncode-ai/fabric-switchboard/blob/36828d5eeeeb72fd64025b6845b4bd0b65a64c15/crates/switchboard-core/src/lib.rs#L229),
+[backup publication](https://github.com/passioncode-ai/fabric-switchboard/blob/36828d5eeeeb72fd64025b6845b4bd0b65a64c15/crates/switchboard-core/src/backup.rs#L109),
+[timestamp scan](https://github.com/passioncode-ai/fabric-switchboard/blob/36828d5eeeeb72fd64025b6845b4bd0b65a64c15/crates/switchboard-runtime/src/limits.rs#L272).
+
 See [verification](../evidence/quota-order-2026-10-04.md) for actual exits, fail-first
 regressions, browser coverage and NOT_RUN acceptance. Local checks do not establish hosted
 CI, provider responses, installed bytes or release approval. No full hosted suite dispatched.
