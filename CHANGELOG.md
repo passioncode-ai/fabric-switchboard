@@ -8,10 +8,18 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- `--background` starts the app without showing its window or taking focus (and, on macOS,
-  without a Dock icon), as the local lifecycle broker does for apps it keeps running; opening it
-  again shows the window. Unknown launch arguments are ignored, and App Nap no longer slows the
-  account service while no window is open.
+## 0.5.4-beta.1 — 2026-10-04
+
+Switchboard now stays quiet while nothing changes, and it respects every limit the providers
+report: no quota check before the time a provider asked for, no feature limit mistaken for the
+whole account, no estimated hold shown as a reset. Signed by the same team (`KJ35UYYL22`) as
+0.5.3, so the Keychain's trust carries over.
+
+**Windows:** windows_authenticode: NOT_SIGNED. The archive is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
+### Quota, limits and accounts
+
 - An account held after a limit error shows whether the time is the provider's own reset
   (*Limit resets*) or an estimate (*Retry hold until*). Holds survive a restart, and a new
   Claude Code session's limit is charged to the account it runs on even when its reset time
@@ -27,14 +35,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   once with a new sign-in. A row whose check failed shows when the next check runs. A quota
   check no longer holds up other actions while the provider answers, and two checks of one
   account share one request.
-- A `SIGTERM` or `SIGINT` that arrives while the app or `switchboard serve` is still starting
-  now runs the normal drain instead of ending the process with its control file left behind.
 - Account rows show fresh remaining quota first within each pool, followed by the shortest
   known wait. Reset dates include a countdown in days, hours and minutes; Pause countdown
   keeps the displayed duration still. Unknown or stale quota stays labelled.
 - Partial quota responses no longer make unobserved windows appear fresh. Backups created
   in the same second keep separate copies, and session attribution reads timestamp metadata
   without materializing conversation content.
+
+### Lifecycle
 
 Version 0.5.4: the organization's [lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
 applied to Switchboard ([PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23);
@@ -61,6 +69,12 @@ applied to Switchboard ([PR #23](https://github.com/passioncode-ai/fabric-switch
 - `/usr/bin/security` calls and the backup write no longer hold the async workers (SB-23).
 - Local builds keep the current and the previous release in `artifacts/` and unregister removed
   app bundles.
+- `--background` starts the app without showing its window or taking focus (and, on macOS,
+  without a Dock icon), as the local lifecycle broker does for apps it keeps running; opening it
+  again shows the window. Unknown launch arguments are ignored, and App Nap no longer slows the
+  account service while no window is open.
+- A `SIGTERM` or `SIGINT` that arrives while the app or `switchboard serve` is still starting
+  now runs the normal drain instead of ending the process with its control file left behind.
 
 ## 0.5.3-beta.2 — 2026-10-04
 
