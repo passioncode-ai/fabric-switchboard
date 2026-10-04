@@ -8,6 +8,32 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+Version 0.5.4: the organization's [lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
+applied to Switchboard ([PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23);
+[AGENTS.md → Lifecycle](AGENTS.md#lifecycle)).
+
+- **No Keychain read on a timer.** The background looks at Claude Code's and Codex's sign-in
+  sources without decrypting anything or starting a process — file stamps, the Keychain item's
+  attributes and access list — and reads only when one of them changed. A locked keychain, a
+  refusal or an item that would ask is remembered and not tried again until it changes or a
+  person acts (a locked keychain is looked at again after 1, then up to 30 minutes), so no
+  background loop can raise a Keychain dialog. Capture, a person's action, still reads directly.
+- **Idle means idle.** One background pass every 30 s instead of 10 s; renewals are rescheduled
+  only when credentials change; Claude Swap is found in the process table without running `ps`;
+  a quota check that finds nothing new is not written (flushed within 15 minutes and at stop);
+  the window polls a sign-in only while one waits.
+- **Managed sessions survive a restart or an update.** The proxy's port and token are kept in
+  `proxy.json` and reused; if another program took the port, the proxy moves, keeps the token
+  and repoints the managed homes.
+- **A clean stop.** Quit, the last window, `SIGTERM` and `SIGINT` (app and `switchboard serve`)
+  run one drain with an 8 s deadline and a hard exit at 10 s; `control.json` names its owner's
+  pid and is removed at stop, and one left by a dead owner counts as stale.
+- **A bounded log** of codes and numbers only in `~/Library/Logs/Fabric Switchboard/`
+  (5 × 5 MB, 0600).
+- `/usr/bin/security` calls and the backup write no longer hold the async workers (SB-23).
+- Local builds keep the current and the previous release in `artifacts/` and unregister removed
+  app bundles.
+
 ## 0.5.3-beta.2 — 2026-10-04
 
 The first release built, signed and published by GitHub Actions instead of a laptop, with the

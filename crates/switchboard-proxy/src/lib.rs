@@ -80,19 +80,55 @@ struct Gateway {
 pub struct ProxyHandle {
     address: SocketAddr,
     token: String,
-    stop: Option<oneshot::Sender<()>>,
-    task: JoinHandle<()>,
+    stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
+    task: std::sync::Mutex<Option<JoinHandle<()>>>,
+}
+/// How long a start waits for its recorded port to be released by a previous owner.
+const REBIND_ATTEMPTS: u32 = 5;
+const REBIND_WAIT: Duration = Duration::from_millis(100);
+fn valid_token(token: &str) -> bool {
+    token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
 impl ProxyHandle {
     pub async fn start(store: Arc<Store>) -> Result<Self, String> {
+        Self::start_on(store, None, None).await
+    }
+    /// Starts on `port` with `token` when given — the address and capability a managed session
+    /// already holds survive a restart (lifecycle LC-11). A port another program holds falls
+    /// back to a fresh one; the token is kept either way.
+    pub async fn start_on(
+        store: Arc<Store>,
+        port: Option<u16>,
+        token: Option<String>,
+    ) -> Result<Self, String> {
         Self::start_at(
             store,
             "https://api.anthropic.com".into(),
             "https://api.openai.com".into(),
             "https://chatgpt.com".into(),
             Timeouts::default(),
+            port,
+            token,
         )
         .await
+    }
+    async fn bind(port: Option<u16>) -> Result<tokio::net::TcpListener, String> {
+        if let Some(port) = port.filter(|p| *p != 0) {
+            for attempt in 0..REBIND_ATTEMPTS {
+                match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await {
+                    Ok(listener) => return Ok(listener),
+                    Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                        if attempt + 1 < REBIND_ATTEMPTS {
+                            tokio::time::sleep(REBIND_WAIT).await;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+        tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|_| "Local proxy could not start.".to_string())
     }
     async fn start_at(
         store: Arc<Store>,
@@ -100,14 +136,16 @@ impl ProxyHandle {
         openai: String,
         chatgpt: String,
         timeouts: Timeouts,
+        port: Option<u16>,
+        token: Option<String>,
     ) -> Result<Self, String> {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|_| "Local proxy could not start.")?;
+        let listener = Self::bind(port).await?;
         let address = listener
             .local_addr()
             .map_err(|_| "Local proxy address unavailable.")?;
-        let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        let token = token
+            .filter(|t| valid_token(t))
+            .unwrap_or_else(|| format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()));
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -140,8 +178,8 @@ impl ProxyHandle {
         Ok(Self {
             address,
             token,
-            stop: Some(stop),
-            task,
+            stop: std::sync::Mutex::new(Some(stop)),
+            task: std::sync::Mutex::new(Some(task)),
         })
     }
     pub fn address(&self) -> SocketAddr {
@@ -150,24 +188,36 @@ impl ProxyHandle {
     pub fn token(&self) -> &str {
         &self.token
     }
-    pub async fn shutdown(mut self) {
-        if let Some(stop) = self.stop.take() {
+    /// Stops accepting, lets requests in flight finish until `deadline`, then cuts them.
+    /// True when every connection ended by itself.
+    pub async fn stop(&self, deadline: Duration) -> bool {
+        if let Some(stop) = self.stop.lock().ok().and_then(|mut s| s.take()) {
             let _ = stop.send(());
         }
-        if tokio::time::timeout(Duration::from_secs(2), &mut self.task)
-            .await
-            .is_err()
-        {
-            self.task.abort();
+        let Some(mut task) = self.task.lock().ok().and_then(|mut t| t.take()) else {
+            return true;
+        };
+        match tokio::time::timeout(deadline, &mut task).await {
+            Ok(_) => true,
+            Err(_) => {
+                task.abort();
+                let _ = task.await;
+                false
+            }
         }
+    }
+    pub async fn shutdown(self) {
+        self.stop(Duration::from_secs(2)).await;
     }
 }
 impl Drop for ProxyHandle {
     fn drop(&mut self) {
-        if let Some(stop) = self.stop.take() {
+        if let Some(stop) = self.stop.get_mut().ok().and_then(|s| s.take()) {
             let _ = stop.send(());
         }
-        self.task.abort();
+        if let Some(task) = self.task.get_mut().ok().and_then(|t| t.take()) {
+            task.abort();
+        }
     }
 }
 fn connection_fields(headers: &HeaderMap) -> std::collections::HashSet<String> {

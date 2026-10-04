@@ -11,6 +11,15 @@ use tokio::task::JoinHandle;
 
 pub const INTERVAL_SECONDS: i64 = 180;
 const MAX_BACKOFF: i64 = 1800;
+/// The background cadence (lifecycle LC-08: nothing polls faster than 30 seconds). Each pass
+/// is cheap when nothing changed: a quiet probe of the sign-in sources, no process spawned.
+pub const PASS_SECONDS: u64 = 30;
+/// Quota checks per pass; with the 30 s pass this keeps a full store on its 180 s schedule.
+const CHECKS_PER_PASS: usize = 4;
+/// Timestamps held in memory are written at least this often (a crash loses no more).
+const FLUSH_SECONDS: i64 = 900;
+/// A renewal that did not happen is tried again after this long, not on every pass.
+const RENEW_RETRY_SECONDS: i64 = 60;
 
 pub fn now() -> i64 {
     SystemTime::now()
@@ -19,157 +28,198 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
-pub struct MonitorHandle(JoinHandle<()>);
+pub struct MonitorHandle {
+    stop: tokio::sync::watch::Sender<bool>,
+    task: Option<JoinHandle<()>>,
+}
 impl MonitorHandle {
     pub fn start(runtime: &Arc<Runtime>, native_sources: bool) -> Self {
         let weak = Arc::downgrade(runtime);
-        Self(tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(10));
+        let (stop, mut stopped) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(PASS_SECONDS));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut last_source_sync = 0;
-            let mut last_limit_scan = 0;
-            // What the previous pass saw of Claude Swap: whether it ran, and its files.
-            let mut swap_was_running: Option<bool> = None;
-            let mut swap_last_signature = None;
+            let mut pass = Pass::default();
             loop {
-                interval.tick().await;
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    _ = stopped.changed() => break,
+                }
+                if *stopped.borrow() {
+                    break;
+                }
                 let Some(runtime) = weak.upgrade() else {
                     break;
                 };
-                let time = now();
-                // With no saved Claude OAuth account there is nothing of Claude Code's to keep
-                // current: no Keychain read, no Claude Swap read, no transcript scan.
-                let claude = native_sources && claude_oauth_saved(&runtime.store);
-                if native_sources
-                    && (time - last_source_sync >= INTERVAL_SECONDS || time < last_source_sync)
-                {
-                    // Network first, outside the lock: who owns a lineage not seen before.
-                    if claude {
-                        crate::refresh::learn_live_owner(
-                            &runtime.store,
-                            runtime.native,
-                            &runtime.refresh,
-                        )
-                        .await;
-                    }
-                    // Claude Swap's files are read outside the lock; adopting its newer
-                    // generations happens under it, with the live sync.
-                    // Claude Swap only ever matters for saved Claude accounts.
-                    let activity = if claude {
-                        crate::external::claude_swap_activity()
-                    } else {
-                        crate::external::SwapActivity::default()
-                    };
-                    let running = activity.running;
-                    runtime
-                        .refresh
-                        .set_swap_activity(activity.running, activity.switching);
-                    let signature = claude
-                        .then(crate::external::claude_swap_signature)
-                        .flatten();
-                    let due = crate::refresh::swap_read_due(
-                        running,
-                        swap_was_running,
-                        signature,
-                        swap_last_signature,
-                    );
-                    let read = due.then(crate::external::read_claude_swap);
-                    // After a stop, a row that could not be read may hold Swap's last renewal:
-                    // read again next pass rather than mark the files as seen.
-                    let partial = matches!(&read, Some(Ok(batch)) if !running && batch.failed > 0);
-                    let swap = match (running, read) {
-                        (true, Some(Ok(batch))) => {
-                            crate::refresh::SwapView::Profiles(batch.profiles, batch.failed_emails)
-                        }
-                        (true, _) => crate::refresh::SwapView::Unreadable,
-                        (false, Some(Ok(batch))) => {
-                            crate::refresh::SwapView::Stopped(batch.profiles)
-                        }
-                        (false, _) => crate::refresh::SwapView::NotRunning,
-                    };
-                    // A failed read (Swap was writing its files) is repeated next pass: neither
-                    // the files nor the stop are marked as seen.
-                    let failed = due
-                        && (partial
-                            || matches!(
-                                swap,
-                                crate::refresh::SwapView::Unreadable
-                                    | crate::refresh::SwapView::NotRunning
-                            ));
-                    if !failed {
-                        swap_last_signature = signature;
-                        swap_was_running = Some(running);
-                    }
-                    let _mutation = runtime.mutations.lock().await;
-                    // Claude Code left its token expired: renew it under Claude Code's locks so
-                    // managed sessions and quota checks on that account keep working.
-                    if claude {
-                        crate::refresh::renew_idle_live(
-                            &runtime.store,
-                            runtime.native,
-                            &runtime.refresh,
-                        )
-                        .await;
-                    }
-                    crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
-                    sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
-                    runtime.invalidate_current();
-                    last_source_sync = time;
-                }
-                if native_sources {
-                    let _ = runtime.maybe_backup(time, false);
-                }
-                if time - last_limit_scan >= 30 || time < last_limit_scan {
-                    scan_limits(&runtime, claude, time);
-                    last_limit_scan = time;
-                }
-                let Ok(snapshot) = runtime.store.snapshot() else {
-                    continue;
-                };
-                let mut due: Vec<_> = snapshot
-                    .accounts
-                    .into_iter()
-                    .filter(|a| due(a, time))
-                    .collect();
-                // Oldest due first: a failing first row cannot starve another account.
-                due.sort_by_key(|a| {
-                    a.usage_health
-                        .as_ref()
-                        .map(|h| h.next_check_at)
-                        .unwrap_or(0)
-                });
-                if native_sources {
-                    renew_due(&runtime).await;
-                }
-                for account in due.into_iter().take(2) {
-                    let _ = check(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                        &account.id,
-                        Some(&runtime.mutations),
-                    )
-                    .await;
-                }
-                if claude && native_rotation_on(&runtime.store) {
-                    // A native switch files the live lineage under its account: know its owner
-                    // first (network, outside the lock; at most once a minute per lineage).
-                    crate::refresh::learn_live_owner(
-                        &runtime.store,
-                        runtime.native,
-                        &runtime.refresh,
-                    )
-                    .await;
-                }
-                let _mutation = runtime.mutations.lock().await;
-                let _ = rotate(&runtime, native_sources);
+                pass.run(&runtime, native_sources, now()).await;
             }
-        }))
+        });
+        Self {
+            stop,
+            task: Some(task),
+        }
+    }
+    /// Starts no further pass and waits up to `deadline` for the one in flight — a renewal
+    /// must store the token the provider just returned — then abandons it. True: drained.
+    pub async fn stop(mut self, deadline: Duration) -> bool {
+        let _ = self.stop.send(true);
+        let Some(mut task) = self.task.take() else {
+            return true;
+        };
+        match tokio::time::timeout(deadline, &mut task).await {
+            Ok(_) => true,
+            Err(_) => {
+                task.abort();
+                false
+            }
+        }
     }
 }
 impl Drop for MonitorHandle {
     fn drop(&mut self) {
-        self.0.abort();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+/// What the background remembers between passes.
+#[derive(Default)]
+pub(crate) struct Pass {
+    last_source_sync: i64,
+    /// What the previous pass saw of Claude Swap: whether it ran, and its files.
+    swap_was_running: Option<bool>,
+    swap_last_signature: Option<(u64, u64, u128)>,
+    renew: RenewSchedule,
+}
+/// When each inactive Claude account's token comes due, learned from the vault only when the
+/// store's credentials changed — not by reading every credential on every pass (LC-08).
+#[derive(Default)]
+struct RenewSchedule {
+    changes: Option<u64>,
+    due_at: Vec<(String, i64)>,
+    retry_at: std::collections::HashMap<String, i64>,
+}
+impl Pass {
+    pub(crate) async fn run(&mut self, runtime: &Runtime, native_sources: bool, time: i64) {
+        // With no saved Claude OAuth account there is nothing of Claude Code's to keep
+        // current: no Keychain read, no Claude Swap read, no transcript scan.
+        let claude = native_sources && claude_oauth_saved(&runtime.store);
+        if native_sources
+            && (time - self.last_source_sync >= INTERVAL_SECONDS || time < self.last_source_sync)
+        {
+            self.sync_sources(runtime, claude, time).await;
+        }
+        if native_sources {
+            let _ = runtime.maybe_backup(time, false);
+        }
+        scan_limits(runtime, claude, time);
+        let Ok(snapshot) = runtime.store.snapshot() else {
+            return;
+        };
+        let mut due: Vec<_> = snapshot
+            .accounts
+            .into_iter()
+            .filter(|a| due(a, time))
+            .collect();
+        // Oldest due first: a failing first row cannot starve another account.
+        due.sort_by_key(|a| {
+            a.usage_health
+                .as_ref()
+                .map(|h| h.next_check_at)
+                .unwrap_or(0)
+        });
+        if native_sources {
+            renew_due(runtime, time, &mut self.renew).await;
+        }
+        for account in due.into_iter().take(CHECKS_PER_PASS) {
+            let _ = check(
+                &runtime.store,
+                runtime.native,
+                &runtime.refresh,
+                &account.id,
+                Some(&runtime.mutations),
+            )
+            .await;
+        }
+        if claude && native_rotation_on(&runtime.store) {
+            // A native switch files the live lineage under its account: know its owner
+            // first (network, outside the lock; at most once a minute per lineage).
+            crate::refresh::learn_live_owner(&runtime.store, runtime.native, &runtime.refresh)
+                .await;
+        }
+        {
+            let _mutation = runtime.mutations.lock().await;
+            let _ = rotate(runtime, native_sources);
+        }
+        // Quota timestamps wait in memory; they reach the disk with the next real change or
+        // after a quarter of an hour.
+        let _ = runtime.store.flush_if_older(time, FLUSH_SECONDS);
+    }
+
+    async fn sync_sources(&mut self, runtime: &Runtime, claude: bool, time: i64) {
+        // Network first, outside the lock: who owns a lineage not seen before.
+        if claude {
+            crate::refresh::learn_live_owner(&runtime.store, runtime.native, &runtime.refresh)
+                .await;
+        }
+        // Claude Swap's files are read outside the lock; adopting its newer generations
+        // happens under it, with the live sync. Claude Swap only matters for saved Claude
+        // accounts.
+        let activity = if claude {
+            (runtime.native.swap_activity)()
+        } else {
+            crate::external::SwapActivity::default()
+        };
+        let running = activity.running;
+        runtime
+            .refresh
+            .set_swap_activity(activity.running, activity.switching);
+        let signature = if claude {
+            (runtime.native.swap_signature)()
+        } else {
+            None
+        };
+        let due = crate::refresh::swap_read_due(
+            running,
+            self.swap_was_running,
+            signature,
+            self.swap_last_signature,
+        );
+        let read = due.then(runtime.native.swap);
+        // After a stop, a row that could not be read may hold Swap's last renewal: read
+        // again next pass rather than mark the files as seen.
+        let partial = matches!(&read, Some(Ok(batch)) if !running && batch.failed > 0);
+        let swap = match (running, read) {
+            (true, Some(Ok(batch))) => {
+                crate::refresh::SwapView::Profiles(batch.profiles, batch.failed_emails)
+            }
+            (true, _) => crate::refresh::SwapView::Unreadable,
+            (false, Some(Ok(batch))) => crate::refresh::SwapView::Stopped(batch.profiles),
+            (false, _) => crate::refresh::SwapView::NotRunning,
+        };
+        // A failed read (Swap was writing its files) is repeated next pass: neither the files
+        // nor the stop are marked as seen.
+        let failed = due
+            && (partial
+                || matches!(
+                    swap,
+                    crate::refresh::SwapView::Unreadable | crate::refresh::SwapView::NotRunning
+                ));
+        if !failed {
+            self.swap_last_signature = signature;
+            self.swap_was_running = Some(running);
+        }
+        let _mutation = runtime.mutations.lock().await;
+        // Claude Code left its token expired: renew it under Claude Code's locks so managed
+        // sessions and quota checks on that account keep working.
+        if claude {
+            crate::refresh::renew_idle_live(&runtime.store, runtime.native, &runtime.refresh).await;
+        }
+        crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
+        sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
+        runtime.invalidate_current();
+        self.last_source_sync = time;
     }
 }
 
@@ -311,40 +361,47 @@ const CHECK_DEADLINE: Duration = Duration::from_secs(25);
 
 /// Renews inactive Claude tokens on their own schedule. Quota checks back off up to 30
 /// minutes, longer than the renewal margin, so a managed route could otherwise expire
-/// between checks. At most two grants per pass.
-async fn renew_due(runtime: &Runtime) {
-    let Ok(snapshot) = runtime.store.snapshot() else {
-        return;
-    };
-    let time = now();
+/// between checks. At most two grants per pass. Credentials are read only when the store's
+/// credentials changed; an account whose renewal did not happen waits a minute.
+async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
+    let changes = runtime.store.changes();
+    if schedule.changes != Some(changes) {
+        let Ok(snapshot) = runtime.store.snapshot() else {
+            return;
+        };
+        schedule.due_at = snapshot
+            .accounts
+            .iter()
+            .filter(|a| a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+            .filter_map(|a| {
+                let credential = runtime.store.stored_credential(&a.id).ok()?;
+                crate::refresh::due_at(&credential).map(|at| (a.id.clone(), at))
+            })
+            .collect();
+        schedule.changes = Some(changes);
+    }
     let mut done = 0;
-    for account in snapshot
-        .accounts
-        .iter()
-        .filter(|a| a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
-    {
+    for (id, due_at) in schedule.due_at.clone() {
         if done == 2 {
             break;
         }
-        let due = runtime
-            .store
-            .stored_credential(&account.id)
-            .is_ok_and(|c| crate::refresh::due(&c, time));
-        if !due {
+        if due_at > time || schedule.retry_at.get(&id).is_some_and(|at| *at > time) {
             continue;
         }
         let _mutation = runtime.mutations.lock().await;
-        if crate::refresh::ensure_fresh(
+        let outcome = crate::refresh::ensure_fresh(
             &runtime.store,
             runtime.native,
             &runtime.refresh,
-            &account.id,
+            &id,
             false,
         )
-        .await
-            == crate::refresh::Outcome::Refreshed
-        {
+        .await;
+        if outcome == crate::refresh::Outcome::Refreshed {
             done += 1;
+            schedule.retry_at.remove(&id);
+        } else {
+            schedule.retry_at.insert(id, time + RENEW_RETRY_SECONDS);
         }
     }
 }
@@ -455,7 +512,7 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         (&p.identity, ids)
     });
     let files = if native.is_some() {
-        crate::limits::transcript_files(time)
+        (runtime.native.transcripts)(time)
     } else {
         vec![]
     };
@@ -843,6 +900,7 @@ mod tests {
             activate: activates,
             live: crate::no_live,
             swap: crate::no_swap,
+            ..crate::UNAVAILABLE
         };
         let lock = tokio::sync::Mutex::new(());
         assert_eq!(
@@ -892,7 +950,7 @@ mod tests {
             .store
             .usage_health(&b.id, "failed", now(), now() + MAX_BACKOFF)
             .unwrap();
-        renew_due(&runtime).await;
+        renew_due(&runtime, now(), &mut RenewSchedule::default()).await;
         assert_eq!(
             runtime.store.stored_credential(&b.id).unwrap().access_token,
             "renewed"
@@ -1112,6 +1170,163 @@ mod tests {
             .unwrap();
         assert_eq!(health.status, "failed");
         assert!(health.next_check_at > now());
+    }
+    /// Lifecycle LC-08's check: one idle hour of passes on a fake clock — fifteen saved Claude
+    /// accounts, native rotation on, a signed-in Claude Code, backups on, nothing changing —
+    /// counted against the idle budget: no sign-in read after the first, no credential read
+    /// on a timer, no metadata write, no second backup.
+    #[tokio::test]
+    async fn an_idle_hour_on_a_fake_clock_stays_inside_the_budget() {
+        use crate::fixtures::*;
+        use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+        static CLOCK: AtomicI64 = AtomicI64::new(0);
+        // When Claude Code last wrote its sign-in: an hour before the test starts.
+        static WRITTEN: AtomicI64 = AtomicI64::new(0);
+        static SIGN_IN_READS: AtomicU64 = AtomicU64::new(0);
+        static GATE: external::Watch = external::Watch::new();
+        fn watched(provider: Provider) -> Result<external::CapturedProfile, String> {
+            let settled = WRITTEN.load(Ordering::SeqCst);
+            GATE.get(
+                provider,
+                || CLOCK.load(Ordering::SeqCst),
+                || external::Probe::Ready {
+                    stamps: vec![external::Stamp::Item(Some((settled, settled)))],
+                    consent: false,
+                    newest: settled,
+                },
+                || {
+                    SIGN_IN_READS.fetch_add(1, Ordering::SeqCst);
+                    signed_in(provider)
+                },
+            )
+        }
+        #[derive(Default)]
+        struct CountingVault {
+            inner: MemoryVault,
+            gets: AtomicU64,
+        }
+        impl switchboard_core::Vault for CountingVault {
+            fn get(&self, id: &str) -> Result<Credential, String> {
+                self.gets.fetch_add(1, Ordering::SeqCst);
+                self.inner.get(id)
+            }
+            fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+                self.inner.put(id, value)
+            }
+            fn delete(&self, id: &str) -> Result<(), String> {
+                self.inner.delete(id)
+            }
+        }
+        struct Key;
+        impl switchboard_core::backup::BackupKey for Key {
+            fn load(&self) -> Result<Option<[u8; 32]>, String> {
+                Ok(Some([7; 32]))
+            }
+            fn create(&self, _: &[u8; 32]) -> Result<bool, String> {
+                Ok(false)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let backups = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let runtime = Runtime::open_with(
+            root.path().to_owned(),
+            vault.clone(),
+            crate::NativeSources {
+                current: watched,
+                activate: activates,
+                ..crate::UNAVAILABLE
+            },
+        )
+        .await
+        .unwrap();
+        // Nothing here may reach a real provider.
+        runtime
+            .refresh
+            .set_endpoint("http://127.0.0.1:9/token".into());
+        runtime
+            .refresh
+            .set_profile_endpoint("http://127.0.0.1:9/profile".into());
+        runtime.enable_backups(Some(Arc::new(Key)), Some(backups.path().to_owned()));
+        let start = now();
+        WRITTEN.store(start - 3600, Ordering::SeqCst);
+        save(&runtime.store, "synthetic-a", "default");
+        for n in 1..15 {
+            let account = save(&runtime.store, &format!("synthetic-{n}"), "default");
+            // Quota checked a moment ago; the next check is due after these two hours.
+            runtime
+                .store
+                .usage_health(&account.id, "ok", start - 10, start + 3 * 3600)
+                .unwrap();
+        }
+        let a = runtime.store.snapshot().unwrap().accounts[0].id.clone();
+        runtime
+            .store
+            .usage_health(&a, "ok", start - 10, start + 3 * 3600)
+            .unwrap();
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        runtime.store.flush().unwrap();
+        let mut pass = Pass::default();
+        // The first pass learns what is there: the sign-in, the renewal schedule, a backup.
+        CLOCK.store(start, Ordering::SeqCst);
+        pass.run(&runtime, true, start).await;
+        let reads = SIGN_IN_READS.load(Ordering::SeqCst);
+        let gets = vault.gets.load(Ordering::SeqCst);
+        let writes = runtime.store.metadata_writes();
+        let backup_files = || std::fs::read_dir(backups.path()).unwrap().count();
+        let first_backups = backup_files();
+        // Then an hour of passes with nothing changing.
+        let passes = 3600 / PASS_SECONDS as i64;
+        for k in 1..=passes {
+            let time = start + k * PASS_SECONDS as i64;
+            CLOCK.store(time, Ordering::SeqCst);
+            pass.run(&runtime, true, time).await;
+        }
+        let gets = vault.gets.load(Ordering::SeqCst) - gets;
+        eprintln!(
+            "idle hour: {passes} passes, sign-in reads {}, credential reads {gets}, metadata writes {}, backups {}",
+            SIGN_IN_READS.load(Ordering::SeqCst) - reads,
+            runtime.store.metadata_writes() - writes,
+            backup_files() - first_backups
+        );
+        assert_eq!(passes, 120, "nothing polls faster than every 30 seconds");
+        assert_eq!(
+            SIGN_IN_READS.load(Ordering::SeqCst),
+            reads,
+            "no sign-in read"
+        );
+        assert_eq!(runtime.store.metadata_writes(), writes, "no metadata write");
+        assert_eq!(backup_files(), first_backups, "no backup without a change");
+        // One per pass for native rotation's current account, one per three-minute source
+        // sync for the signed-in account (before: every account's credential, every 10 s).
+        let syncs = (3600 / INTERVAL_SECONDS) as u64;
+        assert!(
+            gets <= passes as u64 + syncs,
+            "credential reads {gets} per idle hour"
+        );
+        // Without rotation, only the source sync reads one.
+        let mut off = policy("claude_cli");
+        off.enabled = false;
+        runtime.store.set_policy(off).unwrap();
+        // The change itself is answered once (schedule, backup); then the idle hour.
+        let next = start + (passes + 1) * PASS_SECONDS as i64;
+        CLOCK.store(next, Ordering::SeqCst);
+        pass.run(&runtime, true, next).await;
+        let gets = vault.gets.load(Ordering::SeqCst);
+        let writes = runtime.store.metadata_writes();
+        for k in passes + 2..=2 * passes + 1 {
+            let time = start + k * PASS_SECONDS as i64;
+            CLOCK.store(time, Ordering::SeqCst);
+            pass.run(&runtime, true, time).await;
+        }
+        let gets = vault.gets.load(Ordering::SeqCst) - gets;
+        // The first sync after the change rebuilds which account holds which lineage once.
+        assert!(
+            gets <= syncs + 15,
+            "credential reads {gets} per idle hour without rotation"
+        );
+        assert_eq!(runtime.store.metadata_writes(), writes);
+        assert_eq!(SIGN_IN_READS.load(Ordering::SeqCst), reads);
     }
     #[tokio::test]
     async fn monitor_drops_without_retaining_the_runtime() {

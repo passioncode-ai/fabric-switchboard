@@ -324,6 +324,40 @@ const NATIVE: Host = Host {
 fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     start_terminal(&write_launch_script(home, content)?)
 }
+/// After the proxy had to move from `old` to `new` (its port was taken), points the files
+/// Switchboard generated in managed homes — launch scripts and Codex's provider config — at
+/// the new port. Only the exact loopback address is replaced; nothing else is touched.
+/// Returns how many files changed.
+pub(crate) fn repoint_managed(root: &Path, old: u16, new: u16) -> usize {
+    let from = format!("http://127.0.0.1:{old}/");
+    let to = format!("http://127.0.0.1:{new}/");
+    let Ok(homes) = fs::read_dir(root.join("runtimes")) else {
+        return 0;
+    };
+    let mut changed = 0;
+    for home in homes.flatten() {
+        for (name, executable) in [
+            ("launch.command", true),
+            ("launch.ps1", true),
+            ("config.toml", false),
+        ] {
+            let path = home.path().join(name);
+            let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 256 * 1024) else {
+                continue;
+            };
+            let Ok(text) = String::from_utf8(bytes) else {
+                continue;
+            };
+            if !text.contains(&from) {
+                continue;
+            }
+            if private_write(&path, text.replace(&from, &to).as_bytes(), executable).is_ok() {
+                changed += 1;
+            }
+        }
+    }
+    changed
+}
 fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
     #[cfg(windows)]
     let path = home.join("launch.ps1");

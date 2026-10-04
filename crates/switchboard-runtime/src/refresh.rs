@@ -10,7 +10,9 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use switchboard_core::{Account, AuthKind, Credential, ExternalIdentity, Provider, Store};
+use switchboard_core::{
+    Account, AuthKind, Credential, ExternalIdentity, Provider, Snapshot, Store,
+};
 
 pub(crate) const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 pub(crate) const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
@@ -77,7 +79,12 @@ pub(crate) struct RefreshState {
     grants: std::sync::atomic::AtomicBool,
     /// Refresh tokens a grant is spending right now (the grant outlives a cancelled caller).
     in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Which stored account holds a refresh token, as of a store change count: the scan of
+    /// every stored credential runs again only after credentials changed (lifecycle LC-08).
+    holders: Mutex<Option<(u64, Holders)>>,
 }
+/// Refresh-token fingerprint → the stored account holding it.
+type Holders = HashMap<String, Option<String>>;
 impl Default for RefreshState {
     fn default() -> Self {
         // Unit tests never reach the provider: the discard port refuses at once.
@@ -92,6 +99,33 @@ impl Default for RefreshState {
     }
 }
 impl RefreshState {
+    /// The first stored Claude OAuth account (in store order) holding `token`. The map from
+    /// token fingerprint to holder is rebuilt only when the store's credentials changed.
+    fn holder(&self, store: &Store, snapshot: &Snapshot, token: &str) -> Option<String> {
+        let changes = store.changes();
+        let mut holders = self.holders.lock().ok()?;
+        if holders.as_ref().is_none_or(|(at, _)| *at != changes) {
+            let mut map = HashMap::new();
+            for account in snapshot
+                .accounts
+                .iter()
+                .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+            {
+                if let Some(held) = store
+                    .stored_credential(&account.id)
+                    .ok()
+                    .and_then(|c| c.refresh_token)
+                {
+                    map.entry(fingerprint(&held))
+                        .or_insert_with(|| Some(account.id.clone()));
+                }
+            }
+            *holders = Some((changes, map));
+        }
+        holders
+            .as_ref()
+            .and_then(|(_, map)| map.get(&fingerprint(token)).cloned().flatten())
+    }
     pub(crate) fn at(endpoint: String) -> Self {
         Self {
             endpoint: Mutex::new(endpoint),
@@ -116,6 +150,7 @@ impl RefreshState {
             stash: Arc::new(Mutex::new(HashMap::new())),
             swap_held: Mutex::new(Default::default()),
             journal: Mutex::new(None),
+            holders: Mutex::new(None),
         }
     }
     /// The offline CLI's state: no grant is ever made; rejected lineages come from the owner's
@@ -291,6 +326,13 @@ pub(crate) fn due(credential: &Credential, time: i64) -> bool {
         && credential
             .expires_at
             .is_some_and(|t| t - time <= MARGIN_SECONDS)
+}
+
+/// When a credential comes due for renewal; None: it cannot be renewed (no refresh token or
+/// no expiry).
+pub(crate) fn due_at(credential: &Credential) -> Option<i64> {
+    credential.refresh_token.as_ref()?;
+    credential.expires_at.map(|t| t - MARGIN_SECONDS)
 }
 
 /// Refreshes one account if it is inactive and due (or `force`, after a 401).
@@ -998,21 +1040,13 @@ pub(crate) fn lineage(
                 && o.organization_id == identity.organization_id
         })
     };
-    for account in snapshot
-        .accounts
-        .iter()
-        .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
-    {
-        if store
-            .stored_credential(&account.id)
-            .is_ok_and(|c| c.refresh_token.as_deref() == Some(token))
-        {
-            return if same(account.external_identity.as_ref()) {
-                Lineage::Own
-            } else {
-                Lineage::Foreign
-            };
-        }
+    if let Some(holder) = state.holder(store, &snapshot, token) {
+        let account = snapshot.accounts.iter().find(|a| a.id == holder);
+        return if same(account.and_then(|a| a.external_identity.as_ref())) {
+            Lineage::Own
+        } else {
+            Lineage::Foreign
+        };
     }
     match state.owner(token) {
         // The same login in another organization is another account.
@@ -1203,18 +1237,21 @@ mod tests {
         activate: activates,
         live: crate::no_live,
         swap: crate::no_swap,
+        ..crate::UNAVAILABLE
     };
     const SIGNED_OUT: NativeSources = NativeSources {
         current: signed_out,
         activate: activates,
         live: crate::no_live,
         swap: crate::no_swap,
+        ..crate::UNAVAILABLE
     };
     const UNREADABLE: NativeSources = NativeSources {
         current: unreadable,
         activate: activates,
         live: crate::no_live,
         swap: crate::no_swap,
+        ..crate::UNAVAILABLE
     };
 
     #[tokio::test]
@@ -1423,6 +1460,7 @@ mod tests {
             activate: never,
             live: crate::no_live,
             swap: crate::no_swap,
+            ..crate::UNAVAILABLE
         };
         assert_eq!(
             crate::activate_native(&store, &b, None, native, Some(&state)).unwrap_err(),
@@ -2214,6 +2252,7 @@ mod tests {
         activate: activates,
         live: fake_live,
         swap: crate::no_swap,
+        ..crate::UNAVAILABLE
     };
     fn idle_setup(item: Value) -> (tempfile::TempDir, Arc<Store>) {
         LIVE.with(|l| *l.borrow_mut() = Some(serde_json::to_vec(&item).unwrap()));

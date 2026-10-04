@@ -1,5 +1,6 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod agents;
+mod blocking;
 pub mod control;
 pub mod external;
 #[cfg(target_os = "macos")]
@@ -7,6 +8,7 @@ mod external_keychain;
 pub mod launch;
 mod limits;
 mod monitor;
+pub mod oplog;
 pub mod projects;
 mod refresh;
 use serde::{Deserialize, Serialize};
@@ -135,7 +137,11 @@ pub enum Operation {
 /// Tests substitute synthetic sources so they never touch real Claude or Codex auth.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeSources {
+    /// The sign-in as the background may read it: probed quietly, read only on change, never
+    /// in a way that can show a dialog (lifecycle LC-04).
     pub(crate) current: fn(Provider) -> Result<external::CapturedProfile, String>,
+    /// The read a person asked for (capture); None: the same as `current`.
+    pub(crate) fresh: Option<fn(Provider) -> Result<external::CapturedProfile, String>>,
     /// Writes the target under Claude Code's locks; `preserve` receives the outgoing live
     /// credential under those same locks, before anything is written.
     pub(crate) activate: Activate,
@@ -143,6 +149,12 @@ pub(crate) struct NativeSources {
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
     /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
     pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
+    /// Whether Claude Swap runs and switches, read from the process table in-process.
+    pub(crate) swap_activity: fn() -> external::SwapActivity,
+    /// A cheap fingerprint of Claude Swap's files.
+    pub(crate) swap_signature: fn() -> Option<(u64, u64, u128)>,
+    /// Claude Code's recent session transcripts, for its limit markers.
+    pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -153,11 +165,15 @@ pub(crate) type Activate = fn(
 /// Synthetic owners (tests, the packaged smoke check) never read or write real sign-in.
 pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     current: |_| Err("External sign-in unavailable or its files are unsafe.".into()),
+    fresh: None,
     activate: |_, _, _, _| {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
     swap: no_swap,
+    swap_activity: external::SwapActivity::none,
+    swap_signature: || None,
+    transcripts: |_| Vec::new(),
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -169,10 +185,20 @@ pub(crate) fn no_live() -> Result<Box<dyn external::LiveItem>, String> {
 }
 pub(crate) const NATIVE: NativeSources = NativeSources {
     current: external::capture_current_cached,
+    fresh: Some(external::capture_current),
     activate: external::activate_claude,
     live: external::lock_live,
     swap: external::read_claude_swap,
+    swap_activity: external::claude_swap_activity,
+    swap_signature: external::claude_swap_signature,
+    transcripts: limits::transcript_files,
 };
+impl NativeSources {
+    /// The read for an operation a person asked for.
+    pub(crate) fn fresh(&self, provider: Provider) -> Result<external::CapturedProfile, String> {
+        (self.fresh.unwrap_or(self.current))(provider)
+    }
+}
 
 pub struct Runtime {
     pub store: Arc<Store>,
@@ -223,7 +249,7 @@ impl Runtime {
         native: NativeSources,
     ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
-        let proxy = ProxyHandle::start(store.clone()).await?;
+        let proxy = start_proxy(&root, store.clone()).await?;
         let refresh = refresh::RefreshState::default();
         refresh.remember_in(root.join("renewal-state.json"));
         Ok(Arc::new(Self {
@@ -397,7 +423,10 @@ impl Runtime {
             }
             state.writing = true;
         }
-        let result = switchboard_core::backup::write(&self.store, &dir, key.as_ref(), time);
+        // The backup key comes through `/usr/bin/security`: a blocking section (SB-23).
+        let result = blocking::run(|| {
+            switchboard_core::backup::write(&self.store, &dir, key.as_ref(), time)
+        });
         let mut state = self
             .backup_state
             .lock()
@@ -443,9 +472,9 @@ impl Runtime {
             }
             cache.generation
         };
-        // Reading may wait on an OS credential prompt; invalidation must not wait for it.
-        // The window shows what is signed in now: its own 30 s cache is the only one.
-        external::forget_current();
+        // The window shows what is signed in now: the watched read probes the sources and
+        // reads again only when one changed (lifecycle LC-04), so a refresh timer never
+        // spawns a Keychain read and never shows a dialog.
         let value = observe_current(&self.store, self.native.current);
         let mut cache = self
             .current_cache
@@ -459,11 +488,114 @@ impl Runtime {
     }
 }
 
+/// Where the proxy's port and token are recorded, so a managed session started before a
+/// restart or an update still reaches the proxy (lifecycle LC-11).
+const PROXY_FILE: &str = "proxy.json";
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProxyRecord {
+    protocol: u8,
+    port: u16,
+    token: String,
+}
+fn load_proxy_record(root: &Path) -> Option<ProxyRecord> {
+    let bytes =
+        switchboard_core::private_fs::read_private_strict(&root.join(PROXY_FILE), 4096).ok()?;
+    let record: ProxyRecord = serde_json::from_slice(&bytes).ok()?;
+    (record.protocol == 1
+        && record.port != 0
+        && record.token.len() == 64
+        && record.token.bytes().all(|b| b.is_ascii_hexdigit()))
+    .then_some(record)
+}
+/// Starts the proxy on its recorded port and token. When another program holds that port it
+/// starts on a fresh one, keeps the token, and points the managed homes' generated files at
+/// the new port, so a session launched from them again reaches the proxy.
+async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, String> {
+    let record = load_proxy_record(root);
+    let proxy = ProxyHandle::start_on(
+        store,
+        record.as_ref().map(|r| r.port),
+        record.as_ref().map(|r| r.token.clone()),
+    )
+    .await?;
+    let port = proxy.address().port();
+    let unchanged = record
+        .as_ref()
+        .is_some_and(|r| r.port == port && r.token == proxy.token());
+    if !unchanged {
+        let saved = ProxyRecord {
+            protocol: 1,
+            port,
+            token: proxy.token().to_owned(),
+        };
+        if let Ok(bytes) = serde_json::to_vec(&saved) {
+            let _ = switchboard_core::private_fs::private_write(&root.join(PROXY_FILE), &bytes);
+        }
+    }
+    if let Some(old) = record.filter(|r| r.port != port) {
+        let homes = launch::repoint_managed(root, old.port, port);
+        oplog::event(
+            "proxy_port_changed",
+            &[
+                ("old_port", oplog::Field::Number(old.port.into())),
+                ("new_port", oplog::Field::Number(port.into())),
+                ("files_repointed", oplog::Field::Number(homes as i64)),
+            ],
+        );
+    }
+    Ok(proxy)
+}
+
+/// Lifecycle LC-01's deadlines: the owner's drain gets `DRAIN_DEADLINE`; if the process has
+/// not exited by `HARD_EXIT_AFTER` from the stop request, it exits regardless.
+pub const DRAIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8);
+pub const HARD_EXIT_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+/// Arms the backstop: a plain thread that ends the process if the orderly stop overruns.
+pub fn arm_hard_exit(after: std::time::Duration) {
+    let _ = std::thread::Builder::new()
+        .name("switchboard-hard-exit".into())
+        .spawn(move || {
+            std::thread::sleep(after);
+            oplog::event("hard_exit", &[]);
+            std::process::exit(1);
+        });
+}
+/// Resolves on the first stop request the process receives: `SIGTERM` or `SIGINT` (Unix),
+/// Ctrl-C (elsewhere). Names the signal as a code for the log.
+pub async fn stop_requested() -> Result<&'static str, String> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut terminate =
+            signal(SignalKind::terminate()).map_err(|_| "Shutdown signal unavailable.")?;
+        let mut interrupt =
+            signal(SignalKind::interrupt()).map_err(|_| "Shutdown signal unavailable.")?;
+        Ok(tokio::select! {
+            _ = terminate.recv() => "sigterm",
+            _ = interrupt.recv() => "sigint",
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .map_err(|_| "Shutdown signal unavailable.")?;
+        Ok("ctrl_c")
+    }
+}
+
+/// How an owner's shutdown ended (lifecycle LC-01).
+pub struct Stopped {
+    /// Everything in flight finished inside the deadline; false: the rest was abandoned.
+    pub drained: bool,
+    pub millis: u64,
+}
 /// Holding this value keeps both listeners and the exclusive store lease alive.
 pub struct Owner {
     pub runtime: Arc<Runtime>,
-    _control: control::ControlHandle,
-    _monitor: monitor::MonitorHandle,
+    control: control::ControlHandle,
+    monitor: monitor::MonitorHandle,
 }
 impl Owner {
     pub async fn start(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, String> {
@@ -491,11 +623,60 @@ impl Owner {
             runtime.refresh.set_grants(false);
         }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
+        oplog::event(
+            "owner_started",
+            &[
+                ("pid", oplog::Field::Number(std::process::id().into())),
+                (
+                    "proxy_port",
+                    oplog::Field::Number(runtime.proxy.address().port().into()),
+                ),
+            ],
+        );
         Ok(Self {
             runtime,
-            _control: control,
-            _monitor: monitor,
+            control,
+            monitor,
         })
+    }
+    /// The one shutdown every quit path runs (lifecycle LC-01): no new background pass or
+    /// request starts; the pass and the operation in flight — a renewal must store the token
+    /// the provider just returned — get until `deadline`; the proxy lets its streams finish
+    /// inside what is left (at most two seconds); pending timestamps are written; the
+    /// descriptor is removed. Returns once the store's lock is free, or at the deadline.
+    pub async fn shutdown(self, deadline: std::time::Duration) -> Stopped {
+        let started = std::time::Instant::now();
+        let left = |cap: std::time::Duration| deadline.saturating_sub(started.elapsed()).min(cap);
+        let Self {
+            runtime,
+            control,
+            monitor,
+        } = self;
+        let mut drained = monitor.stop(left(deadline)).await;
+        control.close().await;
+        // The operation in flight holds the owner's transaction; taking it means it finished,
+        // and holding it means no other one starts.
+        let transaction = tokio::time::timeout(left(deadline), runtime.mutations.lock()).await;
+        drained &= transaction.is_ok();
+        drained &= runtime
+            .proxy
+            .stop(left(std::time::Duration::from_secs(2)))
+            .await;
+        let _ = runtime.store.flush();
+        drop(transaction);
+        let millis = started.elapsed().as_millis() as u64;
+        oplog::event(
+            "owner_stopped",
+            &[
+                (
+                    "outcome",
+                    oplog::Field::Code(if drained { "drained" } else { "abandoned" }),
+                ),
+                ("millis", oplog::Field::Number(millis as i64)),
+            ],
+        );
+        drop(runtime);
+        Stopped { drained, millis }
     }
     /// `switchboard serve`: native sources, and a vault that never shows a Keychain dialog.
     pub async fn native(root: PathBuf) -> Result<Self, String> {
@@ -550,7 +731,7 @@ async fn execute(
             if provider == Provider::Claude {
                 refresh::learn_live_owner(&store, native, refresh_state).await;
             }
-            let captured = (native.current)(provider)?;
+            let captured = native.fresh(provider)?;
             // A sign-in that is another account's lineage never lands under this name, and one
             // nothing attributes never overwrites a copy already saved (audit P2-1).
             if provider == Provider::Claude && captured.kind == AuthKind::OAuth {
@@ -1188,6 +1369,7 @@ pub(crate) mod fixtures {
                 activate,
                 live: no_live,
                 swap: no_swap,
+                ..UNAVAILABLE
             },
         )
         .await
@@ -1836,5 +2018,160 @@ mod owner_tests {
         assert!(remove.await.unwrap().is_err());
         assert!(home.is_dir());
         assert_eq!(runtime.store.snapshot().unwrap().accounts.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    //! Lifecycle rules LC-01 (quit within a deadline) and LC-11 (addresses survive a restart).
+    use super::*;
+    use std::time::Duration;
+    use switchboard_core::MemoryVault;
+
+    async fn owner(root: &Path) -> Owner {
+        Owner::start(root.to_owned(), Arc::new(MemoryVault::default()))
+            .await
+            .unwrap()
+    }
+    /// A managed session holds the proxy's address and token in its environment.
+    async fn status_as_holder(address: std::net::SocketAddr, token: &str) -> reqwest::StatusCode {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .post(format!("http://{address}/claude/default/v1/messages"))
+            .bearer_auth(token)
+            .body("{}")
+            .send()
+            .await
+            .unwrap()
+            .status()
+    }
+
+    #[tokio::test]
+    async fn a_restarted_owner_keeps_the_address_and_token_a_session_holds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = owner(tmp.path()).await;
+        let address = first.runtime.proxy.address();
+        let token = first.runtime.proxy.token().to_owned();
+        assert_ne!(
+            status_as_holder(address, &token).await,
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        first.shutdown(Duration::from_secs(5)).await;
+        let second = owner(tmp.path()).await;
+        assert_eq!(second.runtime.proxy.address(), address);
+        assert_eq!(second.runtime.proxy.token(), token);
+        // The session started before the restart still gets through.
+        assert_ne!(
+            status_as_holder(address, &token).await,
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_as_holder(address, "not-the-token").await,
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn a_taken_port_moves_the_proxy_and_repoints_managed_homes_with_the_same_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = owner(tmp.path()).await;
+        let old = first.runtime.proxy.address();
+        let token = first.runtime.proxy.token().to_owned();
+        let runtimes = tmp.path().join("runtimes");
+        for home in ["claude-team", "codex-team"] {
+            switchboard_core::private_fs::private_dir(&runtimes.join(home)).unwrap();
+        }
+        let script = runtimes.join("claude-team/launch.command");
+        let config = runtimes.join("codex-team/config.toml");
+        switchboard_core::private_fs::private_write(
+            &script,
+            format!("export ANTHROPIC_BASE_URL='http://{old}/claude/team'\n").as_bytes(),
+        )
+        .unwrap();
+        switchboard_core::private_fs::private_write(
+            &config,
+            format!("base_url = \"http://{old}/codex/team/v1\"\n").as_bytes(),
+        )
+        .unwrap();
+        first.shutdown(Duration::from_secs(5)).await;
+        // Another program took the port while Switchboard was closed.
+        let squatter = std::net::TcpListener::bind(old).unwrap();
+        let second = owner(tmp.path()).await;
+        let new = second.runtime.proxy.address();
+        assert_ne!(new.port(), old.port());
+        assert_eq!(
+            second.runtime.proxy.token(),
+            token,
+            "sessions keep their token"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&script).unwrap(),
+            format!("export ANTHROPIC_BASE_URL='http://{new}/claude/team'\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            format!("base_url = \"http://{new}/codex/team/v1\"\n")
+        );
+        drop(squatter);
+        // The new port is the recorded one from now on.
+        second.shutdown(Duration::from_secs(5)).await;
+        let third = owner(tmp.path()).await;
+        assert_eq!(third.runtime.proxy.address(), new);
+    }
+
+    #[tokio::test]
+    async fn an_idle_owner_stops_at_once_and_removes_its_descriptor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = owner(tmp.path()).await;
+        let descriptor = tmp.path().join("control.json");
+        assert!(descriptor.exists());
+        let started = std::time::Instant::now();
+        let stopped = owner.shutdown(Duration::from_secs(5)).await;
+        assert!(stopped.drained);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!descriptor.exists());
+        // The store is free for the next owner.
+        Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_busy_owner_finishes_the_operation_in_flight_within_the_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = owner(tmp.path()).await;
+        let runtime = owner.runtime.clone();
+        // An operation in flight holds the owner's transaction for two seconds.
+        let (held, wait) = tokio::sync::oneshot::channel();
+        let work = tokio::spawn(async move {
+            let _transaction = runtime.mutations.lock().await;
+            let _ = held.send(());
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        });
+        wait.await.unwrap();
+        let started = std::time::Instant::now();
+        let stopped = owner.shutdown(Duration::from_secs(8)).await;
+        assert!(
+            stopped.drained,
+            "the operation finished inside the deadline"
+        );
+        assert!(started.elapsed() >= Duration::from_millis(1500));
+        assert!(started.elapsed() < Duration::from_secs(8));
+        work.await.unwrap();
+        // One that outlives the deadline is abandoned at the deadline, not waited for.
+        let owner = super::lifecycle_tests::owner(tmp.path()).await;
+        let runtime = owner.runtime.clone();
+        let (held, wait) = tokio::sync::oneshot::channel();
+        let _stuck = tokio::spawn(async move {
+            let _transaction = runtime.mutations.lock().await;
+            let _ = held.send(());
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        wait.await.unwrap();
+        let started = std::time::Instant::now();
+        let stopped = owner.shutdown(Duration::from_secs(1)).await;
+        assert!(!stopped.drained);
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(!tmp.path().join("control.json").exists());
     }
 }
