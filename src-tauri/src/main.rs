@@ -7,6 +7,16 @@ struct SmokeMode(Option<tempfile::TempDir>);
 #[tauri::command]
 fn frontend_ready(app: tauri::AppHandle, mode: State<'_, SmokeMode>) {
     if mode.0.is_some() {
+        // Whether the window is on screen, so the smoke check can tell an ordinary start from a
+        // background one (SB-30).
+        let visible = app
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        println!(
+            "SWITCHBOARD_WINDOW {}",
+            if visible { "visible" } else { "hidden" }
+        );
         println!("SWITCHBOARD_FRONTEND_READY {}", env!("CARGO_PKG_VERSION"));
         app.exit(0);
     }
@@ -311,7 +321,7 @@ struct Launch {
     /// `--smoke-test`: a temporary store and memory vault, exiting once the UI is ready.
     smoke: bool,
     /// `--background`: start without showing the window or taking focus — the local lifecycle
-    /// broker's always-on start. The window appears on the next launch or a Dock click.
+    /// broker's always-on start. The window appears when the app is opened again.
     background: bool,
 }
 fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
@@ -396,12 +406,8 @@ fn main() {
             }
             app.manage(SmokeMode(temporary));
             // The window is created hidden (tauri.conf.json): shown now on an ordinary start;
-            // in the background, left hidden, and on macOS without a Dock icon, so nothing comes
-            // forward — the next launch or `reveal` brings it.
-            if background {
-                #[cfg(target_os = "macos")]
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            } else {
+            // in the background, left hidden — opening the app again (`reveal`) brings it.
+            if !background {
                 reveal(app.handle());
             }
             // SIGTERM (logout, `kill`, an updater) and SIGINT end the app the way Quit does:
@@ -451,15 +457,22 @@ fn main() {
             link_cli
         ])
         .build(tauri::generate_context!());
-    let Ok(app) = built else {
+    let Ok(mut app) = built else {
         eprintln!("Fabric Switchboard could not start. Check app-data permissions, another running instance and native vault access.");
         std::process::exit(1);
     };
+    // macOS: in the background the app is an accessory — no Dock icon, no activation. Set on the
+    // built app, before the event loop launches, so the launch itself never runs as a regular
+    // app (setup runs only after the launch would already have activated it).
+    #[cfg(target_os = "macos")]
+    if background {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = &mut app;
     app.run(|handle, event| {
-        // Every quit path — Quit, Cmd-Q, the last window closing, a signal — ends here: the
-        // owner stops its timers, finishes or abandons work in flight by the deadline,
-        // removes its descriptor and releases the store (lifecycle LC-01).
-        // macOS: clicking the Dock icon of an app started in the background shows its window.
+        // macOS: opening the app again (Finder, Spotlight, `open -a`) while its window is hidden
+        // shows it.
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen {
             has_visible_windows: false,
@@ -469,6 +482,9 @@ fn main() {
             reveal(handle);
             return;
         }
+        // Every quit path — Quit, Cmd-Q, the last window closing, a signal — ends here: the
+        // owner stops its timers, finishes or abandons work in flight by the deadline,
+        // removes its descriptor and releases the store (lifecycle LC-01).
         if let tauri::RunEvent::Exit = event {
             switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
             let slot = handle.state::<Slot>();

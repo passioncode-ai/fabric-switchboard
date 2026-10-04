@@ -828,7 +828,7 @@ let refreshing = false;
 // Menus close on Escape and on a click anywhere outside them.
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
 document.addEventListener('click', (event) => { if (openMenu && !(event.target as HTMLElement | null)?.closest('.menu-root')) { openMenu = null; render(); } });
-setInterval(() => {
+function backgroundRefresh() {
   if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
   refreshing = true; const stamp = clock.stamp();
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
@@ -836,4 +836,8 @@ setInterval(() => {
     if (!clock.accepts(stamp)) return;
     snapshot = data; applyContext(context); backgroundRender();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
-}, 60_000);
+}
+setInterval(backgroundRefresh, 60_000);
+// A window shown after hours in the background (SB-30) reads fresh metadata at once rather
+// than at the next minute.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });

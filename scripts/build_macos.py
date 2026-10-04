@@ -362,6 +362,8 @@ def main():
     if sha(embedded) != sha(cli):
         raise SystemExit('Embedded CLI differs from the archived CLI.')
     startup = verify_native_startup(app/'Contents/MacOS/fabric-switchboard', version)
+    # The lifecycle broker's always-on start: hidden window, unknown argument ignored (SB-30).
+    startup_background = verify_native_startup(app/'Contents/MacOS/fabric-switchboard', version, background=True)
     (folder/'README.txt').write_text(f'Fabric Switchboard {version}\nMove the app to Applications. CLI: ./switchboard --help\nKeep GUI or switchboard serve open for managed sessions. See repository docs/CLI.md.\nSignature and notarization differ; see the adjacent release receipt JSON.\n')
     # The license and the third-party notices travel with every binary archive.
     for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
@@ -370,7 +372,7 @@ def main():
     archive_folder(folder, archive)
     verify_source(commit)
     toolchain = {'rustc': capture(['rustc', '--version']), 'node': capture(['node', '--version']), 'macos': capture(['sw_vers', '-productVersion']), 'sdk': capture(['xcrun', '--show-sdk-version'])}
-    receipt = {'version':version, 'commit':commit, 'source_clean':True, 'toolchain':toolchain, 'architectures':architectures, 'developer_id_identity':identity_name, 'signing_certificate_sha1':identity_hash, 'signing_team':team, 'signature_verified':True, 'native_startup':startup, 'notarization':pending_notarization(mode), 'cli_sha256':sha(cli), 'archive_sha256':sha(archive), 'archive':archive.name, 'folder':folder.name}
+    receipt = {'version':version, 'commit':commit, 'source_clean':True, 'toolchain':toolchain, 'architectures':architectures, 'developer_id_identity':identity_name, 'signing_certificate_sha1':identity_hash, 'signing_team':team, 'signature_verified':True, 'native_startup':startup, 'native_startup_background':startup_background, 'notarization':pending_notarization(mode), 'cli_sha256':sha(cli), 'archive_sha256':sha(archive), 'archive':archive.name, 'folder':folder.name}
     receipt_path = ARTIFACTS/(folder.name+'-receipt.json')
     save(receipt_path, receipt)
     if mode == 'profile':
