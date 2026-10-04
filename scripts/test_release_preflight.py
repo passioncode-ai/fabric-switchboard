@@ -62,3 +62,19 @@ class Preflight(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Encoding(unittest.TestCase):
+    def test_the_notes_are_read_as_utf8_whatever_the_locale(self):
+        """The Windows runner's default encoding is cp1252: CHANGELOG's typographic quotes made the
+        v0.5.4-beta.1 run fail before any build. Run the script under an ASCII locale."""
+        import json
+        import os
+        import subprocess
+        root = pathlib.Path(__file__).resolve().parent.parent
+        version = json.loads((root / 'package.json').read_text(encoding='utf-8'))['version']
+        self.assertTrue(any(ord(c) > 127 for c in (root / 'CHANGELOG.md').read_text(encoding='utf-8')))
+        env = dict(os.environ, LC_ALL='C', LANG='C', PYTHONUTF8='0', PYTHONCOERCECLOCALE='0', PYTHONIOENCODING='ascii')
+        done = subprocess.run([sys.executable, str(root / 'scripts/release_preflight.py'), '--tag', f'v{version}', '--publish', 'false'],
+                              env=env, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr[-500:])

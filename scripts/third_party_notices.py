@@ -192,7 +192,7 @@ def build() -> str:
             "url": f"https://crates.io/crates/{name}/{version}",
         })
 
-    lock = json.loads((ROOT / "package-lock.json").read_text())
+    lock = json.loads((ROOT / "package-lock.json").read_text(encoding='utf-8'))
     node_modules = ROOT / "node_modules"
     for path, info in sorted(lock["packages"].items()):
         if not path or info.get("dev") or info.get("devOptional"):
@@ -391,7 +391,7 @@ def main() -> int:
         print(f"third-party notices: {error}", file=sys.stderr)
         return 2
     if args.check:
-        current = OUTPUT.read_text() if OUTPUT.exists() else ""
+        current = OUTPUT.read_text(encoding='utf-8') if OUTPUT.exists() else ""
         if current != content:
             print(
                 "THIRD_PARTY_NOTICES.md is stale; run `python3 scripts/third_party_notices.py`",

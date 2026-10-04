@@ -114,7 +114,7 @@ def main():
     changed = capture(['git', 'status', '--porcelain', '--untracked-files=all'])
     if changed:
         raise SystemExit(dirty_tree_message(changed))
-    version = json.loads((ROOT / 'package.json').read_text())['version']
+    version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
     signatures = json.loads(args.signatures.read_text(encoding='utf-8-sig')) if args.signatures else None
     if isinstance(signatures, dict):  # PowerShell writes a single object for a one-item list
         signatures = [signatures]

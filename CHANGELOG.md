@@ -8,12 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-## 0.5.4-beta.1 — 2026-10-04
+## 0.5.4-beta.2 — 2026-10-04
 
 Switchboard now stays quiet while nothing changes, and it respects every limit the providers
 report: no quota check before the time a provider asked for, no feature limit mistaken for the
 whole account, no estimated hold shown as a reset. Signed by the same team (`KJ35UYYL22`) as
 0.5.3, so the Keychain's trust carries over.
+(The `v0.5.4-beta.1` tag never became a release: its run stopped before building, when the
+Windows runner could not read these notes.)
 
 **Windows:** windows_authenticode: NOT_SIGNED. The archive is built natively but not
 Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.

@@ -17,10 +17,10 @@ NOT_SIGNED = 'windows_authenticode: NOT_SIGNED'
 
 
 def declared_versions(root=ROOT):
-    cargo = re.search(r'^version = "([^"]+)"', (root / 'Cargo.toml').read_text(), re.MULTILINE)
+    cargo = re.search(r'^version = "([^"]+)"', (root / 'Cargo.toml').read_text(encoding='utf-8'), re.MULTILINE)
     return {
-        'package.json': json.loads((root / 'package.json').read_text())['version'],
-        'src-tauri/tauri.conf.json': json.loads((root / 'src-tauri/tauri.conf.json').read_text())['version'],
+        'package.json': json.loads((root / 'package.json').read_text(encoding='utf-8'))['version'],
+        'src-tauri/tauri.conf.json': json.loads((root / 'src-tauri/tauri.conf.json').read_text(encoding='utf-8'))['version'],
         'Cargo.toml': cargo.group(1) if cargo else None,
     }
 
@@ -67,7 +67,7 @@ def main():
     parser.add_argument('--windows-signing', type=flag, help='vars.AZURE_SIGNING_ENABLED; omitted where the variable is not visible')
     args = parser.parse_args()
     changelog = ROOT / 'CHANGELOG.md'
-    errors = check(args.tag, declared_versions(), changelog.read_text() if changelog.exists() else '',
+    errors = check(args.tag, declared_versions(), changelog.read_text(encoding='utf-8') if changelog.exists() else '',
                    args.publish, args.windows_signing)
     for error in errors:
         print(f'::error::{error}')

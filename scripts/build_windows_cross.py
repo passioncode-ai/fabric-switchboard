@@ -62,7 +62,7 @@ def main():
             raise SystemExit(f'Missing build tool: {name}. See docs/DISTRIBUTION.md.')
     env['XWIN_CACHE_DIR'] = str(ROOT / 'artifacts/xwin')
     env['XWIN_ARCH'] = 'x86_64'
-    version = json.loads((ROOT / 'package.json').read_text())['version']
+    version = json.loads((ROOT / 'package.json').read_text(encoding='utf-8'))['version']
     folder = ROOT / 'artifacts' / f'Fabric-Switchboard-{version}-windows-x64'
     outputs = (folder, Path(str(folder) + '.zip'), folder.parent / (folder.name + '-receipt.json'))
     if any(path.exists() for path in outputs):
