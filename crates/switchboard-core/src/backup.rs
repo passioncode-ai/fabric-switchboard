@@ -108,12 +108,38 @@ fn aad(created_at: i64, store: &str, accounts: usize, missing: usize) -> Vec<u8>
     format!("{FORMAT}:v{VERSION}:{created_at}:{store}:{accounts}:{missing}").into_bytes()
 }
 fn file_name(created_at: i64) -> String {
-    format!("{PREFIX}{created_at}.json")
+    format!(
+        "{PREFIX}{created_at}-{}.json",
+        uuid::Uuid::new_v4().simple()
+    )
 }
 fn valid_name(name: &str) -> bool {
     name.strip_prefix(PREFIX)
         .and_then(|rest| rest.strip_suffix(".json"))
-        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+        .is_some_and(|generation| {
+            let (digits, suffix) = match generation.split_once('-') {
+                Some((digits, suffix)) => (digits, Some(suffix)),
+                None => (generation, None), // Timestamp-only backups from earlier versions.
+            };
+            !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && suffix
+                    .is_none_or(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
+        })
+}
+
+/// Reserve a new destination exclusively before atomic publication. Even a collision must
+/// never replace a previous generation or another store's file. An interrupted reservation
+/// is empty (or remains empty if publication fails) and is ignored by listing and pruning.
+fn write_new(dir: &Path, file: &str, bytes: &[u8]) -> Result<(), String> {
+    private_fs::private_dir(dir)?;
+    let path = dir.join(file);
+    drop(private_fs::create_new(&path)?);
+    let result = private_fs::private_write(&path, bytes);
+    if result.is_err() {
+        let _ = std::fs::remove_file(path);
+    }
+    result
 }
 
 /// Writes one backup of every account whose credential can be read, then keeps the newest
@@ -166,10 +192,11 @@ pub fn write(
         data: STANDARD.encode(&sealed),
     };
     let bytes = serde_json::to_vec_pretty(&envelope).map_err(|_| UNAVAILABLE)?;
-    private_fs::private_write(&dir.join(file_name(now)), &bytes)?;
+    let file = file_name(now);
+    write_new(dir, &file, &bytes)?;
     prune(dir, &store_id, KEEP);
     Ok(Some(Info {
-        file: file_name(now),
+        file,
         created_at: now,
         accounts: count,
         missing,
@@ -717,6 +744,108 @@ mod tests {
             "the complete backup survives"
         );
         assert!(kept.len() <= KEEP + 1);
+    }
+    #[test]
+    fn same_second_partial_backup_never_replaces_the_complete_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open(temp.path().join("one"), vault.clone()).unwrap();
+        save(&store, "synthetic-a", "token-a");
+        let b = save(&store, "synthetic-b", "token-b");
+        let full = write(&store, &backups, &keys, 100).unwrap().unwrap();
+        use crate::Vault;
+        vault.delete(&b.id).unwrap();
+        let partial = write(&store, &backups, &keys, 100).unwrap().unwrap();
+        assert_ne!(full.file, partial.file, "each backup is a new generation");
+        let kept = list(&backups, &store, &keys);
+        assert_eq!(kept.len(), 2);
+        assert!(kept.iter().any(|i| i.file == full.file && i.missing == 0));
+        let fresh = super::tests::store(&temp.path().join("fresh"));
+        assert_eq!(
+            restore(&fresh, &backups, &full.file, &keys).unwrap().added,
+            2
+        );
+    }
+    #[test]
+    fn same_second_backups_from_different_stores_both_survive() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let one = store(&temp.path().join("one"));
+        let two = store(&temp.path().join("two"));
+        save(&one, "synthetic-a", "token-a");
+        save(&two, "synthetic-b", "token-b");
+        let first = write(&one, &backups, &keys, 100).unwrap().unwrap();
+        let second = write(&two, &backups, &keys, 100).unwrap().unwrap();
+        assert_ne!(first.file, second.file);
+        assert_eq!(
+            list(&backups, &one, &keys).iter().filter(|i| i.own).count(),
+            1
+        );
+        assert_eq!(
+            list(&backups, &two, &keys).iter().filter(|i| i.own).count(),
+            1
+        );
+    }
+    #[test]
+    fn timestamp_only_backups_still_list_and_restore() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        save(&original, "synthetic-a", "token-a");
+        let info = write(&original, &backups, &keys, 100).unwrap().unwrap();
+        let legacy = "switchboard-backup-100.json";
+        std::fs::rename(backups.join(info.file), backups.join(legacy)).unwrap();
+        assert_eq!(list(&backups, &original, &keys)[0].file, legacy);
+        let fresh = store(&temp.path().join("fresh"));
+        assert_eq!(restore(&fresh, &backups, legacy, &keys).unwrap().added, 1);
+        for invalid in [
+            "switchboard-backup-.json",
+            "switchboard-backup-100-.json",
+            "switchboard-backup-100-../escape.json",
+            "switchboard-backup-100-not-a-generation.json",
+        ] {
+            assert!(!valid_name(invalid));
+        }
+    }
+    #[test]
+    fn immutable_publication_never_replaces_an_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = "switchboard-backup-100.json";
+        let path = temp.path().join(file);
+        private_fs::private_write(&path, b"existing generation").unwrap();
+        assert!(write_new(temp.path(), file, b"replacement").is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"existing generation");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn immutable_publication_refuses_symlinks_and_keeps_private_permissions() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        private_fs::private_dir(&backups).unwrap();
+        let target = temp.path().join("unrelated");
+        std::fs::write(&target, b"untouched").unwrap();
+        let file = "switchboard-backup-100.json";
+        symlink(&target, backups.join(file)).unwrap();
+        assert!(write_new(&backups, file, b"replacement").is_err());
+        assert_eq!(std::fs::read(target).unwrap(), b"untouched");
+        assert!(std::fs::symlink_metadata(backups.join(file))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        write_new(&backups, "switchboard-backup-101.json", b"private").unwrap();
+        assert_eq!(
+            std::fs::metadata(backups.join("switchboard-backup-101.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
     #[test]
     fn restoring_twice_changes_nothing_for_accounts_without_identity() {

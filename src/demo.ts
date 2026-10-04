@@ -46,6 +46,15 @@ export function createDemoAdapter(): Adapter {
   const enabled = (id: string) => { const found = account(id); if (!found.enabled) throw new Error('This account is disabled. Enable it before continuing.'); return found; };
   const logins = new Map<string, LoginInput & { started: number }>();
   let signIns = 0;
+  // Explicit browser-only acceptance fixtures for ordering, multi-window waits and failure.
+  if (new URLSearchParams(location.search).get('quota-review') === '1') {
+    for (const id of ['demo-claude-east', 'demo-claude-west']) {
+      const item = state.accounts.find(a => a.id === id)!;
+      const until = now() + (id.endsWith('east') ? 7200 : 600);
+      item.usage = { used_percent: 100, observed_at: now(), resets_at: until, source: 'Synthetic quota review', windows: [{ name: 'Session', used_percent: 100, resets_at: now() + 60 }, { name: 'Weekly', used_percent: 100, resets_at: until }] };
+    }
+    state.accounts.find(a => a.id === 'demo-claude-south')!.usage_health!.status = 'failed';
+  }
   const signInRequired = new Set(['demo-claude-meadow']);
   const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];
   return {

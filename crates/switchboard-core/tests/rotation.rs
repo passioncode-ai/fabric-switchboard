@@ -659,6 +659,122 @@ fn one_native_cli_target_cannot_have_competing_enabled_pools_even_on_disk() {
 }
 
 #[test]
+fn partial_headers_never_freshen_an_unobserved_low_quota_window() {
+    // Both a missing weekly window and a missing model-specific window must keep
+    // their original freshness, even when inference keeps reporting other windows.
+    for omitted in ["seven_day", "seven_day_opus"] {
+        let (_root, _vault, store) = setup();
+        let time = clock();
+        let current = account(&store, "org-current", time);
+        let candidate = account(&store, "org-candidate", time);
+        let window = |name: &str| UsageWindow {
+            name: name.into(),
+            used_percent: 10.,
+            resets_at: Some(time + 7200),
+        };
+        let mut original = vec![window("five_hour"), window("seven_day")];
+        if omitted == "seven_day_opus" {
+            original.push(window(omitted));
+        }
+        store
+            .observe(
+                &candidate,
+                Usage {
+                    used_percent: 10.,
+                    observed_at: time,
+                    resets_at: Some(time + 7200),
+                    source: "claude_oauth".into(),
+                    windows: original,
+                },
+            )
+            .unwrap();
+        for elapsed in [301, 302] {
+            let at = time + elapsed;
+            observe(&store, &current, 99., at);
+            let mut reported = vec![window("five_hour")];
+            if omitted == "seven_day_opus" {
+                reported.push(window("seven_day"));
+            }
+            store
+                .observe(
+                    &candidate,
+                    Usage {
+                        used_percent: 10.,
+                        observed_at: at,
+                        resets_at: Some(time + 7200),
+                        source: "response_headers".into(),
+                        windows: reported,
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .rotation_decision(&policy(), Some(&current), at)
+                    .unwrap()
+                    .reason,
+                "no_eligible_account",
+                "omitted {omitted} at {elapsed}"
+            );
+            let saved = store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|account| account.id == candidate)
+                .unwrap();
+            assert_eq!(saved.usage.unwrap().observed_at, time);
+            assert_eq!(saved.usage_health.unwrap().checked_at, at);
+        }
+        // A failed check must not erase ordering of the preceding successful
+        // response, whose aggregate age still includes the historical window.
+        store
+            .usage_health(&candidate, "failed", time + 303, time + 483)
+            .unwrap();
+        // The conservative aggregate age is not the latest response time:
+        // a delayed response must still not overwrite the newer header values.
+        assert!(store
+            .observe(
+                &candidate,
+                Usage {
+                    used_percent: 0.,
+                    observed_at: time + 301,
+                    resets_at: Some(time + 7200),
+                    source: "response_headers".into(),
+                    windows: vec![UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: 0.,
+                        resets_at: Some(time + 7200),
+                    }],
+                },
+            )
+            .is_err());
+        // An authoritative endpoint response replaces the historical windows,
+        // including a model window that the endpoint no longer reports.
+        let at = time + 303;
+        observe(&store, &current, 99., at);
+        store
+            .observe(
+                &candidate,
+                Usage {
+                    used_percent: 10.,
+                    observed_at: at,
+                    resets_at: Some(time + 7200),
+                    source: "claude_oauth".into(),
+                    windows: vec![window("five_hour"), window("seven_day")],
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .rotation_decision(&policy(), Some(&current), at)
+                .unwrap()
+                .candidate_id,
+            Some(candidate)
+        );
+    }
+}
+
+#[test]
 fn partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation() {
     let (_root, _vault, store) = setup();
     let time = clock();

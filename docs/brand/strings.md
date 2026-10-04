@@ -34,3 +34,11 @@ Humanization: on, own pass; each message names the effect and the next action; n
 - “Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.” — shown while `MonitorStatus.renewal_blocked` (the token endpoint answered `invalid_client`).
 - “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” — rotation decision `claude_swap_switching` (0.5.3): `cswap auto` runs, or Claude Swap's menu bar runs with its automatic switching on.
 - “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.” — About → Connect agents while the app runs translocated (0.5.3).
+
+Quota ordering/countdown (Status: proposed; operator-authorized implementation; product outcome unobserved), SCN-021 and SCN-032 — [interface](../../src/main.ts), [logic](../../src/ui-logic.ts):
+- `accounts.order`: “Within each pool: remaining quota first, then shortest wait. Unknown usage follows.”
+- `quota.countdown.pause` / `.resume`: “Pause countdown” / “Resume countdown”; newly appearing timestamps while paused read “Countdown paused”.
+- `quota.reset`: “Resets {date}”, “Reported reset {date}” for stale/failed history, “Quota windows reset {date}” for exhausted windows, “Reset time unavailable”.
+- `quota.hold`: “Retry hold until {date}”; a hold can be estimated and is not a quota reset. Badge “Limit reached” replaces the combined old badge.
+- `quota.remaining`: “{days}d {hours}h {minutes}m remaining”, “<1m remaining”, “Due · awaiting check”, “Time unavailable”. Zero elapsed time never confirms usable quota.
+Humanization: on — own pass; operational state strings reviewed, no decorative rewrites.

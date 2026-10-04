@@ -1,0 +1,437 @@
+PassionCode 1.1.0: 2 canonical sources, 3 native assets, CSS roles, 52 contrast pairs in 2 themes and version 0.5.4 verified
+
+> fabric-switchboard@0.5.4 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 15 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/assets/switchboard-mark-W_RyjoyY.svg   0.56 kB │ gzip:  0.33 kB
+dist/index.html                             0.71 kB │ gzip:  0.40 kB
+dist/assets/index-CmnyNZeL.css             22.36 kB │ gzip:  4.92 kB
+dist/assets/platform-BF52aGr8.js            0.45 kB │ gzip:  0.29 kB
+dist/assets/demo-evcE7c31.js               12.26 kB │ gzip:  4.00 kB
+dist/assets/index-DLN_R-ka.js              77.33 kB │ gzip: 24.95 kB
+✓ built in 334ms
+5 read-deadline cases passed; stalled/late IPC cannot hold loading forever.
+17 ui-logic cases passed, including quota priority and wall-clock countdowns.
+239 backend error messages in 24 Rust files: 83 verbatim, 140 mapped, 16 allowlisted; 0 formatted messages fall back to the generic text. Extractor self-test: 23 receipts.
+   Compiling fabric-switchboard v0.5.4 (<checkout>/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.58s
+     Running unittests src/main.rs (target/debug/deps/fabric_switchboard-bb2ff5766ce77fb6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/switchboard-0a3f6d75e1c49a04)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/commands.rs (target/debug/deps/commands-da643cebc86dd093)
+
+running 9 tests
+test help_and_invalid_arguments_do_not_create_storage_or_echo_values ... ok
+test oversized_or_malformed_secret_stdin_is_not_echoed ... ok
+test offline_backup_never_writes_and_restore_takes_only_backup_names ... ok
+test human_usage_and_events_print_utc_times_and_health ... ok
+test offline_list_and_status_are_json_and_launch_requires_owner ... ok
+test rotation_settings_persist_offline_and_report_stopped_monitor ... ok
+test separate_cli_process_mutates_live_owner_without_touching_native_vault ... ok
+test rotation_set_changes_only_the_given_flags ... ok
+test serve_stops_on_sigterm_and_sigint_within_the_deadline ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+
+     Running tests/mcp.rs (target/debug/deps/mcp-88347b8b55b2072d)
+
+running 4 tests
+test project_commands_work_offline_from_the_cli ... ok
+test handshake_lists_tools_and_rejects_malformed_messages ... ok
+test project_rules_are_optional_visible_and_applied_on_request ... ok
+test managed_session_reads_usage_and_switches_only_inside_its_pool ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running unittests src/lib.rs (target/debug/deps/switchboard_core-767f323136f7ae6b)
+
+running 45 tests
+test backup::tests::key_text_is_exactly_64_hex_characters ... ok
+test keychain::tests::a_declined_dialog_is_not_repeated_in_the_same_process ... ok
+test keychain::tests::a_shared_copy_written_first_wins_over_the_legacy_one ... ok
+test backup::tests::immutable_publication_never_replaces_an_existing_file ... ok
+test keychain::tests::absent_everywhere_is_reported_as_absent ... ok
+test keychain::tests::always_allow_lets_the_move_delete_the_original ... ok
+test keychain::tests::app_writes_and_the_bundled_cli_reads_without_a_dialog ... ok
+test keychain::tests::cli_never_asks_and_names_the_app_as_the_way_out ... ok
+test keychain::tests::delete_removes_both_copies_and_asks_only_in_the_app ... ok
+test keychain::tests::development_builds_never_touch_the_users_items ... ok
+test backup::tests::immutable_publication_refuses_symlinks_and_keeps_private_permissions ... ok
+test keychain::tests::failed_or_unverified_copy_keeps_the_original ... ok
+test keychain::tests::legacy_item_already_trusting_the_app_moves_silently ... ok
+test keychain::tests::legacy_item_moves_with_one_dialog_and_never_asks_again ... ok
+test keychain_macos::tests::a_build_without_the_team_variable_trusts_no_team ... ok
+test backup::tests::restore_never_replaces_a_newer_sign_in ... ok
+test backup::tests::another_key_or_a_tampered_file_is_refused ... ok
+test keychain_macos::tests::candidates_cover_the_running_bundle_and_the_installed_app ... ok
+test keychain_macos::tests::only_a_well_formed_team_id_becomes_a_requirement ... ok
+test keychain_macos::tests::partition_descriptions_decode_from_hex ... ok
+test keychain_macos::tests::signed_bundle_acceptance ... ignored, needs Developer ID signed copies of this binary; see docs/KEYCHAIN.md
+test backup::tests::timestamp_only_backups_still_list_and_restore ... ok
+test keychain_macos::tests::the_tool_must_be_on_the_decrypt_list_and_in_a_partition ... ok
+test keychain_macos::tests::unsigned_test_binaries_are_development_builds ... ok
+test security_cli::tests::a_small_secret_travels_on_stdin_as_hex_and_never_in_argv ... ok
+test backup::tests::a_restored_copy_starts_from_the_newest_generation_saved_elsewhere ... ok
+test security_cli::tests::an_oversized_secret_falls_back_to_argv_as_hex ... ok
+test security_cli::tests::creation_without_update_omits_the_update_flag ... ok
+test security_cli::tests::names_are_quoted_for_the_interactive_parser ... ok
+test backup::tests::same_second_backups_from_different_stores_both_survive ... ok
+test security_cli::tests::runner_output_is_bounded ... ok
+test security_cli::tests::runner_passes_stdin_and_ends_it ... ok
+test private_fs::tests::strict_read_refuses_exposed_capability_without_changing_file ... ok
+test security_cli::tests::runner_reports_exit_codes_stdout_and_hides_stderr ... ok
+test security_cli::tests::runner_deadline_kills_and_reaps ... ok
+test backup::tests::same_second_partial_backup_never_replaces_the_complete_one ... ok
+test backup::tests::restoring_twice_changes_nothing_for_accounts_without_identity ... ok
+test backup::tests::a_backup_restores_into_a_fresh_install_and_is_sealed_on_disk ... ok
+test backup::tests::only_the_newest_ten_are_kept_and_an_empty_store_writes_nothing ... ok
+test backup::tests::partial_backups_never_push_out_the_last_complete_one ... ok
+test backup::tests::stores_sharing_a_folder_never_prune_each_other ... ok
+test keychain_macos::tests::a_legacy_item_moves_into_the_shared_namespace_and_verifies ... ok
+test keychain_macos::tests::an_untrusted_read_fails_closed_without_a_dialog ... ok
+test keychain_macos::tests::created_items_trust_the_listed_executables_by_requirement ... ok
+test keychain_macos::tests::a_probe_reads_no_secret_and_tells_absent_trusted_untrusted_and_locked ... ok
+
+test result: ok. 44 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.90s
+
+     Running tests/projects.rs (target/debug/deps/projects-ebd6360505da84bb)
+
+running 5 tests
+test rejects_invalid_rules_without_changing_metadata ... ok
+test schema_three_is_written_only_while_rules_exist ... ok
+test saves_and_updates_one_rule_per_path_and_provider ... ok
+test removing_a_rule_or_its_account_removes_it_in_one_write ... ok
+test resolves_the_longest_enabled_unexpired_prefix_per_provider ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/rotation.rs (target/debug/deps/rotation-1f69a078952e506b)
+
+running 14 tests
+test native_context_never_enters_metadata_and_expired_storage_is_backend_only ... ok
+test policy_history_is_runtime_owned_persisted_and_validated ... ok
+test v1_defaults_migrate_on_write_and_unknown_fields_fail_closed ... ok
+test upsert_identity_includes_org_preserves_disabled_and_rolls_back_vault_on_disk_failure ... ok
+test same_token_different_known_org_never_merges_and_absent_identity_falls_back ... ok
+test one_native_cli_target_cannot_have_competing_enabled_pools_even_on_disk ... ok
+test recapturing_same_generation_preserves_quota_and_late_old_response_cannot_overwrite_new_generation ... ok
+test native_target_excludes_api_keys_and_scope_crossings_even_with_better_quota ... ok
+test managed_route_and_cooldown_publish_together_or_neither ... ok
+test partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation ... ok
+test a_limit_error_switches_despite_spare_quota_and_skips_limited_candidates ... ok
+test rotation_threshold_hysteresis_cooldown_and_deterministic_candidate ... ok
+test stale_failed_disabled_expired_reset_and_native_ineligible_accounts_hold ... ok
+test partial_headers_never_freshen_an_unobserved_low_quota_window ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+     Running tests/storage.rs (target/debug/deps/storage-36f44088c70c620b)
+
+running 25 tests
+test codex_jwt_expiry_is_a_hint_not_a_verified_identity ... ok
+test child_process_cannot_open_locked_store ... ok
+test add_rollback_deletes_exact_new_item_and_failed_cleanup_is_explicit ... ok
+test codex_id_token_is_preserved_in_vault_only_and_is_bounded ... ok
+test native_vault_roundtrip_uses_only_random_app_owned_item ... ignored, Explicit synthetic native Keychain acceptance; may require an OS access prompt
+test parses_provider_formats_and_rejects_invalid_credentials ... ok
+test lock_contends_and_releases_on_drop ... ok
+test disk_failure_rolls_back_memory_and_added_secret ... ok
+test failed_removal_publication_leaves_visible_unusable_account_and_retry_recovers ... ok
+test process_lock_probe ... ok
+test a_renewal_goes_only_to_the_owner_the_token_endpoint_named ... ok
+test expired_or_missing_credentials_never_become_selected ... ok
+test duplicates_are_secret_and_pool_based_and_direct_structs_are_validated ... ok
+test simultaneous_duplicate_adds_publish_only_one_account ... ok
+test header_usage_merges_into_stored_windows_and_is_not_journaled ... ok
+test vault_failures_preserve_state_and_never_echo_secret_errors ... ok
+test corruption_unknown_schema_and_oversized_metadata_fail_closed ... ok
+test pending_timestamps_are_written_once_they_are_older_than_the_flush_interval ... ok
+test private_permissions_and_symlink_and_hardlink_refusal ... ok
+test usage_validates_bounds_and_preserves_previous_observation ... ok
+test an_unchanged_quota_check_is_not_written_until_something_changes ... ok
+test clock_set_back_after_observation_keeps_store_open_and_writable ... ok
+test lifecycle_routes_are_scoped_and_survive_restart_without_secret_metadata ... ok
+test concurrent_updates_are_serialized_without_lost_accounts ... ok
+test events_are_allowlisted_bounded_and_persisted ... ok
+
+test result: ok. 24 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.86s
+
+     Running unittests src/lib.rs (target/debug/deps/switchboard_proxy-2cba277c577e1a9d)
+
+running 21 tests
+test tests::default_timeouts_bound_connect_and_idle_but_not_the_whole_stream ... ok
+test tests::malformed_or_partial_windows_never_turn_into_invented_available_quota ... ok
+test tests::quota_windows_keep_each_reset_and_aggregate_the_limiting_window ... ok
+test tests::headers_allow_one_window_but_reject_malformed_present_window ... ok
+test tests::connection_listed_headers_are_not_relayed_in_either_direction ... ok
+test tests::incomplete_stream_is_aborted_instead_of_success ... ok
+test tests::codex_replaces_both_headers_and_strips_cookies ... ok
+test tests::claude_beta_query_is_forwarded_and_connection_fields_are_removed ... ok
+test tests::redirects_do_not_exfiltrate_credentials ... ok
+test tests::usage_missing_is_not_zero ... ok
+test tests::body_limit_admits_the_providers_32_mib_and_refuses_one_byte_more ... ok
+test tests::auth_is_injected_and_route_changes_only_next_request ... ok
+test tests::rejection_is_never_replayed_and_events_contain_no_secrets ... ok
+test tests::claude_code_headers_reach_upstream_and_limit_headers_come_back ... ok
+test tests::unauthorized_origin_and_unknown_paths_never_contact_upstream ... ok
+test tests::only_unsuccessful_requests_are_journaled_and_usage_is_kept ... ok
+test tests::usage_checks_report_the_providers_wait_and_never_its_body ... ok
+test tests::every_unsuccessful_outcome_is_still_journaled_once ... ok
+test tests::a_stream_idle_past_the_read_timeout_is_cut_and_journaled_as_aborted ... ok
+test tests::successful_requests_never_push_other_events_out_of_the_journal ... ok
+test tests::a_stream_that_keeps_moving_outlives_the_read_timeout_many_times_over ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+
+     Running unittests src/lib.rs (target/debug/deps/switchboard_runtime-f07ed0eb427cf448)
+
+running 185 tests
+test blocking::tests::outside_a_runtime_it_just_runs ... ok
+test agents::setup_tests::a_hostile_cli_path_stays_one_shell_word ... ok
+test blocking::tests::on_a_single_threaded_runtime_it_just_runs ... ok
+test agents::tests::link_is_created_reused_and_never_replaces_foreign_files ... ok
+test agents::setup_tests::a_translocated_copy_is_never_linked_or_offered ... ok
+test agents::setup_tests::setup_offers_commands_for_the_found_cli_and_never_a_credential ... ok
+test external::tests::a_changed_source_is_read_again_and_a_read_in_the_writes_second_is_not_reused ... ok
+test external::tests::a_captured_expiry_never_outlives_its_access_token ... ok
+test external::tests::a_config_created_by_a_switch_skips_onboarding_and_an_existing_one_is_kept ... ok
+test external::tests::a_credential_write_that_fails_after_committing_is_rolled_back ... ok
+test external::tests::a_locked_keychain_is_never_read_and_its_probe_backs_off_to_half_an_hour ... ok
+test control::tests::missing_and_stale_descriptor_allow_only_lock_guarded_fallback ... ok
+test control::tests::reused_port_never_receives_bearer_or_secret ... ok
+test external::tests::a_managed_api_key_is_removed_and_returns_on_rollback ... ok
+test external::tests::a_plaintext_copy_on_macos_is_rewritten_only_when_it_exists ... ok
+test control::tests::proved_connection_close_never_reconnects_to_send_a_secret ... ok
+test external::tests::a_probe_names_consent_lock_and_the_files_a_read_would_use ... ok
+test external::tests::a_home_inside_switchboards_data_folder_is_refused ... ok
+test control::tests::the_descriptor_names_the_owners_pid ... ok
+test external::tests::a_newer_session_profile_generation_wins_over_the_backup ... ok
+test external::tests::a_refusing_source_is_read_once_in_an_hour_of_passes_not_in_a_loop ... ok
+test external::tests::a_renewed_live_item_reaches_an_existing_plaintext_copy_only ... ok
+test external::tests::a_wiped_live_sign_in_is_signed_out_and_does_not_block_a_switch ... ok
+test external::tests::an_item_that_would_ask_is_not_read_until_it_changes_or_a_person_acts ... ok
+test external::tests::backup_file_precedes_keychain ... ok
+test external::tests::activation_cas_and_rollback_preserve_original ... ok
+test external::tests::claude_swap_switching_is_told_from_merely_running ... ok
+test external::tests::current_capture_preserves_native_fields_and_does_not_write ... ok
+test external::tests::context_resolves_homes_configs_and_keychain_services_like_the_cli ... ok
+test external::tests::codex_store_selection_never_reads_stale_file_over_keyring ... ok
+test external::tests::codexs_keychain_item_is_read_only_the_quiet_way ... ok
+test control::tests::auth_host_origin_query_unknown_operation_and_limits_are_enforced ... ok
+test external::tests::partial_import_rejects_traversal_and_bad_identity ... ok
+test external::tests::only_claude_swap_itself_counts_as_running ... ok
+test external::tests::lost_lock_before_rollback_never_overwrites_new_owner ... ok
+test external::tests::procargs_are_parsed_into_one_command_line ... ok
+test external::tests::shared_keys_come_from_the_live_item_and_account_keys_from_the_target ... ok
+test external::tests::source_drift_is_not_captured_under_unchanged_index ... ok
+test external::tests::the_outgoing_generation_is_preserved_under_the_lock_before_any_write ... ok
+test control::tests::descriptor_is_private_and_symlink_is_rejected ... ok
+test control::tests::a_descriptor_whose_owner_died_is_stale_even_when_its_port_was_reused ... ok
+test external::tests::source_reads_refuse_symlinks_and_preserve_permissions ... ok
+test launch::tests::a_process_younger_than_its_marker_is_a_reused_pid ... ok
+test launch::tests::codex_export_preserves_native_auth_shape_without_refresh_lineage ... ok
+test external::tests::a_renewal_takes_only_the_credential_locks ... ok
+test control::tests::tampered_capability_does_not_fallback_to_offline ... ok
+test external::tests::claude_swaps_files_change_their_signature ... ok
+test external::tests::the_process_table_is_read_in_process_and_includes_this_test ... ok
+test external::tests::lock_heartbeat_and_replacement_are_checked ... ok
+test external::tests::unwritable_lock_directory_is_not_reported_as_claude_updating ... ok
+test launch::tests::keychain_user_prefers_a_set_user_then_the_passwd_entry ... ok
+test launch::tests::launch_script_runs_project_without_changing_auth_home ... ok
+test launch::tests::codex_login_cleanup_is_retry_safe_after_home_is_removed ... ok
+test control::tests::live_owner_accepts_mutation_and_never_returns_secret ... ok
+test launch::tests::live_pid_holds_the_home_only_while_it_can_be_the_session ... ok
+test launch::tests::launched_sessions_get_switchboard_tools_with_exact_quoting ... ok
+test launch::tests::journal_failure_after_terminal_opened_is_not_a_launch_failure ... ok
+test launch::tests::expired_credential_is_refused_and_releases_the_home ... ok
+test blocking::tests::a_blocking_call_does_not_stall_the_tasks_beside_it ... ok
+test launch::tests::ps_elapsed_time_forms_parse_and_malformed_ones_do_not ... ok
+test launch::tests::pending_launch_excludes_rewrite_and_is_released_on_failure ... ok
+test launch::tests::rejects_invalid_fields ... ok
+test launch::tests::reservation_expires_after_ten_minutes_in_either_direction ... ok
+test launch::tests::private_write_and_symlink_refusal ... ok
+test launch::tests::script_quotes_paths_and_clears_credentials ... ok
+test launch::tests::login_state_reads_completion_and_an_exited_terminal ... ok
+test launch::tests::script_unsets_every_conflicting_variable ... ok
+test launch::tests::service_matches_derived_name ... ok
+test launch::tests::windows_script_quotes_literals_and_tracks_process_incarnation ... ok
+test launch::tests::launch_refuses_bad_input_before_touching_a_home ... ok
+test launch::tests::stale_reservation_no_longer_holds_the_home ... ok
+test launch::tests::sign_in_whose_terminal_never_ran_can_be_cancelled_once_its_reservation_expires ... ok
+test launch::tests::isolated_launch_script_exports_the_home_and_runs_in_the_project ... ok
+test lifecycle_tests::an_idle_owner_stops_at_once_and_removes_its_descriptor ... ok
+test launch::tests::managed_codex_launch_points_codex_at_the_local_proxy ... ok
+test limits::tests::a_marker_without_reset_holds_fifteen_minutes ... ok
+test limits::tests::a_marker_with_another_accounts_reset_is_not_charged_to_the_new_one ... ok
+test lifecycle_tests::a_restarted_owner_keeps_the_address_and_token_a_session_holds ... ok
+test limits::tests::a_spend_limit_marker_holds_until_its_reset ... ok
+test limits::tests::a_proxy_session_429_is_not_charged_to_the_native_account ... ok
+test limits::tests::after_a_restart_the_journal_dates_the_last_switch ... ok
+test limits::tests::managed_rate_limit_events_mark_their_account ... ok
+test limits::tests::an_identity_changed_outside_switchboard_also_gets_the_grace ... ok
+test limits::tests::an_old_sessions_marker_without_a_reset_is_not_charged_to_the_new_account ... ok
+test limits::tests::errors_count_against_the_current_identity_only_after_the_switch_grace ... ok
+test monitor::tests::a_rate_limited_usage_check_waits_as_the_provider_asks ... ok
+test launch::tests::isolated_claude_launch_writes_only_the_access_token_into_its_home ... ok
+test limits::tests::opaque_conversation_content_cannot_hide_an_old_sessions_start ... ok
+test limits::tests::ordinary_lines_mentioning_limits_are_never_markers ... ok
+test external::tests::lock_contention_never_steals_existing_lock ... ok
+test limits::tests::only_recent_jsonl_files_are_considered_and_tails_are_bounded ... ok
+test launch::tests::managed_launch_requires_the_selected_account_and_routes_through_the_proxy ... ok
+test launch::tests::isolated_codex_launch_writes_the_native_auth_snapshot ... ok
+test launch::tests::terminal_failure_releases_the_home_and_records_no_launch ... ok
+test monitor::tests::backoff_is_bounded_and_clock_independent ... ok
+test external::tests::a_live_lock_is_waited_for_and_a_stale_one_is_taken_over ... ok
+test monitor::tests::a_rejected_lineage_reports_sign_in_without_probing ... ok
+test monitor::tests::a_token_expiring_between_backed_off_checks_is_renewed ... ok
+test monitor::tests::background_sync_never_moves_a_newer_copy_back ... ok
+test monitor::tests::background_sync_never_files_another_accounts_lineage ... ok
+test monitor::tests::schedule_written_before_the_clock_moved_back_is_due_now ... ok
+test monitor::tests::monitor_drops_without_retaining_the_runtime ... ok
+test monitor::tests::unreadable_credentials_do_not_stay_at_the_front_of_the_due_queue ... ok
+test lifecycle_tests::a_taken_port_moves_the_proxy_and_repoints_managed_homes_with_the_same_token ... ok
+test oplog::tests::a_process_without_an_installed_log_writes_nothing ... ok
+test monitor::tests::unsupported_quota_is_recorded_without_network ... ok
+test oplog::tests::an_event_is_one_json_line_of_codes_and_numbers ... ok
+test monitor::tests::failed_managed_switch_is_not_reported_as_native_activation ... ok
+test monitor::tests::automatic_selection_yields_to_manual_cooldown ... ok
+test oplog::tests::a_symlinked_log_file_is_never_followed ... ok
+test monitor::tests::automatic_managed_switch_is_journaled_as_rotation ... ok
+test oplog::tests::the_log_and_its_folder_are_private ... ok
+test monitor::tests::without_saved_claude_accounts_the_monitor_leaves_claude_code_alone ... ok
+test monitor::tests::a_limit_error_in_claude_code_switches_with_quota_to_spare ... ok
+test owner_tests::an_isolated_launch_wants_hours_of_token_life ... ok
+test monitor::tests::native_rotation_leaves_switching_to_an_auto_switching_claude_swap ... ok
+test owner_tests::a_live_generation_nobody_can_attribute_is_never_filed ... ok
+test owner_tests::a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch ... ok
+test owner_tests::activation_after_claude_logout_proceeds_and_is_journaled ... ok
+test owner_tests::current_accounts_do_not_wait_behind_a_mutation ... ok
+test owner_tests::capturing_another_accounts_lineage_under_this_name_is_refused ... ok
+test owner_tests::current_account_matches_across_pools ... ok
+test owner_tests::a_foreign_lineage_under_this_name_is_never_filed_or_switched_from ... ok
+test owner_tests::capturing_an_unattributed_sign_in_never_overwrites_a_saved_copy ... ok
+test owner_tests::an_account_with_an_expired_access_token_still_activates ... ok
+test owner_tests::rfc3339_formats_utc_seconds ... ok
+test monitor::tests::automatic_native_switch_journals_activation_and_rotation ... ok
+test monitor::tests::rotation_skips_a_rejected_sign_in_for_the_next_eligible_account ... ok
+test owner_tests::workbench_metadata_stays_available_during_a_reserved_mutation ... ok
+test owner_tests::failed_login_cleanup_releases_the_slot_after_the_account_is_saved ... ok
+test owner_tests::identities_without_an_account_id_are_never_the_same_account ... ok
+test owner_tests::home_cleanup_waits_for_the_owners_launch_reservation ... ok
+test monitor::tests::native_rotation_switches_to_an_expired_but_renewable_account ... ok
+test owner_tests::importing_from_claude_swap_never_moves_an_account_backwards ... ok
+test projects::tests::session_labels_round_trip_and_reject_foreign_shapes ... ok
+test projects::tests::sessions_are_detected_from_launch_labels_the_live_proxy_and_codex_homes ... ok
+test projects::tests::folders_are_canonical_existing_and_outside_app_data ... ok
+test owner_tests::backups_follow_changes_and_restore_into_a_fresh_install ... ok
+test owner_tests::switching_away_from_an_unsaved_account_is_refused_and_the_account_in_use_is_a_no_op ... ok
+test refresh::tests::a_claude_swap_row_that_could_not_be_read_stays_held ... ok
+test refresh::tests::a_refused_client_after_the_hold_is_tried_once_more ... ok
+test refresh::tests::a_dead_copy_comes_back_when_claude_swap_holds_its_successor ... ok
+test refresh::tests::a_renewed_live_item_keeps_every_other_key ... ok
+test refresh::tests::a_refused_client_holds_every_renewal_without_blaming_an_account ... ok
+test projects::tests::paused_expired_and_missing_rules_change_nothing ... ok
+test owner_tests::switching_away_keeps_the_live_generation_in_every_pool ... ok
+test owner_tests::failed_or_unreadable_activation_is_journaled_as_failed ... ok
+test refresh::tests::a_rejected_lineage_is_never_handed_to_claude_code ... ok
+test refresh::tests::a_rejected_lineage_is_remembered_across_restarts ... ok
+test refresh::tests::a_renewed_token_that_cannot_be_stored_is_kept_and_adopted_later ... ok
+test refresh::tests::a_renewal_issued_to_another_saved_account_reaches_that_account ... ok
+test refresh::tests::a_token_far_from_expiry_is_left_alone ... ok
+test refresh::tests::a_token_issued_for_another_account_is_a_dead_lineage_here ... ok
+test refresh::tests::a_switch_after_claude_swap_stopped_takes_its_generation_and_holds_nothing ... ok
+test refresh::tests::a_successor_issued_to_a_saved_account_with_an_older_lineage_still_reaches_it ... ok
+test projects::tests::managed_rule_selects_once_in_its_pool_and_never_crosses_pools ... ok
+test refresh::tests::a_running_claude_swap_renews_its_accounts_and_switchboard_follows_it ... ok
+test refresh::tests::an_idle_live_item_that_changed_is_left_alone ... ok
+test refresh::tests::an_idle_live_account_is_renewed_in_claude_code_and_every_copy ... ok
+test refresh::tests::claude_swaps_files_are_read_when_they_can_hold_something_new ... ok
+test refresh::tests::malformed_grant_responses_are_rejected ... ok
+test refresh::tests::a_stopped_claude_swap_still_hands_over_what_it_renewed_last ... ok
+test refresh::tests::an_idle_renewal_that_cannot_be_written_is_stashed ... ok
+test lifecycle_tests::a_busy_owner_finishes_the_operation_in_flight_within_the_deadline ... ok
+test refresh::tests::an_idle_renewal_issued_to_another_account_stays_with_claude_code_only ... ok
+test refresh::tests::an_idle_live_lineage_rejected_by_the_provider_is_dead ... ok
+test refresh::tests::a_grant_whose_caller_gives_up_still_keeps_the_successor ... ok
+test refresh::tests::an_unanswered_owner_question_waits_a_minute ... ok
+test refresh::tests::an_inactive_expired_account_is_refreshed_in_every_pool ... ok
+test refresh::tests::the_account_in_use_is_left_to_claude_code_until_it_is_idle ... ok
+test refresh::tests::the_offline_cli_never_spends_a_refresh_token ... ok
+test refresh::tests::invalid_grant_requires_sign_in_until_the_credential_is_replaced ... ok
+test refresh::tests::switching_to_an_account_swap_no_longer_lists_is_not_refused ... ok
+test refresh::tests::only_the_unreadable_rows_account_stays_held ... ok
+test refresh::tests::rows_without_identity_and_recently_active_identities_are_not_renewed ... ok
+test refresh::tests::the_ordinary_claude_code_account_is_never_refreshed ... ok
+test refresh::tests::switching_to_an_account_claude_swap_renews_takes_its_newest_generation_first ... ok
+test refresh::tests::the_same_login_in_another_organization_is_another_account ... ok
+test refresh::tests::the_offline_cli_still_refuses_a_lineage_the_owner_saw_rejected ... ok
+test refresh::tests::transient_failures_back_off_and_keep_the_token ... ok
+test monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget ... ok
+test oplog::tests::writing_past_the_cap_rotates_and_keeps_a_bounded_number_of_files ... ok
+test refresh::tests::the_provider_names_the_owner_of_an_unknown_live_lineage ... ok
+test refresh::tests::an_account_whose_renewal_is_in_flight_is_not_switched_to ... ok
+test launch::tests::generated_zsh_script_survives_hostile_paths_and_scrubs_the_environment ... ok
+
+test result: ok. 185 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.25s
+
+   Doc-tests switchboard_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests switchboard_proxy
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests switchboard_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking fabric-switchboard v0.5.4 (<checkout>/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.81s
+70 Markdown files, 557 relative links, 0 errors
+switchboard plugin: 0 errors
+.......................
+----------------------------------------------------------------------
+Ran 23 tests in 0.377s
+
+OK
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
+
+OK
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.016s
+
+OK
+.....{
+  "status": "Invalid",
+  "issues": []
+}
+............................
+----------------------------------------------------------------------
+Ran 33 tests in 0.052s
+
+OK
+THIRD_PARTY_NOTICES.md is current (578991 bytes)

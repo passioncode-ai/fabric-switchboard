@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Account rows show fresh remaining quota first within each pool, followed by the shortest
+  known wait. Reset dates include a countdown in days, hours and minutes; Pause countdown
+  keeps the displayed duration still. Unknown or stale quota stays labelled.
+- Partial quota responses no longer make unobserved windows appear fresh. Backups created
+  in the same second keep separate copies, and session attribution reads timestamp metadata
+  without materializing conversation content.
+
 Version 0.5.4: the organization's [lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
 applied to Switchboard ([PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23);
 [AGENTS.md → Lifecycle](AGENTS.md#lifecycle)).

@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, expiryFrom, groupAccounts, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -131,7 +131,7 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
-    lastRendered = markup; root.replaceChildren(shell); return true;
+    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); return true;
   };
   const sidebar = el('aside', 'sidebar');
   const brand = el('div', 'brand');
@@ -269,6 +269,33 @@ function emptyState(title: string, description: string) { const section = el('se
 // ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──
 const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includes(account.id);
 const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
+// #region quota-countdown — docs: docs/runs/2026-10-04-quota-review/README.md
+let countdownPaused = false;
+const pausedCountdowns = new Map<number, string>();
+/** A tick touches text only: no focus movement, list reordering or provider request. */
+const countdownPoll = intervalWhile(() => {
+  const now = Date.now() / 1000;
+  root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = resetCountdown(Number(node.dataset.countdown), now); });
+}, 60_000);
+function syncCountdown() {
+  countdownPoll.sync(!countdownPaused && !document.hidden && page === 'accounts' && !!root.querySelector('[data-countdown]'));
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !countdownPaused) root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = resetCountdown(Number(node.dataset.countdown), Date.now() / 1000); });
+  syncCountdown();
+});
+function resetDisplay(until: number, label = 'Resets') {
+  if (resetCountdown(until, Date.now() / 1000) === 'Time unavailable') return el('span', 'usage-unknown', 'Time unavailable');
+  const wrapper = el('span', 'reset-display');
+  const time = el('time', '', `${label} ${date(until)}`); time.dateTime = new Date(until * 1000).toISOString();
+  time.title = new Date(until * 1000).toLocaleString(undefined, { timeZoneName: 'short' });
+  const remaining = el('span', 'reset-remaining', countdownPaused ? pausedCountdowns.get(until) ?? 'Countdown paused' : resetCountdown(until, Date.now() / 1000));
+  remaining.dataset.countdown = String(until);
+  // Informational timer: screen readers can inspect it without minute-by-minute announcements.
+  remaining.setAttribute('aria-live', 'off'); wrapper.append(time, remaining); return wrapper;
+}
+const quotaContext = () => ({ nowSeconds: Date.now() / 1000, policies: snapshot?.policies, limits: monitor?.limited, signInRequired: monitor?.sign_in_required });
+// #endregion quota-countdown
 /** A menu is part of the render: `openMenu` names the one that is open. */
 function menu(key: string, label: string, items: ([string, () => void] | [string, () => void, string])[], triggerClass = 'icon-button', text = '⋯') {
   const wrapper = el('div', 'menu-root');
@@ -396,7 +423,13 @@ function renderAccounts(main: HTMLElement) {
     const empty = emptyState('Start with one account', 'Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.');
     empty.append(addMenu()); main.append(empty); return;
   }
-  for (const group of groupAccounts(accounts)) {
+  const sorting = el('div', 'account-sort-note');
+  sorting.append(el('span', '', 'Within each pool: remaining quota first, then shortest wait. Unknown usage follows.'), button(countdownPaused ? 'Resume countdown' : 'Pause countdown', () => {
+    if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(Number(node.dataset.countdown), node.textContent ?? '')); }
+    countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
+  }, 'button quiet', 'countdown-toggle'));
+  main.append(sorting);
+  for (const group of groupAccounts(accounts, quotaContext())) {
     const section = el('section', 'account-group'); section.setAttribute('aria-label', `${providerName(group.provider)} accounts`);
     const heading = el('div', 'group-heading');
     heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${group.count} ${group.count === 1 ? 'account' : 'accounts'}`));
@@ -422,7 +455,7 @@ function accountRow(account: Account) {
   if (active) title.append(el('span', 'badge selected-badge', 'Next managed request'));
   if (signIn) title.append(el('span', 'badge danger-badge', 'Sign in again'));
   const limit = accountLimit(account);
-  if (limit) { const badge = el('span', 'badge warn-badge', `Limit reached · until ${date(limit.until)}`); badge.title = limit.source === 'managed' ? 'A managed request was refused with a rate limit.' : 'Claude Code reported a usage or spend limit for this account.'; title.append(badge); }
+  if (limit) { const badge = el('span', 'badge warn-badge', 'Limit reached'); badge.title = limit.source === 'managed' ? 'A managed request was refused with a rate limit.' : 'Claude Code reported a usage or spend limit. The retry hold may be estimated.'; title.append(badge); }
   if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
   const email = account.external_identity?.email;
   name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? 'OAuth' : '')));
@@ -454,22 +487,31 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   return menu(account.id, `More actions for ${account.label}`, items);
 }
 function usageCell(account: Account) {
-  const observation = account.usage; const now = Date.now() / 1000;
+  const observation = account.usage; const now = Date.now() / 1000; const limit = accountLimit(account);
   if (!observation) {
     const cell = el('div', 'row-usage');
     cell.append(el('span', 'usage-unknown', account.kind === 'oauth' ? (account.usage_health?.status === 'failed' ? 'Check failed' : 'Usage unknown') : account.kind === 'api_key' ? 'API billing' : 'No quota check'));
+    if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
     return cell;
   }
-  const policies = snapshot?.policies?.filter((policy) => policy.provider === account.provider && policy.pool === account.pool && policy.enabled) ?? [];
-  const maxAge = policies.length ? Math.min(...policies.map((policy) => policy.max_age_seconds)) : 300;
-  const { stale, resetPassed } = usageFreshness(observation, maxAge, now);
+  const cell = el('div', 'row-usage');
+  const { stale, resetPassed } = usageFreshness(observation, quotaMaxAge(account, snapshot?.policies), now);
+  const failed = account.usage_health?.status === 'failed' || account.usage_health?.status === 'unavailable';
   const control = button('', () => { if (quotaOpen.has(account.id)) quotaOpen.delete(account.id); else quotaOpen.add(account.id); render(); restoreFocus(`quota-${account.id}`); }, 'row-usage', `quota-${account.id}`);
-  control.setAttribute('aria-expanded', String(quotaOpen.has(account.id))); control.setAttribute('aria-label', `${Math.round(observation.used_percent)}% of the highest quota used. Show quota windows.`);
+  control.setAttribute('aria-expanded', String(quotaOpen.has(account.id)));
+  control.setAttribute('aria-label', `${Math.round(observation.used_percent)}% of the highest quota used${resetPassed ? ' before reset; current usage unknown' : failed ? '; last check failed' : stale ? '; stale observation' : ''}. Show quota windows.`);
   const meter = el('progress', `usage-meter ${observation.used_percent >= 90 ? 'is-high' : ''}`); meter.max = 100; meter.value = observation.used_percent;
+  meter.setAttribute('aria-label', resetPassed || stale || failed ? 'Last reported quota used' : 'Reported quota used');
   const line = el('span', 'usage-line');
-  line.append(el('strong', '', `${Math.round(observation.used_percent)}%`), el('span', stale ? 'stale' : '', resetPassed ? 'reset since check' : stale ? `stale · ${age(observation.observed_at)}` : observation.resets_at ? `resets ${date(observation.resets_at)}` : age(observation.observed_at)));
-  control.append(line, meter);
-  return control;
+  line.append(el('strong', '', `${Math.round(observation.used_percent)}%`), el('span', stale || failed ? 'stale' : '', resetPassed ? 'reset since check' : failed ? 'check failed' : stale ? `stale · ${age(observation.observed_at)}` : age(observation.observed_at)));
+  control.append(line, meter); cell.append(control);
+  const quota = quotaOrder(account, { ...quotaContext(), limits: [] });
+  const reset = quota.state === 'blocked' ? quota.until : observation.resets_at;
+  if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
+  // A hold is not a quota reset; show both when they differ.
+  if (reset && (!limit || reset !== limit.until)) cell.append(resetDisplay(reset, stale || failed ? 'Reported reset' : quota.state === 'blocked' ? 'Quota windows reset' : 'Resets'));
+  if (quota.state === 'blocked' && quota.until === null) cell.append(el('span', 'usage-unknown', 'Reset time unavailable'));
+  return cell;
 }
 function quotaDetails(account: Account) {
   const observation = account.usage!; const now = Date.now() / 1000; const health = account.usage_health;
@@ -477,7 +519,11 @@ function quotaDetails(account: Account) {
   const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
   for (const window of windows) {
     const reset = windowReset(window.resets_at, now);
-    const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`), el('span', 'usage-caption', reset ? `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before` : window.resets_at ? `Resets ${date(window.resets_at)}` : 'Reset time unavailable')); details.append(row);
+    const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? `${window.name} · usage unknown since reset` : `${window.name} · ${Math.round(window.used_percent)}% used`));
+    if (reset) row.append(el('span', 'usage-caption', `Reset ${date(window.resets_at!)} · ${Math.round(window.used_percent)}% was used before`));
+    else if (window.resets_at) row.append(resetDisplay(window.resets_at));
+    else row.append(el('span', 'usage-caption', 'Reset time unavailable'));
+    details.append(row);
   }
   details.append(el('p', 'usage-caption', `${observation.source} · Observed ${date(observation.observed_at)}`));
   if (health?.status === 'failed') details.append(el('p', 'usage-error', 'Last quota check failed. Not eligible for automatic switching until a check succeeds.'));

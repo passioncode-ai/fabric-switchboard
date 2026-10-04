@@ -39,6 +39,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-029 | Keep saved accounts usable for automatic switching | draft |
 | SCN-030 | Get accounts back after reinstalling Switchboard | draft |
 | SCN-031 | Move off an account that hit a limit the quota does not show | draft |
+| SCN-032 | Find remaining quota and compare account waits | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -602,10 +603,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** automatic switching on for Claude Code; another saved account with fresh quota.
 **Entry point:** automatic; SCR-01 shows the result.
 **Steps:**
-1. A Claude Code session hits a usage or spend limit → within about 30 seconds Switchboard switches Claude Code to the free account with the lowest usage, even inside the cooldown; the bar reads “Switched after the account in use hit a provider limit.”
-2. The limited row shows “Limit reached · until …” and is not chosen again before then.
+1. A Claude Code session hits a usage or spend limit → the monitor attempts a switch on its next scan (timing and running-session credential adoption remain SB-06 acceptance), changing Claude Code to the free account with the lowest usage, even inside the cooldown; the bar reads “Switched after the account in use hit a provider limit.”
+2. The limited row shows “Limit reached” and “Retry hold until {date}” plus remaining time, and is not chosen again before the hold ends. The hold may be estimated.
 **Alt paths:** No other free account → “The account in use hit a provider limit, and no other account is free. Holding it.” Managed sessions are detected from the proxy's own 429 responses.
-**Expected result:** work continues on another account; the limited one returns after its reset.
+**Expected result:** the saved/native selection changes to another account. The next accepted managed request uses that selection; an already stopped native session may still need operator continuation or restart. Automatic wake/resume is deferred to SB-25. The retry hold expiring does not verify restored quota.
 **UI elements:** row badge, Automatic switching decision text.
 **States covered:** limited, switched on limit, all limited.
 **Errors & recovery:** a failed activation reads as before (`activation_failed`).
@@ -614,3 +615,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `limits::tests`, `a_limit_error_in_claude_code_switches_with_quota_to_spare`, rotation test; marker shape measured on this machine's own transcripts (field names only).
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-16, REQ-17
+
+
+## SCN-032 — Find remaining quota and compare account waits
+**Persona:** P-01
+**Goal:** Find saved accounts with quota and understand the wait in hours and days.
+**Preconditions:** Account metadata loaded; provider observations may be missing, partial, failed or old.
+**Entry point:** SCR-01 Accounts
+**Steps:**
+1. Within each provider/pool group, view fresh accounts with remaining quota first, most headroom first.
+2. Then compare limited/exhausted accounts by earliest known end of wait. If several quota windows are exhausted, use the latest reset; a missing blocking reset reads Reset time unavailable.
+3. Read the local date/time and remaining days/hours/minutes on each account and its expanded windows.
+4. Pause countdown → text stays frozen across metadata renders; resume → wall-clock remaining time returns.
+**Alt paths:** Unknown/stale/failed data follow known waits, then sign-in-required and disabled rows. Provider/pool boundaries remain. A runtime retry hold is labelled separately from quota resets. Passed reset reads Due · awaiting check; the pre-reset measurement remains history until a fresh provider observation. Authoritative JSON restores freshness after partial headers; retained windows never acquire a newer evidence timestamp.
+**Expected result:** Display order reflects available evidence without selecting accounts, changing policies, refreshing credentials or replaying requests. Date stays visible alongside duration; timer updates do not move focus or announce every minute.
+**UI elements:** account groups, ordering note, quota button, date/time, countdown, Pause countdown, Resume countdown.
+**States covered:** available, blocked, unknown reset, stale, failed, sign-in-required, disabled, reset-passed, paused, hidden window.
+**Errors & recovery:** Failed checks keep prior values as history; Check usage or scheduled polling can update them. Missing evidence never means zero usage or confirmed capacity.
+**Status:** draft
+**Meaning:** implementation follows the operator's request on 2026-10-04; no provider acceptance inferred.
+**Coverage:** [UI logic tests](../../scripts/test-ui-logic.mjs), [renderer](../../src/main.ts), [synthetic demo](../../src/demo.ts), [verification](../../docs/evidence/quota-order-2026-10-04.md).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01

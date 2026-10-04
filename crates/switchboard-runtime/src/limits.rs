@@ -2,8 +2,8 @@
 //! per-account rate limit answers 429 while the quota endpoint still reports spare capacity;
 //! Claude Swap cannot see it. Two sources: the proxy's own `request rate_limited` events for
 //! managed sessions, and the API-error markers Claude Code writes into its session transcripts
-//! for ordinary sessions. Only lines flagged `isApiErrorMessage` with a rate-limit error are
-//! parsed; conversation content is never read into a structure, kept or logged.
+//! for ordinary sessions. Deserialization keeps only flagged API-error markers and timestamp
+//! metadata for session attribution; conversation content is never materialized, kept or logged.
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
@@ -16,8 +16,8 @@ use switchboard_core::{ExternalIdentity, Snapshot};
 
 /// An error older than this says nothing about the account now.
 pub(crate) const WINDOW_SECONDS: i64 = 900;
-/// Running Claude Code sessions adopt a changed Keychain item within about 30 seconds; errors
-/// in the first minute after a switch may still come from the previous account.
+/// Heuristic attribution grace: errors shortly after a switch may belong to the previous
+/// account's session. Actual running-session adoption timing remains unverified (SB-06).
 pub(crate) const SWITCH_GRACE_SECONDS: i64 = 60;
 /// A limit with no reported reset holds for this long, then the account may be tried again.
 const DEFAULT_HOLD_SECONDS: i64 = 900;
@@ -270,6 +270,12 @@ pub(crate) fn markers(files: &[PathBuf], since: i64, now: i64) -> Vec<(i64, i64)
 }
 /// The time of the first timestamped entry of a session transcript (its first 64 KiB).
 fn session_start(path: &Path) -> Option<i64> {
+    // Unknown fields use serde's IgnoredAny visitor rather than allocating a Value tree.
+    // An ordinary prompt is opaque; only its timestamp participates in attribution.
+    #[derive(serde::Deserialize)]
+    struct Metadata {
+        timestamp: String,
+    }
     let mut head = Vec::new();
     fs::File::open(path)
         .ok()?
@@ -277,11 +283,13 @@ fn session_start(path: &Path) -> Option<i64> {
         .read_to_end(&mut head)
         .ok()?;
     head.split(|b| *b == b'\n').find_map(|line| {
-        let value: Value = serde_json::from_slice(line).ok()?;
-        let stamp = value.get("timestamp")?.as_str()?;
-        time::OffsetDateTime::parse(stamp, &time::format_description::well_known::Rfc3339)
-            .ok()
-            .map(|t| t.unix_timestamp())
+        let metadata: Metadata = serde_json::from_slice(line).ok()?;
+        time::OffsetDateTime::parse(
+            &metadata.timestamp,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .ok()
+        .map(|t| t.unix_timestamp())
     })
 }
 fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, i64, bool)> {
@@ -601,6 +609,19 @@ mod tests {
             NOW + 150,
         );
         assert!(state.limited_ids(NOW + 150).contains("id-b"));
+    }
+    #[test]
+    fn opaque_conversation_content_cannot_hide_an_old_sessions_start() {
+        let temp = tempfile::tempdir().unwrap();
+        // This valid JSON number cannot be represented by serde_json::Value.
+        // Session attribution needs only the timestamp, not conversation values.
+        let opened = format!(
+            r#"{{"type":"user","message":{{"content":{{"opaque":1e9999}}}},"timestamp":"{}"}}"#,
+            rfc(NOW - 3600)
+        );
+        let path = transcript(temp.path(), &[opened, error_line(NOW - 10, None)]);
+        assert_eq!(session_start(&path), Some(NOW - 3600));
+        assert_eq!(latest_limit(&[path], NOW - 60, NOW), None);
     }
     #[test]
     fn only_recent_jsonl_files_are_considered_and_tails_are_bounded() {

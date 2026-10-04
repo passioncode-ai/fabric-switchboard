@@ -228,11 +228,16 @@ fn usage_valid(u: &Usage) -> bool {
 
 fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
     let mut windows = new.windows.clone();
+    let mut observed_at = new.observed_at;
     for w in &old.windows {
         if !windows.iter().any(|n| n.name == w.name)
             && w.resets_at.is_none_or(|t| t >= new.observed_at)
         {
             windows.push(w.clone());
+            // The aggregate can establish capacity only as recently as every
+            // window it contains. A partial header response does not observe
+            // the missing weekly/model quota, even when its reset is ahead.
+            observed_at = observed_at.min(old.observed_at);
         }
     }
     let worst = windows
@@ -241,7 +246,7 @@ fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
     let merged = Usage {
         used_percent: worst.used_percent,
         resets_at: worst.resets_at,
-        observed_at: new.observed_at,
+        observed_at,
         source: new.source.clone(),
         windows,
     };
@@ -994,6 +999,12 @@ impl Store {
         if a.usage
             .as_ref()
             .is_some_and(|old| old.observed_at > usage.observed_at && !ahead(old.observed_at))
+            // Merged historical windows conservatively retain their older age;
+            // the latest check still orders incoming observations. A failure
+            // must not let a delayed older success erase that later health.
+            || a.usage_health.as_ref().is_some_and(|health| {
+                health.checked_at > usage.observed_at && !ahead(health.checked_at)
+            })
         {
             return Err("Usage observation is older than the stored observation".into());
         }

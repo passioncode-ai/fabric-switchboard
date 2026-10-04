@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, ProjectRule, RotationPolicy, Usage } from './types';
+import type { Account, AccountLimit, ProjectRule, RotationPolicy, Usage } from './types';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -35,7 +35,7 @@ export interface Freshness {
 export function usageFreshness(usage: Pick<Usage, 'observed_at' | 'resets_at' | 'windows'>, maxAgeSeconds: number, nowSeconds: number): Freshness {
   const resets = [usage.resets_at, ...(usage.windows ?? []).map((window) => window.resets_at)];
   const resetPassed = resets.some((reset) => typeof reset === 'number' && reset <= nowSeconds);
-  return { stale: resetPassed || nowSeconds - usage.observed_at > maxAgeSeconds, resetPassed };
+  return { stale: resetPassed || !Number.isFinite(usage.observed_at) || usage.observed_at > nowSeconds || nowSeconds - usage.observed_at > maxAgeSeconds, resetPassed };
 }
 
 export function windowReset(resetsAt: number | null | undefined, nowSeconds: number): boolean {
@@ -81,22 +81,75 @@ export function projectName(path: string): string {
   return parts.length ? parts[parts.length - 1] : path;
 }
 
+// #region quota-order — docs: docs/runs/2026-10-04-quota-review/README.md
+export interface QuotaOrderContext {
+  nowSeconds: number;
+  policies?: Pick<RotationPolicy, 'provider' | 'pool' | 'enabled' | 'max_age_seconds'>[];
+  limits?: Pick<AccountLimit, 'account_id' | 'until'>[];
+  signInRequired?: string[];
+}
+export interface QuotaOrder { state: 'available' | 'blocked' | 'unknown' | 'sign_in' | 'disabled'; until: number | null; used: number }
+export function quotaMaxAge(account: Pick<Account, 'provider' | 'pool'>, policies: QuotaOrderContext['policies'] = []): number {
+  const ages = policies.filter(p => p.enabled && p.provider === account.provider && p.pool === account.pool).map(p => p.max_age_seconds);
+  return ages.length ? Math.min(...ages) : 300;
+}
+const validTime = (value: number | null | undefined): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0 && value * 1000 <= 8.64e15;
+/** Display ranking only: never selects an account or alters rotation policy. */
+export function quotaOrder(account: Account, context: QuotaOrderContext): QuotaOrder {
+  const unknown: QuotaOrder = { state: 'unknown', until: null, used: Infinity };
+  if (!account.enabled) return { ...unknown, state: 'disabled' };
+  if (context.signInRequired?.includes(account.id)) return { ...unknown, state: 'sign_in' };
+  const hold = context.limits?.find(limit => limit.account_id === account.id && validTime(limit.until) && limit.until > context.nowSeconds);
+  const usage = account.usage;
+  const windows = usage?.windows?.length ? usage.windows : usage ? [{ used_percent: usage.used_percent, resets_at: usage.resets_at }] : [];
+  const fresh = account.kind === 'oauth' && usage && account.usage_health?.status !== 'failed' && account.usage_health?.status !== 'unavailable'
+    && !usageFreshness(usage, quotaMaxAge(account, context.policies), context.nowSeconds).stale
+    && Number.isFinite(usage.used_percent) && windows.every(w => Number.isFinite(w.used_percent) && w.used_percent >= 0 && w.used_percent <= 100);
+  if (!fresh) return hold ? { ...unknown, state: 'blocked', until: hold.until } : unknown;
+  const used = Math.max(usage.used_percent, ...windows.map(w => w.used_percent));
+  const exhausted = windows.filter(w => w.used_percent >= 100);
+  if (used >= 100 && !exhausted.length) exhausted.push({ used_percent: used, resets_at: usage.resets_at });
+  if (exhausted.length) {
+    const known = exhausted.every(w => validTime(w.resets_at) && w.resets_at > context.nowSeconds);
+    return { state: 'blocked', used, until: known ? Math.max(hold?.until ?? 0, ...exhausted.map(w => w.resets_at!)) : null };
+  }
+  return hold ? { state: 'blocked', used, until: hold.until } : { state: 'available', used, until: null };
+}
+/** Days plus hours stay legible for weekly waits; no decrementing counter or negative values. */
+export function resetCountdown(until: number, nowSeconds: number): string {
+  if (!validTime(until) || !Number.isFinite(nowSeconds)) return 'Time unavailable';
+  const remaining = until - nowSeconds;
+  if (remaining <= 0) return 'Due · awaiting check';
+  if (remaining < 60) return '<1m remaining';
+  const minutes = Math.ceil(remaining / 60), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60), mins = minutes % 60;
+  return `${days ? `${days}d ` : ''}${hours || days ? `${hours}h ` : ''}${mins}m remaining`;
+}
+
 type Groupable = Pick<Account, 'provider' | 'pool' | 'enabled' | 'created_at'>;
 export interface AccountGroup<T> { provider: Account['provider']; count: number; pools: { pool: string; accounts: T[] }[] }
-/** Provider sections (Claude Code first), pool sub-groups (default first), enabled before disabled. */
-export function groupAccounts<T extends Groupable>(accounts: T[]): AccountGroup<T>[] {
+/** Provider and pool boundaries survive quota ordering; old callers retain structural order. */
+export function groupAccounts<T extends Groupable>(accounts: T[], context?: QuotaOrderContext): AccountGroup<T>[] {
   const groups: AccountGroup<T>[] = [];
+  const ranks = { available: 0, blocked: 1, unknown: 2, sign_in: 3, disabled: 4 };
+  const compare = (a: T, b: T) => {
+    if (context) {
+      const left = quotaOrder(a as unknown as Account, context), right = quotaOrder(b as unknown as Account, context);
+      const rank = ranks[left.state] - ranks[right.state];
+      if (rank) return rank;
+      if (left.state === 'available' && left.used !== right.used) return left.used - right.used;
+      if (left.state === 'blocked' && left.until !== right.until) return (left.until ?? Infinity) - (right.until ?? Infinity);
+    }
+    return Number(b.enabled) - Number(a.enabled) || a.created_at - b.created_at || ((a as unknown as Account).id ?? '').localeCompare((b as unknown as Account).id ?? '');
+  };
   for (const provider of ['claude', 'codex'] as const) {
-    const mine = accounts.filter((account) => account.provider === provider);
+    const mine = accounts.filter(account => account.provider === provider);
     if (!mine.length) continue;
-    const pools = [...new Set(mine.map((account) => account.pool))].sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)));
-    groups.push({
-      provider, count: mine.length,
-      pools: pools.map((pool) => ({ pool, accounts: mine.filter((account) => account.pool === pool).sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.created_at - b.created_at) })),
-    });
+    const pools = [...new Set(mine.map(account => account.pool))].sort((a, b) => a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b));
+    groups.push({ provider, count: mine.length, pools: pools.map(pool => ({ pool, accounts: mine.filter(account => account.pool === pool).sort(compare) })) });
   }
   return groups;
 }
+// #endregion quota-order
 
 type Switchable = Pick<Account, 'provider' | 'kind' | 'enabled' | 'external_identity'>;
 /** Native Claude Code activation needs a Claude OAuth profile with its captured identity. */
