@@ -581,7 +581,9 @@ fn header_usage_merges_into_stored_windows_and_is_not_journaled() {
     );
     assert_eq!(usage.used_percent, 70.0);
     assert_eq!(usage.resets_at, Some(t + 90_000));
-    assert_eq!(usage.observed_at, t);
+    // The Opus value was not observed by these headers: retained history must
+    // not acquire a fresh aggregate timestamp and become a rotation candidate.
+    assert_eq!(usage.observed_at, t - 10);
     assert_eq!(usage.source, "response_headers");
     assert_eq!(snapshot.events.len(), events);
 }
@@ -829,11 +831,12 @@ fn an_unchanged_quota_check_is_not_written_until_something_changes() {
     let (root, vault, store) = setup();
     let a = add(&store, "synthetic");
     let metadata = || fs::read(root.path().join("accounts.json")).unwrap();
+    let resets_at = now() + 7200;
     let usage = |at: i64, used: f64| Usage {
         windows: vec![],
         used_percent: used,
         observed_at: at,
-        resets_at: Some(now() + 7200),
+        resets_at: Some(resets_at),
         source: "claude_oauth".into(),
     };
     let t = now() - 100;

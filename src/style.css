@@ -235,3 +235,8 @@ button.row-usage:hover:not(:disabled) .usage-line strong { text-decoration: unde
 }
 .warn-badge { color: var(--warn); border-color: var(--warn); background: var(--warn-weak); }
 .backup-list { margin: var(--space-3) 0; }
+
+/* Quota date and elapsed wait use the existing operational token layer. */
+.account-sort-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); color: var(--muted); font-size: var(--t-chip); }
+.reset-display { display: grid; gap: var(--space-1); white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
+.reset-remaining { font-variant-numeric: tabular-nums; color: var(--ink); }

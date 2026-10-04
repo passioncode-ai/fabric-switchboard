@@ -169,4 +169,45 @@ check(() => {
   assert(main.includes('loginPoll.sync('), 'render keeps the poll in step with the pending sign-in');
 });
 
-console.log(`${cases} ui-logic cases passed: appearance, monitored accounts, reset-aware staleness, mutation ordering, error vocabulary, project rules, account groups, row actions, auto-switch start, sign-in outcomes, sign-in poll only while pending.`);
+
+// R3–R5: quota ordering is explicit, conservative and independent of input order.
+check(() => {
+  const now = 1_000_000;
+  const account = (id, used, reset = now + 3600, extra = {}) => ({ id, label: id, provider: 'claude', pool: 'default', enabled: true, kind: 'oauth', created_at: 1, usage: used === null ? null : { used_percent: used, observed_at: now - 10, resets_at: reset }, ...extra });
+  const a = account('available', 20), b = account('soon', 100, now + 60), c = account('late', 100, now + 7200);
+  const d = account('unknown', null), e = account('disabled', 0, now + 1, { enabled: false });
+  const bad = account('failed', 0, now + 1, { usage_health: { status: 'failed' } });
+  const stale = account('stale', 0, now + 1, { usage: { used_percent: 0, observed_at: now - 400, resets_at: now + 1 } });
+  const result = logic.groupAccounts([e, c, stale, b, d, bad, a], { nowSeconds: now }).flatMap(g => g.pools.flatMap(p => p.accounts.map(a => a.id)));
+  assert.deepEqual(result, ['available', 'soon', 'late', 'failed', 'stale', 'unknown', 'disabled']);
+  assert.equal(logic.quotaOrder(account('reset', 0, now), { nowSeconds: now }).state, 'unknown');
+  assert.equal(logic.quotaOrder(a, { nowSeconds: now, signInRequired: ['available'] }).state, 'sign_in');
+  assert.equal(logic.quotaOrder(account('future', 0, now + 20, { usage: { ...a.usage, observed_at: now + 10 } }), { nowSeconds: now }).state, 'unknown');
+  const multi = account('multi', 100, now + 60, { usage: { ...a.usage, used_percent: 100, resets_at: now + 60, windows: [{ name: 'session', used_percent: 100, resets_at: now + 60 }, { name: 'weekly', used_percent: 100, resets_at: now + 86400 }] } });
+  assert.equal(logic.quotaOrder(multi, { nowSeconds: now }).until, now + 86400);
+  assert.equal(logic.quotaOrder(multi, { nowSeconds: now, limits: [{ account_id: multi.id, until: now + 172800 }] }).until, now + 172800, 'later hold governs wait');
+  const input = [a, b, c]; const before = structuredClone(input);
+  logic.groupAccounts(input, { nowSeconds: now });
+  assert.deepEqual(input, before, 'display sorting never mutates metadata');
+  assert.deepEqual(logic.groupAccounts([...input].reverse(), { nowSeconds: now }), logic.groupAccounts(input, { nowSeconds: now }));
+  multi.usage.windows[1].resets_at = null;
+  assert.equal(logic.quotaOrder(multi, { nowSeconds: now }).until, null, 'missing blocking reset never means earliest known window');
+  assert.equal(logic.quotaOrder(a, { nowSeconds: now, limits: [{ account_id: a.id, until: now + 900 }] }).state, 'blocked');
+  assert.equal(logic.quotaOrder(a, { nowSeconds: now, limits: [{ account_id: a.id, until: now }] }).state, 'available');
+  assert.equal(logic.quotaOrder(account('api', 0, now + 20, { kind: 'api_key' }), { nowSeconds: now }).state, 'unknown');
+  assert.equal(logic.quotaOrder(account('nan', NaN), { nowSeconds: now }).state, 'unknown');
+  assert.equal(logic.quotaOrder(a, { nowSeconds: now, policies: [{ provider: 'claude', pool: 'default', enabled: true, max_age_seconds: 5 }] }).state, 'unknown');
+});
+check(() => {
+  const now = 1_000_000;
+  assert.equal(logic.resetCountdown(now + 1, now), '<1m remaining');
+  assert.equal(logic.resetCountdown(now + 3660, now), '1h 1m remaining');
+  assert.equal(logic.resetCountdown(now + 172860, now), '2d 0h 1m remaining');
+  assert.equal(logic.resetCountdown(now + 2592000, now), '30d 0h 0m remaining');
+  assert.equal(logic.resetCountdown(now, now), 'Due · awaiting check');
+  assert.equal(logic.resetCountdown(now - 50, now), 'Due · awaiting check');
+  assert.equal(logic.resetCountdown(NaN, now), 'Time unavailable');
+  assert.equal(logic.resetCountdown(9e12, now), 'Time unavailable');
+});
+
+console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

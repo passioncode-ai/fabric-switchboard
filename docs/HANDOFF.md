@@ -1,3 +1,20 @@
+# Quota ordering and system review — 2026-10-04
+
+**Start here:** [handoffs/2026-10-04-quota-review.md](handoffs/2026-10-04-quota-review.md).
+The [unified plan](runs/2026-10-04-quota-review/PLAN.md) maps every current block and carry-over
+task; the [dated report](reports/2026-10-04-system-review/README.md) carries primary sources and
+developer threads. Canonical rows SB-35…38 cover quota ordering/date/countdown plus reproduced
+freshness, backup-generation and session-timestamp repairs. Actual checks and browser limits:
+[verification](evidence/quota-order-2026-10-04.md).
+
+**Exact next autonomous code task:** SB-39, shared quota-check retry deadline and Retry-After
+seconds/HTTP-date parsing; its packet includes scopes, edge cases and fail-first checks.
+SB-06/25 adoption and continuation need typed identity/scope evidence and live versioned probes.
+SB-15/02/34 remain separate native/Windows/release gates. Source stays 0.5.4, unreleased;
+this task neither publishes nor installs. Preserve the lifecycle and release receipts below.
+
+---
+
 # Landed, not released — Switchboard 0.5.4: lifecycle contract (2026-10-04)
 
 **Start here:** [handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md](handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md) (board SB-27), [PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23), merged as `f0b8d7f` after the branch was brought up to `main` (0.5.3-beta.2) by a merge (`45bbdbf`). Gate on `45bbdbf`: `./scripts/check.sh` exit 0 (299 Rust tests). Board: SB-27 and SB-23 done; release is SB-34.
