@@ -1,3 +1,16 @@
+# Released — Switchboard v0.5.4-beta.3 (2026-10-05)
+
+[Release record](evidence/release-0.5.md#release-v054-beta3-2026-10-05). Published from `023314c` by run
+37238681118; verified download; site serves it; installed here (0.5.3-beta.2 kept for rollback); the
+lifecycle broker now starts Switchboard with `--background` (enrolled, policyRevision 5). Since the
+last handoff also landed: SB-42 (structured sign-in result), SB-29 (`switchboard uninstall`), SB-43
+(MCP client matrix), SB-46 (docs reconciled), SB-47 packet for Fabric COM-11 (waits on Fabric
+COM-01/COM-03). **Next autonomous:** SB-07 (instrumented, waiting for a failure), SB-05, SB-16.
+**Operator:** SB-15 day of use, SB-02 Windows, SB-03 Azure, SB-28/SB-48 product decisions,
+SB-31 stable release, `switchboard uninstall --yes` acceptance (F8 orphan item).
+
+---
+
 # SB-30 — background start (2026-10-04)
 
 [Run record](runs/2026-10-04-sb-30-background/README.md). `--background` starts hidden with no focus
