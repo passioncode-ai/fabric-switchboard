@@ -461,12 +461,13 @@ fn main() {
         eprintln!("Fabric Switchboard could not start. Check app-data permissions, another running instance and native vault access.");
         std::process::exit(1);
     };
-    // macOS: in the background the app is an accessory — no Dock icon, no activation. Set on the
+    // macOS: in the background the app runs with the Prohibited policy — no Dock icon, and the
+    // launch's own activation request is refused (measured: Accessory still came forward). Set on the
     // built app, before the event loop launches, so the launch itself never runs as a regular
     // app (setup runs only after the launch would already have activated it).
     #[cfg(target_os = "macos")]
     if background {
-        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+        app.set_activation_policy(tauri::ActivationPolicy::Prohibited);
     }
     #[cfg(not(target_os = "macos"))]
     let _ = &mut app;

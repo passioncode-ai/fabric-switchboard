@@ -1,3 +1,13 @@
+# SB-30 — background start (2026-10-04)
+
+[Run record](runs/2026-10-04-sb-30-background/README.md). `--background` starts hidden with no focus
+(measured); unknown arguments are ignored. **Post-install step (after a release with SB-30):** enrol
+the broker target — `backgroundLaunch` on for `switchboard.desktop` (local-lifecycle owner CLI,
+`docs/runbooks/local-lifecycle.md` in `~/DATA/sshlg-personal-os`) — then check that closing the
+window and the broker's restart bring no window forward.
+
+---
+
 # SB-41 — typed, attributable limit evidence (2026-10-04)
 
 **Start here:** [run record](runs/2026-10-04-sb-41-limit-evidence/README.md); contract in
