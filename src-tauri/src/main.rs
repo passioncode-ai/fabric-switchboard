@@ -304,19 +304,47 @@ fn agent_setup() -> Value {
 fn link_cli() -> Result<Value, String> {
     switchboard_runtime::agents::link_bundled_cli()
 }
+/// How the desktop was launched. Only these flags mean anything; every other argument — a
+/// Launch Services `-psn_…`, a flag a launcher adds — is ignored, never a failed start (SB-30).
+#[derive(Debug, PartialEq, Eq, Default)]
+struct Launch {
+    /// `--smoke-test`: a temporary store and memory vault, exiting once the UI is ready.
+    smoke: bool,
+    /// `--background`: start without showing the window or taking focus — the local lifecycle
+    /// broker's always-on start. The window appears on the next launch or a Dock click.
+    background: bool,
+}
+fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
+    let mut launch = Launch::default();
+    for argument in arguments.into_iter().skip(1) {
+        match argument.as_str() {
+            "--smoke-test" => launch.smoke = true,
+            "--background" => launch.background = true,
+            _ => {}
+        }
+    }
+    launch
+}
+/// Shows the window and brings the app forward (it may have started in the background).
+fn reveal(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
-    let smoke = std::env::args().any(|argument| argument == "--smoke-test");
+    let Launch { smoke, background } = launch(std::env::args());
     let mut builder = tauri::Builder::default();
     // A second launch (double-click on Windows, `open -n` on macOS) focuses this window
     // instead of starting another owner that would find the store locked. The packaged smoke
     // check runs beside an installed app on purpose, with its own temporary store.
     if !smoke {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            reveal(app);
         }));
     }
     if !smoke {
@@ -367,6 +395,15 @@ fn main() {
                 });
             }
             app.manage(SmokeMode(temporary));
+            // The window is created hidden (tauri.conf.json): shown now on an ordinary start;
+            // in the background, left hidden, and on macOS without a Dock icon, so nothing comes
+            // forward — the next launch or `reveal` brings it.
+            if background {
+                #[cfg(target_os = "macos")]
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            } else {
+                reveal(app.handle());
+            }
             // SIGTERM (logout, `kill`, an updater) and SIGINT end the app the way Quit does:
             // through the exit event below, which drains the owner (lifecycle LC-01).
             let handle = app.handle().clone();
@@ -422,6 +459,16 @@ fn main() {
         // Every quit path — Quit, Cmd-Q, the last window closing, a signal — ends here: the
         // owner stops its timers, finishes or abandons work in flight by the deadline,
         // removes its descriptor and releases the store (lifecycle LC-01).
+        // macOS: clicking the Dock icon of an app started in the background shows its window.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen {
+            has_visible_windows: false,
+            ..
+        } = event
+        {
+            reveal(handle);
+            return;
+        }
         if let tauri::RunEvent::Exit = event {
             switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
             let slot = handle.state::<Slot>();
@@ -431,4 +478,47 @@ fn main() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        std::iter::once("Fabric Switchboard")
+            .chain(list.iter().copied())
+            .map(String::from)
+            .collect()
+    }
+
+    /// SB-30: an argument the app does not know never stops it from starting.
+    #[test]
+    fn unknown_arguments_are_ignored_and_background_is_recognised() {
+        assert_eq!(launch(args(&[])), Launch::default());
+        assert_eq!(
+            launch(args(&[
+                "-psn_0_12345",
+                "--unknown",
+                "value",
+                "--Background"
+            ])),
+            Launch::default()
+        );
+        assert_eq!(
+            launch(args(&["--background"])),
+            Launch {
+                smoke: false,
+                background: true
+            }
+        );
+        assert_eq!(
+            launch(args(&["--smoke-test", "--background"])),
+            Launch {
+                smoke: true,
+                background: true
+            }
+        );
+        // The program name itself is not an argument.
+        assert_eq!(launch(["--background".to_string()]), Launch::default());
+    }
 }
