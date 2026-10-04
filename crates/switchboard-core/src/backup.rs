@@ -211,7 +211,7 @@ fn envelopes(dir: &Path) -> Vec<(String, Envelope)> {
             (envelope.format == FORMAT && envelope.version == VERSION).then_some((name, envelope))
         })
         .collect();
-    found.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
+    found.sort_by_key(|a| std::cmp::Reverse(a.1.created_at));
     found
 }
 

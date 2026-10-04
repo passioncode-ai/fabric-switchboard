@@ -83,7 +83,7 @@ WebKit helpers; measured on a release, not by the gate.
 
 **Residency.** Background rotation, renewal and backups run only while the app or `serve`
 runs. Closing the window quits the app; that is the declared residency until a menu-bar or
-login-item mode is decided (product decision, not taken here). Managed sessions keep working
+login-item mode is decided (product decision, not taken here; board SB-28). Managed sessions keep working
 across a quit and relaunch because the proxy address and token are stable.
 
 **Build output and caches (LC-15).** Release artefacts live in `artifacts/`

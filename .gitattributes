@@ -1,2 +1,6 @@
+# Text is LF in every checkout, Windows included. A Windows checkout with core.autocrlf
+# wrote CRLF, and `tauri build` rewrites src-tauri/Cargo.toml with LF, so the release
+# job saw a changed tree and refused its receipt (v0.5.3-rc.3, run 37148716778).
+* text=auto eol=lf
 # Canonical SPDX license texts are vendored byte-for-byte; keep their whitespace.
 scripts/licenses/*.txt -whitespace

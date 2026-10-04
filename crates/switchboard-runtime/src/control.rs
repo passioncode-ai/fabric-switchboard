@@ -28,6 +28,11 @@ use uuid::Uuid;
 const FILE: &str = "control.json";
 const REQUEST_LIMIT: usize = 128 * 1024;
 const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+/// How long a connect to the owner may take before it counts as unanswered. A live
+/// owner accepts at once; a port nobody listens on is refused at once on macOS but
+/// only after about two seconds of SYN retries on Windows, and a refusal is the
+/// fallback a stale descriptor must reach, so the bound sits well past that.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Descriptor {
@@ -242,7 +247,7 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         return Ok(None);
     }
     let stream = match tokio::time::timeout(
-        Duration::from_secs(2),
+        CONNECT_TIMEOUT,
         tokio::net::TcpStream::connect(descriptor.address),
     )
     .await

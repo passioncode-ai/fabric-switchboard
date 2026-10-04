@@ -404,7 +404,10 @@ fn codex_auth(reader: &dyn Reader, c: &Context) -> Result<Option<Vec<u8>>, Strin
         .get("features")
         .and_then(|f| f.get("secret_auth_storage"))
         .and_then(toml::Value::as_bool)
-        .unwrap_or(cfg!(windows));
+        // Codex turns this on by default only on Windows, and a non-macOS context is
+        // refused below whatever the setting: the default is the context's
+        // platform, never the one this binary was built for.
+        .unwrap_or(false);
     if secrets || !c.mac {
         return Err("This Codex keyring backend cannot be imported yet. Use official sign-in to add a profile.".into());
     }
@@ -2359,7 +2362,7 @@ mod tests {
     #[test]
     fn a_live_lock_is_waited_for_and_a_stale_one_is_taken_over() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(".claude.lock");
+        let path = temp.path().canonicalize().unwrap().join(".claude.lock");
         fs::create_dir(&path).unwrap();
         let start = std::time::Instant::now();
         assert_eq!(
@@ -2372,7 +2375,9 @@ mod tests {
         );
         // A holder that stopped heartbeating long ago left an empty directory: taken over.
         let old = std::time::SystemTime::now() - Duration::from_secs(120);
-        fs::File::open(&path)
+        // Opened the way the heartbeat opens it: a plain open of a directory is
+        // refused on Windows.
+        directory_file(&path)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(old))
             .unwrap();
@@ -2811,10 +2816,23 @@ mod tests {
             assert!(refuse_home_inside(&link, Some(root)).is_err());
         }
     }
+    // A fixture path that is absolute on this platform: Windows needs a drive.
+    #[cfg(windows)]
+    macro_rules! fx {
+        ($p:literal) => {
+            concat!("C:", $p)
+        };
+    }
+    #[cfg(not(windows))]
+    macro_rules! fx {
+        ($p:literal) => {
+            $p
+        };
+    }
     #[test]
     fn context_resolves_homes_configs_and_keychain_services_like_the_cli() {
         let f = Fixture::new();
-        let home = Path::new("/fixture/user");
+        let home = Path::new(fx!("/fixture/user"));
         let env = |pairs: &'static [(&'static str, &'static str)]| {
             move |name: &str| {
                 pairs
@@ -2828,8 +2846,8 @@ mod tests {
         assert_eq!(
             (c.home.as_path(), c.config.as_path()),
             (
-                Path::new("/fixture/user/.claude"),
-                Path::new("/fixture/user/.claude.json")
+                Path::new(fx!("/fixture/user/.claude")),
+                Path::new(fx!("/fixture/user/.claude.json"))
             )
         );
         assert_eq!(c.service, "Claude Code-credentials");
@@ -2837,37 +2855,37 @@ mod tests {
         let c = context_from(
             Provider::Claude,
             None,
-            &env(&[("CLAUDE_CONFIG_DIR", "/fixture/alt")]),
+            &env(&[("CLAUDE_CONFIG_DIR", fx!("/fixture/alt"))]),
             home,
             &f,
             "u".into(),
         )
         .unwrap();
-        assert_eq!(c.config, Path::new("/fixture/alt/.claude.json"));
-        assert_eq!(c.service, service("/fixture/alt"));
+        assert_eq!(c.config, Path::new(fx!("/fixture/alt/.claude.json")));
+        assert_eq!(c.service, service(fx!("/fixture/alt")));
         assert!(
             c.service.starts_with("Claude Code-credentials-")
                 && c.service.len() == "Claude Code-credentials-".len() + 8
         );
         // A legacy .config.json wins over .claude.json.
-        f.put(Path::new("/fixture/alt/.config.json"), b"{}");
+        f.put(Path::new(fx!("/fixture/alt/.config.json")), b"{}");
         let c = context_from(
             Provider::Claude,
             None,
-            &env(&[("CLAUDE_CONFIG_DIR", "/fixture/alt")]),
+            &env(&[("CLAUDE_CONFIG_DIR", fx!("/fixture/alt"))]),
             home,
             &f,
             "u".into(),
         )
         .unwrap();
-        assert_eq!(c.config, Path::new("/fixture/alt/.config.json"));
+        assert_eq!(c.config, Path::new(fx!("/fixture/alt/.config.json")));
         // Secure storage pointing at another profile is refused; matching is fine.
         assert!(context_from(
             Provider::Claude,
             None,
             &env(&[
-                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
-                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/fixture/other")
+                ("CLAUDE_CONFIG_DIR", fx!("/fixture/alt")),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", fx!("/fixture/other"))
             ]),
             home,
             &f,
@@ -2878,8 +2896,8 @@ mod tests {
             Provider::Claude,
             None,
             &env(&[
-                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
-                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/fixture/alt")
+                ("CLAUDE_CONFIG_DIR", fx!("/fixture/alt")),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", fx!("/fixture/alt"))
             ]),
             home,
             &f,
@@ -2899,27 +2917,27 @@ mod tests {
         let c = context_from(
             Provider::Codex,
             None,
-            &env(&[("CODEX_HOME", "/fixture/codex")]),
+            &env(&[("CODEX_HOME", fx!("/fixture/codex"))]),
             home,
             &f,
             "u".into(),
         )
         .unwrap();
-        assert_eq!(c.config, Path::new("/fixture/codex/config.toml"));
+        assert_eq!(c.config, Path::new(fx!("/fixture/codex/config.toml")));
         // An explicit home (an isolated sign-in) ignores the environment.
         let c = context_from(
             Provider::Claude,
-            Some(Path::new("/fixture/login")),
+            Some(Path::new(fx!("/fixture/login"))),
             &env(&[
-                ("CLAUDE_CONFIG_DIR", "/fixture/alt"),
-                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", "/elsewhere"),
+                ("CLAUDE_CONFIG_DIR", fx!("/fixture/alt")),
+                ("CLAUDE_SECURESTORAGE_CONFIG_DIR", fx!("/elsewhere")),
             ]),
             home,
             &f,
             "u".into(),
         )
         .unwrap();
-        assert_eq!(c.service, service("/fixture/login"));
+        assert_eq!(c.service, service(fx!("/fixture/login")));
     }
     #[test]
     fn backup_file_precedes_keychain() {

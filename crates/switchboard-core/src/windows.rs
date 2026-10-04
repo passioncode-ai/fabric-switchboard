@@ -79,6 +79,51 @@ fn user_sid() -> Result<String, String> {
         String::from_utf16(std::slice::from_raw_parts(text, len)).map_err(error)
     }
 }
+/// The owner Windows gives to what this process creates when it names none: the
+/// token's default owner. For an ordinary user it is the user; for an elevated
+/// member of Administrators it is, by default, the Administrators group — so a
+/// directory such a process made itself (a temporary directory, a data directory
+/// made before Switchboard ran) is owned by the group, not by the user's SID.
+struct DefaultOwner(Vec<usize>);
+impl DefaultOwner {
+    fn current() -> Result<Self, String> {
+        unsafe {
+            let mut token = null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return Err(error(io::Error::last_os_error()));
+            }
+            let token = Handle(token);
+            let mut needed = 0;
+            GetTokenInformation(token.0, TokenOwner, null_mut(), 0, &mut needed);
+            let mut data = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+            if GetTokenInformation(
+                token.0,
+                TokenOwner,
+                data.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            ) == 0
+            {
+                return Err(error("token owner"));
+            }
+            Ok(Self(data))
+        }
+    }
+    fn sid(&self) -> PSID {
+        unsafe { (*(self.0.as_ptr().cast::<TOKEN_OWNER>())).Owner }
+    }
+}
+/// True when `owner` is this user, or the owner this process's own token gives to
+/// what it creates. Anything else belongs to another principal and is refused.
+fn owned_by_us(owner: PSID, user: PSID) -> Result<bool, String> {
+    unsafe {
+        if EqualSid(owner, user) != 0 {
+            return Ok(true);
+        }
+        let default = DefaultOwner::current()?;
+        Ok(EqualSid(owner, default.sid()) != 0)
+    }
+}
 fn descriptor() -> Result<Local, String> {
     let s = format!("O:{}D:P(A;OICI;FA;;;{})", user_sid()?, user_sid()?);
     let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
@@ -136,8 +181,12 @@ fn protect(path: &Path) -> Result<(), String> {
         let sd = descriptor()?;
         let mut expected = null_mut();
         let mut defaulted = 0;
+        // The DIRECTORY may be owned by the token's default owner as well as by the
+        // user: an elevated administrator's process creates directories owned by
+        // the Administrators group, and refusing those refused this user's own
+        // storage. The protected DACL set below still grants only the user.
         if GetSecurityDescriptorOwner(sd.0, &mut expected, &mut defaulted) == 0
-            || EqualSid(owner, expected) == 0
+            || !owned_by_us(owner, expected)?
         {
             return Err("Private storage belongs to another Windows user".into());
         }
@@ -523,6 +572,39 @@ mod tests {
         let hardlink = root.join("hardlink");
         fs::hard_link(&path, &hardlink).unwrap();
         assert!(private_fs::read_private(&path, 64).is_err());
+    }
+    #[test]
+    fn windows_existing_directory_made_by_this_process_is_ours() {
+        // A directory this process made WITHOUT Switchboard's descriptor gets the
+        // token's default owner: the user, or, for an elevated administrator (the
+        // CI runner), the Administrators group. Both are this process's own.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("made-by-std");
+        fs::create_dir(&root).unwrap();
+        private_dir(&root).unwrap();
+        private_fs::private_write(&root.join("file"), b"synthetic").unwrap();
+        assert_eq!(
+            private_fs::read_private(&root.join("file"), 64).unwrap(),
+            b"synthetic"
+        );
+        unsafe {
+            let user = descriptor().unwrap();
+            let mut user_sid = null_mut();
+            let mut defaulted = 0;
+            assert_ne!(
+                GetSecurityDescriptorOwner(user.0, &mut user_sid, &mut defaulted),
+                0
+            );
+            let default = DefaultOwner::current().unwrap();
+            assert!(owned_by_us(default.sid(), user_sid).unwrap());
+            assert!(owned_by_us(user_sid, user_sid).unwrap());
+            // LocalSystem is neither this user nor this token's default owner.
+            let system: Vec<u16> = "S-1-5-18".encode_utf16().chain(Some(0)).collect();
+            let mut sid = null_mut();
+            assert_ne!(ConvertStringSidToSidW(system.as_ptr(), &mut sid), 0);
+            let _sid = Local(sid);
+            assert!(!owned_by_us(sid, user_sid).unwrap());
+        }
     }
     #[test]
     fn windows_failed_replacement_preserves_old_bytes() {

@@ -4,7 +4,7 @@
 (rules LC-01…LC-15, adopted 2026-10-03) to Fabric Switchboard, fixing the lifecycle audit's
 findings for this product (`fabric-workspace` `docs/reports/2026-10-03-lifecycle-audit/raw/fabric-switchboard.md`,
 host findings H3/H4). Branch `claude/lifecycle-contract`, based on `21d005c` (0.5.3 on `main`).
-Board row SB-25. The 0.5.3 work (single instance, lazy owner start, Codex read quietly, nothing
+Board row SB-27 (numbered SB-25 on the branch before it met `main`'s 2026-10-04 board). The 0.5.3 work (single instance, lazy owner start, Codex read quietly, nothing
 read without saved Claude accounts) is kept as it is.
 
 ## Done, with the test that proves each
@@ -27,10 +27,10 @@ Version: 0.5.4 in every manifest.
 ## Not done, and why
 
 - **F1 residency** (window close stops background work): a product decision — menu bar,
-  hide-on-close or opt-in login item. Board SB-26. The stable proxy address removes the part that
+  hide-on-close or opt-in login item. Board SB-28. The stable proxy address removes the part that
   broke running sessions.
 - **F5 broker pin by hash:** owned by the local-lifecycle broker, not this repository.
-- **F8 orphan `vault-key` item, F9 uninstall, adaptive probe cadence (F4):** board SB-27. The
+- **F8 orphan `vault-key` item, F9 uninstall, adaptive probe cadence (F4):** board SB-29. The
   probe cadence is coupled to rotation's `max_age_seconds`; backing off probes for rotation
   pools would make rotation refuse every candidate.
 - **Desktop SIGTERM end to end:** the drain is shared code tested through `serve` and the owner;
@@ -45,7 +45,7 @@ Version: 0.5.4 in every manifest.
 
 ## Exact next task
 
-Land SB-25 after v0.5.3-beta.1 is published: review the PR, merge, release v0.5.4-beta.1, install,
+Land SB-27 after v0.5.3-beta.1 is published: review the PR, merge, release v0.5.4-beta.1, install,
 then on the operator's Mac (1) sample `ps` for 200 s and confirm no `security`/`ps` children at
 idle, (2) read `~/Library/Logs/Fabric Switchboard/switchboard.log`, (3) quit and relaunch with a
 managed session open and confirm it keeps working, (4) measure average CPU over an hour against

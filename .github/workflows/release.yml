@@ -1,0 +1,277 @@
+# The release: the macOS universal app and CLI, signed with the organization's CI Developer ID,
+# notarized (the app stapled, the CLI notarized on its own), and the Windows x64 installer and
+# CLI built natively, Authenticode-signed with Azure Artifact Signing once the operator switches
+# it on (AZURE_SIGNING_ENABLED; docs/DISTRIBUTION.md). Then attested (Sigstore), summed,
+# GPG-signed and published by the organization's shared workflow.
+#
+# Signing happens only here, in the protected `release` environment: approved by a
+# person from release-approvers, who may be whoever pushed the tag; an agent never
+# approves (passioncode-ai/.github release-signing/README.md). A build signed anywhere else is a debug build and is never
+# published. A published release is never rewritten: a fix is a new tag.
+#
+# Release:    merge the release PR (versions + a `## X.Y.Z` CHANGELOG section), then push an
+#             annotated vX.Y.Z tag on the merge commit.
+# Rehearsal:  push vX.Y.Z-rc.N (the push trigger ignores it), then
+#             gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false
+#             The signed set is kept as a workflow artifact for 14 days; no release is created.
+#
+# This workflow replaces build-windows.yml (the manual, unsigned Windows build): a Windows
+# build of a commit is now a rehearsal on an -rc tag.
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "false = rehearsal: build, sign, notarize and attest, create no release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Before anyone is asked to approve: the tag names the version being built, and a published
+  # release has its CHANGELOG section.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Tag, versions and release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          if [[ "$REF_TYPE" != tag ]]; then echo "::error::run the release on a tag, not a $REF_TYPE"; exit 1; fi
+          python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH"
+
+  macos:
+    needs: [preflight]
+    runs-on: macos-latest
+    environment: release
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Rust stable for both Mac architectures
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - run: npm ci
+      - id: sign
+        uses: passioncode-ai/.github/actions/apple-signing@v1
+        with:
+          developer-id-p12-b64: ${{ secrets.APPLE_DEVELOPER_ID_P12_B64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          team-id: ${{ vars.APPLE_TEAM_ID }}
+      - name: Build the app and CLI, signed with the Developer ID
+        id: build
+        env:
+          IDENTITY: ${{ steps.sign.outputs.identity }}
+          # Compiled into the Keychain code (docs/KEYCHAIN.md); the script checks it equals the
+          # identity's team and that both executables carry it.
+          SWITCHBOARD_SIGNING_TEAM: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          python3 scripts/build_macos.py --identity "$IDENTITY" --arch universal --external-notarization
+          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          name="Fabric-Switchboard-$version-macos-universal"
+          {
+            echo "app=artifacts/$name/Fabric Switchboard.app"
+            echo "receipt=artifacts/$name-receipt.json"
+            echo "archive=artifacts/$name.zip"
+          } >> "$GITHUB_OUTPUT"
+      - id: notarize
+        uses: passioncode-ai/.github/actions/notarize@v1
+        with:
+          path: ${{ steps.build.outputs.app }}
+          asc-key-id: ${{ secrets.ASC_KEY_ID }}
+          asc-issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          asc-key-p8-b64: ${{ secrets.ASC_API_KEY_P8_B64 }}
+      - name: Notarize the standalone CLI, then package the stapled app
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_P8_B64: ${{ secrets.ASC_API_KEY_P8_B64 }}
+          RECEIPT: ${{ steps.build.outputs.receipt }}
+          SUBMISSION: ${{ steps.notarize.outputs.submission }}
+        run: python3 scripts/build_macos.py --finish-external "$RECEIPT" --app-submission "$SUBMISSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
+          path: |
+            ${{ steps.build.outputs.archive }}
+            ${{ steps.build.outputs.receipt }}
+          if-no-files-found: error
+      - if: always()
+        uses: passioncode-ai/.github/actions/apple-signing/cleanup@v1
+
+  windows:
+    needs: [preflight]
+    runs-on: windows-latest
+    environment: release
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write # azure/login (OIDC), used only when Windows signing is switched on
+    env:
+      SIGNING: ${{ vars.AZURE_SIGNING_ENABLED == 'true' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Unsigned Windows builds must be said in the release notes
+        env:
+          TAG: ${{ github.ref_name }}
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          python scripts/release_preflight.py --tag $env:TAG --publish $env:PUBLISH --windows-signing $env:SIGNING
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add x86_64-pc-windows-msvc
+      - run: npm ci
+      - name: Native storage and runtime fixtures
+        run: |
+          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the CLI (static CRT) and the desktop executable
+        run: |
+          $env:RUSTFLAGS = '-C target-feature=+crt-static'
+          cargo build --release --locked -p switchboard-cli --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item Env:RUSTFLAGS
+          npm exec tauri build -- --no-bundle --ci -- --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Signing pass 1: the executables, before the installer packs the desktop one.
+      - name: Azure login (OIDC)
+        if: env.SIGNING == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign the desktop executable and the CLI
+        if: env.SIGNING == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files: |
+            ${{ github.workspace }}\target\release\fabric-switchboard.exe
+            ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\switchboard.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Bundle the NSIS installer
+        run: |
+          npm exec tauri bundle -- --bundles nsis --ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # Signing pass 2: the installer itself.
+      - name: Sign the installer
+        if: env.SIGNING == 'true'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\release\bundle\nsis
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify the Authenticode signatures
+        if: env.SIGNING == 'true'
+        run: |
+          $files = @(
+            'target\release\fabric-switchboard.exe',
+            'target\x86_64-pc-windows-msvc\release\switchboard.exe'
+          ) + (Get-ChildItem target\release\bundle\nsis -Filter *-setup.exe).FullName
+          $report = foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $file
+            Write-Host "$((Split-Path $file -Leaf)): $($sig.Status)"
+            if ($sig.Status -ne 'Valid') { throw "Authenticode status of $file is $($sig.Status), not Valid" }
+            [pscustomobject]@{
+              file = Split-Path $file -Leaf
+              status = "$($sig.Status)"
+              signer = $sig.SignerCertificate.Subject
+              thumbprint = $sig.SignerCertificate.Thumbprint
+              timestamper = $sig.TimeStamperCertificate.Subject
+            }
+          }
+          ConvertTo-Json -InputObject @($report) | Set-Content "$env:RUNNER_TEMP\signatures.json"
+      - name: Package the archive and its receipt
+        run: |
+          if ($env:SIGNING -eq 'true') {
+            python scripts/package_windows.py --authenticode SIGNED --signatures "$env:RUNNER_TEMP\signatures.json" --native-tests PASS
+          } else {
+            python scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows
+          path: |
+            artifacts/Fabric-Switchboard-*-windows-x64.zip
+            artifacts/Fabric-Switchboard-*-windows-x64-receipt.json
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: passioncode-ai/.github/.github/workflows/release-publish.yml@v1
+    with:
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+    secrets: inherit
