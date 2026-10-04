@@ -906,3 +906,84 @@ fn a_limit_error_switches_despite_spare_quota_and_skips_limited_candidates() {
         .unwrap();
     assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
 }
+
+/// SB-40: a metered feature's limit is not the account's. It stays in the stored aggregate
+/// (older builds read it conservatively) but rotation weighs the account's own windows, and an
+/// observation with only feature windows has unknown account capacity — never eligible.
+#[test]
+fn feature_limits_neither_move_the_account_nor_make_a_candidate() {
+    let (root, vault, store) = setup();
+    let now = clock();
+    let with = |windows: &[(&str, f64)]| Usage {
+        used_percent: windows.iter().map(|w| w.1).fold(0.0, f64::max),
+        observed_at: now,
+        resets_at: Some(now + 3600),
+        source: "codex_oauth".into(),
+        windows: windows
+            .iter()
+            .map(|(name, used)| UsageWindow {
+                name: (*name).into(),
+                used_percent: *used,
+                resets_at: Some(now + 3600),
+            })
+            .collect(),
+    };
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    // The account in use has room; only one of its features is exhausted.
+    store
+        .observe(
+            &a,
+            with(&[("five_hour", 40.), ("feature_codex_other_primary", 100.)]),
+        )
+        .unwrap();
+    observe(&store, &c, 10., now);
+    let p = policy();
+    let decision = store.rotation_decision(&p, Some(&a), now).unwrap();
+    assert_eq!(decision.candidate_id, None);
+    assert_ne!(decision.reason, "threshold_reached");
+    // The account in use is full; the only other account with a fresh observation reports only
+    // a feature window: unknown, not a candidate. The measured one is.
+    observe(&store, &a, 95., now);
+    store
+        .observe(&b, with(&[("feature_codex_other_primary", 0.)]))
+        .unwrap();
+    observe(&store, &c, 99., now);
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "no_eligible_account"
+    );
+    observe(&store, &c, 10., now);
+    assert_eq!(
+        store
+            .rotation_decision(&p, Some(&a), now)
+            .unwrap()
+            .candidate_id
+            .as_deref(),
+        Some(c.as_str())
+    );
+    // An account-wide blocker (spend control, a workspace limit) is not a feature: it counts.
+    store
+        .observe(&c, with(&[("five_hour", 10.), ("workspace_credits", 100.)]))
+        .unwrap();
+    assert_eq!(
+        store.rotation_decision(&p, Some(&a), now).unwrap().reason,
+        "no_eligible_account"
+    );
+    // A feature window whose reset has passed does not make the account's figures stale.
+    let mut passed = with(&[("five_hour", 10.), ("feature_codex_other_primary", 100.)]);
+    passed.windows[1].resets_at = Some(now + 1);
+    store.observe(&c, passed).unwrap();
+    assert_eq!(
+        store
+            .rotation_decision(&p, Some(&a), now + 2)
+            .unwrap()
+            .candidate_id
+            .as_deref(),
+        Some(c.as_str())
+    );
+    // The stored metadata still passes validation when the store is opened again.
+    drop(store);
+    Store::open(root.path().into(), vault).unwrap();
+}

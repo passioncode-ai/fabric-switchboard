@@ -617,8 +617,12 @@ fn print_result(value: &Value, cli: &Cli) {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |t| t.as_secs() as i64);
             for a in accounts {
-                let quota = a["usage"]["used_percent"]
-                    .as_f64()
+                // The account's own capacity: a metered feature's limit is not it (SB-40).
+                let usage =
+                    serde_json::from_value::<switchboard_core::Usage>(a["usage"].clone()).ok();
+                let quota = usage
+                    .as_ref()
+                    .and_then(switchboard_core::Usage::account_used_percent)
                     .map(|p| {
                         let observed = &a["usage"]["observed_at"];
                         // Matches the default rotation limit on observation age.
@@ -629,7 +633,13 @@ fn print_result(value: &Value, cli: &Cli) {
                             if stale { " (stale)" } else { "" }
                         )
                     })
-                    .unwrap_or_else(|| "usage unknown".into());
+                    .unwrap_or_else(|| {
+                        if usage.is_some() {
+                            "account usage unknown (only feature limits reported)".into()
+                        } else {
+                            "usage unknown".into()
+                        }
+                    });
                 let health = match a["usage_health"]["status"].as_str() {
                     Some(status) => format!(
                         "health {status}; next check {}",

@@ -1095,3 +1095,282 @@ fn a_dated_retry_after_is_measured_on_the_providers_clock() {
     headers.insert("retry-after", "30".parse().unwrap());
     assert_eq!(retry_after_seconds(&headers, sent + 99_999), Some(30));
 }
+
+/// SB-40: the payload of the official Codex client's own test
+/// (`usage_payload_maps_primary_and_additional_rate_limits`, openai/codex@afb436d), as JSON.
+fn official_codex_payload() -> serde_json::Value {
+    serde_json::json!({
+        "plan_type": "pro",
+        "rate_limit": {
+            "allowed": true, "limit_reached": false,
+            "primary_window": {"used_percent": 42, "limit_window_seconds": 300, "reset_after_seconds": 0, "reset_at": 2_000_000_123},
+            "secondary_window": {"used_percent": 84, "limit_window_seconds": 3600, "reset_after_seconds": 0, "reset_at": 2_000_000_456}
+        },
+        "additional_rate_limits": [{
+            "limit_name": "codex_other", "metered_feature": "codex_other",
+            "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 70, "limit_window_seconds": 900, "reset_after_seconds": 0, "reset_at": 2_000_000_789}}
+        }],
+        "credits": {"has_credits": true, "unlimited": false, "balance": "9.99"},
+        "spend_control": {"reached": false, "individual_limit": {
+            "source": null, "limit": "25000", "used": "8000", "remaining": "17000",
+            "used_percent": 32, "remaining_percent": 68, "reset_after_seconds": 3600, "reset_at": 2_000_000_789}},
+        "rate_limit_reached_type": {"type": "workspace_member_credits_depleted"}
+    })
+}
+fn window<'a>(usage: &'a Usage, name: &str) -> Option<&'a UsageWindow> {
+    usage.windows.iter().find(|w| w.name == name)
+}
+
+#[test]
+fn codex_usage_keeps_every_dimension_the_official_client_reads() {
+    let at = 2_000_000_000;
+    let usage = parse_usage_at(Provider::Codex, &official_codex_payload(), at).unwrap();
+    assert_eq!(window(&usage, "primary").unwrap().used_percent, 42.0);
+    assert_eq!(
+        window(&usage, "primary").unwrap().resets_at,
+        Some(2_000_000_123)
+    );
+    assert_eq!(window(&usage, "secondary").unwrap().used_percent, 84.0);
+    let feature = window(&usage, "feature_codex_other_primary").unwrap();
+    assert_eq!(
+        (feature.used_percent, feature.resets_at),
+        (70.0, Some(2_000_000_789))
+    );
+    let spend = window(&usage, "spend_limit").unwrap();
+    assert_eq!(
+        (spend.used_percent, spend.resets_at),
+        (32.0, Some(2_000_000_789))
+    );
+    // The workspace has run out of credits: no seat of it can work, whatever the windows say.
+    let credits = window(&usage, "workspace_credits").unwrap();
+    assert_eq!((credits.used_percent, credits.resets_at), (100.0, None));
+    assert_eq!(usage.account_used_percent(), Some(100.0));
+    // The credit balance is a purchase measure, not a limit, and is not stored.
+    assert!(!serde_json::to_string(&usage).unwrap().contains("9.99"));
+}
+
+#[test]
+fn a_feature_limit_is_scoped_and_does_not_stand_for_the_account() {
+    let at = 2_000_000_000;
+    let mut payload = official_codex_payload();
+    payload["additional_rate_limits"][0]["rate_limit"]["primary_window"]["used_percent"] =
+        100.into();
+    payload["spend_control"] = serde_json::Value::Null;
+    payload["rate_limit_reached_type"] = serde_json::Value::Null;
+    let usage = parse_usage_at(Provider::Codex, &payload, at).unwrap();
+    // Stored aggregate stays the maximum over every window (older builds read it).
+    assert_eq!(usage.used_percent, 100.0);
+    // The account's own capacity is the primary and secondary windows.
+    assert_eq!(usage.account_used_percent(), Some(84.0));
+}
+
+#[test]
+fn a_plan_without_main_windows_has_unknown_account_capacity() {
+    let usage = parse_usage_at(
+        Provider::Codex,
+        &serde_json::json!({"plan_type": "plus", "rate_limit": null, "additional_rate_limits": [
+            {"limit_name": "codex_other", "metered_feature": "codex_other",
+             "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 10, "limit_window_seconds": 900, "reset_after_seconds": 60, "reset_at": 2_000_000_060}}}]}),
+        2_000_000_000,
+    )
+    .unwrap();
+    assert!(window(&usage, "feature_codex_other_primary").is_some());
+    assert_eq!(usage.account_used_percent(), None, "missing is not zero");
+    // Nothing usable at all is still no observation.
+    assert!(parse_usage_at(
+        Provider::Codex,
+        &serde_json::json!({"plan_type": "plus", "rate_limit": null}),
+        2_000_000_000
+    )
+    .is_err());
+}
+
+#[test]
+fn spend_control_and_reached_limits_block_whatever_the_percentages() {
+    let at = 2_000_000_000;
+    let base = |extra: serde_json::Value| {
+        let mut payload = serde_json::json!({"plan_type": "pro", "rate_limit": {"allowed": true, "limit_reached": false,
+            "primary_window": {"used_percent": 5, "limit_window_seconds": 300, "reset_after_seconds": 0, "reset_at": 2_000_000_300}}});
+        for (k, v) in extra.as_object().unwrap() {
+            if k == "rate_limit" {
+                for (rk, rv) in v.as_object().unwrap() {
+                    payload["rate_limit"][rk] = rv.clone();
+                }
+            } else {
+                payload[k] = v.clone();
+            }
+        }
+        parse_usage_at(Provider::Codex, &payload, at).unwrap()
+    };
+    // Reached spend control without details: blocked, reset unknown.
+    let u = base(serde_json::json!({"spend_control": {"reached": true}}));
+    assert_eq!(
+        (
+            window(&u, "spend_limit").unwrap().used_percent,
+            window(&u, "spend_limit").unwrap().resets_at
+        ),
+        (100.0, None)
+    );
+    assert_eq!(u.account_used_percent(), Some(100.0));
+    // The provider says the limit is reached while no window reads 100 %.
+    for flags in [
+        serde_json::json!({"rate_limit": {"limit_reached": true}}),
+        serde_json::json!({"rate_limit": {"allowed": false}}),
+        serde_json::json!({"rate_limit_reached_type": {"type": "rate_limit_reached"}}),
+    ] {
+        let u = base(flags);
+        assert_eq!(window(&u, "limit_reached").unwrap().used_percent, 100.0);
+        assert_eq!(u.account_used_percent(), Some(100.0));
+    }
+    // Workspace usage limit: an organisation block.
+    let u = base(
+        serde_json::json!({"rate_limit_reached_type": {"type": "workspace_owner_usage_limit_reached"}}),
+    );
+    assert_eq!(
+        window(&u, "workspace_usage_limit").unwrap().used_percent,
+        100.0
+    );
+    // An unknown reason, unknown fields: ignored, nothing invented.
+    let u = base(
+        serde_json::json!({"rate_limit_reached_type": {"type": "something_new"}, "brand_new_field": {"x": 1}}),
+    );
+    assert_eq!(u.windows.len(), 1);
+    assert_eq!(u.account_used_percent(), Some(5.0));
+    // An under-limit spend control with details is a measurement, not a block.
+    let u = base(
+        serde_json::json!({"spend_control": {"reached": false, "individual_limit": {"limit": "1", "used": "0", "remaining": "1",
+        "used_percent": 0, "remaining_percent": 100, "reset_after_seconds": 10, "reset_at": 2_000_000_010}}}),
+    );
+    assert_eq!(window(&u, "spend_limit").unwrap().used_percent, 0.0);
+}
+
+#[test]
+fn feature_names_are_sanitised_bounded_and_unique() {
+    let at = 2_000_000_000;
+    let feature = |name: &str, used: i64| {
+        serde_json::json!({"limit_name": name, "metered_feature": name,
+        "rate_limit": {"allowed": true, "limit_reached": false,
+            "primary_window": {"used_percent": used, "limit_window_seconds": 60, "reset_after_seconds": 0, "reset_at": 2_000_000_060},
+            "secondary_window": {"used_percent": used, "limit_window_seconds": 600, "reset_after_seconds": 0, "reset_at": 2_000_000_600}}})
+    };
+    let mut features: Vec<_> = (0..20).map(|i| feature(&format!("f{i}"), 1)).collect();
+    features.insert(0, feature("Codex Other/Model:<script>", 3));
+    features.insert(1, feature("codex_other_model__script_", 4));
+    features.insert(2, feature(&"x".repeat(200), 5));
+    features.insert(3, feature("", 6));
+    let usage = parse_usage_at(Provider::Codex, &serde_json::json!({"plan_type": "pro",
+        "rate_limit": {"allowed": true, "limit_reached": false,
+            "primary_window": {"used_percent": 1, "limit_window_seconds": 300, "reset_after_seconds": 0, "reset_at": 2_000_000_300}},
+        "additional_rate_limits": features}), at).unwrap();
+    let names: Vec<&str> = usage
+        .windows
+        .iter()
+        .map(|w| w.name.as_str())
+        .filter(|n| n.starts_with("feature_"))
+        .collect();
+    assert!(names.len() <= 12, "{names:?}");
+    // Sanitised and trimmed; a second feature that sanitises to the same id is dropped.
+    let first = window(&usage, "feature_codex_other_model__script_primary").unwrap();
+    assert_eq!(first.used_percent, 3.0);
+    assert!(names.iter().all(|n| n.len() <= 64
+        && n.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')));
+    let unique: std::collections::HashSet<_> = names.iter().collect();
+    assert_eq!(unique.len(), names.len());
+    assert!(usage.windows.len() <= 16);
+    assert!(!serde_json::to_string(&usage).unwrap().contains("script>"));
+}
+
+/// SB-40 review F1: every blocker at once plus many features still fits the store's 16 windows,
+/// and the store accepts the observation.
+#[test]
+fn every_blocker_with_many_features_still_fits_the_store() {
+    // Real time: the store refuses an observation stamped ahead of the clock.
+    let at = now();
+    let features: Vec<_> = (0..8)
+        .map(|i| serde_json::json!({"limit_name": format!("f{i}"), "metered_feature": format!("f{i}"),
+            "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 1, "limit_window_seconds": 60, "reset_after_seconds": 60},
+                "secondary_window": {"used_percent": 1, "limit_window_seconds": 600, "reset_after_seconds": 600}}}))
+        .collect();
+    let usage = parse_usage_at(Provider::Codex, &serde_json::json!({"plan_type": "pro",
+        "rate_limit": {"allowed": false, "limit_reached": false,
+            "primary_window": {"used_percent": 50, "limit_window_seconds": 300, "reset_after_seconds": 300},
+            "secondary_window": {"used_percent": 50, "limit_window_seconds": 3600, "reset_after_seconds": 3600}},
+        "spend_control": {"reached": true},
+        "rate_limit_reached_type": {"type": "workspace_member_credits_depleted"},
+        "additional_rate_limits": features}), at).unwrap();
+    assert_eq!(usage.windows.len(), 16);
+    for name in ["spend_limit", "workspace_credits", "limit_reached"] {
+        assert!(window(&usage, name).is_some(), "{name}");
+    }
+    let (_root, store) = store();
+    let a = add(
+        &store,
+        Provider::Codex,
+        AuthKind::OAuth,
+        "a",
+        "synthetic-token",
+    );
+    store.observe(&a.id, usage).unwrap();
+}
+
+/// SB-40 review F5: an overspend reads above 100 % on the wire; a bad reset loses only itself.
+#[test]
+fn an_overspent_limit_is_clamped_and_a_bad_reset_loses_only_itself() {
+    let at = 2_000_000_000;
+    let parse = |limit: serde_json::Value, reached: bool| {
+        parse_usage_at(Provider::Codex, &serde_json::json!({"plan_type": "pro",
+            "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 5, "limit_window_seconds": 300, "reset_after_seconds": 0, "reset_at": 2_000_000_300}},
+            "spend_control": {"reached": reached, "individual_limit": limit}}), at).unwrap()
+    };
+    let over = parse(
+        serde_json::json!({"limit": "1", "used": "2", "remaining": "0", "used_percent": 180,
+        "remaining_percent": 0, "reset_after_seconds": 3600, "reset_at": 2_000_003_600}),
+        false,
+    );
+    let spend = window(&over, "spend_limit").unwrap();
+    assert_eq!(
+        (spend.used_percent, spend.resets_at),
+        (100.0, Some(2_000_003_600))
+    );
+    // A past `reset_at` with no usable fallback: the block stays, its reset is unknown.
+    let past = parse(
+        serde_json::json!({"limit": "1", "used": "1", "remaining": "0", "used_percent": 100,
+        "remaining_percent": 0, "reset_at": 5}),
+        true,
+    );
+    let spend = window(&past, "spend_limit").unwrap();
+    assert_eq!((spend.used_percent, spend.resets_at), (100.0, None));
+    // Not reached, measured, bad reset: the measurement is kept without a reset.
+    let measured = parse(
+        serde_json::json!({"limit": "10", "used": "3", "remaining": "7", "used_percent": 30,
+        "remaining_percent": 70, "reset_at": 0}),
+        false,
+    );
+    assert_eq!(window(&measured, "spend_limit").unwrap().used_percent, 30.0);
+}
+
+/// SB-40 review F8: the same features listed in another order are the same observation.
+#[test]
+fn feature_order_does_not_change_the_observation() {
+    let at = 2_000_000_000;
+    let feature = |name: &str| {
+        serde_json::json!({"limit_name": name, "metered_feature": name,
+        "rate_limit": {"allowed": true, "limit_reached": false,
+            "primary_window": {"used_percent": 3, "limit_window_seconds": 60, "reset_after_seconds": 0, "reset_at": 2_000_000_060}}})
+    };
+    let parse = |features: Vec<serde_json::Value>| {
+        parse_usage_at(Provider::Codex, &serde_json::json!({"plan_type": "pro",
+            "rate_limit": {"allowed": true, "limit_reached": false,
+                "primary_window": {"used_percent": 1, "limit_window_seconds": 300, "reset_after_seconds": 0, "reset_at": 2_000_000_300}},
+            "additional_rate_limits": features}), at).unwrap()
+    };
+    let one = parse(vec![feature("beta"), feature("alpha")]);
+    let two = parse(vec![feature("alpha"), feature("beta")]);
+    let names = |u: &Usage| u.windows.iter().map(|w| w.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&one), names(&two));
+}

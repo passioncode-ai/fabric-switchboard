@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, ProjectRule, RotationPolicy, Usage } from './types';
+import type { Account, AccountLimit, ProjectRule, RotationPolicy, Usage, UsageWindow } from './types';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -40,7 +40,9 @@ export interface Freshness {
 }
 
 export function usageFreshness(usage: Pick<Usage, 'observed_at' | 'resets_at' | 'windows'>, maxAgeSeconds: number, nowSeconds: number): Freshness {
-  const resets = [usage.resets_at, ...(usage.windows ?? []).map((window) => window.resets_at)];
+  // Only the account's own windows can make the observation stale; a feature window's reset is
+  // shown on that window alone (SB-40). With windows stored, the aggregate reset is one of theirs.
+  const resets = usage.windows?.length ? usage.windows.filter(w => !isFeatureWindow(w)).map(w => w.resets_at) : [usage.resets_at];
   const resetPassed = resets.some((reset) => typeof reset === 'number' && reset <= nowSeconds);
   return { stale: resetPassed || !Number.isFinite(usage.observed_at) || usage.observed_at > nowSeconds || nowSeconds - usage.observed_at > maxAgeSeconds, resetPassed };
 }
@@ -95,6 +97,34 @@ export interface QuotaOrderContext {
   limits?: Pick<AccountLimit, 'account_id' | 'until'>[];
   signInRequired?: string[];
 }
+/** The reset of the account window in highest use, or null — never a feature window's (SB-40). */
+export function accountReset(usage: Usage): number | null {
+  const windows = accountWindows(usage);
+  if (!windows.length) return null;
+  const worst = windows.reduce((a, b) => (b.used_percent > a.used_percent ? b : a));
+  return worst.resets_at ?? null;
+}
+/** A window that limits one metered feature, not the account (core `FEATURE_WINDOW_PREFIX`, SB-40). */
+export function isFeatureWindow(window: Pick<UsageWindow, 'name'>): boolean {
+  return window.name.startsWith('feature_');
+}
+/** The account's own windows: every stored window except feature limits; an observation stored
+ * without windows is its aggregate. Empty when only feature windows exist — unknown, not zero. */
+export function accountWindows(usage: Usage): Pick<UsageWindow, 'used_percent' | 'resets_at'>[] {
+  if (!usage.windows?.length) return [{ used_percent: usage.used_percent, resets_at: usage.resets_at }];
+  return usage.windows.filter(w => !isFeatureWindow(w));
+}
+/** The account's capacity in use, or null when no window speaks for the account (core `account_used_percent`). */
+export function accountUsedPercent(usage: Usage): number | null {
+  const windows = accountWindows(usage);
+  return windows.length ? Math.max(...windows.map(w => w.used_percent)) : null;
+}
+/** A feature window's label: `feature_codex_other_primary` → `codex_other · primary feature limit`. */
+export function featureWindowLabel(name: string): string {
+  const rest = name.slice('feature_'.length);
+  const match = /^(.*)_(primary|secondary)$/.exec(rest);
+  return match ? `${match[1]} · ${match[2]} feature limit` : `${rest} · feature limit`;
+}
 export interface QuotaOrder { state: 'available' | 'blocked' | 'unknown' | 'sign_in' | 'disabled'; until: number | null; used: number }
 export function quotaMaxAge(account: Pick<Account, 'provider' | 'pool'>, policies: QuotaOrderContext['policies'] = []): number {
   const ages = policies.filter(p => p.enabled && p.provider === account.provider && p.pool === account.pool).map(p => p.max_age_seconds);
@@ -108,12 +138,13 @@ export function quotaOrder(account: Account, context: QuotaOrderContext): QuotaO
   if (context.signInRequired?.includes(account.id)) return { ...unknown, state: 'sign_in' };
   const hold = context.limits?.find(limit => limit.account_id === account.id && validTime(limit.until) && limit.until > context.nowSeconds);
   const usage = account.usage;
-  const windows = usage?.windows?.length ? usage.windows : usage ? [{ used_percent: usage.used_percent, resets_at: usage.resets_at }] : [];
+  // Feature limits do not rank the account (SB-40); with no account window, usage is unknown.
+  const windows = usage ? accountWindows(usage) : [];
   const fresh = account.kind === 'oauth' && usage && account.usage_health?.status !== 'failed' && account.usage_health?.status !== 'unavailable'
     && !usageFreshness(usage, quotaMaxAge(account, context.policies), context.nowSeconds).stale
-    && Number.isFinite(usage.used_percent) && windows.every(w => Number.isFinite(w.used_percent) && w.used_percent >= 0 && w.used_percent <= 100);
+    && Number.isFinite(usage.used_percent) && windows.length > 0 && windows.every(w => Number.isFinite(w.used_percent) && w.used_percent >= 0 && w.used_percent <= 100);
   if (!fresh) return hold ? { ...unknown, state: 'blocked', until: hold.until } : unknown;
-  const used = Math.max(usage.used_percent, ...windows.map(w => w.used_percent));
+  const used = Math.max(...windows.map(w => w.used_percent));
   const exhausted = windows.filter(w => w.used_percent >= 100);
   if (used >= 100 && !exhausted.length) exhausted.push({ used_percent: used, resets_at: usage.resets_at });
   if (exhausted.length) {

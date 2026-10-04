@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Codex accounts show the limits the Codex app itself reads beyond the two usage windows: a
+  personal spend limit, a workspace out of credits or at its usage limit, and each feature's
+  own limit. A limit on one feature no longer marks the whole account as used up; spend and
+  workspace limits block it whatever the percentages say.
 - When a provider answers a quota check with “too many requests”, nothing checks that account
   again before the time it asked for — not the background, not Check usage, not
   `switchboard usage` or MCP. Its `Retry-After` is read in seconds or as a date and kept whole

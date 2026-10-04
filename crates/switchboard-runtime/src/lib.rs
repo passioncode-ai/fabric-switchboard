@@ -2437,12 +2437,17 @@ mod usage_gate_tests {
         let a = save(&runtime.store, "synthetic-a", "default");
         let up = upstream(&runtime).await;
         up.status.store(429, Ordering::SeqCst);
-        *up.retry_after.lock().unwrap() = "1";
+        // Two seconds, not one: the clock has whole-second resolution, and a one-second wait
+        // recorded at x.999 s legitimately ends before an immediate second call.
+        *up.retry_after.lock().unwrap() = "2";
         assert!(usage(&runtime, &a.id).await.is_err());
         up.status.store(200, Ordering::SeqCst);
         assert!(usage(&runtime, &a.id).await.is_err());
         assert_eq!(up.calls.load(Ordering::SeqCst), 1);
-        tokio::time::sleep(std::time::Duration::from_millis(2_100)).await;
+        // Wait for the hold itself to end rather than for a fixed time.
+        while runtime.usage_gate.held(&a.id, monitor::now()) {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
         assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 2);
         assert!(
