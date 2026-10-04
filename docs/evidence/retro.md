@@ -21,6 +21,17 @@
    thing spent, not by whoever asked. Name both in the spec's failure column. Source: run
    2026-10-03. Retire after two runs adding such calls pass review with no finding of this class.
 
+5. **Taking an operation out of a shared lock is a contract change for everyone who waited on
+   that lock.** Before building, list each waiter (the quit drain, other operations, the
+   background) and what it relied on the lock to guarantee, in the spec's failure column. Source:
+   run 2026-10-04 (SB-39: the drain stopped covering a manual quota check that could still spend
+   a refresh token). Retire after two runs that change lock scope pass the seam tier with no
+   finding of this class.
+6. **A test that fails once and passes on rerun is a product race until shown otherwise.**
+   Read the failure for its mechanism before calling it flaky. Source: run 2026-10-04 (SB-44: a
+   "flaky" shutdown test was a real signal-handler race at start-up). Retire after three runs in
+   which every intermittent failure met was traced to its mechanism without this reminder.
+
 ## Run stamps
 
 | Date | Run | Commit | Diverged |
@@ -28,8 +39,40 @@
 | 2026-10-02 | PLAN-0.5 prompt-free switching | `2cf0088` | yes — entries below |
 | 2026-10-02 | PLAN-0.5 backups and limit errors, release v0.5.0-beta.1 | `e6c5e54` | yes — entry below |
 | 2026-10-03 | PLAN-0.5 §0.5.1 Claude Swap parity and review fixes | `13a8712` | yes — entry below |
+| 2026-10-04 | SB-39 provider not-before for every quota check (+ SB-44) | `6d67fbe` | yes — entry below |
 
 ## Recent log
+
+### 2026-10-04 — a lock taken away, and a new state read by the background
+
+- **Symptom:** the full gate was green (320 tests) when two blind reviews found two P2s
+  ([run record](../runs/2026-10-04-sb-39-quota-deadline/README.md#independent-review)):
+  - with `Operation::Usage` moved out of the owner transaction, the quit drain no longer waited
+    for a manual quota check, which could then spend a refresh token after the drain;
+  - a hold recorded under a clock later set back was rebased only by a check, never by the
+    background due filter, which then skipped the account for the size of the correction.
+- **Surfaced at:** stage 5, independent review (seam and unit tiers). **Owned by:** stage 3 spec.
+  The failure column listed every *caller* of the new gate (standing instruction 1) but not every
+  *waiter* on the lock the change removed, nor every *reader* of the new state.
+- **Root cause:** the spec modelled the change as "add a guard" and "remove a lock" separately;
+  the lock's other guarantee — "the drain sees every operation finish" — had no line of its own.
+- **Fix:** code, each with a fail-first test (`a_quota_check_left_running_at_quit_spends_no_refresh_token`,
+  `the_background_rebases_a_hold_without_a_credential`); a standing instruction (5).
+- **Catches it next time:** standing instruction 5; for readers, instruction 1 now reads both ways
+  in practice — list who *reads* a new state as well as who must be blocked by it.
+- **Also:** the gate's intermittent `serve` shutdown failure was a real start-up signal race
+  (SB-44), fixed in the same run; standing instruction 6.
+
+### Standing-instruction prune (2026-10-04)
+
+- Instruction 1 held: the gate sits in `monitor::check`, and the seam tier found no caller that
+  bypassed it — 1 of the 2 runs it needs to retire.
+- Instruction 2 held and was needed: the stage-0 fetch found 7 unread commits on `main`; its
+  retirement count restarts.
+- Instruction 3: `usage-holds.json` got an owner and a deletion rule in the spec, but the unit
+  tier found the rule only partly implemented (pruning) — a finding of this class; it stays.
+- Instruction 4: the drain finding is of this class (a grant started where nothing outlives the
+  exiting process); it stays.
 
 ### 2026-10-03 — a token-spending call was cancellable, and its successor had one owner
 
