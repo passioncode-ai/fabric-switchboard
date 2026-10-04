@@ -1,12 +1,12 @@
-# Landing — Switchboard 0.5.4: lifecycle contract (2026-10-04)
+# Landed, not released — Switchboard 0.5.4: lifecycle contract (2026-10-04)
 
-**Start here:** [handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md](handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md) (board SB-27), [PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23), branch `claude/lifecycle-contract` brought up to `main` (0.5.3-beta.2) by a merge.
+**Start here:** [handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md](handoffs/2026-10-03-switchboard-0.5.4-lifecycle.md) (board SB-27), [PR #23](https://github.com/passioncode-ai/fabric-switchboard/pull/23), merged as `f0b8d7f` after the branch was brought up to `main` (0.5.3-beta.2) by a merge (`45bbdbf`). Gate on `45bbdbf`: `./scripts/check.sh` exit 0 (299 Rust tests). Board: SB-27 and SB-23 done; release is SB-34.
 
 No `security -w` on a timer (quiet probe, read on change); 30 s idle cadence with no timer spawns and writes only on change; stable proxy port and token across restarts; one drain for Quit, last window, `SIGTERM` and `SIGINT` with descriptor cleanup; a bounded log in `~/Library/Logs/Fabric Switchboard/`; SB-23; build pruning; [AGENTS.md → Lifecycle](../AGENTS.md#lifecycle).
 
 **Version:** 0.5.4 in every manifest, unreleased. `main` released the 0.5.3 code twice (`v0.5.3-beta.1`, `v0.5.3-beta.2`); 0.5.4 is the next free patch and ships as `v0.5.4-beta.1` through the release workflow ([DISTRIBUTION.md](DISTRIBUTION.md) *Prereleases*) — the release PR renames `## Unreleased` in [CHANGELOG.md](../CHANGELOG.md).
 
-**Exact next task:** release 0.5.4 (`v0.5.4-beta.1`, operator approval), install, then the on-Mac checks listed in the handoff. Residency (SB-28) and uninstall (SB-29) stay open.
+**Exact next task:** SB-34 — release 0.5.4 as `v0.5.4-beta.1` (release PR, tag, dispatch, the operator's approval), install, then the on-Mac checks listed in the handoff. Residency (SB-28), uninstall (SB-29) and `--background` (SB-30, issue #25) stay open.
 
 ---
 

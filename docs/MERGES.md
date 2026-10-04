@@ -4,6 +4,12 @@
 
 Written by `agent_sync.py merge`. Entries newer than 7 days keep their detail; older ones are compacted to one line each on the next write. Read it before starting work: it is the shortest answer to *what landed while I was on my branch*.
 
+### 2026-10-04T06:42:40Z · `lifecycle-0.5.4` · claude/lifecycle-contract → main · `f0b8d7f` (PR #23)
+- run: r-3439612a8
+- files: 44 (44 files changed, 3052 insertions(+), 334 deletions(-))
+- conflicts: 3, resolved in `45bbdbf` — `scripts/check.sh` (both test lines kept), `docs/evidence/backlog.md` (main's board kept; the branch's SB-25…27 are SB-27…29), `docs/HANDOFF.md` (0.5.4 section above main's 0.5.3-beta.2)
+- summary: 0.5.4 lifecycle contract — no Keychain read on a timer, idle cadence, stable proxy, drain on quit, bounded log; SB-23
+
 ### 2026-10-03T10:51:03Z · `switchboard-0.5.3-board` · agent/switchboard-0.5.3-board → main · `a8936c2`
 - run: r-74550f2ee
 - files: 2 (2 files changed, 24 insertions(+), 14 deletions(-))
