@@ -604,15 +604,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** automatic; SCR-01 shows the result.
 **Steps:**
 1. A Claude Code session hits a usage or spend limit → the monitor attempts a switch on its next scan (timing and running-session credential adoption remain SB-06 acceptance), changing Claude Code to the free account with the lowest usage, even inside the cooldown; the bar reads “Switched after the account in use hit a provider limit.”
-2. The limited row shows “Limit reached” and “Retry hold until {date}” plus remaining time, and is not chosen again before the hold ends. The hold may be estimated.
-**Alt paths:** No other free account → “The account in use hit a provider limit, and no other account is free. Holding it.” Managed sessions are detected from the proxy's own 429 responses.
+2. The limited row shows “Limit reached” and, with remaining time, “Limit resets {date}” when Claude Code reported the reset or “Retry hold until {date}” when the hold is estimated, and is not chosen again before it ends (SB-41). The hold survives a restart of Switchboard.
+**Alt paths:** No other free account → “The account in use hit a provider limit, and no other account is free. Holding it.” Managed sessions are detected from the proxy's own 429 responses. A session opened before the switch keeps charging the account it runs on; a session opened after it charges the new account, even when both limits reset at the same time (SB-41).
 **Expected result:** the saved/native selection changes to another account. The next accepted managed request uses that selection; an already stopped native session may still need operator continuation or restart. Automatic wake/resume is deferred to SB-25. The retry hold expiring does not verify restored quota.
 **UI elements:** row badge, Automatic switching decision text.
 **States covered:** limited, switched on limit, all limited.
 **Errors & recovery:** a failed activation reads as before (`activation_failed`).
 **Status:** draft
 **Meaning:** operator request 2026-10-02 ([PLAN-0.5](../PLAN-0.5.md) D-6); Claude Swap does not do this.
-**Coverage:** `limits::tests`, `a_limit_error_in_claude_code_switches_with_quota_to_spare`, rotation test; marker shape measured on this machine's own transcripts (field names only).
+**Coverage:** `limits::tests` (including `an_equal_reset_on_a_new_session_is_the_new_accounts_limit`, `evidence_survives_a_restart_and_a_hold_is_not_a_reset`), `a_limit_error_in_claude_code_switches_with_quota_to_spare`, rotation test, `limitLabel` in `scripts/test-ui-logic.mjs`; marker shape measured on this machine's own transcripts (field names only).
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-16, REQ-17
 

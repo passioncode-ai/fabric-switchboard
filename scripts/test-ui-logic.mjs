@@ -210,6 +210,14 @@ check(() => {
   assert.equal(logic.accountReset(only.usage), null);
 });
 
+// SB-41: a provider-reported reset reads as a reset; an estimated hold never does.
+check(() => {
+  assert.equal(logic.limitLabel({ until: 100, resets_at: 100 }), 'Limit resets');
+  assert.equal(logic.limitLabel({ until: 100, resets_at: null }), 'Retry hold until');
+  assert.equal(logic.limitLabel({ until: 100 }), 'Retry hold until', 'an older owner reports no reset field');
+  assert.equal(logic.limitLabel({ until: 200, resets_at: 100 }), 'Retry hold until', 'a longer hold is not the reset');
+});
+
 // R3–R5: quota ordering is explicit, conservative and independent of input order.
 check(() => {
   const now = 1_000_000;

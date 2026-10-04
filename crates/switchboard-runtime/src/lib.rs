@@ -257,6 +257,7 @@ impl Runtime {
         refresh.remember_in(root.join("renewal-state.json"));
         let usage_gate =
             usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
+        let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -268,7 +269,7 @@ impl Runtime {
             monitor_decisions: Mutex::new(Vec::new()),
             native,
             refresh,
-            limits: limits::LimitState::default(),
+            limits,
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),

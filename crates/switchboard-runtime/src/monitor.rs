@@ -573,6 +573,9 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
     } else {
         vec![]
     };
+    runtime
+        .limits
+        .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
     runtime.limits.refresh(&snapshot, native, &files, time);
 }
 

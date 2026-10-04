@@ -4,7 +4,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -494,7 +494,7 @@ function usageCell(account: Account) {
     // Without an observation there is no disclosure to show the schedule; the row says it.
     const next = failedNextCheck(account);
     if (next !== null) cell.append(el('span', 'usage-caption', `Next check ${date(next)}`));
-    if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
+    if (limit) cell.append(resetDisplay(limit.until, limitLabel(limit)));
     return cell;
   }
   const cell = el('div', 'row-usage');
@@ -515,7 +515,7 @@ function usageCell(account: Account) {
   cell.append(control);
   const quota = quotaOrder(account, { ...quotaContext(), limits: [] });
   const reset = quota.state === 'blocked' ? quota.until : accountReset(observation);
-  if (limit) cell.append(resetDisplay(limit.until, 'Retry hold until'));
+  if (limit) cell.append(resetDisplay(limit.until, limitLabel(limit)));
   // A hold is not a quota reset; show both when they differ.
   if (reset && (!limit || reset !== limit.until)) cell.append(resetDisplay(reset, stale || failed ? 'Reported reset' : quota.state === 'blocked' ? 'Quota windows reset' : 'Resets'));
   if (quota.state === 'blocked' && quota.until === null) cell.append(el('span', 'usage-unknown', 'Reset time unavailable'));

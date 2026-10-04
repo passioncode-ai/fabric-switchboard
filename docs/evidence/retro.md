@@ -32,6 +32,12 @@
    "flaky" shutdown test was a real signal-handler race at start-up). Retire after three runs in
    which every intermittent failure met was traced to its mechanism without this reminder.
 
+7. **An open question on the board is never an invariant in code.** When a design depends on
+   something the board lists as unverified (SB-06-style), the spec states both answers and the
+   code takes the branch that stays correct under either; a bound the code must respect gets its
+   worst-case sum written in the spec. Source: runs 2026-10-04 (SB-40, SB-41). Retire after two
+   runs touching unverified behaviour pass review with no finding of this class.
+
 ## Run stamps
 
 | Date | Run | Commit | Diverged |
@@ -40,8 +46,25 @@
 | 2026-10-02 | PLAN-0.5 backups and limit errors, release v0.5.0-beta.1 | `e6c5e54` | yes — entry below |
 | 2026-10-03 | PLAN-0.5 §0.5.1 Claude Swap parity and review fixes | `13a8712` | yes — entry below |
 | 2026-10-04 | SB-39 provider not-before for every quota check (+ SB-44) | `6d67fbe` | yes — entry below |
+| 2026-10-04 | SB-40 Codex limits beyond the two windows | `585c255` | yes — entry below |
+| 2026-10-04 | SB-41 typed, attributable limit evidence | this branch | yes — entry below |
 
 ## Recent log
+
+### 2026-10-04 — SB-40 and SB-41: a bound that was not computed, a heuristic that froze an open question
+
+- **Symptom:** green gates, then review findings: SB-40 could emit 17 windows to a store that
+  accepts 16 (P2); SB-41's session binding assumed a running session never adopts a switch — the
+  open SB-06 question, decided in the direction that disabled the feature (P1), and its hold was
+  bounded from the pass clock, rewriting the file every pass (P2).
+- **Surfaced at:** stage 5 review. **Owned by:** stage 3 spec — SB-40's spec named the 16-window
+  limit but no arithmetic over the worst case; SB-41's spec stated "a session runs on one
+  sign-in" as a fact although the board lists it as unverified.
+- **Root cause:** a limit was quoted without its worst-case sum; an open question was encoded as
+  an invariant instead of as the conservative branch.
+- **Fix:** code with fail-first tests (run records); standing instruction 7.
+- **Catches it next time:** standing instruction 7.
+
 
 ### 2026-10-04 — a lock taken away, and a new state read by the background
 
