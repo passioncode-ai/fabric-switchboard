@@ -544,7 +544,7 @@ fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
         })
         .filter_map(|p| p["max_age_seconds"].as_i64())
         .min()
-        .unwrap_or(300);
+        .unwrap_or(switchboard_core::UNPOLICED_MAX_AGE_SECONDS);
     let windows: Vec<Value> = usage
         .get("windows")
         .and_then(Value::as_array)

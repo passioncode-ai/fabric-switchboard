@@ -132,7 +132,8 @@ export function featureWindowLabel(name: string): string {
 export interface QuotaOrder { state: 'available' | 'blocked' | 'unknown' | 'sign_in' | 'disabled'; until: number | null; used: number }
 export function quotaMaxAge(account: Pick<Account, 'provider' | 'pool'>, policies: QuotaOrderContext['policies'] = []): number {
   const ages = policies.filter(p => p.enabled && p.provider === account.provider && p.pool === account.pool).map(p => p.max_age_seconds);
-  return ages.length ? Math.min(...ages) : 300;
+  // Without a policy: core UNPOLICED_MAX_AGE_SECONDS, the ten-minute idle cadence plus slack (SB-48).
+  return ages.length ? Math.min(...ages) : 900;
 }
 const validTime = (value: number | null | undefined): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0 && value * 1000 <= 8.64e15;
 /** Display ranking only: never selects an account or alters rotation policy. */

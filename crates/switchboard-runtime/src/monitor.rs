@@ -11,7 +11,8 @@ use tokio::task::JoinHandle;
 
 use crate::usage_gate::UsageGate;
 
-pub const INTERVAL_SECONDS: i64 = 180;
+/// The active quota cadence (SB-48); also the source-sync and first-failure interval.
+pub const INTERVAL_SECONDS: i64 = switchboard_core::CHECK_ACTIVE_SECONDS;
 const MAX_BACKOFF: i64 = 1800;
 /// The background cadence (lifecycle LC-08: nothing polls faster than 30 seconds). Each pass
 /// is cheap when nothing changed: a quiet probe of the sign-in sources, no process spawned.
@@ -489,6 +490,9 @@ fn sync_live_sources(
     let Ok(snapshot) = store.snapshot() else {
         return;
     };
+    // Which saved accounts the ordinary CLIs are signed in to: those are checked on the active
+    // cadence (SB-48). Learned from the same cached read, before any lineage decision.
+    let mut in_use = std::collections::BTreeSet::new();
     for provider in [Provider::Claude, Provider::Codex] {
         let accounts: Vec<_> = snapshot
             .accounts
@@ -503,6 +507,16 @@ fn sync_live_sources(
         let Ok(profile) = current(provider) else {
             continue;
         };
+        for account in &accounts {
+            if store
+                .match_external(provider, &account.pool, &profile.identity)
+                .ok()
+                .flatten()
+                .is_some_and(|matched| matched.id == account.id)
+            {
+                in_use.insert(account.id.clone());
+            }
+        }
         if provider == Provider::Claude {
             refresh.note_active(&profile.identity);
             // Only a lineage proven to be this identity's is filed under it: after an
@@ -551,6 +565,7 @@ fn sync_live_sources(
             );
         }
     }
+    let _ = store.set_in_use(in_use);
 }
 
 /// Collects limit errors: the proxy's own events always; Claude Code's transcript markers only
@@ -1164,6 +1179,58 @@ mod tests {
             store.stored_credential(&a.id).unwrap().access_token,
             "renewed"
         );
+    }
+    #[test]
+    fn the_account_the_cli_is_signed_in_to_is_checked_on_the_active_cadence() {
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let add = |name: &str| {
+            store
+                .upsert(
+                    name.into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    credential(name),
+                    Some(identity(name)),
+                )
+                .unwrap()
+                .id
+        };
+        let (a, b) = (add("synthetic-a"), add("synthetic-b"));
+        let state = crate::refresh::RefreshState::default();
+        sync_live_sources(&store, signed_in, &state);
+        let time = now() - 5;
+        let observed = |id: &str| {
+            store
+                .observe(
+                    id,
+                    Usage {
+                        used_percent: 10.,
+                        observed_at: time,
+                        resets_at: Some(time + 86_400),
+                        source: "claude_oauth".into(),
+                        windows: vec![],
+                    },
+                )
+                .unwrap();
+            store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|x| x.id == id)
+                .unwrap()
+                .usage_health
+                .unwrap()
+                .next_check_at
+                - time
+        };
+        assert_eq!(observed(&a), switchboard_core::CHECK_ACTIVE_SECONDS);
+        assert_eq!(observed(&b), switchboard_core::CHECK_IDLE_SECONDS);
     }
     #[test]
     fn a_rate_limited_usage_check_waits_as_the_provider_asks() {
