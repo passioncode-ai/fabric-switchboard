@@ -8,6 +8,8 @@ request. It is a desktop app plus the `switchboard` command-line tool, for macOS
 Windows. It is Fabric's account tool and works on its own; built by
 [PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
 
+![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
+
 **Status: [v0.6.0](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.0)**,
 the first stable release (macOS universal, notarized by Apple and stapled; Windows x64 built
 natively, not yet Authenticode-signed). Builds are made and signed only by the
@@ -93,7 +95,7 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
 - [Agents Switchboard works with](docs/AGENT-SUPPORT.md): the 30 popular coding agents
   (Hermes, Kilo Code, Cline, Goose, OpenCode, …) — tools, proxy and launch, with sources.
 - [Usage analytics](docs/ANALYTICS.md): what release builds send (counts and kinds, never
-  account names, e-mail addresses or sign-ins), the installation id PassionCode apps share, and
+  account names, e-mail addresses or sign-ins), the installation id PassionCode.ai tools share, and
   the switch that turns it off for all of them.
 
 ## Running from source

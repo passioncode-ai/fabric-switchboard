@@ -888,17 +888,17 @@ function updateControls(panel: HTMLElement) {
   panel.append(option, el('p', 'form-note', line.text));
   if (line.restart) panel.append(button('Restart to update', () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, 'Restarting Switchboard with the new version…', 'update-restart'), 'button', 'update-restart'));
 }
-/** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode app shares. */
+/** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode.ai tool shares. */
 function analyticsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
   const heading = el('h2', '', 'Usage analytics'); heading.id = 'analytics-heading';
-  panel.append(heading, el('p', '', 'Switchboard counts installs, days of use and how many accounts are connected, by provider and type, to help PassionCode improve its apps. It never sends account names, e-mail addresses, sign-ins, pool names or what you do with your accounts. A random installation number, shared by the PassionCode apps on this computer, lets one person using several of them count once.'));
+  panel.append(heading, el('p', '', 'Switchboard counts installs, days of use and how many accounts are connected, by provider and type, to help PassionCode improve its apps. It never sends account names, e-mail addresses, sign-ins, pool names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.'));
   if (analyticsError) { panel.append(el('p', 'form-note', 'The analytics setting is unavailable. Refresh to retry.')); return panel; }
   if (!analyticsState) { panel.append(el('p', 'form-note', 'Reading the analytics setting…')); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
-  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? 'Anonymous usage analytics are on.' : 'Anonymous usage analytics are off for every PassionCode app on this computer.', 'analytics'); });
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? 'Anonymous usage analytics are on.' : 'Anonymous usage analytics are off for every PassionCode.ai tool on this computer.', 'analytics'); });
   option.append(box, el('span', '', 'Share anonymous usage counts'));
-  panel.append(option, el('p', 'form-note', analyticsState.available ? 'This switch applies to every PassionCode app on this computer.' : 'Only installed release builds send analytics; this build sends nothing.'));
+  panel.append(option, el('p', 'form-note', analyticsState.available ? 'This switch applies to every PassionCode.ai tool on this computer.' : 'Only installed release builds send analytics; this build sends nothing.'));
   return panel;
 }
 function backupsPanel() {
