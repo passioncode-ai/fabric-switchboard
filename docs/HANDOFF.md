@@ -1,3 +1,20 @@
+# Released — Switchboard v0.6.0, the first stable release (2026-10-05)
+
+[Release record](evidence/release-0.5.md#release-v060-2026-10-05--the-first-stable-release).
+New since 0.5.5: **projects** reserve their own accounts — a project is one or more folders with a
+pool of its own; launches outside its folders, foreign accounts inside them, native activation,
+native rules and native rotation of its accounts are refused ([CONTRACTS → Projects
+(0.6)](CONTRACTS.md), SCN-034); a **five-step first-run tour** (SCN-035); the Windows installer
+embeds `switchboard.exe` (SB-05). SB-51 done (growth registry), SB-31 done. Installed here.
+
+**Exact next task:** SB-52 — build the N-018 continuation skeleton from its
+[packet](packets/n-018-continuation.md) (operator's yes to the Observatory MCP entry is recorded).
+Then SB-49 (idle CPU ≈ 0.29 %), SB-07, SB-16. **Operator:** SB-15 day of use incl. a project with
+two repositories, SB-02 Windows, SB-03 Azure signing, `switchboard uninstall --yes` acceptance.
+**Other apps:** analytics integration passioncode-ai/fabric#12, passioncode-ai/fabric-inbox#27.
+
+---
+
 # Released — Switchboard v0.5.5-beta.1 (2026-10-05)
 
 [Release record](evidence/release-0.5.md#release-v055-beta1-2026-10-05). Operator decisions of

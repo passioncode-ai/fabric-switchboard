@@ -384,3 +384,18 @@ Same signing team (`KJ35UYYL22`).
 | Residency | LaunchAgent `~/Library/LaunchAgents/ai.passioncode.fabric-switchboard.plist` written at the first start (`ProgramArguments` app + `--background`, `RunAtLoad`); log `login_item enabled`; System Events: 0 windows, 1 menu-bar item |
 | Analytics | `PassionCode/installation.json` created (version 1, UUID id, analytics on); log `analytics_flush sent` ×2 (3 events); `sshlg-analytics/scripts/stats.sh 1 "Fabric Switchboard"`: release 3 events, 1 session, 1 user |
 | Idle hour (installed 0.5.5, broker-started with `--background`, no window) | sampled every second for 3600 s: CPU time 0.73 s → 11.22 s, 10.5 s per hour ≈ **0.29 %** average (target < 0.2 %; 0.5.4 measured ≈ 0.24 %); RSS 75.8 MB average, 90.4 MB peak (target ≤ 250 MB); children seen in 2 one-second samples (one `/usr/bin/security`, one exited before it could be named). SB-49 stays open: the analytics tick and the residency changes did not lower it; next is counting what each pass does |
+
+### Release v0.6.0 (2026-10-05) — the first stable release
+
+0.6.0: projects reserve their own accounts (SB-53, #63), the first-run tour (SB-54, #63), the
+Windows installer embeds the CLI (SB-05, #60), on top of 0.5.5. Operator decision: «готовим
+релизный финальный билд … релизим на сайт и GitHub» (SB-31).
+
+| Step | Result |
+|---|---|
+| Source | `main` `c03a3f7` ([#64](https://github.com/passioncode-ai/fabric-switchboard/pull/64)), tag `v0.6.0`; `release_preflight.py --tag v0.6.0 --publish true` ok; local gate exit 0; `npm run app:build` ok; `smoke_native.py` PASS ordinary (visible, tray) and background (hidden, tray) |
+| Release run | [37293063593](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37293063593), started by the tag push: preflight, windows (incl. *The installer carries the CLI*), macos, publish all success; both gates approved by the agent on the operator's instruction |
+| Published | 2026-10-05T10:10:14Z, **not a prerelease** |
+| Downloaded set | `SHA256SUMS` 4/4 OK (macOS `be7ef792490b9b266e5a48529890db1cd97bce7e807d826f9881d5b0e698f9f0`, Windows `6b8eefde9a37ce6e9bca4486cda421b0d72e64743cf8433ddcc295af5435afe2`); GPG good signature, organization key; `gh attestation verify` exit 0 ×2; `spctl` → `Notarized Developer ID`; stapled; notarization app `e189918b-f662-43cb-9029-3f1f3b120eb3`, CLI `c40a6ca4-418c-4c1a-bc13-1c235fde5ba7` |
+| Website | `passioncode-ai.github.io` [PR #41](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/41): manifest, facts, beta wording removed (disclosures kept and now asserted by `check-site.mjs`), projects FAQ; deployed (Worker `867abf0e-4138-4575-b4fb-20e752d29a90`); downloads 302 to `v0.6.0`; page reads *Latest release: 0.6.0* |
+| Local install | 0.5.5-beta.1 kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.5.5-beta.1-2026-10-05/`; broker stop → `stopped`, install, `ensure_running` → `ready`, pid 71135 `--background`; log `login_item enabled`, `analytics_flush sent`; 0 windows, 1 menu-bar item; `switchboard --version` → `0.6.0`; analytics server: 11 release events, 1 user |
