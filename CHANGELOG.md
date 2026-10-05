@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.5.5-beta.1 — 2026-10-05
+
+Switchboard now stays running with its window closed and opens at login, its account list is
+compact again with each account's state readable at a glance, idle accounts are checked less
+often, and release builds count anonymous usage. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The archive is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Usage analytics
 
 - Release builds count installs, days of use and connected accounts — numbers and kinds only,
