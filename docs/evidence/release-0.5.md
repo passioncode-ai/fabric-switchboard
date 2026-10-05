@@ -399,3 +399,25 @@ Windows installer embeds the CLI (SB-05, #60), on top of 0.5.5. Operator decisio
 | Downloaded set | `SHA256SUMS` 4/4 OK (macOS `be7ef792490b9b266e5a48529890db1cd97bce7e807d826f9881d5b0e698f9f0`, Windows `6b8eefde9a37ce6e9bca4486cda421b0d72e64743cf8433ddcc295af5435afe2`); GPG good signature, organization key; `gh attestation verify` exit 0 ×2; `spctl` → `Notarized Developer ID`; stapled; notarization app `e189918b-f662-43cb-9029-3f1f3b120eb3`, CLI `c40a6ca4-418c-4c1a-bc13-1c235fde5ba7` |
 | Website | `passioncode-ai.github.io` [PR #41](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/41): manifest, facts, beta wording removed (disclosures kept and now asserted by `check-site.mjs`), projects FAQ; deployed (Worker `867abf0e-4138-4575-b4fb-20e752d29a90`); downloads 302 to `v0.6.0`; page reads *Latest release: 0.6.0* |
 | Local install | 0.5.5-beta.1 kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.5.5-beta.1-2026-10-05/`; broker stop → `stopped`, install, `ensure_running` → `ready`, pid 71135 `--background`; log `login_item enabled`, `analytics_flush sent`; 0 windows, 1 menu-bar item; `switchboard --version` → `0.6.0`; analytics server: 11 release events, 1 user |
+
+### Release v0.6.1 (2026-10-05) — automatic updates, other agents, complete backups
+
+0.6.1: automatic updates on by default (SB-55, #68), the 30 most used coding agents through
+Switchboard's tools, proxy or launch (#69, [AGENT-SUPPORT.md](../AGENT-SUPPORT.md)), backups that
+carry projects, rules, selections and settings and restore a new install on their own (#66),
+lost credentials of known accounts restored and session history kept on uninstall (#67), the
+Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не потеряется при удалении …
+автоматический механизм обновления по дефолту», «поддерживаем работу с агентами … топ-30».
+
+| Step | Result |
+|---|---|
+| Source | `main` `efdba3d` ([#70](https://github.com/passioncode-ai/fabric-switchboard/pull/70)), tag `v0.6.1`; local gate exit 0; `npm run app:build` ok; `smoke_native.py` PASS ordinary (visible, tray) and background (hidden, tray) |
+| Release run | [37318911563](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37318911563), started by the tag push: preflight, macos, windows, updater, publish all success; both gates approved by the agent on the operator's instruction |
+| Published | 2026-10-05T14:02:08Z, **not a prerelease**, 11 assets (adds `latest.json` and the signed updater packages `*.app.tar.gz` + `.sig`, `*-setup.exe.sig`) |
+| Downloaded set | `SHA256SUMS` 9/9 OK (macOS zip `76a5ddf4933d9fc9e20879dfd3ca2c2d2e72c05bef44710471d286acd7433619`, Windows setup `fd69a153b2dcf276b03c5c47383781eecabd4d6502b8bcff05523277272c31d7`); GPG good signature, organization key; `gh attestation verify --signer-repo passioncode-ai/.github` exit 0 ×2, signer `release-publish.yml@refs/tags/v1`; `spctl` → `accepted, Notarized Developer ID`; `stapler validate` ok; notarization app `69efa954-84f1-4b0c-80a0-871c3f4e62f1`, CLI `49958842-efe4-4b27-937a-f407f6b93743`; app and CLI report `0.6.1` |
+| Updater manifest | `releases/latest/download/latest.json` → HTTP 200, version `0.6.1`, platforms `darwin-aarch64`, `darwin-universal`, `darwin-x86_64`, `windows-x86_64` |
+| Website | `passioncode-ai.github.io` [PR #46](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/46) adds `/switchboard/agents/`, generated from `catalog/agents.json`; deployed (Worker `6c53d51f-1d54-4990-9586-0ef416851170`), `https://passioncode.ai/switchboard/agents/` → 200. Version and checksums follow the release through the site's release sync |
+| Local install | 0.6.0 kept at `$HOME/DATA/_archive/switchboard-installed-rollback-0.6.0-2026-10-05/` (0.5.5-beta.1 rollback removed); broker stop → `stopped` (drained in 12 ms), install, Gatekeeper accepted, `ensure_running` → `ready`, pid 88909 `--background`; log `owner_started`, `login_item enabled`, `analytics_flush sent`; `<data>/auto-update` absent (= on); first `update_check` at 14:05:58Z, 91 s after start → `current`; `switchboard --version` → `0.6.1` |
+
+Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
+updates arrive on their own. The first automatic update is observed on the next release (SB-15).

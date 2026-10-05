@@ -1,6 +1,6 @@
 # Packet SB-52 / N-018 — continuation walking skeleton (owner materialization)
 
-**State:** materialized 2026-10-05, not built. **Board:** SB-52. **Program packet:** org-index
+**State:** built 2026-10-05 on branch `agent/sb-52-continuation` (run record at the end); live acceptance open. **Board:** SB-52. **Program packet:** org-index
 `docs/observatory/programs/2026-10-04-agent-memory/packets/N-018.md` (rev 1, PB-137/M9).
 **Engine contract:** memory/0.1, `passioncode-ai/project-observatory-dashboard` `5c31318`
 ([#159](https://github.com/passioncode-ai/project-observatory-dashboard/pull/159), N-016 + N-025);
@@ -68,3 +68,32 @@ tool `switchboard_continue` later):
 - **Observatory:** a `--json` answer for `workflow handoff`, so step 2 does not parse prose.
 - **Live acceptance** (two real accounts, a real limit) is paid/provider work and needs the
   operator's bounded authorization; the skeleton ships on the synthetic harness.
+
+## Run record (2026-10-05)
+
+Built as targeted, with these decisions and findings:
+
+- **Open questions closed.** The operator's yes to the Observatory MCP entry in a session's home
+  (2026-10-05) is used: the entry is derived from the installed engine (launcher `#!` interpreter,
+  `full-path`/`mcp/server.py`, `--home` from Switchboard's environment), never copied from the
+  user's own agent configs. The engine still has no `--json` for `handoff`, so its one-line
+  answer is parsed strictly (`parse_offer`), and anything else is refused as unreadable.
+- **Handoff target.** `--to-provider` is the executor's own provider name, so the pack names the
+  provider the workflow's sessions write; `--to-account` is the Switchboard account id (a UUID,
+  inside the engine's `accountRef` pattern).
+- **Preflight before the offer.** `launch::preflight` runs every check `launch` makes before it
+  touches a home, plus the credential (isolated) or route selection (managed), so a launch that
+  would be refused never leaves an offer behind.
+- **Finding, engine 0.16.0:** a checkpoint's `git` artifact path with a UUID folder name is
+  stored redacted (`…/[redacted]/repo`). Switchboard matches a redacted component to exactly one
+  folder; the engine's own pack then reads git from a path that does not exist
+  (`git_snapshot` → `not an existing absolute directory`), so the pack carries no git state for
+  such a checkout. Filed as SB-58 for the Observatory owners.
+
+| Check | Result |
+|---|---|
+| Unit and fake-engine tests | `cargo test -p switchboard-runtime continuation` — 12 passed, 1 ignored (`real_engine_contract`) |
+| Launch tests | `a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt`, `preflight_refuses_what_a_launch_would_refuse_without_writing` |
+| Planted defects (each separately, restored after) | folder check removed, `--force` added to the offer, waiting handoff ignored, key states ignored, provider mismatch accepted: each failed a test |
+| Real engine, scratch workspace | engine 0.16.0, `OBSERVATORY_HOME` in the session scratchpad, a synthetic workflow backdated past the silence rule: read → plan → MCP server → offer `handoff:34f6193d9e640027` → second plan refused `HANDOFF_WAITING`. A fresh workflow's offer refused by the engine's silence rule, reported verbatim |
+| Not run | a real session accepting the handoff on a second real account after a real limit (paid provider work; operator) |

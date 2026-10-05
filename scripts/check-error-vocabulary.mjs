@@ -31,6 +31,10 @@ const EXCLUDED_FILES = {
   // Lifecycle log (LC-12). Log::event discards every write error: logging never fails or
   // answers a caller.
   'crates/switchboard-runtime/src/oplog.rs': 'log writes; errors are dropped inside Log::event',
+  // Workflow continuation (SB-52). Only Operation::Continue reaches it, and only the CLI sends
+  // that operation: no Tauri command does (src-tauri has no continue command). A desktop entry
+  // point for it adds its messages to src/adapter.ts and removes this line.
+  'crates/switchboard-runtime/src/continuation.rs': 'CLI-only workflow continuation; no renderer request reaches it',
 };
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.

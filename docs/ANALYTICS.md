@@ -11,10 +11,13 @@ Inbox) counts once. Events go to the self-hosted Aptabase at `https://analytics.
 ## What is sent
 
 Every event carries the app version, the OS name, an SDK tag (`switchboard-analytics@<version>`),
-an Aptabase session id and `props.install_id` — the shared installation id below. Nothing else
-identifies the machine or the person.
+an Aptabase session id, `props.install_id` — the shared installation id below — the same value
+again as `props.iid`, and `props.environment`: `production` for a release, `sandbox` for a
+debug build or a pre-release version (`-rc.N`, `-beta.N`). `iid` and `environment` are the names
+`sshlg-growth` counts by (operator decision 2026-10-05); `iid` adds no new identifier. Nothing
+else identifies the machine or the person.
 
-| Event | When | Props (besides `install_id`) |
+| Event | When | Props (besides `install_id`, `iid`, `environment`) |
 |---|---|---|
 | `app_installed` | first start of this app on this machine (once, kept in `<data>/analytics-state.json`) | the counts below; `first_passioncode_app` — no PassionCode app had run here before |
 | `app_started` | every start of the desktop app | `launch`: `ordinary` or `background` (login item, lifecycle broker) |

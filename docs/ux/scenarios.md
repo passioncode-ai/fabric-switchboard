@@ -45,6 +45,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-035 | Learn the product in five steps on first start | draft |
 | SCN-036 | Run another coding agent on Switchboard | draft |
 | SCN-037 | Get new versions without doing anything | draft |
+| SCN-038 | Continue a workflow on another account when a limit runs out | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -750,3 +751,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `updates::tests` (on by default, saved switch, unavailable copies, relaunch keeps `--background`, bundle replaceable without a password), `residency::tests::the_tray_names_the_version_it_restarts_into`, `scripts/test-ui-logic.mjs` (status line and restart offer), `scripts/test_updater_artifacts.py` (latest.json names only files of the release with their own signatures; the macOS archive layout), the macOS package rebuilt from the installed notarized 0.6.0 app and verified by codesign, stapler and Gatekeeper on the unpacked copy (2026-10-05). The first live update is the release after the one that ships this: acceptance (SB-15).
 **Product:** unobserved
 **Traces:** SB-55, LC-01, LC-09, SCN-030, SCN-033
+
+## SCN-038 — Continue a workflow on another account when a limit runs out
+**Persona:** P-01
+**Goal:** An agent's long task (an Observatory workflow) stops because its account hit its limit; another account of the same provider picks it up from the last checkpoint, without redoing finished steps and without the person copying context.
+**Preconditions:** Project Observatory installed; the workflow open, its executor silent for two minutes; every key it declares in the Observatory vault; another enabled account of the same provider; the desktop app or `switchboard serve` running.
+**Entry point:** CLI `switchboard continue <wf> --account <id> --dir <checkout>` (a desktop entry and an MCP tool come later).
+**Steps:**
+1. `project-observatory full workflow list` names the stalled workflow → run `switchboard continue` with it, the account and the checkout.
+2. Switchboard reads the workflow and offers it to the account (reason `limit`) → prints the handoff id and until when it is offered.
+3. Terminal opens the account's session in the checkout → its first message tells it to accept the handoff, continue from the checkpoint in the acceptance answer and obey its constraints → it does, and writes checkpoints as it goes.
+**Alt paths:** the executor wrote less than two minutes ago → Observatory's refusal (“…without its lease token a handoff waits until it has been silent for 120 s”), nothing launched; a closed workflow, no checkpoint, a waiting handoff, a key not in the vault (named), another provider, the same account, a folder outside the checkouts → refused before any offer; the session fails to start after the offer → the handoff id and its deadline, the offer lapses on its own.
+**Expected result:** the work continues on the new account from where it stopped; the old session, if it writes again, is refused by Observatory (`LeaseLost`) and its step is kept for review.
+**UI elements:** CLI output (`workflow`, `handoff`, `offeredUntil`); the launched Terminal session.
+**States covered:** ready, refused before the offer (each reason), refused by the engine, offered and launched, offered and launch failed.
+**Errors & recovery:** every refusal names the fix; nothing is retried automatically; a lapsed offer can be made again.
+**Status:** draft
+**Meaning:** SB-52 / N-018 (PB-137/M9), operator yes to the Observatory MCP entry 2026-10-05.
+**Coverage:** `continuation::tests` (12, incl. a fake engine), `launch::tests::a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt`, `preflight_refuses_what_a_launch_would_refuse_without_writing`; `real_engine_contract` against engine 0.16.0 in a scratch workspace. Live acceptance with two real accounts and a real limit needs the operator.
+**Product:** unobserved
+**Traces:** SB-52, CONTRACTS → Workflow continuation

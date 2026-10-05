@@ -3,6 +3,7 @@ pub mod agent_catalog;
 pub mod agents;
 pub mod analytics;
 mod blocking;
+pub mod continuation;
 pub mod control;
 pub mod external;
 #[cfg(target_os = "macos")]
@@ -93,6 +94,13 @@ pub enum Operation {
         id: String,
     },
     Launch {
+        id: String,
+        mode: String,
+        working_directory: PathBuf,
+    },
+    /// Continue an Observatory workflow on this account (SB-52): read, offer, launch.
+    Continue {
+        workflow_id: String,
         id: String,
         mode: String,
         working_directory: PathBuf,
@@ -1244,6 +1252,67 @@ async fn execute(
             Ok(
                 json!({"message": "Terminal launch requested. Provider response is not yet verified.", "agent_tools": agent_tools}),
             )
+        }
+        Operation::Continue {
+            workflow_id,
+            id,
+            mode,
+            working_directory,
+        } => {
+            let runtime = needs_owner()?;
+            // Everything that can refuse runs before the offer, so a refusal leaves the workflow
+            // exactly as it was; after the offer, a failed launch leaves it to lapse.
+            if !continuation::valid_workflow_id(&workflow_id) {
+                return Err(continuation::BAD_WORKFLOW_ID.into());
+            }
+            let bin = continuation::observatory()?;
+            let account = store
+                .snapshot()?
+                .accounts
+                .into_iter()
+                .find(|a| a.id == id)
+                .ok_or("Account not found.")?;
+            let directory = working_directory
+                .canonicalize()
+                .map_err(|_| "Choose an existing project directory.")?;
+            let shown = continuation::show(&bin, &workflow_id)?;
+            let plan = continuation::plan(&shown, &workflow_id, &account, &directory)?;
+            if mode == "isolated" {
+                refresh::learn_live_owner(&store, native, refresh_state).await;
+                let short = store
+                    .stored_credential(&id)
+                    .is_ok_and(|c| short_lived(&c, monitor::now()));
+                if refresh::ensure_fresh(&store, native, refresh_state, &id, short).await
+                    == refresh::Outcome::Active
+                {
+                    adopt_live(&store, native, refresh_state, &id);
+                }
+            }
+            launch::preflight(root, &store, &id, &mode, &directory)?;
+            let observatory = continuation::observatory_mcp(&bin)?;
+            let offer = continuation::offer(&bin, &plan, &id)?;
+            let resumed = continuation::Continuation {
+                workflow_id: workflow_id.clone(),
+                handoff_id: offer.handoff_id.clone(),
+                observatory,
+            };
+            let agent_tools = launch::launch_continuation(
+                root,
+                &store,
+                &runtime.proxy,
+                &id,
+                &mode,
+                &directory,
+                &resumed,
+            )
+            .map_err(|e| continuation::launch_failed(&offer, &e))?;
+            Ok(json!({
+                "message": "Terminal launch requested; the session accepts the handoff itself. Provider response is not yet verified.",
+                "workflow": workflow_id,
+                "handoff": offer.handoff_id,
+                "offeredUntil": offer.expires_at,
+                "agent_tools": agent_tools,
+            }))
         }
         Operation::BeginLogin {
             provider,

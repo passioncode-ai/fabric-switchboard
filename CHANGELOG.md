@@ -11,6 +11,36 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - About → Version and license now points a commercial license request to the form at
   https://passioncode.ai/business/ instead of an email address.
 
+## 0.6.2 — 2026-10-05
+
+Switchboard uses far less of your Mac in the background, and an agent that runs out of its limit
+mid-task can be picked up by another of your accounts. If you run 0.6.1, this version arrives on
+its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
+### Lighter in the background
+
+- Switchboard watches Claude Code's session logs for limit errors. It used to read the end of
+  every active log twice a minute; now it reads only what each log added since. On a Mac with
+  22 active sessions, one background pass went from 66 ms to about 1 ms.
+
+### Continue a task on another account
+
+- `switchboard continue <workflow> --account <id> --dir <checkout>` hands a Project Observatory
+  workflow whose agent hit its limit to another account of the same provider, and opens that
+  account's session in the checkout. The session takes the work over from the last checkpoint.
+  Switchboard refuses before changing anything when the workflow cannot be continued here, and
+  reports Observatory's own reason when it declines. macOS only for now.
+  [CLI.md](docs/CLI.md).
+
+### Usage analytics
+
+- Each anonymous usage event also carries the installation id under a second name and whether
+  the build is a release, so PassionCode's own reports count installs correctly. Nothing new
+  identifies you. [ANALYTICS.md](docs/ANALYTICS.md).
+
 ## 0.6.1 — 2026-10-05
 
 Switchboard now updates itself: from this version on, new releases arrive and install without
