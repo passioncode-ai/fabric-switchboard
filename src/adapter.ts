@@ -33,11 +33,15 @@ export const nativeAdapter: Adapter = {
   linkCli: () => invoke('link_cli'),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
+  analytics: () => readWithDeadline(invoke('analytics_status')),
+  setAnalytics: (enabled) => invoke('set_analytics', { enabled }),
 };
 
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'Usage analytics are available in the installed app only.',
+  'Could not save the analytics choice.',
   'Opening at login is available in the installed app only.',
   'Could not save the choice in Switchboard\'s data folder.',
   'Could not add Switchboard to the login items. Check the system\'s login item settings.',

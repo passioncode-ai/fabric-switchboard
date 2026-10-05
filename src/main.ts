@@ -41,6 +41,8 @@ const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
 let loginItem: LoginItem | null = null;
 let loginItemError = false;
+let analyticsState: LoginItem | null = null;
+let analyticsError = false;
 let backupError = false;
 let busy = false;
 let loading = true;
@@ -99,6 +101,7 @@ async function reload() {
   loading = false; render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   void loadBackups();
+  void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
@@ -676,7 +679,7 @@ function renderAbout(main: HTMLElement) {
     ['Native Claude activation', 'An explicit update of the local Claude Code account. CLI reload timing is not a guarantee that a running session has changed account.'],
     ['Automatic rotation', 'Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
-  section.append(definitions); main.append(section, residencyPanel(), backupsPanel(), appearancePanel(), productPanel());
+  section.append(definitions); main.append(section, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), productPanel());
 }
 async function loadBackups() {
   try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
@@ -693,6 +696,19 @@ function residencyPanel() {
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { loginItem = await adapter.setLoginItem(wanted); }, wanted ? 'Switchboard will open at login, in the background.' : 'Switchboard will no longer open at login.', 'login-item'); });
   option.append(box, el('span', '', 'Open at login, in the background'));
   panel.append(option, el('p', 'form-note', loginItem.available ? 'Starts without a window; open it from the menu-bar icon.' : 'Available in the installed app.'));
+  return panel;
+}
+/** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode app shares. */
+function analyticsPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
+  const heading = el('h2', '', 'Usage analytics'); heading.id = 'analytics-heading';
+  panel.append(heading, el('p', '', 'Switchboard counts installs, days of use and how many accounts are connected, by provider and type, to help PassionCode improve its apps. It never sends account names, e-mail addresses, sign-ins, pool names or what you do with your accounts. A random installation number, shared by the PassionCode apps on this computer, lets one person using several of them count once.'));
+  if (analyticsError) { panel.append(el('p', 'form-note', 'The analytics setting is unavailable. Refresh to retry.')); return panel; }
+  if (!analyticsState) { panel.append(el('p', 'form-note', 'Reading the analytics setting…')); return panel; }
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? 'Anonymous usage analytics are on.' : 'Anonymous usage analytics are off for every PassionCode app on this computer.', 'analytics'); });
+  option.append(box, el('span', '', 'Share anonymous usage counts'));
+  panel.append(option, el('p', 'form-note', analyticsState.available ? 'This switch applies to every PassionCode app on this computer.' : 'Only installed release builds send analytics; this build sends nothing.'));
   return panel;
 }
 function backupsPanel() {

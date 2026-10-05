@@ -1,5 +1,6 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod agents;
+pub mod analytics;
 mod blocking;
 pub mod control;
 pub mod external;
@@ -225,6 +226,9 @@ pub struct Runtime {
     backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
     backup_folder: Mutex<Option<PathBuf>>,
     backup_state: Mutex<BackupState>,
+    /// Anonymous usage analytics; only the desktop app of the real data folder, in a release
+    /// build, starts it (docs/ANALYTICS.md).
+    analytics: Mutex<Option<Arc<analytics::Analytics>>>,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -283,6 +287,7 @@ impl Runtime {
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
+            analytics: Mutex::new(None),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -321,7 +326,12 @@ impl Runtime {
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
         let _mutation = self.mutations.lock().await;
-        execute(self.store.clone(), &self.root, Some(self), operation).await
+        let reported = Reported::of(&operation, &self.store);
+        let result = execute(self.store.clone(), &self.root, Some(self), operation).await;
+        if let (Ok(_), Some(reported)) = (&result, reported) {
+            self.report(&reported);
+        }
+        result
     }
     fn begin_login(
         &self,
@@ -461,6 +471,68 @@ impl Runtime {
         }
         if let Ok(mut slot) = self.backup_folder.lock() {
             *slot = folder;
+        }
+    }
+    /// Starts analytics for the desktop app (docs/ANALYTICS.md): a release build (it carries
+    /// the App Key) owning the real data folder. `launch` is `ordinary` or `background`.
+    pub fn enable_analytics(self: &Arc<Self>, launch: &str) {
+        let (Some(key), Some(shared)) = (analytics::APP_KEY, analytics::shared_folder()) else {
+            return;
+        };
+        if default_root().ok().as_deref() != Some(self.root.as_path()) {
+            return;
+        }
+        self.enable_analytics_with(key, analytics::HOST, shared, launch);
+    }
+    pub(crate) fn enable_analytics_with(
+        self: &Arc<Self>,
+        key: &str,
+        host: &str,
+        shared: PathBuf,
+        launch: &str,
+    ) {
+        let client = Arc::new(analytics::Analytics::new(key, host, shared, &self.root));
+        if let Ok(snapshot) = self.store.snapshot() {
+            client.started(launch, &snapshot);
+        }
+        if let Ok(mut slot) = self.analytics.lock() {
+            *slot = Some(client.clone());
+        }
+        tokio::spawn(async move { client.flush().await });
+    }
+    pub(crate) fn analytics(&self) -> Option<Arc<analytics::Analytics>> {
+        self.analytics.lock().ok().and_then(|slot| slot.clone())
+    }
+    /// `{available, enabled}` for About. Unavailable outside a release desktop build.
+    pub fn analytics_status(&self) -> Value {
+        self.analytics().map_or_else(
+            || json!({"available": false, "enabled": false}),
+            |a| a.status(),
+        )
+    }
+    /// The person's switch; shared by every PassionCode app on this machine.
+    pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
+        self.analytics()
+            .ok_or_else(|| "Usage analytics are available in the installed app only.".to_string())?
+            .set_enabled(enabled)
+    }
+    /// After an operation: accounts it added or removed, a switch it made; then a send.
+    fn report(&self, kind: &Reported) {
+        let Some(client) = self.analytics() else {
+            return;
+        };
+        match kind {
+            Reported::Accounts(method) => {
+                if let Ok(snapshot) = self.store.snapshot() {
+                    client.reconcile(&snapshot, method);
+                }
+            }
+            Reported::Switch { provider, target } => {
+                client.switched(provider.as_str(), target, "manual");
+            }
+        }
+        if client.pending() > 0 {
+            tokio::spawn(async move { client.flush().await });
         }
     }
     fn backup_folder(&self) -> Option<PathBuf> {
@@ -802,6 +874,42 @@ impl Owner {
     }
 }
 
+/// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
+enum Reported {
+    /// Accounts may have been added or removed; additions are attributed to this method.
+    Accounts(&'static str),
+    Switch {
+        provider: Provider,
+        target: &'static str,
+    },
+}
+impl Reported {
+    fn of(operation: &Operation, store: &Store) -> Option<Self> {
+        Some(match operation {
+            Operation::CaptureCurrent { .. } => Self::Accounts("capture"),
+            Operation::ImportClaudeSwap { .. } => Self::Accounts("import_claude_swap"),
+            Operation::Add { .. } => Self::Accounts("manual"),
+            Operation::FinishLogin { .. } => Self::Accounts("sign_in"),
+            Operation::RestoreBackup { .. } => Self::Accounts("restore"),
+            Operation::Remove { .. } => Self::Accounts("removed"),
+            Operation::Select { provider, .. } => Self::Switch {
+                provider: *provider,
+                target: "managed",
+            },
+            Operation::ActivateNative { id } => Self::Switch {
+                provider: store
+                    .snapshot()
+                    .ok()?
+                    .accounts
+                    .into_iter()
+                    .find(|a| &a.id == id)?
+                    .provider,
+                target: "native",
+            },
+            _ => return None,
+        })
+    }
+}
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
     execute(store, &root, None, operation).await

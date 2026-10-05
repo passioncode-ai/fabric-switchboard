@@ -35,6 +35,11 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime analytics.rs installation()/set_shared_enabled(): internal. status() reads them as
+  // "off"; set_enabled() replaces every one with "Could not save the analytics choice.".
+  'Installation folder unavailable.': 'replaced by the analytics choice error',
+  'Installation unavailable.': 'replaced by the analytics choice error',
+  'Installation file unreadable.': 'replaced by the analytics choice error',
   // runtime uninstall.rs remove_login_item(): `switchboard uninstall --yes` lists it under
   // `failures` in CLI output; uninstall is never a desktop operation (SB-28).
   'Could not remove the login item.': 'uninstall CLI output only',

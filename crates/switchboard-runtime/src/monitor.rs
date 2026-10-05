@@ -159,6 +159,16 @@ impl Pass {
             let _mutation = runtime.mutations.lock().await;
             let _ = rotate(runtime, native_sources);
         }
+        // Analytics: the daily active event and accounts added by any path; sends what waits.
+        if let Some(client) = runtime.analytics() {
+            if let Ok(snapshot) = runtime.store.snapshot() {
+                client.tick(&snapshot, time);
+            }
+            // Sent beside the pass: a slow analytics server never delays a quota check.
+            if client.pending() > 0 {
+                tokio::spawn(async move { client.flush().await });
+            }
+        }
         // Quota timestamps wait in memory; they reach the disk with the next real change or
         // after a quarter of an hour.
         let _ = runtime.store.flush_if_older(time, FLUSH_SECONDS);
@@ -670,6 +680,21 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     "switched"
                 }
                 .into();
+                if let Some(client) = runtime.analytics() {
+                    client.switched(
+                        policy.provider.as_str(),
+                        if policy.target == "managed" {
+                            "managed"
+                        } else {
+                            "native"
+                        },
+                        if reason == "switched_on_limit" {
+                            "limit"
+                        } else {
+                            "rotation"
+                        },
+                    );
+                }
             } else if policy.target == "claude_cli" {
                 reason = "activation_failed".into();
             } else {
