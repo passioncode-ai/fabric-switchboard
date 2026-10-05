@@ -68,6 +68,12 @@ enum Command {
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
     Serve,
+    /// Other coding agents (Hermes, Kilo Code, Cline, Goose, OpenCode, …): how each connects to
+    /// `switchboard mcp` and the proxy, and launching those configured by environment alone.
+    Agents {
+        #[command(subcommand)]
+        command: AgentsCommand,
+    },
     /// Projects (folders that reserve their own accounts) and optional project rules.
     Project {
         #[command(subcommand)]
@@ -249,6 +255,27 @@ enum Rotation {
 enum RotationTarget {
     Managed,
     ClaudeCli,
+}
+#[derive(Subcommand)]
+enum AgentsCommand {
+    /// Every agent in the catalog with what it supports: mcp, proxy or launch.
+    List,
+    /// How to connect one agent: its MCP registration and, when it can, the proxy settings.
+    Connect {
+        agent: String,
+        #[arg(long, default_value = "default")]
+        pool: String,
+    },
+    /// Print the agents' proxy key, for an agent's key command. Not a provider credential.
+    Key,
+    /// Start an agent configured by environment alone in a folder, on the pool's API-key account.
+    Launch {
+        agent: String,
+        #[arg(long, default_value = "default")]
+        pool: String,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
 }
 #[derive(Subcommand)]
 enum Backup {
@@ -504,6 +531,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             }
             .into(),
             working_directory: working_directory.clone(),
+        },
+        Command::Agents { command } => match command {
+            AgentsCommand::List => Operation::AgentCatalog,
+            AgentsCommand::Connect { agent, pool } => Operation::AgentConnect {
+                agent: agent.clone(),
+                pool: pool.clone(),
+            },
+            AgentsCommand::Key => Operation::AgentKey,
+            AgentsCommand::Launch { agent, pool, dir } => Operation::LaunchAgent {
+                agent: agent.clone(),
+                pool: pool.clone(),
+                working_directory: folder(dir)?,
+            },
         },
         Command::Project { command } => match command {
             Project::List => Operation::Snapshot,
@@ -776,6 +816,56 @@ fn print_result(value: &Value, cli: &Cli) {
                         .map(|t| format!(" · until {t}"))
                         .unwrap_or_default()
                 );
+            }
+        }
+        Command::Agents {
+            command: AgentsCommand::Key,
+        } => println!("{}", text(&value["key"])),
+        Command::Agents {
+            command: AgentsCommand::List,
+        } => {
+            for agent in value["agents"].as_array().into_iter().flatten() {
+                println!(
+                    "{:18} {:7} {}",
+                    text(&agent["id"]),
+                    text(&agent["level"]),
+                    text(&agent["name"])
+                );
+            }
+            println!("\nmcp: registers switchboard mcp · proxy: also uses the proxy (its config file) · launch: switchboard agents launch <id>");
+        }
+        Command::Agents {
+            command: AgentsCommand::Connect { .. },
+        } => {
+            println!("{} ({})", text(&value["name"]), text(&value["level"]));
+            let mcp = &value["mcp"];
+            if mcp["supported"] == true {
+                println!("\nMCP:");
+                if let Some(cmd) = mcp["add_command"].as_str() {
+                    println!("  {cmd}");
+                }
+                if let Some(snippet) = mcp["config_snippet"].as_str() {
+                    println!("  in {}:\n{}", text(&mcp["config_path"]), snippet);
+                }
+            } else {
+                println!("\nMCP: not supported by this agent.");
+            }
+            if let Some(a) = value["anthropic"].as_object() {
+                println!("\nAnthropic-compatible proxy: {}", text(&a["base_url"]));
+                for (k, v) in a["env"].as_object().into_iter().flatten() {
+                    println!("  export {k}=\"{}\"", text(v));
+                }
+                if let Some(snippet) = a["config_snippet"].as_str() {
+                    println!("{snippet}");
+                }
+            }
+            if let Some(o) = value["openai"].as_object() {
+                println!("\nOpenAI-compatible proxy: {}", text(&o["base_url"]));
+            }
+            for key in ["requires", "launch", "warning", "notes"] {
+                if let Some(line) = value[key].as_str() {
+                    println!("\n{line}");
+                }
             }
         }
         Command::Project {

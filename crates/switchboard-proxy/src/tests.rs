@@ -1374,3 +1374,153 @@ fn feature_order_does_not_change_the_observation() {
     let names = |u: &Usage| u.windows.iter().map(|w| w.name.clone()).collect::<Vec<_>>();
     assert_eq!(names(&one), names(&two));
 }
+
+// Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.
+#[tokio::test]
+async fn agents_reach_api_key_accounts_and_never_a_subscription_sign_in() {
+    let (_root, s) = store();
+    let key = add(
+        &s,
+        Provider::Claude,
+        AuthKind::ApiKey,
+        "key",
+        "synthetic-key",
+    );
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &key.id).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let router = Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(headers["x-api-key"], "synthetic-key");
+                "{}"
+            }
+        }),
+    );
+    let (url, up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let agent = p.agent_token().to_owned();
+    assert_ne!(
+        agent,
+        p.token(),
+        "the agent capability is not the session token"
+    );
+    assert_eq!(
+        agent,
+        agent_token(p.token()),
+        "stable across restarts with the token"
+    );
+    let url = format!("http://{}/claude/default/v1/messages", p.address());
+    let client = reqwest::Client::new();
+    // As `x-api-key` (Anthropic SDKs) and as a bearer.
+    let by_key = client
+        .post(&url)
+        .header("x-api-key", &agent)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_key.status(), 200);
+    let by_bearer = client
+        .post(&url)
+        .bearer_auth(&agent)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(by_bearer.status(), 200);
+    // The session token is never accepted as `x-api-key`, and nothing else gets in.
+    let wrong = client
+        .post(&url)
+        .header("x-api-key", p.token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), 401);
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    // A subscription sign-in selected: refused for agents before any provider call.
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let refused = client
+        .post(&url)
+        .header("x-api-key", &agent)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+    assert!(refused
+        .text()
+        .await
+        .unwrap()
+        .contains("subscription sign-in"));
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "the provider was never asked"
+    );
+    p.shutdown().await;
+    up.abort();
+}
+
+#[tokio::test]
+async fn chat_completions_reach_openai_with_an_api_key_only() {
+    let (_root, s) = store();
+    let key = add(
+        &s,
+        Provider::Codex,
+        AuthKind::ApiKey,
+        "key",
+        "synthetic-openai",
+    );
+    s.select(Provider::Codex, "default", &key.id).unwrap();
+    let router = Router::new().route(
+        "/v1/chat/completions",
+        post(|headers: HeaderMap| async move {
+            assert_eq!(headers["authorization"], "Bearer synthetic-openai");
+            "{\"choices\":[]}"
+        }),
+    );
+    let (url, up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let client = reqwest::Client::new();
+    let url = format!("http://{}/codex/default/v1/chat/completions", p.address());
+    let ok = client
+        .post(&url)
+        .bearer_auth(p.agent_token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 200);
+    assert!(ok.text().await.unwrap().contains("choices"));
+    // A ChatGPT sign-in has no Chat Completions: refused, even for Codex's own capability.
+    let sub = add(
+        &s,
+        Provider::Codex,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-chatgpt",
+    );
+    s.select(Provider::Codex, "default", &sub.id).unwrap();
+    let refused = client
+        .post(&url)
+        .bearer_auth(p.token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 404);
+    p.shutdown().await;
+    up.abort();
+}

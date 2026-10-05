@@ -66,6 +66,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  agentConnect(agent: string, pool: string): Promise<AgentConnection>;
+  launchAgent(agent: string, pool: string, workingDirectory: string): Promise<unknown>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
@@ -73,3 +75,7 @@ export interface Adapter {
   setAnalytics(enabled: boolean): Promise<LoginItem>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }
+/** One entry of catalog/agents.json (third-party agents, 0.6). */
+export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null }
+/** What `switchboard agents connect` returns: commands and snippets, never a key. */
+export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }

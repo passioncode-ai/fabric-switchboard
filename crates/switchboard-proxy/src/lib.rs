@@ -70,6 +70,8 @@ impl Default for Timeouts {
 struct Gateway {
     store: Arc<Store>,
     token: String,
+    /// The capability for third-party agents (`agent_token`): API-key accounts only.
+    agent_token: String,
     address: SocketAddr,
     client: reqwest::Client,
     slots: Arc<Semaphore>,
@@ -80,12 +82,24 @@ struct Gateway {
 pub struct ProxyHandle {
     address: SocketAddr,
     token: String,
+    agent_token: String,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 /// How long a start waits for its recorded port to be released by a previous owner.
 const REBIND_ATTEMPTS: u32 = 5;
 const REBIND_WAIT: Duration = Duration::from_millis(100);
+/// The third-party agents' capability, derived from the session token so it survives a restart
+/// with it and needs no file of its own. Knowing it never reveals the session token.
+pub fn agent_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("switchboard-agents:{token}").as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+/// Third-party agents may use only accounts the provider sells for any client: API keys.
+/// Subscription sign-ins (Claude.ai OAuth, a Claude setup token, ChatGPT) belong to the
+/// provider's own client (docs/AGENTS.md → Terms).
+pub const AGENT_SUBSCRIPTION_REFUSED: &str = "This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.";
 fn valid_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -153,9 +167,11 @@ impl ProxyHandle {
             .read_timeout(timeouts.read)
             .build()
             .map_err(|_| "HTTP client unavailable.")?;
+        let agent = agent_token(&token);
         let state = Gateway {
             store,
             token: token.clone(),
+            agent_token: agent.clone(),
             address,
             client,
             slots: Arc::new(Semaphore::new(16)),
@@ -178,6 +194,7 @@ impl ProxyHandle {
         Ok(Self {
             address,
             token,
+            agent_token: agent,
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
         })
@@ -187,6 +204,10 @@ impl ProxyHandle {
     }
     pub fn token(&self) -> &str {
         &self.token
+    }
+    /// The capability third-party agents present (as `x-api-key` or a bearer token).
+    pub fn agent_token(&self) -> &str {
+        &self.agent_token
     }
     /// Stops accepting, lets requests in flight finish until `deadline`, then cuts them.
     /// True when every connection ended by itself.
@@ -303,13 +324,26 @@ async fn relay(
             "Managed mode supports HTTP/SSE only.",
         );
     }
-    let expected = format!("Bearer {}", g.token);
-    let supplied = request
+    // Claude Code and Codex present the session token as a bearer; other agents present the
+    // agent token, as a bearer or as `x-api-key` (what Anthropic SDKs send for an API key).
+    let bearer = request
         .headers()
         .get("authorization")
-        .map(|x| x.as_bytes())
+        .and_then(|x| x.to_str().ok())
+        .and_then(|x| x.strip_prefix("Bearer "))
+        .unwrap_or_default()
+        .as_bytes()
+        .to_vec();
+    let key = request
+        .headers()
+        .get("x-api-key")
+        .map(|x| x.as_bytes().to_vec())
         .unwrap_or_default();
-    if !bool::from(supplied.ct_eq(expected.as_bytes())) {
+    let official = bool::from(bearer.ct_eq(g.token.as_bytes()));
+    let agent = !official
+        && (bool::from(bearer.ct_eq(g.agent_token.as_bytes()))
+            || bool::from(key.ct_eq(g.agent_token.as_bytes())));
+    if !official && !agent {
         return error(StatusCode::UNAUTHORIZED, "Local capability required.");
     }
     let query = request.uri().query().map(str::to_owned);
@@ -324,7 +358,8 @@ async fn relay(
     }
     let provider = match (provider.as_str(), operation.as_str()) {
         ("claude", "messages" | "messages/count_tokens") => Provider::Claude,
-        ("codex", "responses") => Provider::Codex,
+        // Chat Completions for the many agents that speak only that (OpenAI API keys only).
+        ("codex", "responses" | "chat/completions") => Provider::Codex,
         _ => return error(StatusCode::NOT_FOUND, "Unsupported provider operation."),
     };
     let permit = match g.slots.clone().try_acquire_owned() {
@@ -345,6 +380,15 @@ async fn relay(
             )
         }
     };
+    if agent && account.kind != AuthKind::ApiKey {
+        return error(StatusCode::FORBIDDEN, AGENT_SUBSCRIPTION_REFUSED);
+    }
+    if operation == "chat/completions" && account.kind != AuthKind::ApiKey {
+        return error(
+            StatusCode::NOT_FOUND,
+            "Chat Completions needs an OpenAI API-key account in this pool.",
+        );
+    }
     let (parts, body) = request.into_parts();
     let bytes =
         match tokio::time::timeout(Duration::from_secs(30), to_bytes(body, BODY_LIMIT)).await {
@@ -365,7 +409,7 @@ async fn relay(
             if query.is_some() { "?beta=true" } else { "" }
         ),
         (Provider::Codex, AuthKind::OAuth) => format!("{}/backend-api/codex/responses", g.chatgpt),
-        (Provider::Codex, _) => format!("{}/v1/responses", g.openai),
+        (Provider::Codex, _) => format!("{}/v1/{}", g.openai, operation),
     };
     let mut headers = HeaderMap::new();
     let request_hop_fields = connection_fields(&parts.headers);

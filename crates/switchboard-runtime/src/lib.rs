@@ -1,4 +1,5 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
+pub mod agent_catalog;
 pub mod agents;
 pub mod analytics;
 mod blocking;
@@ -133,6 +134,21 @@ pub enum Operation {
     },
     RemoveProject {
         pool: String,
+    },
+    /// The third-party agent catalog (`agent_catalog`).
+    AgentCatalog,
+    /// How to connect one agent to `switchboard mcp` and, when it can, the proxy's `pool`.
+    AgentConnect {
+        agent: String,
+        pool: String,
+    },
+    /// The agents' proxy capability, for an agent's `key_cmd` or an `export`.
+    AgentKey,
+    /// Starts a `launch`-level agent in a folder on the pool's API-key account.
+    LaunchAgent {
+        agent: String,
+        pool: String,
+        working_directory: PathBuf,
     },
     ApplyProject {
         path: PathBuf,
@@ -311,6 +327,9 @@ impl Runtime {
         if matches!(
             operation,
             Operation::Snapshot
+                | Operation::AgentCatalog
+                | Operation::AgentConnect { .. }
+                | Operation::AgentKey
                 | Operation::Status
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
@@ -1166,6 +1185,40 @@ async fn execute(
                 monitor::check(&store, native, refresh_state, &id, None, gate).await?
             ))
         }
+        Operation::AgentCatalog => Ok(agent_catalog::catalog()),
+        Operation::AgentConnect { agent, pool } => {
+            let address = runtime
+                .map(|r| r.proxy.address().to_string())
+                .or_else(|| load_proxy_record(root).map(|r| format!("127.0.0.1:{}", r.port)));
+            let cli = launch::agent_cli()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "switchboard".into());
+            agent_catalog::connect(&agent, address.as_deref(), &pool, &cli)
+        }
+        Operation::AgentKey => {
+            let token = match runtime {
+                Some(r) => r.proxy.token().to_owned(),
+                None => load_proxy_record(root)
+                    .map(|r| r.token)
+                    .ok_or("Start the desktop app or 'switchboard serve' once first.")?,
+            };
+            Ok(json!({"key": switchboard_proxy::agent_token(&token)}))
+        }
+        Operation::LaunchAgent {
+            agent,
+            pool,
+            working_directory,
+        } => {
+            let runtime = needs_owner()?;
+            launch::launch_agent(
+                root,
+                &store,
+                &runtime.proxy,
+                &agent,
+                &pool,
+                &working_directory,
+            )
+        }
         Operation::Launch {
             id,
             mode,
@@ -1928,6 +1981,39 @@ mod owner_tests {
         third.restore_at_start();
         assert_eq!(third.store.snapshot().unwrap().accounts.len(), 1);
         assert!(third.execute(Operation::Backups).await.unwrap()["restored_at_start"].is_null());
+    }
+    #[tokio::test]
+    async fn a_third_party_agent_never_starts_on_a_subscription_account() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let oauth = save(&runtime.store, "synthetic-a", "agents");
+        runtime
+            .store
+            .select(Provider::Claude, "agents", &oauth.id)
+            .unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let launch = |agent: &str| Operation::LaunchAgent {
+            agent: agent.into(),
+            pool: "agents".into(),
+            working_directory: repo.path().to_owned(),
+        };
+        assert_eq!(
+            runtime.execute(launch("goose")).await.unwrap_err(),
+            switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED
+        );
+        assert!(runtime
+            .execute(launch("no-such-agent"))
+            .await
+            .unwrap_err()
+            .contains("Unknown agent"));
+        // An MCP-only agent has nothing to launch.
+        assert!(runtime.execute(launch("cursor-cli")).await.is_err());
+        // The key is derived, never stored, and matches what the proxy accepts.
+        let key = runtime.execute(Operation::AgentKey).await.unwrap();
+        assert_eq!(
+            key["key"],
+            switchboard_proxy::agent_token(runtime.proxy.token())
+        );
     }
     #[tokio::test]
     async fn the_account_the_cli_uses_cannot_join_a_project() {
