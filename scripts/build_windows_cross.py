@@ -67,11 +67,12 @@ def main():
     outputs = (folder, Path(str(folder) + '.zip'), folder.parent / (folder.name + '-receipt.json'))
     if any(path.exists() for path in outputs):
         raise SystemExit('Output already exists; preserve folder, ZIP and receipt before rebuilding.')
-    run(['npm', 'exec', 'tauri', 'build', '--', '--runner', 'cargo-xwin', '--target', TARGET,
-         '--bundles', 'nsis', '--no-sign', '--ci', '--', '--locked'], env)
+    # The CLI first: the installer embeds it (src-tauri/tauri.windows.conf.json resources, SB-05).
     cli_env = env.copy()
     cli_env['RUSTFLAGS'] = '-C target-feature=+crt-static'
     run(['cargo', 'xwin', 'build', '--release', '--locked', '--target', TARGET, '-p', 'switchboard-cli'], cli_env)
+    run(['npm', 'exec', 'tauri', 'build', '--', '--runner', 'cargo-xwin', '--target', TARGET,
+         '--bundles', 'nsis', '--no-sign', '--ci', '--', '--locked'], env)
     if source_commit() != commit:
         raise SystemExit('Source changed during build; no artifact receipt issued.')
     base = ROOT / 'target' / TARGET / 'release'

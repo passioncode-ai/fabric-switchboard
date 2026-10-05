@@ -209,6 +209,23 @@ jobs:
           npm exec tauri bundle -- --bundles nsis --ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # SB-05: the installer puts switchboard.exe beside the desktop executable, where the app
+      # finds it for agents (agents.rs bundled_cli). Installed silently into a scratch folder and
+      # removed again; the signed installer of the next step is the same file.
+      - name: The installer carries the CLI
+        run: |
+          $setup = (Get-ChildItem target\release\bundle\nsis -Filter *-setup.exe).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'switchboard-install-check'
+          $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          foreach ($name in 'fabric-switchboard.exe', 'switchboard.exe') {
+            if (-not (Test-Path (Join-Path $dir $name))) { throw "$name is not installed" }
+          }
+          & (Join-Path $dir 'switchboard.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'installed CLI did not run' }
+          $uninstaller = Join-Path $dir 'uninstall.exe'
+          if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait }
+
       # Signing pass 2: the installer itself.
       - name: Sign the installer
         if: env.SIGNING == 'true'
