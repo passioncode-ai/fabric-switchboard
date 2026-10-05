@@ -706,3 +706,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** browser demo 2026-10-05: five steps, targets `+ Add account`, `.rotation-bar`, `+ New project`; finish stores `switchboard.tour`; About shows it again; Escape closes.
 **Product:** unobserved
 **Traces:** SCN-001
+
+## SCN-036 — Get new versions without doing anything
+**Persona:** P-01
+**Goal:** Every installed Switchboard moves to each new release on its own, with nothing to download, approve or reinstall, and nothing lost on the way.
+**Preconditions:** the installed app from a release (a development build, the smoke check and a copy macOS runs from a translocated path never check).
+**Entry point:** none — it runs on its own; About → *Running in the background* shows it; the menu-bar icon offers the restart.
+**Steps:**
+1. Install and open Switchboard → about 90 s after start, and every six hours after, it reads `latest.json` of the newest GitHub release.
+2. A newer version is announced → it downloads in the background and is checked against the update key compiled into the app and the version its signature names; a package that fails is discarded (“The downloaded update did not pass its signature check and was discarded. Switchboard tries again within the hour.”).
+3. macOS: the verified version replaces the app bundle at once; Windows: the installer waits for the app to quit. About reads “Version {version} is ready. It starts the next time Switchboard opens, or restart now.”; the menu-bar menu gains *Restart to update to {version}*.
+4. Do nothing → the next start (a reboot, a login, a Quit and reopen) runs the new version. Or press *Restart to update* → the owner drains (LC-01) and the new version starts — in the background if the window was hidden.
+5. About → uncheck *Install updates automatically* → “Automatic updates are off. Switchboard will not check for new versions.”; the choice is saved in `<data>/auto-update` and travels with backups.
+**Alt paths:** An app the person cannot replace without an administrator password (macOS) is not installed in the background; About says “Restarting asks for an administrator password to replace the app.” and *Restart to update* asks for it; a refused password reads “The update needs an administrator password to replace Switchboard in this folder. It was not installed.” No network, a GitHub outage or a failed download reads “Could not check for updates…” / “Could not download the update…” and retries within the hour. A quit by logout or shutdown (a signal) starts no installer on Windows; the next ordinary quit does. A copy run from a translocated path reads “Move Fabric Switchboard to the Applications folder to receive updates.”
+**Expected result:** the person runs the newest release without acting; accounts, settings, connections and backups are untouched by an update.
+**UI elements:** About residency panel: checkbox “Install updates automatically”, status line, button “Restart to update”; tray item “Restart to update to {version}”.
+**States covered:** unavailable (development, translocated), off, checking, current, downloading, ready (installed / needs a password), failed (check, download, signature, install), restarting.
+**Errors & recovery:** every failure keeps the running version and retries within the hour; nothing is half-installed — macOS swaps the bundle outside the quit path, Windows installs in NSIS update mode, which never uninstalls and never deletes the app data.
+**Status:** draft
+**Meaning:** operator request 2026-10-05 («автоматический механизм обновления по дефолту был включен для всех версий… ничего не делая, подтягивать новые версии»).
+**Coverage:** `updates::tests` (on by default, saved switch, unavailable copies, relaunch keeps `--background`, bundle replaceable without a password), `residency::tests::the_tray_names_the_version_it_restarts_into`, `scripts/test-ui-logic.mjs` (status line and restart offer), `scripts/test_updater_artifacts.py` (latest.json names only files of the release with their own signatures; the macOS archive layout), the macOS package rebuilt from the installed notarized 0.6.0 app and verified by codesign, stapler and Gatekeeper on the unpacked copy (2026-10-05). The first live update is the release after the one that ships this: acceptance (SB-15).
+**Product:** unobserved
+**Traces:** SB-55, LC-01, LC-09, SCN-030, SCN-033

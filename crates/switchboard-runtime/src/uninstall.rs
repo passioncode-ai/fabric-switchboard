@@ -25,6 +25,7 @@ const OWNED: &[&str] = &[
     "limit-evidence.json",
     "backup-id",
     "login-item",
+    "auto-update",
     "homes",
     "runtimes",
     "logins",
@@ -327,6 +328,7 @@ mod tests {
         }
         let (_temp, root, vault) = setup();
         std::fs::write(root.join("login-item"), "on\n").unwrap();
+        std::fs::write(root.join("auto-update"), "off\n").unwrap();
         let plan = uninstall(
             &root,
             vault.clone(),
@@ -345,6 +347,11 @@ mod tests {
             .as_array()
             .unwrap()
             .contains(&json!("login-item")));
+        // SB-55: the auto-update choice is Switchboard's own file too (it travels in backups).
+        assert!(plan["data_entries"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("auto-update")));
         let done = uninstall(
             &root,
             vault,

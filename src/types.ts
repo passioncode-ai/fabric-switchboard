@@ -71,5 +71,22 @@ export interface Adapter {
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<LoginItem>;
   setAnalytics(enabled: boolean): Promise<LoginItem>;
+  /** Automatic updates (SB-55): on by default; unavailable outside the installed app. */
+  updateStatus(): Promise<UpdateStatus>;
+  setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;
+  /** Quits through the drain and starts the new version; refused when nothing is ready. */
+  restartToUpdate(): Promise<UpdateStatus>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }
+export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';
+export interface UpdateStatus {
+  available: boolean;
+  reason: string | null;
+  enabled: boolean;
+  state: UpdatePhase;
+  current: string;
+  version: string | null;
+  checked_at: number | null;
+  error: string | null;
+  needs_permission: boolean;
+}

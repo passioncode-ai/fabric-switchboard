@@ -1,5 +1,5 @@
 import { isAbsoluteProjectPath } from './platform';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, LoginInput, Snapshot } from './types';
+import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, LoginInput, Snapshot, UpdateStatus } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -72,6 +72,7 @@ export function createDemoAdapter(): Adapter {
   }
   const signInRequired = new Set(['demo-claude-meadow']);
   const loginItem = { available: true, enabled: true };
+  const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, checked_at: now(), error: null, needs_permission: false };
   const analytics = { available: true, enabled: true };
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   return {
@@ -202,6 +203,9 @@ export function createDemoAdapter(): Adapter {
     async backupNow() { await pause(); const info = { file: `switchboard-backup-${now()}.json`, created_at: now(), accounts: state.accounts.length }; backups.unshift(info); backups.splice(10); return structuredClone(info); },
     async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
     async loginItem() { return { ...loginItem }; },
+    async updateStatus() { return { ...update }; },
+    async setAutoUpdate(enabled) { await pause(); update.enabled = enabled; return { ...update }; },
+    async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },
     async analytics() { return { ...analytics }; },
     async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },

@@ -16,6 +16,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - After a reinstall or `switchboard uninstall`, the first start restores the newest backup on its
   own and says so; an empty account list with a backup beside it offers *Restore from backup*.
 
+### Automatic updates
+
+- Switchboard now updates itself. About 90 seconds after it starts, and every six hours, it
+  checks for a new release, downloads it in the background, verifies its signature and installs
+  it; the new version runs from the next start, or at once with *Restart to update* in the
+  menu-bar menu or About. On by default; About → *Install updates automatically* turns it off.
+- An update never touches your accounts, settings, connections or backups: on Windows the
+  installer runs in update mode, which never uninstalls and never deletes the app data.
+- This version is the first that can update itself; installing it is the last manual download.
+
 ## 0.6.0 — 2026-10-05
 
 The first stable release. A project can now keep its own accounts: only sessions from its folders

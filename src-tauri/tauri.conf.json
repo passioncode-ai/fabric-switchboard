@@ -44,5 +44,17 @@
     "macOS": {
       "minimumSystemVersion": "14.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU3MTg1MDlCMTQ0MUI4OTcKUldTWHVFRVVtMUFZNXc5Ny9aeHFHYmFLdUhBVU9lRG4vVzlGZ3VUR1hVd0hueWtXL1FFdG1WT0QK",
+      "endpoints": [
+        "https://github.com/passioncode-ai/fabric-switchboard/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
