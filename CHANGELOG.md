@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Windows: the installer now puts `switchboard.exe` beside the desktop app, so the Agents panel
+  can show its path and the commands that connect Claude Code and Codex to it.
+
 ## 0.5.5-beta.1 — 2026-10-05
 
 Switchboard now stays running with its window closed and opens at login, its account list is

@@ -1,9 +1,19 @@
 {
   "bundle": {
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "windows": {
-      "nsis": {"installMode": "currentUser"},
-      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true}
+      "nsis": {
+        "installMode": "currentUser"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    },
+    "resources": {
+      "../target/x86_64-pc-windows-msvc/release/switchboard.exe": "switchboard.exe"
     }
   }
 }
