@@ -6,7 +6,8 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import agentCatalog from '../catalog/agents.json';
+import type { Account, Adapter, AgentConnection, AgentInfo, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -364,7 +365,65 @@ function renderAgents(main: HTMLElement) {
     if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button('Link switchboard into ~/.local/bin', () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, 'The command-line tool is linked. Agents and plugins can now start switchboard mcp.', 'link-cli'), 'button primary', 'link-cli'));
     setup.append(copyable('Claude Code', agentSetup.commands.claude_code, 'copy-claude'), copyable('Codex CLI', agentSetup.commands.codex, 'copy-codex'), copyable('Claude Code plugin (tools and the switching-accounts skill)', agentSetup.commands.claude_plugin, 'copy-plugin'));
   }
-  main.append(setup);
+  main.append(setup, otherAgents());
+}
+/** Third-party agents (catalog/agents.json, operator request 2026-10-05): how each connects. */
+function otherAgents() {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'other-agents-heading');
+  const heading = el('h2', '', 'Other agents'); heading.id = 'other-agents-heading';
+  section.append(heading, el('p', '', 'Hermes, Kilo Code, Cline, Goose, OpenCode and the other popular agents connect to switchboard mcp. Those that accept a custom endpoint can also send their requests through Switchboard, which switches accounts for them. Subscription sign-ins stay with Claude Code and Codex, as the providers require: other agents use API-key accounts.'));
+  const groups: [AgentInfo['level'], string][] = [['launch', 'Launch from Switchboard'], ['proxy', 'Through Switchboard, set up once in the agent'], ['mcp', 'Tools only (switchboard mcp)']];
+  const agents = (agentCatalog as { agents: AgentInfo[] }).agents;
+  for (const [level, title] of groups) {
+    const items = agents.filter((agent) => agent.level === level); if (!items.length) continue;
+    section.append(el('h3', 'pool-heading', `${title} · ${items.length}`));
+    const list = el('div', 'agent-grid');
+    for (const agent of items) {
+      const card = el('div', 'agent-chip');
+      const name = el('strong', '', agent.name); card.append(name);
+      if (agent.openrouter_rank) card.append(el('span', 'badge muted', `#${agent.openrouter_rank} on OpenRouter`));
+      card.append(button('Set up', () => void agentDialog(agent), 'text-button', `agent-${agent.id}`));
+      list.append(card);
+    }
+    section.append(list);
+  }
+  section.append(el('p', 'form-note', 'Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents list | connect | launch.'));
+  return section;
+}
+async function agentDialog(agent: AgentInfo) {
+  const context = openDialog(`Set up ${agent.name}`, agent.level === 'mcp' ? 'This agent can use Switchboard\'s tools; its model requests go to its own service.' : 'Register Switchboard\'s tools, then point the agent at Switchboard\'s proxy for one pool.');
+  const pools = [...new Set(snapshot!.accounts.map((a) => a.pool))];
+  const pool = select((pools.length ? pools : ['default']).map((p) => [p, projectOf(p) ? `${p} (project ${projectOf(p)!.name})` : p]));
+  const out = el('div', 'agent-setup');
+  const show = async () => {
+    out.replaceChildren(el('p', 'form-note', 'Reading the setup…'));
+    let info: AgentConnection;
+    try { info = await adapter.agentConnect(agent.id, pool.value); } catch (error) { out.replaceChildren(el('p', 'usage-error', safeError(error))); return; }
+    out.replaceChildren();
+    if (info.mcp.add_command) out.append(copyable('Register the tools', info.mcp.add_command, `mcp-${agent.id}`));
+    if (info.mcp.config_snippet) out.append(copyable(`Or add to ${info.mcp.config_path ?? 'its config'}`, info.mcp.config_snippet, `mcp-file-${agent.id}`));
+    if (!info.mcp.supported) out.append(el('p', 'form-note', 'This agent has no MCP support.'));
+    if (info.anthropic) {
+      const env = Object.entries(info.anthropic.env).map(([k, v]) => `export ${k}="${v}"`).join('\n');
+      if (env) out.append(copyable('Environment', env, `env-${agent.id}`));
+      if (info.anthropic.config_snippet) out.append(copyable('Provider in its config', info.anthropic.config_snippet, `cfg-${agent.id}`));
+      else if (!env) out.append(copyable('Anthropic-compatible endpoint', info.anthropic.base_url, `base-${agent.id}`));
+    }
+    if (info.openai) out.append(copyable('OpenAI-compatible endpoint', info.openai.base_url, `oai-${agent.id}`));
+    if (info.key_command) out.append(copyable('Key (prints it; nothing to store)', info.key_command, `key-${agent.id}`));
+    for (const line of [info.requires, info.warning, info.notes]) if (line) out.append(el('p', 'form-note', line));
+    if (info.launch) out.append(copyable('Launch from the command line', info.launch, `launch-cmd-${agent.id}`));
+  };
+  pool.addEventListener('change', () => void show());
+  const grid = el('div', 'form-grid'); grid.append(field('Pool', pool, 'The pool whose selected API-key account this agent will use.'));
+  context.body.append(grid, out);
+  if (agent.level !== 'mcp' && agent.binary) {
+    const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
+    context.body.append(field('Launch in folder', dir, 'Starts the agent in Terminal in this folder, on the pool\'s API-key account.'));
+    context.actions.append(submit(`Launch ${agent.name}`));
+    context.form.addEventListener('submit', (event) => { event.preventDefault(); lastWorkingDirectory = dir.value.trim(); void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, dir.value.trim()), `${agent.name} launched in Terminal.`); });
+  }
+  void show();
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 // ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──

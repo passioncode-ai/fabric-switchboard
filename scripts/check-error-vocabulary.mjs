@@ -35,6 +35,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
+  // has one, so this never reaches the UI.
+  "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',

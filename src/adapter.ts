@@ -33,6 +33,8 @@ export const nativeAdapter: Adapter = {
   linkCli: () => invoke('link_cli'),
   saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds }),
   removeProject: (pool) => invoke('remove_project', { pool }),
+  agentConnect: (agent, pool) => readWithDeadline(invoke('agent_connect', { agent, pool })),
+  launchAgent: (agent, pool, workingDirectory) => invoke('launch_agent', { agent, pool, workingDirectory }),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
@@ -42,6 +44,10 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  "This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.",
+  'Select an API-key account in this pool first.',
+  'Unknown agent. `switchboard agents list` names them.',
+  'This agent is set up in its own config file; `switchboard agents connect` shows how.',
   "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.",
   'Name the project.',
   'Add between one and sixteen project folders.',

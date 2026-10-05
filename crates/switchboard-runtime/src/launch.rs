@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 #[cfg(any(target_os = "macos", test))]
 use sha2::{Digest, Sha256};
 use std::{
@@ -145,12 +145,22 @@ fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 fn binary(provider: Provider) -> Result<PathBuf, String> {
-    let name = provider.as_str();
+    find_program(provider.as_str())
+        .ok_or_else(|| "Provider CLI not found. Install the official CLI and retry.".into())
+}
+/// An executable named `name` on PATH or in the usual per-user and Homebrew folders.
+pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|s| std::env::split_paths(&s).collect())
         .unwrap_or_default();
     if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/bin"));
+        let home = PathBuf::from(home);
+        dirs.extend([
+            home.join(".local/bin"),
+            home.join(".cargo/bin"),
+            home.join(".bun/bin"),
+            home.join(".npm-global/bin"),
+        ]);
     }
     dirs.extend([
         PathBuf::from("/opt/homebrew/bin"),
@@ -170,22 +180,18 @@ fn binary(provider: Provider) -> Result<PathBuf, String> {
         for extension in ["exe", "cmd", "ps1"] {
             let path = dir.join(format!("{name}.{extension}"));
             if path.is_file() {
-                return path
-                    .canonicalize()
-                    .map_err(|_| "Provider CLI path unavailable.".into());
+                return path.canonicalize().ok();
             }
         }
         #[cfg(not(windows))]
         {
             let path = dir.join(name);
             if path.is_file() {
-                return path
-                    .canonicalize()
-                    .map_err(|_| "Provider CLI path unavailable.".into());
+                return path.canonicalize().ok();
             }
         }
     }
-    Err("Provider CLI not found. Install the official CLI and retry.".into())
+    None
 }
 #[cfg(not(windows))]
 fn script(
@@ -797,6 +803,64 @@ pub(crate) fn project_allows(
         }
     }
     Ok(())
+}
+/// Starts a third-party agent the catalog marks `launch` (configured by environment alone) in
+/// `working_directory`, pointed at the proxy's pool with the agents' capability. Only an API-key
+/// account may serve it, and projects keep their folders (operator request 2026-10-05).
+pub fn launch_agent(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    agent: &str,
+    pool: &str,
+    working_directory: &Path,
+) -> Result<Value, String> {
+    let profile = crate::agent_catalog::launchable(agent)?;
+    if !working_directory.is_absolute() {
+        return Err("Choose an existing project directory.".into());
+    }
+    let working_directory = working_directory
+        .canonicalize()
+        .map_err(|_| "Choose an existing project directory.")?;
+    let private_root = root
+        .canonicalize()
+        .map_err(|_| "Managed home unavailable.")?;
+    if !working_directory.is_dir() || working_directory.starts_with(&private_root) {
+        return Err("Choose an existing project directory.".into());
+    }
+    let (account, _) = store
+        .route(Provider::Claude, pool)
+        .map_err(|_| "Select an API-key account in this pool first.".to_string())?;
+    if account.kind != AuthKind::ApiKey {
+        return Err(switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED.into());
+    }
+    project_allows(&store.snapshot()?, &account, &working_directory)?;
+    let program = find_program(&profile.binary).ok_or_else(|| {
+        format!(
+            "{} is not installed. Install it first, then launch it again.",
+            profile.name
+        )
+    })?;
+    let homes = root.join("runtimes");
+    private_dir(&homes)?;
+    let home = homes.join(format!("agent-{}-{pool}", profile.id));
+    private_dir(&home)?;
+    let base = format!("http://{}/claude/{pool}{}", proxy.address(), profile.suffix);
+    let mut env = BTreeMap::from([(
+        "SWITCHBOARD_SESSION".to_string(),
+        format!("managed:claude:{pool}"),
+    )]);
+    if let (Some(base_env), Some(key_env)) = (&profile.base_env, &profile.key_env) {
+        env.insert(base_env.clone(), base);
+        env.insert(key_env.clone(), proxy.agent_token().to_owned());
+    }
+    env.extend(profile.extra_env.clone());
+    let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
+    let content = script(&home, &program, &args, &env, false, &working_directory);
+    open_terminal(&home, &content)?;
+    Ok(
+        json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
+    )
 }
 pub fn launch(
     root: &Path,

@@ -1,0 +1,1452 @@
+{
+  "schema": 1,
+  "as_of": "2026-10-05",
+  "research": "docs/research/agents-2026-10-05.md",
+  "agents": [
+    {
+      "id": "hermes",
+      "name": "Hermes Agent",
+      "maker": "Nous Research",
+      "kind": "cli",
+      "url": "https://github.com/NousResearch/hermes-agent",
+      "license": "MIT",
+      "openrouter_rank": 1,
+      "install": "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+      "binary": "hermes",
+      "headless": "hermes -z \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "hermes mcp add switchboard --command switchboard --args mcp",
+        "config_path": "~/.hermes/config.yaml",
+        "config_snippet": "mcp_servers:\n  switchboard:\n    command: \"switchboard\"\n    args: [\"mcp\"]\n"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": "providers:\n  switchboard:\n    api: \"{base}\"\n    key_cmd: \"{key_cmd}\"\n    transport: anthropic_messages\n",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "providers.<name>.transport: chat_completions (CC) or codex_responses (R). Which path is appended for Responses is unverified."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": "Adopts external logins by default (reads Claude Code's credential files): set auth.adopt_external_logins: false. Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
+      "notes": "A trailing /v1 is stripped and /v1/messages appended; key sent as x-api-key. Key fields: key_env / api_key / key_cmd. An ANTHROPIC_BASE_URL env var is unverified.",
+      "sources": [
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/integrations/providers.md#L1338-L1354",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/agent/anthropic_adapter.py#L374-L386",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/agent/anthropic_adapter.py#L455-L469",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/user-guide/features/mcp.md#L33-L39",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/reference/cli-commands.md#L125-L127",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/getting-started/installation.md#L45",
+        "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/integrations/providers.md#L160-L197"
+      ]
+    },
+    {
+      "id": "kilo",
+      "name": "Kilo Code + Kilo CLI",
+      "maker": "Kilo-Org",
+      "kind": "cli+ide",
+      "url": "https://github.com/Kilo-Org/kilocode",
+      "license": "MIT",
+      "openrouter_rank": 2,
+      "install": "npm install -g @kilocode/cli",
+      "binary": "kilo",
+      "headless": "kilo run --auto \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.config/kilo/kilo.json",
+        "config_snippet": "{ \"mcp\": { \"switchboard\": { \"type\": \"local\", \"command\": [\"switchboard\", \"mcp\"], \"enabled\": true } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "/v1",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "@ai-sdk/openai-compatible speaks CC; @ai-sdk/openai speaks Responses with baseURL …/codex/<pool>/v1."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Declare a custom provider with \"npm\": \"@ai-sdk/anthropic\", options.baseURL and options.apiKey (or env); the exact top-level key is not given in the research, so no snippet. Key sent as x-api-key. A model entry needs limit; {env:VAR} resolves only in global or trusted config. The extension reads the same files.",
+      "sources": [
+        "https://github.com/Kilo-Org/kilocode/blob/831805118a8c896cc8f55449bea9435e51e6e507/packages/kilo-docs/pages/ai-providers/openai-compatible.md",
+        "https://github.com/Kilo-Org/kilocode/blob/831805118a8c896cc8f55449bea9435e51e6e507/packages/core/src/plugin/provider/anthropic.ts#L19-L24",
+        "https://github.com/Kilo-Org/kilocode/blob/831805118a8c896cc8f55449bea9435e51e6e507/packages/kilo-docs/pages/automate/mcp/using-in-cli.md#L16-L70",
+        "https://github.com/Kilo-Org/kilocode/blob/831805118a8c896cc8f55449bea9435e51e6e507/packages/kilo-docs/pages/code-with-ai/platforms/cli.md#L575-L613",
+        "https://github.com/Kilo-Org/kilocode/blob/831805118a8c896cc8f55449bea9435e51e6e507/packages/kilo-docs/markdoc/partials/install-cli.md#L6"
+      ]
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "maker": "Anthropic",
+      "kind": "cli+ide",
+      "url": "https://code.claude.com/docs/en/setup",
+      "license": "proprietary",
+      "openrouter_rank": 3,
+      "install": "curl -fsSL https://claude.ai/install.sh | bash",
+      "binary": "claude",
+      "headless": "claude -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "claude mcp add --scope user switchboard -- switchboard mcp",
+        "config_path": "~/.claude.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_BASE_URL",
+        "key_env": "ANTHROPIC_API_KEY",
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": true,
+      "level": "launch",
+      "subscription_warning": null,
+      "notes": "Switchboard's primary, already-integrated client; also VS Code/JetBrains extensions and a desktop app. ANTHROPIC_API_KEY goes out as X-Api-Key, ANTHROPIC_AUTH_TOKEN as Bearer. With only ANTHROPIC_BASE_URL set the claude.ai login stays active. The only subscription-eligible Anthropic client.",
+      "sources": [
+        "https://code.claude.com/docs/en/env-vars",
+        "https://code.claude.com/docs/en/llm-gateway-protocol",
+        "https://code.claude.com/docs/en/llm-gateway",
+        "https://code.claude.com/docs/en/mcp",
+        "https://code.claude.com/docs/en/headless",
+        "https://code.claude.com/docs/en/setup"
+      ]
+    },
+    {
+      "id": "cline",
+      "name": "Cline + Cline CLI",
+      "maker": "Cline",
+      "kind": "cli+ide",
+      "url": "https://github.com/cline/cline",
+      "license": "Apache-2.0",
+      "openrouter_rank": 4,
+      "install": "npm install -g cline",
+      "binary": "cline",
+      "headless": "cline \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.cline/data/settings/cline_mcp_settings.json",
+        "config_snippet": "{ \"mcpServers\": { \"switchboard\": { \"command\": \"switchboard\", \"args\": [\"mcp\"], \"disabled\": false, \"autoApprove\": [] } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "/v1",
+        "config_snippet": "cline auth -p anthropic -k {key} -m <model> -b {base}",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "Provider openai-compatible speaks CC; openai-native speaks Responses. Providers live in ~/.cline/data/settings/providers.json."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "CLI uses createAnthropic, so x-api-key. In the extension it is the \"Use custom base URL\" checkbox; that the extension takes the same path is unverified. `cline mcp` opens a wizard; CLINE_MCP_SETTINGS_PATH overrides the MCP file.",
+      "sources": [
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/apps/cli/src/commands/auth.ts#L88-L92",
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/sdk/packages/llms/src/providers/vendors/anthropic.ts#L18-L26",
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/sdk/packages/shared/src/storage/paths.ts#L81",
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/docs/cli/cli-reference.mdx#L14-L48",
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/sdk/packages/llms/src/providers/builtins.ts#L608-L623",
+        "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/docs/getting-started/installing-cline.mdx#L95"
+      ]
+    },
+    {
+      "id": "freebuff",
+      "name": "Freebuff",
+      "maker": "Codebuff",
+      "kind": "cli+desktop",
+      "url": "https://github.com/CodebuffAI/freebuff",
+      "license": null,
+      "openrouter_rank": 5,
+      "install": "npm install -g freebuff",
+      "binary": "freebuff",
+      "headless": null,
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.agents/mcp.json",
+        "config_snippet": "{ \"mcpServers\": { \"switchboard\": { \"command\": \"switchboard\", \"args\": [\"mcp\"] } } }"
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "License inconsistent: repo LICENSE says Apache-2.0, npm says MIT. No headless mode. Models come from Freebuff's own backend (URL fixed at build time). MCP files are also read from {cwd}/.agents/; whether Freebuff's root agent receives the servers is unverified. Needs a Freebuff account.",
+      "sources": [
+        "https://github.com/CodebuffAI/freebuff/blob/703e9aa2877b1196b52e5c7791cb73bab2c8889f/README.md#L1-L75",
+        "https://github.com/CodebuffAI/freebuff/blob/703e9aa2877b1196b52e5c7791cb73bab2c8889f/sdk/src/agents/load-mcp-config.ts#L89-L101",
+        "https://github.com/CodebuffAI/freebuff/blob/703e9aa2877b1196b52e5c7791cb73bab2c8889f/cli/src/cli-args.ts#L51-L72",
+        "https://github.com/CodebuffAI/freebuff/blob/703e9aa2877b1196b52e5c7791cb73bab2c8889f/sdk/src/constants.ts#L9-L20",
+        "https://github.com/CodebuffAI/freebuff/blob/703e9aa2877b1196b52e5c7791cb73bab2c8889f/freebuff/cli/release/package.json#L5"
+      ]
+    },
+    {
+      "id": "omp",
+      "name": "omp (oh-my-pi)",
+      "maker": "can1357",
+      "kind": "cli",
+      "url": "https://github.com/can1357/oh-my-pi",
+      "license": "MIT",
+      "openrouter_rank": 6,
+      "install": "brew install can1357/tap/omp",
+      "binary": "omp",
+      "headless": "omp -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.omp/agent/mcp.json",
+        "config_snippet": "{ \"mcpServers\": { \"switchboard\": { \"type\": \"stdio\", \"command\": \"switchboard\", \"args\": [\"mcp\"] } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_BASE_URL",
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "models.yml api: openai-completions (CC) or openai-responses (R)."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
+      "notes": "Alternative: models.yml providers.<id>.baseUrl with api: anthropic-messages; set auth: apiKey to avoid OAuth-style shaping. A trailing /v1 is stripped and /v1/messages appended; Bearer to non-Anthropic hosts. The key env var name is not given in the research. No CLI add command (/mcp add in the TUI); omp also imports servers from ~/.claude.json, ~/.codex/config.toml and ~/.cursor/mcp.json. Launch by Switchboard waits until its key variable and base path are verified.",
+      "sources": [
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/docs/models.md#L50-L57",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/packages/ai/src/utils/anthropic-auth.ts#L30-L37",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/docs/models.md#L466-L472",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/packages/ai/src/providers/anthropic.ts#L409-L424",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/docs/models.md#L148",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/docs/mcp-config.md#L15-L44",
+        "https://github.com/can1357/oh-my-pi/blob/1c0993c3d12e70042169a951663bb2702e2c0a9e/README.md#L40-L54"
+      ]
+    },
+    {
+      "id": "codex",
+      "name": "Codex CLI",
+      "maker": "OpenAI",
+      "kind": "cli",
+      "url": "https://github.com/openai/codex",
+      "license": "Apache-2.0",
+      "openrouter_rank": 7,
+      "install": "brew install --cask codex",
+      "binary": "codex",
+      "headless": "codex exec \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "codex mcp add switchboard -- switchboard mcp",
+        "config_path": "~/.codex/config.toml",
+        "config_snippet": "[mcp_servers.switchboard]\ncommand = \"switchboard\"\nargs = [\"mcp\"]\n"
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": false,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "Responses only; wire_api = \"chat\" is rejected. config.toml: model_provider = \"switchboard\" and [model_providers.switchboard] base_url = \"http://127.0.0.1:<port>/codex/<pool>/v1\", env_key = \"SWITCHBOARD_TOKEN\", wire_api = \"responses\". Key sent as Bearer. The OPENAI_BASE_URL env var is not read; the config key is openai_base_url."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Switchboard's second integrated client. The only client a ChatGPT-subscription account may be routed to.",
+      "sources": [
+        "https://github.com/openai/codex/blob/823ea830c0fd418b09ff02d36cad9a1fff66465b/codex-rs/model-provider-info/src/lib.rs#L100-L174",
+        "https://github.com/openai/codex/blob/823ea830c0fd418b09ff02d36cad9a1fff66465b/codex-rs/model-provider-info/src/lib.rs#L79-L84",
+        "https://github.com/openai/codex/blob/823ea830c0fd418b09ff02d36cad9a1fff66465b/codex-rs/model-provider/src/bearer_auth_provider.rs#L31-L36",
+        "https://github.com/openai/codex/blob/823ea830c0fd418b09ff02d36cad9a1fff66465b/codex-rs/config/src/config_toml.rs#L426-L427",
+        "https://learn.chatgpt.com/docs/non-interactive-mode",
+        "https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
+        "https://github.com/openai/codex/blob/823ea830c0fd418b09ff02d36cad9a1fff66465b/README.md#L16-L48"
+      ]
+    },
+    {
+      "id": "command-code",
+      "name": "Command Code",
+      "maker": "Command Code (commandcode.ai)",
+      "kind": "cli+desktop",
+      "url": "https://commandcode.ai/docs",
+      "license": "proprietary",
+      "openrouter_rank": 8,
+      "install": "npm i -g command-code@latest",
+      "binary": "cmd",
+      "headless": "cmd -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "cmd mcp add --scope user switchboard -- switchboard mcp",
+        "config_path": "~/.commandcode/mcp.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": "{ \"provider\": { \"switchboard\": { \"api\": \"anthropic-messages\", \"baseURL\": \"{base}\", \"apiKey\": \"{key}\" } } }",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "\"api\": \"openai-completions\" (default) or \"openai-responses\"."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "npm license UNLICENSED; the GitHub repo holds only a readme. Providers file ~/.commandcode/providers.json (apiKey accepts \"$ENV\"). Header and appended path are unverified, so suffix is null. Hand-edit field names for MCP JSON are unverified. `cmd login` is required first; whether BYOK works without a Command Code account is unverified. Node 22+.",
+      "sources": [
+        "https://commandcode.ai/docs/byok",
+        "https://commandcode.ai/docs/mcp",
+        "https://commandcode.ai/docs/headless",
+        "https://commandcode.ai/docs/quickstart",
+        "https://github.com/CommandCodeAI/command-code/tree/5c8f1b48c9d6704210cb3f9a476fdcffe5093e9a"
+      ]
+    },
+    {
+      "id": "pi",
+      "name": "pi",
+      "maker": "Earendil (earendil-works)",
+      "kind": "cli",
+      "url": "https://github.com/earendil-works/pi",
+      "license": "MIT",
+      "openrouter_rank": 9,
+      "install": "curl -fsSL https://pi.dev/install.sh | sh",
+      "binary": "pi",
+      "headless": "pi -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "pi mcp add switchboard -- switchboard mcp",
+        "config_path": "~/.pi/agent/mcp.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": "{ \"providers\": { \"anthropic\": { \"baseUrl\": \"{base}\", \"apiKey\": \"$SWITCHBOARD_TOKEN\" } } }",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "\"api\": \"openai-completions\" (CC) or \"openai-responses\" (R)."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
+      "notes": "Config file ~/.pi/agent/models.json; overriding only baseUrl keeps built-in models. A plain key goes out as x-api-key, ANTHROPIC_AUTH_TOKEN as Bearer. The appended path is unverified (the research's example uses …/claude/<pool> without /v1), so suffix is null.",
+      "sources": [
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/ai/src/api/anthropic-messages.ts#L1068-L1075",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/coding-agent/test/model-registry.test.ts#L95-L120",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/ai/src/api/anthropic-messages.ts#L1013-L1018",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/coding-agent/docs/mcp.md#L9-L62",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/coding-agent/docs/cli.md#L25-L48",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/coding-agent/README.md#L28-L43",
+        "https://github.com/earendil-works/pi/blob/b78e6a9085343ec0f308c3d377da72528b4cf7ee/packages/ai/src/types.ts#L17-L23"
+      ]
+    },
+    {
+      "id": "deepseek-harness",
+      "name": "DeepSeek Harness",
+      "maker": "DeepSeek",
+      "kind": "cli+desktop",
+      "url": "https://github.com/deepseek-ai/deepseek-harness",
+      "license": "MIT",
+      "openrouter_rank": 10,
+      "install": null,
+      "binary": "dsh",
+      "headless": "dsh --profile headless \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "$DSH_HOME/cordis.patch.yml",
+        "config_snippet": "- insert:\n    - id: switchboard-mcp\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: switchboard\n        transport: stdio\n        command: switchboard\n        args: [mcp]\n"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "llm-pi-ai protocols openai-completions and openai-responses."
+      },
+      "proxy_ok": null,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Developer preview; Web UI first (`npx @deepseek-ai/dsh web` opens it on 127.0.0.1:3080); a global install command is unverified. Anthropic via a \"Custom model API\" in llm-pi-ai: providers.<id>.baseURL, api: anthropic-messages, apiKeyEnv, models; header and appended path unverified. Whether a loopback baseURL is accepted is unverified. Session-log upload to DeepSeek is on by default. Per-profile MCP patch: $DSH_HOME/profiles/<profile>/cordis.patch.yml.",
+      "sources": [
+        "https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/docs/user/guide/providers.md#L21-L71",
+        "https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/README.md#L5-L27",
+        "https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/apps/cli/README.md#L14",
+        "https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/docs/config-catalog.md#L2022-L2056",
+        "https://github.com/deepseek-ai/deepseek-harness/blob/5badb15009ae1756c3afe0ae0cef1faafc290ccc/apps/cli/reference/README.md#L129"
+      ]
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "maker": "OpenClaw",
+      "kind": "cli+desktop",
+      "url": "https://github.com/openclaw/openclaw",
+      "license": "MIT",
+      "openrouter_rank": 11,
+      "install": "curl -fsSL https://openclaw.ai/install.sh | bash",
+      "binary": "openclaw",
+      "headless": "openclaw agent exec \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "openclaw mcp set switchboard '{\"command\":\"switchboard\",\"args\":[\"mcp\"]}'",
+        "config_path": "~/.openclaw/openclaw.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_BASE_URL",
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": "{ \"models\": { \"providers\": { \"switchboard\": { \"api\": \"anthropic-messages\", \"baseUrl\": \"{base}\", \"apiKey\": \"{key}\" } } } }",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "openai-completions (default) or openai-responses; how the Responses path is joined is unverified."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
+      "notes": "A personal-assistant gateway with a coding headless mode (agent exec, coding tool profile). ANTHROPIC_BASE_URL is a fallback to models.providers.<id>; the key env var name is not given in the research. /v1/messages is appended (only /messages if the base ends in /v1); x-api-key. A custom baseUrl trusts that loopback origin automatically. `openclaw mcp add` probes the server before saving. Launch by Switchboard waits until its key variable and base path are verified.",
+      "sources": [
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/gateway/config-tools/custom-providers.md#L14-L82",
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/packages/ai/src/transports/anthropic-transport-stream.ts#L79-L87",
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/cli/mcp/transports.md#L21-L30",
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/cli/mcp/registry.md#L82-L101",
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/cli/agent.md#L26-L38",
+        "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/README.md#L28-L41"
+      ]
+    },
+    {
+      "id": "openhands",
+      "name": "OpenHands CLI",
+      "maker": "OpenHands",
+      "kind": "cli",
+      "url": "https://github.com/OpenHands/OpenHands-CLI",
+      "license": "MIT",
+      "openrouter_rank": 12,
+      "install": "uv tool install openhands --python 3.12",
+      "binary": "openhands",
+      "headless": "openhands --headless -t \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "openhands mcp add switchboard --transport stdio switchboard mcp",
+        "config_path": "~/.openhands/mcp.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "LLM_BASE_URL",
+        "key_env": "LLM_API_KEY",
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": "--override-with-envs"
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "env",
+        "base_env": "LLM_BASE_URL",
+        "key_env": "LLM_API_KEY",
+        "notes": "CC by default; Responses only for gpt-5* / codex-mini-latest model names. Env vars need --override-with-envs."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "No longer actively maintained (README points to Agent Canvas); low-value target. Set LLM_MODEL=anthropic/<model> too. Header and appended path at the pinned LiteLLM version are unverified, so suffix is null. Without the override the default base is the All-Hands cloud LLM proxy. Launch by Switchboard waits until its key variable and base path are verified.",
+      "sources": [
+        "https://github.com/OpenHands/OpenHands-CLI/blob/954f2ba646e8d749261a8f2b2b7e3031fa39be9f/openhands_cli/stores/agent_store.py#L133-L221",
+        "https://github.com/OpenHands/OpenHands-CLI/blob/954f2ba646e8d749261a8f2b2b7e3031fa39be9f/README.md#L29-L35",
+        "https://github.com/OpenHands/OpenHands-CLI/blob/954f2ba646e8d749261a8f2b2b7e3031fa39be9f/openhands_cli/argparsers/main_parser.py#L65-L93",
+        "https://github.com/OpenHands/OpenHands-CLI/blob/954f2ba646e8d749261a8f2b2b7e3031fa39be9f/openhands_cli/mcp/mcp_utils.py#L167-L173",
+        "https://github.com/OpenHands/software-agent-sdk/blob/edaac806d1599a4ee1662fd4008fbcd7b537ecd1/openhands-sdk/openhands/sdk/llm/utils/model_features.py#L192-L197"
+      ]
+    },
+    {
+      "id": "zcode",
+      "name": "ZCode",
+      "maker": "Z.ai",
+      "kind": "cli+desktop",
+      "url": "https://github.com/zai-org/ZCode",
+      "license": "Apache-2.0",
+      "openrouter_rank": 13,
+      "install": null,
+      "binary": "zcode",
+      "headless": "zcode -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.zcode/cli/config.json",
+        "config_snippet": "{ \"mcp\": { \"servers\": { \"switchboard\": { \"type\": \"stdio\", \"command\": \"switchboard\", \"args\": [\"mcp\"] } } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "api.type openai-responses (R) or openai-chat-completions (CC)."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Desktop DMG from https://zcode.z.ai/; the CLI's hosted install.sh URL is unverified (npm zcode-app-cli is a third-party wrapper). Provider in ~/.zcode/v2/provider_config.json (ZCODE_PERSONAL_PROVIDER_CONFIG_FILE overrides) with api.type: anthropic-messages, api.baseUrl, access.apiKey; the file's top-level shape is unverified, so no snippet. /v1 is added if absent, then /messages; sends x-api-key and Bearer.",
+      "sources": [
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/packages/adapters/src/model/model-execution.ts#L282-L435",
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/provider/src/config/provider-data-schema.ts#L4-L70",
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/README.md#L139-L180",
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/packages/i18n/src/locales/en-US.ts#L31-L50",
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/README.en.md#L14-L97"
+      ]
+    },
+    {
+      "id": "kimi-code",
+      "name": "Kimi Code CLI",
+      "maker": "Moonshot AI",
+      "kind": "cli",
+      "url": "https://github.com/MoonshotAI/kimi-code",
+      "license": "MIT",
+      "openrouter_rank": null,
+      "install": "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
+      "binary": "kimi",
+      "headless": "kimi -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.kimi-code/mcp.json",
+        "config_snippet": "{ \"mcpServers\": { \"switchboard\": { \"command\": \"switchboard\", \"args\": [\"mcp\"] } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": "default_model = \"sb-claude\"\n[providers.sb-claude]\ntype = \"anthropic\"\nbase_url = \"{base}\"\napi_key_env = \"SWITCHBOARD_TOKEN\"\n[models.sb-claude]\nprovider = \"sb-claude\"\nmodel = \"<claude model id>\"\nmax_context_size = 200000\n",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "type = \"openai\" is CC, type = \"openai_responses\" is R; both Bearer, base …/codex/<pool>/v1."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Replaces \"Proto Agent\" (no established agent by that name). Provider config in ~/.kimi-code/config.toml; x-api-key with Authorization forced to null; shell ANTHROPIC_* vars are ignored. No shell MCP add command (/mcp-config in the TUI); project MCP servers are off in headless runs unless trusted or KIMI_CODE_TRUST_WORKSPACE=1. Whether /login can be skipped with only a custom provider is unverified.",
+      "sources": [
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/configuration/providers.md#L62-L110",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/packages/kosong/src/providers/anthropic.ts#L1192-L1220",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/packages/agent-core-v2/src/human/llm/requester/bases/anthropic/requester.ts#L179-L181",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/configuration/env-vars.md#L6",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/customization/mcp.md#L13-L72",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/reference/kimi-command.md#L110-L129",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/guides/getting-started.md#L27-L53"
+      ]
+    },
+    {
+      "id": "auggie",
+      "name": "Auggie CLI",
+      "maker": "Augment Code",
+      "kind": "cli",
+      "url": "https://github.com/augmentcode/auggie",
+      "license": "proprietary",
+      "openrouter_rank": null,
+      "install": "npm install -g @augmentcode/auggie",
+      "binary": "auggie",
+      "headless": "auggie --print \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "auggie mcp add switchboard -- switchboard mcp",
+        "config_path": "~/.augment/settings.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "Replaces Roo Code (shut down, repo archived). Needs an Augment login and subscription; inference runs in Augment's cloud, and BYOK is an Enterprise backend setting, not a client base URL. Automation auth goes in AUGMENT_SESSION_AUTH. MCP only.",
+      "sources": [
+        "https://docs.augmentcode.com/cli/reference",
+        "https://docs.augmentcode.com/cli/integrations",
+        "https://docs.augmentcode.com/cli/setup-auggie/install-auggie-cli",
+        "https://docs.augmentcode.com/cli/setup-auggie/authentication",
+        "https://docs.augmentcode.com/cosmos/guides/admin-checklist",
+        "https://github.com/augmentcode/auggie/blob/9cc3ead419db9486ad44e6e4bba30ecd6784ccff/LICENSE.md"
+      ]
+    },
+    {
+      "id": "aider",
+      "name": "Aider",
+      "maker": "Aider-AI",
+      "kind": "cli",
+      "url": "https://github.com/Aider-AI/aider",
+      "license": "Apache-2.0",
+      "openrouter_rank": null,
+      "install": "curl -LsSf https://aider.chat/install.sh | sh",
+      "binary": "aider",
+      "headless": "aider --message \"<prompt>\" --yes-always",
+      "mcp": {
+        "supported": false,
+        "add_command": null,
+        "config_path": null,
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_API_BASE",
+        "key_env": "ANTHROPIC_API_KEY",
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": null,
+        "chat_completions": true,
+        "via": "env",
+        "base_env": "OPENAI_API_BASE",
+        "key_env": null,
+        "notes": "CC via OPENAI_API_BASE / --openai-api-base; Responses unverified. Would need the WIP Chat Completions route plus an OpenAI API-key account."
+      },
+      "proxy_ok": true,
+      "level": "launch",
+      "subscription_warning": null,
+      "notes": "No MCP support. Anthropic comes from litellm 1.82.3: it reads ANTHROPIC_API_BASE, then ANTHROPIC_BASE_URL, appends /v1/messages and sends x-api-key. Run with --model anthropic/<model>. Last tagged release v0.86.0 (2025-08-09).",
+      "sources": [
+        "https://github.com/BerriAI/litellm/blob/61409275c8d8478d0a7ffc23d375a4fd86717b23/litellm/main.py#L2845-L2860",
+        "https://github.com/BerriAI/litellm/blob/61409275c8d8478d0a7ffc23d375a4fd86717b23/litellm/llms/anthropic/common_utils.py#L444-L455",
+        "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/requirements.txt#L184",
+        "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/args.py",
+        "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/docs/scripting.md#L13-L43",
+        "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/docs/install.md#L33-L58",
+        "https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/website/docs/llms/openai-compat.md"
+      ]
+    },
+    {
+      "id": "opencode",
+      "name": "OpenCode",
+      "maker": "anomalyco (formerly sst)",
+      "kind": "cli",
+      "url": "https://github.com/anomalyco/opencode",
+      "license": "MIT",
+      "openrouter_rank": null,
+      "install": "brew install anomalyco/tap/opencode",
+      "binary": "opencode",
+      "headless": "opencode run \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.config/opencode/opencode.json",
+        "config_snippet": "{ \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": { \"switchboard\": { \"type\": \"local\", \"command\": [\"switchboard\", \"mcp\"], \"enabled\": true } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "/v1",
+        "config_snippet": "{ \"provider\": { \"anthropic\": { \"options\": { \"baseURL\": \"{base}\", \"apiKey\": \"{key}\" } } } }",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "Built-in openai provider always uses Responses at ${baseURL}/responses with Bearer: set provider.openai.options.baseURL = http://127.0.0.1:<port>/codex/<pool>/v1. A custom provider must use @ai-sdk/openai; @ai-sdk/openai-compatible is CC."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Posts to ${baseURL}/messages with x-api-key; an explicit baseURL wins. apiKey accepts {env:VAR}.",
+      "sources": [
+        "https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/opencode/src/provider/provider.ts#L1810-L1832",
+        "https://github.com/vercel/ai/blob/85464f4e2026d9fc0274424c0171a25742836411/packages/anthropic/src/anthropic-provider.ts#L105-L130",
+        "https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/opencode/src/provider/provider.ts#L243-L249",
+        "https://github.com/vercel/ai/blob/07edaea05f90a0d46a0447849af3ae6ae5d8f662/packages/openai/src/openai-provider.ts#L148-L162",
+        "https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/web/src/content/docs/mcp-servers.mdx#L70-L126",
+        "https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/web/src/content/docs/cli.mdx#L339-L386",
+        "https://github.com/anomalyco/opencode/blob/907b3bc518fa48e90e8ec24dd327d13eee71c36c/packages/web/src/content/docs/index.mdx#L37-L82"
+      ]
+    },
+    {
+      "id": "continue",
+      "name": "Continue + cn",
+      "maker": "Continue (continuedev)",
+      "kind": "cli+ide",
+      "url": "https://github.com/continuedev/continue",
+      "license": "Apache-2.0",
+      "openrouter_rank": null,
+      "install": "npm i -g @continuedev/cli",
+      "binary": "cn",
+      "headless": "cn -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.continue/config.yaml",
+        "config_snippet": "mcpServers:\n  - name: switchboard\n    type: stdio\n    command: switchboard\n    args: [\"mcp\"]\n"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "/v1",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "provider: openai + apiBase. Models named o* / gpt-5+ use /responses, others CC; the adapter package uses Responses only for api.openai.com, so which path cn takes is unverified."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Model with provider: anthropic, apiBase (…/claude/<pool>/v1) and apiKey; x-api-key; no env var. The enclosing models-list shape is not given in the research, so no snippet. cn skips tools unless --allow \"*\". Extension ID Continue.continue; config shared by the extension and cn.",
+      "sources": [
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/llm/llms/Anthropic.ts#L43-L451",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/openai-adapters/src/apis/AnthropicUtils.ts#L66-L91",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/core/llm/index.ts#L1023-L1030",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/packages/openai-adapters/src/apis/OpenAI.ts#L90-L96",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/docs/customize/deep-dives/mcp.mdx#L30-L133",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/docs/cli/headless-mode.mdx#L5-L46",
+        "https://github.com/continuedev/continue/blob/5522c6f44ca0ac3528b37244818fbfa39b5af470/docs/snippets/cli-install.mdx"
+      ]
+    },
+    {
+      "id": "goose",
+      "name": "Goose",
+      "maker": "aaif-goose (formerly Block)",
+      "kind": "cli+desktop",
+      "url": "https://github.com/aaif-goose/goose",
+      "license": "Apache-2.0",
+      "openrouter_rank": null,
+      "install": "brew install block-goose-cli",
+      "binary": "goose",
+      "headless": "goose run -t \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.config/goose/config.yaml",
+        "config_snippet": "extensions:\n  switchboard:\n    type: stdio\n    name: switchboard\n    enabled: true\n    cmd: switchboard\n    args: [\"mcp\"]\n    envs: {}\n    env_keys: []\n    timeout: 300\n"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_HOST",
+        "key_env": "ANTHROPIC_API_KEY",
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "env",
+        "base_env": "OPENAI_HOST",
+        "key_env": "OPENAI_API_KEY",
+        "notes": "OPENAI_HOST=http://127.0.0.1:<port> plus OPENAI_BASE_PATH=codex/<pool>/v1/responses; a base path ending in responses forces Responses. Bearer."
+      },
+      "proxy_ok": true,
+      "level": "launch",
+      "subscription_warning": null,
+      "notes": "x-api-key; v1/messages is appended. `goose run --with-extension \"switchboard mcp\"` adds Switchboard for one run. Desktop: brew install --cask block-goose.",
+      "sources": [
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/crates/goose/src/providers/anthropic_def.rs#L48-L72",
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/crates/goose-providers/src/api_client.rs#L509-L520",
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/crates/goose-providers/src/openai.rs#L382-L400",
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/documentation/docs/guides/config-files.md#L11-L170",
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/documentation/docs/guides/running-tasks.md#L17-L109",
+        "https://github.com/aaif-goose/goose/blob/d7ce0cdf8c4e1fb55aabed5b6717f141c4c8220f/documentation/docs/getting-started/installation.md#L22-L78"
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "maker": "Google",
+      "kind": "cli",
+      "url": "https://github.com/google-gemini/gemini-cli",
+      "license": "Apache-2.0",
+      "openrouter_rank": null,
+      "install": "brew install gemini-cli",
+      "binary": "gemini",
+      "headless": "gemini -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "gemini mcp add -s user switchboard switchboard mcp",
+        "config_path": "~/.gemini/settings.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "Gemini protocol only: GOOGLE_GEMINI_BASE_URL gateway mode still speaks Gemini. `gemini mcp add` defaults to project scope, hence -s user. MCP only.",
+      "sources": [
+        "https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/core/contentGenerator.ts#L63-L92",
+        "https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/packages/core/src/core/contentGenerator.ts#L344-L375",
+        "https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/docs/tools/mcp-server.md#L1116-L1158",
+        "https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/docs/cli/headless.md#L8-L13",
+        "https://github.com/google-gemini/gemini-cli/blob/fb972b2f87fe7d5b06d37eac711490162d98de2c/README.md#L38-L54"
+      ]
+    },
+    {
+      "id": "qwen-code",
+      "name": "Qwen Code",
+      "maker": "QwenLM",
+      "kind": "cli",
+      "url": "https://github.com/QwenLM/qwen-code",
+      "license": "Apache-2.0",
+      "openrouter_rank": null,
+      "install": "brew install qwen-code",
+      "binary": "qwen",
+      "headless": "qwen -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "qwen mcp add switchboard switchboard mcp",
+        "config_path": "~/.qwen/settings.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "ANTHROPIC_BASE_URL",
+        "key_env": "ANTHROPIC_API_KEY",
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "CC by default; \"wireApi\": \"responses\" on a modelProviders.openai[] entry sends to <base without /v1>/v1/responses."
+      },
+      "proxy_ok": true,
+      "level": "launch",
+      "subscription_warning": null,
+      "notes": "Also set ANTHROPIC_MODEL. Alternative: modelProviders.anthropic[] with baseUrl/envKey and security.auth.selectedType: \"anthropic\". Bearer with a claude-cli User-Agent to non-Anthropic hosts. Doubled-/v1 behaviour is unverified; the research says use …/claude/<pool>. Qwen OAuth free tier ended 2026-04-15 (API keys only).",
+      "sources": [
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/packages/core/src/core/anthropicContentGenerator/anthropicContentGenerator.ts#L264-L296",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/docs/users/configuration/auth.md#L216-L234",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/docs/users/configuration/model-providers.md#L242-L258",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/packages/core/src/core/openaiResponsesContentGenerator/responses-pipeline.ts#L595-L617",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/docs/users/features/mcp.md#L20-L110",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/docs/users/features/headless.md#L22-L25",
+        "https://github.com/QwenLM/qwen-code/blob/544d753229f31feca679a85932437650f359e769/README.md#L56-L62"
+      ]
+    },
+    {
+      "id": "crush",
+      "name": "Crush",
+      "maker": "Charm",
+      "kind": "cli",
+      "url": "https://github.com/charmbracelet/crush",
+      "license": "FSL-1.1-MIT",
+      "openrouter_rank": null,
+      "install": "brew install charmbracelet/tap/crush",
+      "binary": "crush",
+      "headless": "crush run \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.config/crush/crushrc",
+        "config_snippet": "mcp add switchboard --command switchboard --args mcp\n"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": "provider add switchboard --type anthropic --base-url {base} --api-key {key}\n",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "--type openai uses Responses only for model IDs on fantasy's built-in Responses list; --type openai-compat uses CC."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Source-available (FSL-1.1-MIT). Config is a Bash-style crushrc; crush.json is deprecated, and the MCP and provider lines are crushrc statements, not shell commands. x-api-key, or Authorization if the key starts with \"Bearer \". Exact path joining is unverified, so suffix is null.",
+      "sources": [
+        "https://github.com/charmbracelet/crush/blob/8da349060b7df148d209979be0a5e9c9281d1f15/internal/agent/coordinator.go#L1072-L1190",
+        "https://github.com/charmbracelet/crush/blob/8da349060b7df148d209979be0a5e9c9281d1f15/README.md#L253-L310",
+        "https://github.com/charmbracelet/crush/blob/8da349060b7df148d209979be0a5e9c9281d1f15/docs/config/README.md#L281-L292",
+        "https://github.com/charmbracelet/crush/blob/8da349060b7df148d209979be0a5e9c9281d1f15/internal/cmd/run.go#L33-L65",
+        "https://github.com/charmbracelet/fantasy/blob/d272c40391c5f87aa241c5b82014f83bdc48778a/providers/openai/openai.go#L191-L223",
+        "https://github.com/charmbracelet/crush/blob/8da349060b7df148d209979be0a5e9c9281d1f15/LICENSE.md"
+      ]
+    },
+    {
+      "id": "zed",
+      "name": "Zed agent",
+      "maker": "Zed Industries",
+      "kind": "ide",
+      "url": "https://github.com/zed-industries/zed",
+      "license": "GPL-3.0-or-later",
+      "openrouter_rank": null,
+      "install": "brew install --cask zed",
+      "binary": "zed",
+      "headless": null,
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.config/zed/settings.json",
+        "config_snippet": "{ \"context_servers\": { \"switchboard\": { \"command\": \"switchboard\", \"args\": [\"mcp\"], \"env\": {} } } }"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "language_models.openai_compatible.<id>.api_url; CC by default, a model with capabilities.chat_completions: false uses {api_url}/responses (Bearer). Zed also calls /responses/compact and /responses/input_tokens, which Switchboard does not route."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Set language_models.anthropic_compatible.<Name>.api_url = …/claude/<pool> with available_models; the model-entry shape is not given in the research, so no snippet. Key via the UI or <PROVIDER_NAME>_API_KEY; always X-Api-Key. No headless agent run is documented (unverified). ACP external agents handle their own auth.",
+      "sources": [
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/crates/anthropic/src/anthropic.rs#L483-L507",
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/docs/src/ai/use-api-access.md#L419-L467",
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/crates/open_ai/src/responses.rs#L863-L869",
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/docs/src/ai/mcp.md#L53-L74",
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/docs/src/ai/external-agents.md#L39-L53",
+        "https://github.com/zed-industries/zed/blob/7aec07ccdedf8bf1ce8723c7e4305ba753651ea6/docs/src/installation.md#L14-L17"
+      ]
+    },
+    {
+      "id": "amp",
+      "name": "Amp",
+      "maker": "Sourcegraph",
+      "kind": "cli+desktop",
+      "url": "https://ampcode.com",
+      "license": "proprietary",
+      "openrouter_rank": null,
+      "install": "curl -fsSL https://ampcode.com/install.sh | bash",
+      "binary": "amp",
+      "headless": "amp -x \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "amp mcp add switchboard -- switchboard mcp",
+        "config_path": "~/.config/amp/settings.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "Custom URL connection formats chat-completions or responses, Bearer; same loopback caveat."
+      },
+      "proxy_ok": null,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "A \"Custom URL\" connection with format anthropic-messages (<base>/v1/messages, Bearer) exists, but connections are stored server-side and hosts must be \"reachable from Amp\": whether a 127.0.0.1 proxy works is unverified, so rated MCP until tested. Requires an Amp account (amp login / AMP_API_KEY).",
+      "sources": [
+        "https://ampcode.com/docs/markdown/customize/model-routing",
+        "https://ampcode.com/docs/markdown/customize/mcp",
+        "https://ampcode.com/docs/markdown/cli/execute-mode",
+        "https://ampcode.com/docs/cli",
+        "https://ampcode.com/llms.txt",
+        "https://www.npmjs.com/package/@sourcegraph/amp"
+      ]
+    },
+    {
+      "id": "cursor-cli",
+      "name": "Cursor CLI",
+      "maker": "Cursor",
+      "kind": "cli",
+      "url": "https://cursor.com/docs/cli/installation.md",
+      "license": "proprietary",
+      "openrouter_rank": null,
+      "install": "curl https://cursor.com/install -fsS | bash",
+      "binary": "agent",
+      "headless": "agent -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.cursor/mcp.json",
+        "config_snippet": "{ \"mcpServers\": { \"switchboard\": { \"type\": \"stdio\", \"command\": \"switchboard\", \"args\": [\"mcp\"] } } }"
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "No provider or base-URL option. MCP file shared with the editor; `agent mcp` has no add command. Headless flags: --force, --output-format json, --approve-mcps. Needs Cursor auth (agent login / CURSOR_API_KEY). Old binary name cursor-agent. MCP only.",
+      "sources": [
+        "https://cursor.com/docs/cli/reference/configuration.md",
+        "https://cursor.com/docs/cli/reference/parameters.md",
+        "https://cursor.com/docs/cli/mcp.md",
+        "https://cursor.com/docs/mcp.md",
+        "https://cursor.com/docs/cli/headless.md",
+        "https://cursor.com/docs/cli/installation.md"
+      ]
+    },
+    {
+      "id": "copilot-cli",
+      "name": "GitHub Copilot CLI",
+      "maker": "GitHub",
+      "kind": "cli",
+      "url": "https://github.com/github/copilot-cli",
+      "license": "proprietary",
+      "openrouter_rank": null,
+      "install": "brew install copilot-cli",
+      "binary": "copilot",
+      "headless": "copilot -p \"<prompt>\" --allow-all-tools",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.copilot/mcp-config.json",
+        "config_snippet": "{\"mcpServers\":{\"switchboard\":{\"type\":\"local\",\"command\":\"switchboard\",\"args\":[\"mcp\"],\"tools\":[\"*\"]}}}"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "env",
+        "base_env": "COPILOT_PROVIDER_BASE_URL",
+        "key_env": "COPILOT_PROVIDER_API_KEY",
+        "extra_env": {
+          "COPILOT_PROVIDER_TYPE": "anthropic"
+        },
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "env",
+        "base_env": "COPILOT_PROVIDER_BASE_URL",
+        "key_env": "COPILOT_PROVIDER_API_KEY",
+        "notes": "COPILOT_PROVIDER_TYPE=openai is CC by default; COPILOT_PROVIDER_WIRE_API=responses switches to Responses."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "Also set COPILOT_MODEL; COPILOT_PROVIDER_BEARER_TOKEN is the Bearer alternative to the key. Header and appended path are unverified, so suffix is null (the research's example base is …/claude/<pool>). COPILOT_OFFLINE=true stops calls to GitHub; whether BYOK plus offline skips GitHub login is unverified. Needs a Copilot subscription; MCP config requires tools. Launch by Switchboard waits until its key variable and base path are verified.",
+      "sources": [
+        "https://github.com/github/docs/blob/ddc34e6c76d8836ec12ed3edfaffb1c4be41829e/content/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models.md#L47-L59",
+        "https://github.com/github/docs/blob/ddc34e6c76d8836ec12ed3edfaffb1c4be41829e/content/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models.md#L132-L144",
+        "https://github.com/github/copilot-sdk/blob/6b4f3a3bde7eb9a8604617b91effe0f4a2e3921b/docs/auth/byok.md#L204-L219",
+        "https://github.com/github/docs/blob/ddc34e6c76d8836ec12ed3edfaffb1c4be41829e/content/copilot/reference/copilot-cli-reference/cli-command-reference.md#L658",
+        "https://github.com/github/docs/blob/ddc34e6c76d8836ec12ed3edfaffb1c4be41829e/content/copilot/reference/copilot-cli-reference/cli-command-reference.md#L941-L994",
+        "https://github.com/github/copilot-cli/blob/a9ba11a191255b3f7b323b425b717f7db14b6c74/README.md#L41-L91",
+        "https://github.com/github/copilot-cli/blob/a9ba11a191255b3f7b323b425b717f7db14b6c74/LICENSE.md#L1-L4"
+      ]
+    },
+    {
+      "id": "factory-droid",
+      "name": "Factory Droid",
+      "maker": "Factory",
+      "kind": "cli+desktop",
+      "url": "https://docs.factory.com/droid-cli/quickstart.md",
+      "license": null,
+      "openrouter_rank": null,
+      "install": "curl -fsSL https://app.factory.ai/cli | sh",
+      "binary": "droid",
+      "headless": "droid exec \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.factory/mcp.json",
+        "config_snippet": "{\"mcpServers\":{\"switchboard\":{\"type\":\"stdio\",\"command\":\"switchboard\",\"args\":[\"mcp\"]}}}"
+      },
+      "anthropic": {
+        "supported": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": "",
+        "config_snippet": "{ \"customModels\": [ { \"model\": \"<claude model id>\", \"displayName\": \"<Display-Name>\", \"baseUrl\": \"{base}\", \"apiKey\": \"${SWITCHBOARD_TOKEN}\", \"provider\": \"anthropic\" } ] }",
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": true,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "provider: \"openai\" uses Responses (base …/codex/<pool>/v1); \"generic-chat-completion-api\" uses CC."
+      },
+      "proxy_ok": true,
+      "level": "proxy",
+      "subscription_warning": null,
+      "notes": "License unverified (public repo holds docs only). Settings file ~/.factory/settings.json; x-api-key by default, \"authMode\": \"bearer\" sends Bearer. Select with droid exec --model \"custom:<Display-Name>-<index>\". droid exec needs FACTORY_API_KEY (a Factory account); whether BYOK works without a Factory login is unverified.",
+      "sources": [
+        "https://docs.factory.com/model-independence/byok.md",
+        "https://docs.factory.com/harness/mcp.md",
+        "https://docs.factory.com/droid-exec/overview.md",
+        "https://docs.factory.com/droid-cli/quickstart.md"
+      ]
+    },
+    {
+      "id": "warp",
+      "name": "Warp",
+      "maker": "Warp",
+      "kind": "cli+desktop",
+      "url": "https://github.com/warpdotdev/Warp",
+      "license": "AGPL-3.0",
+      "openrouter_rank": null,
+      "install": "brew install --cask warp",
+      "binary": "warp",
+      "headless": null,
+      "mcp": {
+        "supported": true,
+        "add_command": null,
+        "config_path": "~/.warp/.mcp.json",
+        "config_snippet": "{\"mcpServers\":{\"switchboard\":{\"command\":\"switchboard\",\"args\":[\"mcp\"]}}}"
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": true,
+        "via": "config",
+        "base_env": null,
+        "key_env": null,
+        "notes": "Custom inference endpoint is CC only and runs from Warp's servers: localhost, 127.0.0.1 and private URLs are rejected."
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "Client AGPL-3.0 with MIT UI crates. Anthropic BYOK takes a key only, no base URL. The Agent CLI (brew install --cask warp-agent-cli) documents no one-shot flag and reads ~/.warp_cli/.mcp.json. Cannot use the proxy; Warp can host Claude Code or Codex, which can use Switchboard themselves.",
+      "sources": [
+        "https://docs.warp.dev/agents/inference/custom-inference-endpoint.md",
+        "https://docs.warp.dev/agents/inference/bring-your-own-api-key.md",
+        "https://docs.warp.dev/agents/capabilities/mcp.md",
+        "https://docs.warp.dev/agents/cli/configuration.md",
+        "https://docs.warp.dev/agents/cli/reference.md",
+        "https://docs.warp.dev/agents/cli/quickstart.md",
+        "https://github.com/warpdotdev/Warp/blob/023685490da35f4cfe01084b8a5b5792cf70cb2a/README.md#L52-L56"
+      ]
+    },
+    {
+      "id": "kiro-cli",
+      "name": "Kiro CLI",
+      "maker": "AWS (Kiro)",
+      "kind": "cli",
+      "url": "https://kiro.dev/docs/getting-started/installation.md",
+      "license": "proprietary",
+      "openrouter_rank": null,
+      "install": "curl -fsSL https://cli.kiro.dev/install | bash",
+      "binary": "kiro-cli",
+      "headless": "kiro-cli chat --no-interactive --trust-all-tools \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "kiro-cli mcp add --name switchboard --scope global --command switchboard --args mcp",
+        "config_path": "~/.kiro/settings/mcp.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "Closed source; formerly Amazon Q Developer CLI. No base URL or BYOK is documented (absence beyond the read pages is unverified); inference runs on Amazon Bedrock through Kiro. Headless needs KIRO_API_KEY (paid plans only). MCP only.",
+      "sources": [
+        "https://kiro.dev/docs/models.md",
+        "https://kiro.dev/docs/reference/settings.md",
+        "https://kiro.dev/docs/cli/headless.md",
+        "https://kiro.dev/docs/mcp/configuration.md",
+        "https://kiro.dev/docs/getting-started/installation.md",
+        "https://github.com/aws/amazon-q-developer-cli/blob/15cc8f3cd18c4272925ce1c7053268eedff1ea0a/README.md#L4"
+      ]
+    },
+    {
+      "id": "devin",
+      "name": "Devin Desktop / Devin CLI (formerly Windsurf/Cascade)",
+      "maker": "Devin (formerly Windsurf)",
+      "kind": "cli+ide",
+      "url": "https://docs.devin.ai/desktop/getting-started.md",
+      "license": null,
+      "openrouter_rank": null,
+      "install": "curl -fsSL https://cli.devin.ai/install.sh | bash",
+      "binary": "devin",
+      "headless": "devin -p \"<prompt>\"",
+      "mcp": {
+        "supported": true,
+        "add_command": "devin mcp add -s user switchboard -- switchboard mcp",
+        "config_path": "~/.config/devin/mcp_config.json",
+        "config_snippet": null
+      },
+      "anthropic": {
+        "supported": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "extra_env": {},
+        "suffix": null,
+        "config_snippet": null,
+        "requires_flag": null
+      },
+      "openai": {
+        "responses": false,
+        "chat_completions": false,
+        "via": null,
+        "base_env": null,
+        "key_env": null,
+        "notes": null
+      },
+      "proxy_ok": false,
+      "level": "mcp",
+      "subscription_warning": null,
+      "notes": "Windsurf docs redirect to Devin; Cascade was removed in v3.9.19 (2026-09-08). License unverified. No BYOK or base URL documented outside air-gapped builds. Devin Desktop can host ACP agents, possibly a way to run a Switchboard-backed agent inside it (unverified). MCP only.",
+      "sources": [
+        "https://docs.devin.ai/desktop/changelog.md",
+        "https://docs.devin.ai/desktop/models.md",
+        "https://docs.devin.ai/cli/extensibility/mcp/configuration.md",
+        "https://docs.devin.ai/cli/reference/commands.md",
+        "https://docs.devin.ai/work-with-devin/devin-cli.md",
+        "https://docs.devin.ai/desktop/devin-local.md"
+      ]
+    }
+  ],
+  "ranking_source": "https://openrouter.ai/apps (global ranking, read 2026-10-05)"
+}

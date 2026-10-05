@@ -8,6 +8,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Other agents
+
+- Switchboard now works with the popular coding agents beyond Claude Code and Codex — Hermes,
+  Kilo Code, Cline, Goose, OpenCode, Qwen Code, Aider and 23 more (Agents → Other agents,
+  `switchboard agents`). Each gets Switchboard's tools; agents that accept a custom endpoint can
+  send their requests through Switchboard, which switches accounts for them, and some launch from
+  Switchboard directly. Subscription sign-ins stay with Claude Code and Codex, as the providers
+  require; other agents use API-key accounts. The proxy now also speaks Chat Completions for
+  OpenAI API keys. [AGENT-SUPPORT.md](docs/AGENT-SUPPORT.md).
+
 ### Backups and reinstall
 
 - Backups now also keep your projects, project rules, which account each pool's managed sessions

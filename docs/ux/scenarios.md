@@ -43,6 +43,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-033 | Keep Switchboard working with its window closed | draft |
 | SCN-034 | Keep a project on its own accounts | draft |
 | SCN-035 | Learn the product in five steps on first start | draft |
+| SCN-036 | Run another coding agent on Switchboard | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -706,3 +707,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** browser demo 2026-10-05: five steps, targets `+ Add account`, `.rotation-bar`, `+ New project`; finish stores `switchboard.tour`; About shows it again; Escape closes.
 **Product:** unobserved
 **Traces:** SCN-001
+
+## SCN-036 — Run another coding agent on Switchboard
+**Persona:** P-01
+**Goal:** Use Hermes, Kilo Code, Cline, Goose, OpenCode or another popular agent with Switchboard's tools and accounts, not only Claude Code and Codex.
+**Preconditions:** the agent is installed; for model requests through Switchboard, an API-key account selected in the chosen pool.
+**Entry point:** Agents → Other agents → Set up; CLI `switchboard agents`.
+**Steps:**
+1. Agents → Other agents lists 30 agents in three groups (Launch from Switchboard, Through Switchboard, Tools only) with their OpenRouter rank.
+2. Set up on an agent → choose the pool → the dialog shows the command that registers the tools, the endpoints, the key command (`switchboard agents key`) and, for launchable agents, Launch in folder.
+3. Launch → the agent opens in Terminal in the folder, on the pool's API-key account; Switchboard switches accounts for it.
+**Alt paths:** The pool's selected account is a subscription sign-in → “This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.” A project's account outside its folders, or a foreign account inside them, is refused as for any launch. Tools-only agents have no endpoint step.
+**Expected result:** every listed agent gets Switchboard's tools; the ones that accept an endpoint use Switchboard's accounts within the providers' terms.
+**UI elements:** Other agents section, Set up dialog, copyable commands.
+**States covered:** each level, pool chosen, launch refused (subscription, project), MCP-only.
+**Errors & recovery:** refusals name the fix; nothing is written to the agent's config by Switchboard.
+**Status:** draft
+**Meaning:** operator request 2026-10-05.
+**Coverage:** proxy `agents_reach_api_key_accounts_and_never_a_subscription_sign_in`, `chat_completions_reach_openai_with_an_api_key_only`; runtime `the_catalog_is_well_formed_and_every_launch_profile_is_complete`, `connect_names_the_key_command_and_never_a_key`, `a_third_party_agent_never_starts_on_a_subscription_account`; browser demo 2026-10-05 (30 agents, Hermes dialog). Live runs with real agents need an API-key account (operator).
+**Product:** unobserved
+**Traces:** CONTRACTS → Other agents (0.6)

@@ -352,6 +352,36 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         .execute(Operation::RemoveProject { pool })
         .await
 }
+/// How one third-party agent connects (catalog/agents.json); commands only, never a key.
+#[tauri::command]
+async fn agent_connect(
+    agent: String,
+    pool: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentConnect { agent, pool })
+        .await
+}
+#[tauri::command]
+async fn launch_agent(
+    agent: String,
+    pool: String,
+    working_directory: std::path::PathBuf,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::LaunchAgent {
+            agent,
+            pool,
+            working_directory,
+        })
+        .await
+}
 #[tauri::command]
 fn agent_setup() -> Value {
     switchboard_runtime::agents::setup()
@@ -543,6 +573,8 @@ fn main() {
             set_project_rule,
             remove_project_rule,
             save_project,
+            agent_connect,
+            launch_agent,
             remove_project,
             agent_setup,
             link_cli
