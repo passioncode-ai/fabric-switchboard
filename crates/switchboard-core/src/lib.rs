@@ -460,6 +460,10 @@ impl Store {
             in_use: Default::default(),
         })
     }
+    /// The private data folder this store owns.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
         self.state
             .lock()

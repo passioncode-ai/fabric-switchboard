@@ -588,9 +588,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** About → Backups; CLI `switchboard backup`.
 **Steps:**
 1. Use Switchboard as usual → an encrypted backup appears in `~/Library/Application Support/Fabric Switchboard Backups` after changes and daily; About lists the newest five.
-2. After a reinstall, open About → Backups → Restore on the newest → the missing accounts come back; the notice says how many were restored and how many were already here.
+2. After a reinstall (or `switchboard uninstall` and a new install) → at its first start Switchboard restores the newest backup this Mac can open by itself: accounts, projects, project rules, managed selections and the open-at-login and auto-update settings come back, and the notice says “Switchboard found your backup from {date} and restored it: …”. An empty account list with a backup beside it also offers Restore from backup; About → Backups → Restore restores any listed backup.
 **Alt paths:** Back up now writes one at once. A backup from another Mac or after the Keychain was erased reads “This backup was made with another key and cannot be opened on this machine.” A restored account whose sign-in has since rotated shows Sign in again.
-**Expected result:** Accounts and policies are back; nothing newer is overwritten; policies return switched off.
+**Expected result:** Accounts, projects, rules, selections and settings are back; nothing newer and no choice made on this install is overwritten; policies return switched off. A person who removed their accounts keeps them removed: only a new data folder restores on its own.
 **UI elements:** Backups panel (folder, limit note, list, Restore, Back up now), notice.
 **States covered:** no backups, list, last automatic backup failed, restored, foreign key.
 **Errors & recovery:** every refusal is a fixed sentence naming the next step.

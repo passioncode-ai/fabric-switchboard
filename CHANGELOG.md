@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Backups and reinstall
+
+- Backups now also keep your projects, project rules, which account each pool's managed sessions
+  use, and the open-at-login and auto-update settings. A change to a project rule triggers a
+  backup too.
+- After a reinstall or `switchboard uninstall`, the first start restores the newest backup on its
+  own and says so; an empty account list with a backup beside it offers *Restore from backup*.
+
 ## 0.6.0 — 2026-10-05
 
 The first stable release. A project can now keep its own accounts: only sessions from its folders

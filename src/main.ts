@@ -6,7 +6,7 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -529,7 +529,10 @@ function renderAccounts(main: HTMLElement) {
   renderPolicies(main);
   const accounts = snapshot!.accounts;
   if (!accounts.length) {
-    const empty = emptyState('Start with one account', 'Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.');
+    // A reinstall with a backup this computer can open: one press brings everything back.
+    const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
+    const empty = emptyState('Start with one account', backup ? `A backup from ${date(backup.created_at)} with ${backup.accounts} ${backup.accounts === 1 ? 'account' : 'accounts'} is on this computer. Restore it to get your accounts, projects and settings back, or add an account.` : 'Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.');
+    if (backup) empty.append(button('Restore from backup', () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, 'Backup restored.', 'empty-restore'), 'button primary', 'empty-restore'));
     empty.append(addMenu()); main.append(empty); return;
   }
   const sorting = el('div', 'account-sort-note');
@@ -782,6 +785,13 @@ function renderAbout(main: HTMLElement) {
 }
 async function loadBackups() {
   try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
+  // Restored on its own at start (a reinstall): say so once per backup.
+  const auto = backupStatus?.restored_at_start;
+  if (auto) {
+    const key = `switchboard.restored.${auto.file}`; let shown = false;
+    try { shown = !!localStorage.getItem(key); localStorage.setItem(key, '1'); } catch { /* shown this run only */ }
+    if (!shown) { showRestored(auto.restored); showNotice(`Switchboard found your backup from ${date(auto.created_at)} and restored it: ${restoredText}`); restoredText = ''; try { snapshot = await adapter.snapshot(); } catch { /* the next refresh shows them */ } }
+  }
   backgroundRender();
 }
 /** SB-28: closing the window keeps Switchboard working; it opens at login in the background. */
@@ -831,8 +841,9 @@ function backupsPanel() {
   return panel;
 }
 let restoredText = '';
-function showRestored(result: { added: number; skipped: number; failed: number }) {
-  restoredText = `${result.added} ${result.added === 1 ? 'account' : 'accounts'} restored · ${result.skipped} already here${result.failed ? ` · ${result.failed} could not be restored` : ''}.`;
+function showRestored(result: Restored) {
+  const extra = [result.projects ? `${result.projects} ${result.projects === 1 ? 'project' : 'projects'}` : '', result.rules ? `${result.rules} ${result.rules === 1 ? 'rule' : 'rules'}` : '', result.settings ? 'settings' : ''].filter(Boolean);
+  restoredText = `${result.added} ${result.added === 1 ? 'account' : 'accounts'} restored${extra.length ? `, with ${extra.join(', ')}` : ''} · ${result.skipped} already here${result.failed ? ` · ${result.failed} could not be restored` : ''}.`;
 }
 function appearancePanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'appearance-heading');
