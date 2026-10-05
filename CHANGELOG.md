@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Interface
+
+- The account list is compact again: each row's quota fits in two lines — the meter with the
+  share used and how long ago it was checked, then the countdown and date of the next reset (or
+  when a limited account is back, or when the next check runs). A coloured mark on the provider
+  icon shows the account's state at a glance: available, running low, limited, stale or failed.
+  The limit details moved into the row's quota disclosure, which now lists each window on one line.
+
 ## 0.5.4-beta.3 — 2026-10-05
 
 Switchboard now stays quiet while nothing changes, and it respects every limit the providers

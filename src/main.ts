@@ -4,7 +4,8 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import type { CardState } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -50,7 +51,7 @@ const usageErrors = new Map<string, string>();
 const providerName = (provider: Provider) => provider === 'claude' ? 'Claude Code' : 'Codex CLI';
 const kindName = (kind: AuthKind) => ({ api_key: 'API key', setup_token: 'Setup token', oauth: 'OAuth' })[kind];
 const date = (seconds: number) => new Date(seconds * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const age = (seconds: number) => { const minutes = Math.max(0, Math.floor((Date.now() / 1000 - seconds) / 60)); return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`; };
+const age = (seconds: number) => { const minutes = Math.max(0, Math.floor((Date.now() / 1000 - seconds) / 60)); return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : minutes < 2880 ? `${Math.floor(minutes / 60)}h ago` : `${Math.floor(minutes / 1440)}d ago`; };
 const identityText = (identity?: ExternalIdentity | null) => identity?.email || identity?.account_id || 'Identity not reported';
 const currentMatch = (account: Account) => {
   const current = currentAccounts?.[account.provider];
@@ -271,17 +272,20 @@ const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includ
 const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
 // #region quota-countdown — docs: docs/runs/2026-10-04-quota-review/README.md
 let countdownPaused = false;
-const pausedCountdowns = new Map<number, string>();
+const pausedCountdowns = new Map<string, string>();
+/** A countdown node's text: the compact card form ("2h 5m") or the long disclosure form. */
+const countdownText = (node: HTMLElement, now: number) => node.dataset.format === 'compact' ? compactCountdown(Number(node.dataset.countdown), now) : resetCountdown(Number(node.dataset.countdown), now);
+const countdownKey = (node: HTMLElement) => `${node.dataset.countdown}|${node.dataset.format ?? 'long'}`;
 /** A tick touches text only: no focus movement, list reordering or provider request. */
 const countdownPoll = intervalWhile(() => {
   const now = Date.now() / 1000;
-  root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = resetCountdown(Number(node.dataset.countdown), now); });
+  root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = countdownText(node, now); });
 }, 60_000);
 function syncCountdown() {
   countdownPoll.sync(!countdownPaused && !document.hidden && page === 'accounts' && !!root.querySelector('[data-countdown]'));
 }
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && !countdownPaused) root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = resetCountdown(Number(node.dataset.countdown), Date.now() / 1000); });
+  if (!document.hidden && !countdownPaused) root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = countdownText(node, Date.now() / 1000); });
   syncCountdown();
 });
 function resetDisplay(until: number, label = 'Resets') {
@@ -289,7 +293,7 @@ function resetDisplay(until: number, label = 'Resets') {
   const wrapper = el('span', 'reset-display');
   const time = el('time', '', `${label} ${date(until)}`); time.dateTime = new Date(until * 1000).toISOString();
   time.title = new Date(until * 1000).toLocaleString(undefined, { timeZoneName: 'short' });
-  const remaining = el('span', 'reset-remaining', countdownPaused ? pausedCountdowns.get(until) ?? 'Countdown paused' : resetCountdown(until, Date.now() / 1000));
+  const remaining = el('span', 'reset-remaining', countdownPaused ? pausedCountdowns.get(`${until}|long`) ?? 'Countdown paused' : resetCountdown(until, Date.now() / 1000));
   remaining.dataset.countdown = String(until);
   // Informational timer: screen readers can inspect it without minute-by-minute announcements.
   remaining.setAttribute('aria-live', 'off'); wrapper.append(time, remaining); return wrapper;
@@ -428,7 +432,7 @@ function renderAccounts(main: HTMLElement) {
   }
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', 'Within each pool: remaining quota first, then shortest wait. Unknown usage follows.'), button(countdownPaused ? 'Resume countdown' : 'Pause countdown', () => {
-    if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(Number(node.dataset.countdown), node.textContent ?? '')); }
+    if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'button quiet', 'countdown-toggle'));
   main.append(sorting);
@@ -451,14 +455,13 @@ function accountRow(account: Account) {
   const current = currentMatch(account); const active = selected(account); const signIn = signInRequired(account);
   const row = el('article', `account-row ${current ? 'is-current' : ''} ${active ? 'is-selected' : ''} ${!account.enabled ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
   row.setAttribute('aria-label', `${account.label}, ${providerName(account.provider)}, ${account.pool} pool${current ? ', in use by the CLI' : ''}`);
-  const icon = el('span', `provider-icon ${account.provider}`, account.provider === 'claude' ? '✳' : '◎'); icon.setAttribute('aria-hidden', 'true');
+  const state = cardState(account, quotaContext()); row.dataset.state = state;
+  const icon = el('span', `provider-icon ${account.provider}`, account.provider === 'claude' ? '✳' : '◎'); icon.setAttribute('aria-hidden', 'true'); icon.title = CARD_STATE[state];
   const name = el('div', 'row-name');
   const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? 'In Claude Code' : 'In Codex CLI'));
   if (active) title.append(el('span', 'badge selected-badge', 'Next managed request'));
   if (signIn) title.append(el('span', 'badge danger-badge', 'Sign in again'));
-  const limit = accountLimit(account);
-  if (limit) { const badge = el('span', 'badge warn-badge', 'Limit reached'); badge.title = limit.source === 'managed' ? 'A managed request was refused with a rate limit.' : 'Claude Code reported a usage or spend limit. The retry hold may be estimated.'; title.append(badge); }
   if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
   const email = account.external_identity?.email;
   name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? 'OAuth' : '')));
@@ -489,45 +492,71 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   items.push(['Rename or disable…', () => editDialog(account)], ['Remove…', () => removeDialog(account), 'danger-text']);
   return menu(account.id, `More actions for ${account.label}`, items);
 }
+/** What the status mark and the screen reader say for each card state. */
+const CARD_STATE: Record<CardState, string> = { available: 'Available', low: 'Running low', blocked: 'Limit reached', stale: 'Stale', failed: 'Check failed', unknown: 'Usage unknown', sign_in: 'Sign in again', disabled: 'Disabled', no_quota: 'No quota check' };
+/** "{lead} 2h 5m · 5 Oct, 21:03": a compact wait that the minute timer keeps current. */
+function compactWait(lead: string, until: number, estimated = false) {
+  const wrapper = el('span', 'usage-wait');
+  const remaining = el('span', 'usage-countdown', countdownPaused ? pausedCountdowns.get(`${until}|compact`) ?? 'paused' : compactCountdown(until, Date.now() / 1000));
+  remaining.dataset.countdown = String(until); remaining.dataset.format = 'compact'; remaining.setAttribute('aria-live', 'off');
+  const time = el('time', '', date(until)); time.dateTime = new Date(until * 1000).toISOString();
+  time.title = new Date(until * 1000).toLocaleString(undefined, { timeZoneName: 'short' });
+  wrapper.append(`${lead} `, remaining, ' · ', time);
+  if (estimated) wrapper.append(el('span', 'usage-estimate', ' · estimated'));
+  return wrapper;
+}
+/** Two lines in every state (compact list): use and freshness, then the one time that matters. */
 function usageCell(account: Account) {
   const observation = account.usage; const now = Date.now() / 1000; const limit = accountLimit(account);
-  if (!observation) {
-    const cell = el('div', 'row-usage');
-    cell.append(el('span', 'usage-unknown', account.kind === 'oauth' ? (account.usage_health?.status === 'failed' ? 'Check failed' : 'Usage unknown') : account.kind === 'api_key' ? 'API billing' : 'No quota check'));
-    // Without an observation there is no disclosure to show the schedule; the row says it.
-    const next = failedNextCheck(account);
-    if (next !== null) cell.append(el('span', 'usage-caption', `Next check ${date(next)}`));
-    if (limit) cell.append(resetDisplay(limit.until, limitLabel(limit)));
-    return cell;
+  const context = quotaContext(); const state = cardState(account, context); const health = account.usage_health;
+  const used = observation ? accountUsedPercent(observation) : null;
+  const freshness = observation ? usageFreshness(observation, quotaMaxAge(account, snapshot?.policies), now) : null;
+  // Line one: the meter with the share used, and how fresh it is.
+  const top = el('span', 'usage-line');
+  if (observation && used !== null) {
+    const meter = el('progress', `usage-meter is-${state}`); meter.max = 100; meter.value = used; meter.setAttribute('aria-hidden', 'true');
+    top.append(meter, el('strong', 'usage-pct', `${Math.round(used)}%`));
+    const ageNode = el('span', `usage-age${state === 'stale' || state === 'failed' ? ' is-warn' : ''}`, age(observation.observed_at));
+    ageNode.title = `Checked ${date(observation.observed_at)}`; top.append(ageNode);
+  } else {
+    top.append(el('span', 'usage-unknown', account.kind === 'api_key' ? 'API billing' : account.kind === 'setup_token' ? 'No quota check' : 'Usage unknown'));
   }
-  const cell = el('div', 'row-usage');
-  const { stale, resetPassed } = usageFreshness(observation, quotaMaxAge(account, snapshot?.policies), now);
-  const failed = account.usage_health?.status === 'failed' || account.usage_health?.status === 'unavailable';
+  // Line two: the time that decides what happens next.
+  const sub = el('span', `usage-sub is-${state}`);
+  const order = quotaOrder(account, context);
+  if (state === 'blocked') {
+    const estimated = !!limit && order.until === limit.until && limitLabel(limit) !== 'Limit resets';
+    if (order.until) sub.append(compactWait(estimated ? 'Retry in' : 'Back in', order.until, estimated)); else sub.append('Reset time unavailable');
+    if (limit) sub.title = limit.source === 'managed' ? 'A managed request was refused with a rate limit.' : 'Claude Code reported a usage or spend limit. The retry hold may be estimated.';
+  } else if (state === 'failed') {
+    const next = failedNextCheck(account); sub.append(next !== null ? `Check failed · next ${date(next)}` : 'Check failed · check usage to retry');
+  } else if (state === 'stale') {
+    const reset = observation ? accountReset(observation) : null;
+    sub.append(freshness?.resetPassed ? 'Reset since check · awaiting a new one' : reset ? `Stale · reported reset ${date(reset)}` : 'Stale · awaiting a new check');
+  } else if (state === 'available' || state === 'low') {
+    const reset = observation ? accountReset(observation) : null;
+    if (reset) sub.append(compactWait('Resets in', reset)); else sub.append('Reset time unavailable');
+  } else if (state === 'unknown') sub.append(monitorChecks(account) ? (health ? `Next check ${date(health.next_check_at)}` : 'Waiting for the first check') : 'Not checked automatically');
+  else if (state === 'sign_in') sub.append('Sign in to check usage');
+  else if (state === 'disabled') sub.append('Not checked while disabled');
+  const label = `${CARD_STATE[state]}${used !== null ? `, ${Math.round(used)}% used` : ''}. ${sub.textContent ?? ''}`;
+  if (!observation) { const cell = el('div', 'row-usage'); cell.setAttribute('role', 'group'); cell.setAttribute('aria-label', label); cell.append(top, sub); return cell; }
   const control = button('', () => { if (quotaOpen.has(account.id)) quotaOpen.delete(account.id); else quotaOpen.add(account.id); render(); restoreFocus(`quota-${account.id}`); }, 'row-usage', `quota-${account.id}`);
   control.setAttribute('aria-expanded', String(quotaOpen.has(account.id)));
-  // The account's own capacity; a feature limit is shown in the disclosure, not here (SB-40).
-  const accountUsed = accountUsedPercent(observation);
-  const shown = accountUsed ?? 0;
-  control.setAttribute('aria-label', `${accountUsed === null ? 'Account usage unknown' : `${Math.round(shown)}% of the highest quota used`}${resetPassed ? ' before reset; current usage unknown' : failed ? '; last check failed' : stale ? '; stale observation' : ''}. Show quota windows.`);
-  const meter = el('progress', `usage-meter ${shown >= 90 ? 'is-high' : ''}`); meter.max = 100; meter.value = shown;
-  meter.setAttribute('aria-label', resetPassed || stale || failed ? 'Last reported quota used' : 'Reported quota used');
-  const line = el('span', 'usage-line');
-  line.append(el('strong', '', accountUsed === null ? 'Usage unknown' : `${Math.round(shown)}%`), el('span', stale || failed ? 'stale' : '', resetPassed ? 'reset since check' : failed ? 'check failed' : stale ? `stale · ${age(observation.observed_at)}` : age(observation.observed_at)));
-  // Unknown is never drawn as an empty meter: no meter at all (SB-40).
-  if (accountUsed === null) control.append(line); else control.append(line, meter);
-  cell.append(control);
-  const quota = quotaOrder(account, { ...quotaContext(), limits: [] });
-  const reset = quota.state === 'blocked' ? quota.until : accountReset(observation);
-  if (limit) cell.append(resetDisplay(limit.until, limitLabel(limit)));
-  // A hold is not a quota reset; show both when they differ.
-  if (reset && (!limit || reset !== limit.until)) cell.append(resetDisplay(reset, stale || failed ? 'Reported reset' : quota.state === 'blocked' ? 'Quota windows reset' : 'Resets'));
-  if (quota.state === 'blocked' && quota.until === null) cell.append(el('span', 'usage-unknown', 'Reset time unavailable'));
-  return cell;
+  control.setAttribute('aria-label', `${label} Show quota windows.`);
+  control.append(top, sub);
+  return control;
 }
 function quotaDetails(account: Account) {
   const observation = account.usage!; const now = Date.now() / 1000; const health = account.usage_health;
   const details = el('div', 'row-details');
   const windows = observation.windows?.length ? observation.windows : [{ name: 'Highest reported window', used_percent: observation.used_percent, resets_at: observation.resets_at }];
+  const limit = accountLimit(account);
+  if (limit) {
+    // The hold is not a quota reset; the windows below keep their own reset times.
+    const row = el('div', 'quota-window'); row.append(el('strong', '', `Limit reached · ${limit.source === 'managed' ? 'a managed request was refused' : 'reported by Claude Code'}`), resetDisplay(limit.until, limitLabel(limit)));
+    details.append(row);
+  }
   for (const window of windows) {
     const reset = windowReset(window.resets_at, now);
     const name = 'name' in window && isFeatureWindow(window) ? featureWindowLabel(window.name) : window.name;
