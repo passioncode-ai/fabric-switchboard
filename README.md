@@ -201,7 +201,7 @@ dependencies.
 ## License
 
 Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
-available for use that does not meet the AGPL's terms — contact@passioncode.ai.
+available for use that does not meet the AGPL's terms — [passioncode.ai/business](https://passioncode.ai/business/).
 v0.4.1-beta.1 is the first release under the AGPL. Versions up to and including v0.4.0-beta.1 were released under PolyForm Noncommercial or Internal Use (v0.4.0-beta.1) and the MIT License (v0.3.1-beta.1 and earlier, commits up to and including `7c36f4a`); those releases keep their licence.
 
 The built app and CLI include third-party components under their own licenses; see

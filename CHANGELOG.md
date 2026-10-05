@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- About → Version and license now points a commercial license request to the form at
+  https://passioncode.ai/business/ instead of an email address.
+
 ## 0.6.1 — 2026-10-05
 
 Switchboard now updates itself: from this version on, new releases arrive and install without
