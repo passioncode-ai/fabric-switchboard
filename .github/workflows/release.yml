@@ -9,6 +9,11 @@
 # made from the stapled app, the Windows one from the final installer — and the `updater` job
 # writes latest.json and refuses it unless every entry names a file of this release with that
 # file's own signature. All of it is published, attested and summed with the rest.
+# The updater key reaches only the two signing steps, as environment variables (GitHub masks
+# secret values in logs; no step runs with `set -x`, and the script passes the key to
+# `tauri signer sign` through its environment, never its arguments, and prints neither).
+# Windows steps call `python`, as the job's other steps do: setup-python on windows-latest
+# provides `python.exe`, not `python3`.
 #
 # Signing happens only here, in the protected `release` environment: approved by a
 # person from release-approvers, who may be whoever pushed the tag; an agent approves only a
@@ -337,8 +342,8 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          python scripts/updater_artifacts.py manifest --tag "$TAG" --dir updater
-          python scripts/updater_artifacts.py check --tag "$TAG" --dir updater
+          python3 scripts/updater_artifacts.py manifest --tag "$TAG" --dir updater
+          python3 scripts/updater_artifacts.py check --tag "$TAG" --dir updater
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-updater

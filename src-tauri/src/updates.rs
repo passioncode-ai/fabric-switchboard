@@ -32,6 +32,10 @@ pub const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(60 * 60);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// A bundle swap is a few renames and an unpack of ~15 MB; one that has not finished in five
+/// minutes is stuck (a hung volume), and the loop must not wait on it.
+#[cfg(target_os = "macos")]
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// The release ships one universal app; `latest.json` names it under this key.
 #[cfg(target_os = "macos")]
 pub const MACOS_TARGET: &str = "darwin-universal";
@@ -48,6 +52,7 @@ pub const SIGNATURE_FAILED: &str = "The downloaded update did not pass its signa
 pub const INSTALL_FAILED: &str =
     "Could not install the update. Switchboard tries again within the hour.";
 pub const NOT_READY: &str = "No update is ready to install yet.";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const PERMISSION_REFUSED: &str = "The update needs an administrator password to replace Switchboard in this folder. It was not installed.";
 const SAVE_FAILED: &str = "Could not save the choice in Switchboard's data folder.";
 
@@ -72,8 +77,18 @@ pub fn availability(exe: &Path, packaged: bool) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Whether a release is offered at all: only a version greater than the running one. This is the
+/// plugin's default rule (it never offers an equal or older version unless `allowDowngrades`,
+/// which is off), stated here so it is tested and cannot drift with the plugin. Downgrades are
+/// also refused by the signature: `requireSignedVersion` makes the version signed into the
+/// package match the one announced, so a manifest cannot dress an old package as new.
+pub fn offered(current: &semver::Version, announced: &semver::Version) -> bool {
+    announced > current
+}
+
 /// The arguments a relaunch after an update starts with: the program, and `--background` when
 /// the window was hidden, so an app that was working in the background stays there.
+#[cfg_attr(windows, allow(dead_code))]
 pub fn relaunch_args(program: OsString, background: bool) -> Vec<OsString> {
     std::iter::once(program)
         .chain(background.then(|| OsString::from(crate::residency::BACKGROUND_ARG)))
@@ -121,6 +136,7 @@ struct Ready {
 
 /// "Restart to update" was pressed: the exit path installs (Windows) and relaunches.
 struct Restart {
+    #[cfg_attr(windows, allow(dead_code))]
     background: bool,
     /// Windows: the same release, checked again with the relaunch arguments for this window
     /// state. None falls back to relaunching with the arguments this process started with.
@@ -137,6 +153,9 @@ struct Inner {
     restart: Option<Restart>,
     /// The quit came from a signal (logout, shutdown, `kill`): no installer is started then.
     signal: bool,
+    /// A macOS bundle swap outlived INSTALL_TIMEOUT. Its thread may still be running, so no
+    /// further check starts until the app restarts.
+    stalled: bool,
 }
 
 pub struct Updates {
@@ -159,6 +178,7 @@ impl Updates {
                 ready: None,
                 restart: None,
                 signal: false,
+                stalled: false,
             }),
             wake: tokio::sync::Notify::new(),
         }
@@ -264,7 +284,7 @@ async fn check_once(app: &AppHandle) -> Phase {
     }
     {
         let mut inner = state.lock();
-        if inner.ready.is_some() || inner.restart.is_some() {
+        if inner.ready.is_some() || inner.restart.is_some() || inner.stalled {
             return inner.phase;
         }
         inner.phase = Phase::Checking;
@@ -320,7 +340,10 @@ fn classify(error: tauri_plugin_updater::Error) -> &'static str {
 }
 
 async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'static str> {
-    let builder = app.updater_builder().timeout(CHECK_TIMEOUT);
+    let builder = app
+        .updater_builder()
+        .timeout(CHECK_TIMEOUT)
+        .version_comparator(|current, release| offered(&current, &release.version));
     #[cfg(target_os = "macos")]
     let builder = builder.target(MACOS_TARGET);
     #[cfg(windows)]
@@ -341,12 +364,29 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
         let bundle = std::env::current_exe()
             .ok()
             .and_then(|exe| tauri_plugin_updater::extract_path_from_executable(&exe).ok());
+        if bundle.is_none() {
+            // Kept for "Restart to update", which installs through the same call and reports it.
+            event(
+                "update_install",
+                &[("outcome", Field::Code("bundle_unknown"))],
+            );
+        }
         if bundle.as_deref().is_some_and(replaceable_without_password) {
             let installing = update.clone();
-            tauri::async_runtime::spawn_blocking(move || installing.install(&bytes))
-                .await
-                .map_err(|_| INSTALL_FAILED)?
-                .map_err(|_| INSTALL_FAILED)?;
+            let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
+            let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
+                Ok(Ok(Ok(()))) => "installed",
+                Ok(Ok(Err(_))) => "failed",
+                Ok(Err(_)) => "panicked",
+                Err(_) => {
+                    state.lock().stalled = true;
+                    "timeout"
+                }
+            };
+            event("update_install", &[("outcome", Field::Code(outcome))]);
+            if outcome != "installed" {
+                return Err(INSTALL_FAILED);
+            }
             return Ok(Some(Ready {
                 update,
                 bytes: None,
@@ -412,21 +452,36 @@ pub async fn restart(app: AppHandle) -> Result<Value, String> {
             ready.bytes = None;
         }
     }
+    // Windows: the installer always runs the bytes verified when the update became ready
+    // (`finish`). The re-check only builds an installer handle that carries the relaunch
+    // arguments for this window state; its own package is never downloaded. When it answers
+    // anything but the same release, the handle of the ready update relaunches with the
+    // arguments this process started with.
     #[cfg(windows)]
     let relaunching = {
         let _ = &bytes;
         let checked = match app
             .updater_builder()
             .timeout(Duration::from_secs(15))
+            .version_comparator(|current, release| offered(&current, &release.version))
             .restart_after_install(false)
             .installer_args(windows_relaunch_args(background))
             .build()
         {
-            Ok(updater) => updater.check().await.ok().flatten(),
-            Err(_) => None,
+            Ok(updater) => updater.check().await.map_err(|_| ()),
+            Err(_) => Err(()),
         };
-        checked
-            .filter(|again| again.version == update.version && again.signature == update.signature)
+        let (code, handle) = match checked {
+            Ok(Some(again))
+                if again.version == update.version && again.signature == update.signature =>
+            {
+                ("same", Some(again))
+            }
+            Ok(Some(_)) => ("newer", None),
+            Ok(None) | Err(_) => ("check_failed", None),
+        };
+        event("update_relaunch_args", &[("outcome", Field::Code(code))]);
+        handle
     };
     #[cfg(not(any(target_os = "macos", windows)))]
     let _ = (&update, &bytes);
@@ -525,6 +580,25 @@ mod tests {
     fn a_translocated_copy_is_told_to_move_to_applications() {
         let exe = Path::new("/private/var/folders/x/AppTranslocation/1234/d/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard");
         assert_eq!(availability(exe, true), Err(UNAVAILABLE_TRANSLOCATED));
+    }
+
+    #[test]
+    fn only_a_newer_version_is_offered() {
+        let v = |text: &str| semver::Version::parse(text).unwrap();
+        assert!(offered(&v("0.6.0"), &v("0.7.0")));
+        assert!(offered(&v("0.6.0"), &v("0.6.1")));
+        assert!(
+            !offered(&v("0.6.0"), &v("0.6.0")),
+            "the same version is not an update"
+        );
+        assert!(
+            !offered(&v("0.7.0"), &v("0.6.9")),
+            "an older version is never offered"
+        );
+        assert!(
+            !offered(&v("0.7.0"), &v("0.7.0-beta.1")),
+            "a prerelease of the running version is older"
+        );
     }
 
     #[test]
