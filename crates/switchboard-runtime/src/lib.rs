@@ -927,7 +927,7 @@ async fn execute(
             Ok(Value::Null)
         }
         Operation::MonitorStatus => Ok(json!({
-            "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS,
+            "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
             "sign_in_required": refresh_state.sign_in_required(&store),
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),

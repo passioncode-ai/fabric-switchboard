@@ -233,7 +233,12 @@ check(() => {
   assert.equal(logic.cardState({ ...base, usage: usage(30), usage_health: { status: 'ok', checked_at: now - 10, next_check_at: now + 170 } }, ctx), 'available');
   assert.equal(logic.cardState({ ...base, usage: usage(85) }, ctx), 'low');
   assert.equal(logic.cardState({ ...base, usage: usage(100) }, ctx), 'blocked');
-  assert.equal(logic.cardState({ ...base, usage: usage(30, { observed_at: now - 900 }) }, ctx), 'stale');
+  // SB-48: without a policy an observation stays current for 900 s; a policy's max age governs its pool.
+  assert.equal(logic.quotaMaxAge(base), 900);
+  assert.equal(logic.quotaMaxAge(base, [{ enabled: true, provider: 'claude', pool: 'p', max_age_seconds: 300 }]), 300);
+  assert.equal(logic.cardState({ ...base, usage: usage(30, { observed_at: now - 600 }) }, ctx), 'available');
+  assert.equal(logic.cardState({ ...base, usage: usage(30, { observed_at: now - 901 }) }, ctx), 'stale');
+  assert.equal(logic.cardState({ ...base, usage: usage(30, { observed_at: now - 600 }) }, { nowSeconds: now, policies: [{ enabled: true, provider: 'claude', pool: 'p', max_age_seconds: 300 }] }), 'stale');
   assert.equal(logic.cardState({ ...base, usage: usage(30), usage_health: { status: 'failed', checked_at: now, next_check_at: now + 900 } }, ctx), 'failed');
   assert.equal(logic.cardState({ ...base, usage: null }, ctx), 'unknown');
   assert.equal(logic.cardState({ ...base, usage: null }, { nowSeconds: now, signInRequired: ['a'] }), 'sign_in');
@@ -249,7 +254,7 @@ check(() => {
   const a = account('available', 20), b = account('soon', 100, now + 60), c = account('late', 100, now + 7200);
   const d = account('unknown', null), e = account('disabled', 0, now + 1, { enabled: false });
   const bad = account('failed', 0, now + 1, { usage_health: { status: 'failed' } });
-  const stale = account('stale', 0, now + 1, { usage: { used_percent: 0, observed_at: now - 400, resets_at: now + 1 } });
+  const stale = account('stale', 0, now + 1, { usage: { used_percent: 0, observed_at: now - 1000, resets_at: now + 1 } });
   const result = logic.groupAccounts([e, c, stale, b, d, bad, a], { nowSeconds: now }).flatMap(g => g.pools.flatMap(p => p.accounts.map(a => a.id)));
   assert.deepEqual(result, ['available', 'soon', 'late', 'failed', 'stale', 'unknown', 'disabled']);
   assert.equal(logic.quotaOrder(account('reset', 0, now), { nowSeconds: now }).state, 'unknown');

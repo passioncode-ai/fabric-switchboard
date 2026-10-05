@@ -828,7 +828,8 @@ fn partial_headers_cannot_erase_unknown_weekly_capacity_for_rotation() {
             .as_ref()
             .unwrap()
             .next_check_at,
-        time + 180
+        // Headers keep the schedule of the last endpoint check: idle, no saved policy (SB-48).
+        time + switchboard_core::CHECK_IDLE_SECONDS
     );
     assert_eq!(
         store
@@ -986,4 +987,150 @@ fn feature_limits_neither_move_the_account_nor_make_a_candidate() {
     // The stored metadata still passes validation when the store is opened again.
     drop(store);
     Store::open(root.path().into(), vault).unwrap();
+}
+
+// SB-48: the quota-check cadence follows what the numbers decide.
+fn account_in(store: &Store, org: &str, pool: &str, now: i64) -> String {
+    store
+        .upsert(
+            org.into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            pool.into(),
+            credential(org, now + 9000),
+            Some(identity(org)),
+        )
+        .unwrap()
+        .id
+}
+fn next_check(store: &Store, id: &str) -> i64 {
+    store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .into_iter()
+        .find(|a| a.id == id)
+        .unwrap()
+        .usage_health
+        .unwrap()
+        .next_check_at
+}
+fn usage_resetting(now: i64, resets: &[Option<i64>]) -> Usage {
+    Usage {
+        used_percent: 40.,
+        observed_at: now,
+        resets_at: resets.iter().flatten().copied().max(),
+        source: "claude_oauth".into(),
+        windows: resets
+            .iter()
+            .enumerate()
+            .map(|(n, reset)| UsageWindow {
+                name: format!("window_{n}"),
+                used_percent: 40.,
+                resets_at: *reset,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn an_idle_account_is_checked_every_ten_minutes_and_just_after_a_reset() {
+    use switchboard_core::{
+        next_quota_check, CHECK_ACTIVE_SECONDS, CHECK_AFTER_RESET_SECONDS, CHECK_IDLE_SECONDS,
+    };
+    let now = clock();
+    let far = usage_resetting(now, &[Some(now + 3600), Some(now + 86_400)]);
+    assert_eq!(
+        next_quota_check(true, &far, now),
+        now + CHECK_ACTIVE_SECONDS
+    );
+    assert_eq!(next_quota_check(false, &far, now), now + CHECK_IDLE_SECONDS);
+    // The earliest future reset of any window pulls the idle check in.
+    let soon = usage_resetting(now, &[Some(now + 86_400), Some(now + 200)]);
+    assert_eq!(
+        next_quota_check(false, &soon, now),
+        now + 200 + CHECK_AFTER_RESET_SECONDS
+    );
+    // Never sooner than a minute, and a reset already passed or unknown changes nothing.
+    let imminent = usage_resetting(now, &[Some(now + 5)]);
+    assert_eq!(next_quota_check(false, &imminent, now), now + 60);
+    let passed = usage_resetting(now, &[Some(now - 5), None]);
+    assert_eq!(
+        next_quota_check(false, &passed, now),
+        now + CHECK_IDLE_SECONDS
+    );
+    // An observation stored without windows (before 0.4) uses its aggregate reset.
+    let mut aggregate = usage_resetting(now, &[]);
+    aggregate.resets_at = Some(now + 300);
+    assert_eq!(
+        next_quota_check(false, &aggregate, now),
+        now + 300 + CHECK_AFTER_RESET_SECONDS
+    );
+}
+
+#[test]
+fn rotation_pools_routed_and_in_use_accounts_keep_the_three_minute_cadence() {
+    use switchboard_core::{CHECK_ACTIVE_SECONDS, CHECK_IDLE_SECONDS};
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let rotating = account_in(&store, "org-rotating", "default", now);
+    let idle = account_in(&store, "org-idle", "idle", now);
+    let routed = account_in(&store, "org-routed", "routed", now);
+    let other = account_in(&store, "org-other", "routed", now);
+    store.set_policy(policy()).unwrap();
+    store.select(Provider::Claude, "routed", &routed).unwrap();
+    store.select(Provider::Claude, "idle", &idle).unwrap();
+    // The "idle" pool's route names the account, so pick another to be idle there.
+    let idle_free = account_in(&store, "org-idle-free", "idle", now);
+    for id in [&rotating, &idle, &routed, &other, &idle_free] {
+        observe(&store, id, 40., now);
+    }
+    assert_eq!(next_check(&store, &rotating), now + CHECK_ACTIVE_SECONDS);
+    assert_eq!(next_check(&store, &routed), now + CHECK_ACTIVE_SECONDS);
+    assert_eq!(next_check(&store, &other), now + CHECK_IDLE_SECONDS);
+    assert_eq!(next_check(&store, &idle_free), now + CHECK_IDLE_SECONDS);
+    // The account the ordinary CLI is signed in to is active too, once the monitor says so.
+    store.set_in_use([idle_free.clone()].into()).unwrap();
+    observe(&store, &idle_free, 41., now + 1);
+    assert_eq!(
+        next_check(&store, &idle_free),
+        now + 1 + CHECK_ACTIVE_SECONDS
+    );
+}
+
+#[test]
+fn becoming_the_account_in_use_pulls_its_check_in_without_a_write() {
+    use switchboard_core::{CHECK_ACTIVE_SECONDS, CHECK_IDLE_SECONDS};
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account_in(&store, "org-a", "idle", now);
+    let b = account_in(&store, "org-b", "idle", now);
+    let c = account_in(&store, "org-c", "other", now);
+    store.select(Provider::Claude, "other", &c).unwrap();
+    for id in [&a, &b] {
+        observe(&store, id, 40., now);
+    }
+    // Both idle: neither is the pool's route (the first account added may be).
+    let routes = store.snapshot().unwrap().routes;
+    let idle_ids: Vec<&String> = [&a, &b]
+        .into_iter()
+        .filter(|id| !routes.values().any(|r| r == *id))
+        .collect();
+    assert!(!idle_ids.is_empty());
+    let target = idle_ids[0].clone();
+    assert_eq!(next_check(&store, &target), now + CHECK_IDLE_SECONDS);
+    // The first call only learns the set: a start moves no schedule.
+    store.set_in_use([target.clone()].into()).unwrap();
+    assert_eq!(next_check(&store, &target), now + CHECK_IDLE_SECONDS);
+    // A later switch to it does, in memory only.
+    store.set_in_use(Default::default()).unwrap();
+    store.flush().unwrap();
+    let writes = store.metadata_writes();
+    store.set_in_use([target.clone()].into()).unwrap();
+    assert_eq!(next_check(&store, &target), now + CHECK_ACTIVE_SECONDS);
+    assert_eq!(store.metadata_writes(), writes, "timestamps stay in memory");
+    // Leaving it in use, or repeating the set, moves nothing.
+    store.set_in_use([target.clone()].into()).unwrap();
+    store.set_in_use(Default::default()).unwrap();
+    assert_eq!(next_check(&store, &target), now + CHECK_ACTIVE_SECONDS);
 }

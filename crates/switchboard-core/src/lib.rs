@@ -127,6 +127,38 @@ pub struct Usage {
 /// `additional_rate_limits`, SB-40), not the account itself. They stay in `windows` and in the
 /// stored `used_percent`, so an older build reads them conservatively.
 pub const FEATURE_WINDOW_PREFIX: &str = "feature_";
+/// Quota-check cadence (SB-48): an account whose numbers decide something right now — its pool
+/// switches automatically, it serves the pool's managed requests, or the ordinary CLI is signed
+/// in to it — is checked every three minutes; any other account every ten, and again just after
+/// one of its windows resets.
+pub const CHECK_ACTIVE_SECONDS: i64 = 180;
+pub const CHECK_IDLE_SECONDS: i64 = 600;
+/// How soon after a reported reset an idle account is checked again.
+pub const CHECK_AFTER_RESET_SECONDS: i64 = 30;
+/// How old an observation may be and still count as current where no rotation policy sets
+/// `max_age_seconds`: the idle cadence plus slack for a busy pass.
+pub const UNPOLICED_MAX_AGE_SECONDS: i64 = 900;
+/// The schedule after a successful quota check observed at `observed`.
+pub fn next_quota_check(active: bool, usage: &Usage, observed: i64) -> i64 {
+    if active {
+        return observed.saturating_add(CHECK_ACTIVE_SECONDS);
+    }
+    let idle = observed.saturating_add(CHECK_IDLE_SECONDS);
+    let windows: Vec<Option<i64>> = if usage.windows.is_empty() {
+        vec![usage.resets_at]
+    } else {
+        usage.windows.iter().map(|w| w.resets_at).collect()
+    };
+    windows
+        .into_iter()
+        .flatten()
+        .filter(|reset| *reset > observed)
+        .map(|reset| reset.saturating_add(CHECK_AFTER_RESET_SECONDS))
+        .min()
+        .map_or(idle, |after| {
+            after.clamp(observed + CHECK_ACTIVE_SECONDS.min(60), idle)
+        })
+}
 impl UsageWindow {
     /// True for a window that limits one feature rather than the whole account.
     pub fn is_feature(&self) -> bool {
@@ -200,6 +232,8 @@ pub struct Store {
     writes: std::sync::atomic::AtomicU64,
     /// Since when memory holds timestamps not yet on disk (0: nothing pending).
     pending_since: std::sync::atomic::AtomicI64,
+    /// Accounts the ordinary CLIs are signed in to, as the monitor last saw (SB-48). Memory only.
+    in_use: Mutex<Option<std::collections::BTreeSet<String>>>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -416,6 +450,7 @@ impl Store {
             changes: Default::default(),
             writes: Default::default(),
             pending_since: Default::default(),
+            in_use: Default::default(),
         })
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
@@ -445,6 +480,49 @@ impl Store {
             std::sync::atomic::Ordering::SeqCst,
         );
         Ok(())
+    }
+    /// The accounts the ordinary CLIs are signed in to now (SB-48). One that became the account
+    /// in use since the last call is due on the active cadence from its last check; the change
+    /// stays in memory like any other timestamp (lifecycle LC-08). The first call only learns the
+    /// set: a start moves no schedule.
+    pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
+        let added: Vec<String> = {
+            let mut set = self
+                .in_use
+                .lock()
+                .map_err(|_| "Account store unavailable")?;
+            let added = match set.as_ref() {
+                Some(known) if *known == ids => return Ok(()),
+                Some(known) => ids.difference(known).cloned().collect(),
+                None => Vec::new(),
+            };
+            *set = Some(ids);
+            added
+        };
+        if added.is_empty() {
+            return Ok(());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let mut moved = false;
+        for a in candidate
+            .accounts
+            .iter_mut()
+            .filter(|a| added.contains(&a.id))
+        {
+            if let Some(health) = a.usage_health.as_mut().filter(|h| h.status == "ok") {
+                let sooner = health.checked_at.saturating_add(CHECK_ACTIVE_SECONDS);
+                if sooner < health.next_check_at {
+                    health.next_check_at = sooner;
+                    moved = true;
+                }
+            }
+        }
+        if moved {
+            self.hold(&mut state, candidate)
+        } else {
+            Ok(())
+        }
     }
     /// Metadata publications written to disk since the store opened.
     pub fn metadata_writes(&self) -> u64 {
@@ -1053,7 +1131,20 @@ impl Store {
                 .unwrap_or(usage.observed_at)
                 .max(usage.observed_at)
         } else {
-            usage.observed_at.saturating_add(180)
+            let in_use = self
+                .in_use
+                .lock()
+                .map(|set| set.as_ref().is_some_and(|set| set.contains(id)))
+                .unwrap_or(true);
+            let rotates = candidate
+                .policies
+                .iter()
+                .any(|p| p.enabled && p.provider == a.provider && p.pool == a.pool);
+            let routed = candidate
+                .routes
+                .get(&format!("{}:{}", a.provider.as_str(), a.pool))
+                .is_some_and(|route| route == id);
+            next_quota_check(in_use || rotates || routed, &usage, usage.observed_at)
         };
         let was_ok = a.usage_health.as_ref().is_some_and(|h| h.status == "ok");
         a.usage_health = Some(UsageHealth {

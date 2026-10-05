@@ -645,8 +645,11 @@ fn print_result(value: &Value, cli: &Cli) {
                     .and_then(switchboard_core::Usage::account_used_percent)
                     .map(|p| {
                         let observed = &a["usage"]["observed_at"];
-                        // Matches the default rotation limit on observation age.
-                        let stale = observed.as_i64().is_none_or(|t| now - t > 300);
+                        // The age past which an account outside rotation is overdue (SB-48);
+                        // rotation itself judges by its policy's `max_age_seconds`.
+                        let stale = observed
+                            .as_i64()
+                            .is_none_or(|t| now - t > switchboard_core::UNPOLICED_MAX_AGE_SECONDS);
                         format!(
                             "{p:.1}% used; observed {}{}",
                             utc(observed),

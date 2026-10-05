@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Quota checks
+
+- Accounts nobody is using are checked every ten minutes instead of every three, and again just
+  after one of their limits resets; the account in use, the one your managed sessions use and
+  every account in a pool that switches automatically stay on three minutes. Without automatic
+  switching, numbers now count as current for 15 minutes, so idle rows no longer read stale.
+
 ### Interface
 
 - The account list is compact again: each row's quota fits in two lines — the meter with the
