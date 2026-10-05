@@ -21,7 +21,7 @@ Every agent here can use Switchboard at one of three levels:
 | 7 | [Codex CLI](https://github.com/openai/codex) · #7 on OpenRouter | cli | Through Switchboard (set up once in the agent) | yes | no | Responses | `codex exec "<prompt>"` |
 | 8 | [Command Code](https://commandcode.ai/docs) · #8 on OpenRouter | cli+desktop | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `cmd -p "<prompt>"` |
 | 9 | [pi](https://github.com/earendil-works/pi) · #9 on OpenRouter | cli | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `pi -p "<prompt>"` |
-| 10 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) · #10 on OpenRouter | cli+desktop | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `dsh --profile headless "<prompt>"` |
+| 10 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) · #10 on OpenRouter | cli+desktop | Through Switchboard (set up once in the agent) | yes | unverified with a local endpoint | unverified | `dsh --profile headless "<prompt>"` |
 | 11 | [OpenClaw](https://github.com/openclaw/openclaw) · #11 on OpenRouter | cli+desktop | Through Switchboard (set up once in the agent) | yes | yes (`ANTHROPIC_BASE_URL`) | Responses, Chat Completions | `openclaw agent exec "<prompt>"` |
 | 12 | [OpenHands CLI](https://github.com/OpenHands/OpenHands-CLI) · #12 on OpenRouter | cli | Through Switchboard (set up once in the agent) | yes | yes (`LLM_BASE_URL`) | Responses, Chat Completions | `openhands --headless -t "<prompt>"` |
 | 13 | [ZCode](https://github.com/zai-org/ZCode) · #13 on OpenRouter | cli+desktop | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `zcode -p "<prompt>"` |
@@ -35,7 +35,7 @@ Every agent here can use Switchboard at one of three levels:
 | 21 | [Qwen Code](https://github.com/QwenLM/qwen-code) | cli | Launch from Switchboard | yes | yes (`ANTHROPIC_BASE_URL`) | Responses, Chat Completions | `qwen -p "<prompt>"` |
 | 22 | [Crush](https://github.com/charmbracelet/crush) | cli | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `crush run "<prompt>"` |
 | 23 | [Zed agent](https://github.com/zed-industries/zed) | ide | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | — |
-| 24 | [Amp](https://ampcode.com) | cli+desktop | Tools only (`switchboard mcp`) | yes | yes (config) | Responses, Chat Completions | `amp -x "<prompt>"` |
+| 24 | [Amp](https://ampcode.com) | cli+desktop | Tools only (`switchboard mcp`) | yes | unverified with a local endpoint | unverified | `amp -x "<prompt>"` |
 | 25 | [Cursor CLI](https://cursor.com/docs/cli/installation.md) | cli | Tools only (`switchboard mcp`) | yes | no (own service) | no | `agent -p "<prompt>"` |
 | 26 | [GitHub Copilot CLI](https://github.com/github/copilot-cli) | cli | Through Switchboard (set up once in the agent) | yes | yes (`COPILOT_PROVIDER_BASE_URL`) | Responses, Chat Completions | `copilot -p "<prompt>" --allow-all-tools` |
 | 27 | [Factory Droid](https://docs.factory.com/droid-cli/quickstart.md) | cli+desktop | Through Switchboard (set up once in the agent) | yes | yes (config) | Responses, Chat Completions | `droid exec "<prompt>"` |

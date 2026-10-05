@@ -45,6 +45,8 @@ def render(catalog):
         an, oa = a.get('anthropic') or {}, a.get('openai') or {}
         if a.get('proxy_ok') is False:
             anth, oai = 'no (own service)', 'no'
+        elif a.get('proxy_ok') is not True:
+            anth, oai = 'unverified with a local endpoint', 'unverified'
         else:
             anth = yes(an.get('supported')) + (f" (`{an['base_env']}`)" if an.get('base_env') else (' (config)' if an.get('supported') else ''))
             kinds = [k for k, v in (('Responses', oa.get('responses')), ('Chat Completions', oa.get('chat_completions'))) if v]
