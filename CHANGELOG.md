@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.0 — 2026-10-05
+
+The first stable release. A project can now keep its own accounts: only sessions from its folders
+use them, and no other project switches to them. A short tour on first start shows what
+Switchboard does and where to press. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Projects
 
 - A project is one or more folders — related repositories — with accounts of its own. Create it
