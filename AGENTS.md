@@ -83,11 +83,12 @@ clock (before 0.5.4: every account's credential every 10 s, a `security` pair ev
 `ps` every 180 s). Targets for the installed app: average CPU < 0.2 %, RSS ≤ 250 MB including the
 WebKit helpers; measured on a release, not by the gate.
 
-**Residency.** Background rotation, renewal and backups run only while the app or `serve`
-runs; the broker keeps the app running (`always_on`) and, enrolled for `--background`, restarts
-it without a window. Closing the window quits the app; that is the declared residency until a menu-bar or
-login-item mode is decided (product decision, not taken here; board SB-28). Managed sessions keep working
-across a quit and relaunch because the proxy address and token are stable.
+**Residency (SB-28, operator decision 2026-10-05).** Background rotation, renewal and backups
+run while the app or `serve` runs, and the app keeps running with its window closed: it ends only
+through Quit (tray, app menu, Cmd-Q) or a signal. Its own login item starts it at login with
+`--background`. The lifecycle broker's `always_on` for `switchboard.desktop` would undo a Quit
+within a second, so with the login item in use the target is `on_demand`. Managed sessions keep
+working across a quit and relaunch because the proxy address and token are stable.
 
 **Build output and caches (LC-15).** Release artefacts live in `artifacts/`
 (`Fabric-Switchboard-<version>-<platform>-<arch>` folders and ZIPs). `scripts/build_macos.py`
