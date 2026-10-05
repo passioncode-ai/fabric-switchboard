@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Usage analytics
+
+- Release builds count installs, days of use and connected accounts — numbers and kinds only,
+  never account names, e-mail addresses, sign-ins or pool names — with PassionCode's own
+  analytics server. A random installation number shared by PassionCode apps on this computer
+  lets one person using several of them count once. Turn it off in About → *Share anonymous
+  usage counts*; that switch applies to every PassionCode app. What is sent:
+  [ANALYTICS.md](docs/ANALYTICS.md).
+
 ### Stays running
 
 - Closing the window no longer quits Switchboard: quota checks, automatic switching, sign-in

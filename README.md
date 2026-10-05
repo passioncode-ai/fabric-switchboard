@@ -91,6 +91,9 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
 - [CLI](docs/CLI.md): commands, JSON, stdin and the shared session owner.
 - [Distribution](docs/DISTRIBUTION.md): macOS universal app/CLI, signing, Windows
   installer/CLI.
+- [Usage analytics](docs/ANALYTICS.md): what release builds send (counts and kinds, never
+  account names, e-mail addresses or sign-ins), the installation id PassionCode apps share, and
+  the switch that turns it off for all of them.
 
 ## Running from source
 

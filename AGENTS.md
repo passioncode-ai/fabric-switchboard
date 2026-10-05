@@ -30,6 +30,8 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). The implementation contract is [doc
 
 ## Local rules
 
+- Analytics ([docs/ANALYTICS.md](docs/ANALYTICS.md)) sends counts and kinds only; a new event or prop that could carry an identifier, label, e-mail, pool name, path or provider text is a privacy change: update ANALYTICS.md and the planted-identifier test in the same change. Only release builds carry the App Key.
+
 - Never read or replace global Claude/Codex credentials to test the app. Use synthetic Vault/upstream fixtures; real login is an explicit operator-assisted acceptance task.
 - No credential, provider prompt, raw upstream error body, managed home, OS app data or environment file enters Git or chat. Renderer IPC must never return a Credential.
 - Preserve provider/pool boundaries. Capture one immutable identity per accepted request. Do not add automatic replay, refresh, fallback or process killing as an incidental fix. The one deliberate refresh is 0.5's renewal of **inactive** Claude OAuth accounts ([PLAN-0.5](docs/PLAN-0.5.md) D-2); the account signed in to the ordinary Claude Code is never refreshed on Switchboard's schedule — only when Claude Code itself left its token expired and idle, under Claude Code's own locks ([PLAN-0.5](docs/PLAN-0.5.md) REQ-33).

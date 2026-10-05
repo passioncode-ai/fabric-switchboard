@@ -61,5 +61,8 @@ export interface Adapter {
   /** Whether Switchboard opens at login in the background (SB-28); unavailable outside the installed app. */
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
+  /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
+  analytics(): Promise<LoginItem>;
+  setAnalytics(enabled: boolean): Promise<LoginItem>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }

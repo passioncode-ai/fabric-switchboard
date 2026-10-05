@@ -41,6 +41,8 @@ use tauri::{Manager, State};
 struct Slot {
     start: Box<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
     smoke: bool,
+    /// How the app was launched, for analytics (`ordinary` or `background`).
+    launch: &'static str,
     owner: tokio::sync::Mutex<Option<Owner>>,
 }
 const STARTUP_FAILED: &str = "Switchboard could not start its account service. Retry; if it keeps failing, quit and reopen Switchboard.";
@@ -55,6 +57,12 @@ impl Slot {
             } else {
                 Owner::desktop(root).await
             };
+            let started = started.inspect(|owner| {
+                // Release builds only (the App Key), the real data folder only (docs/ANALYTICS.md).
+                if !self.smoke {
+                    owner.runtime.enable_analytics(self.launch);
+                }
+            });
             *owner = Some(started.map_err(|error| {
                 if error == "Another Switchboard instance owns this account storage" {
                     STORE_BUSY.to_string()
@@ -345,6 +353,15 @@ fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
     }
     launch
 }
+/// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled}`.
+#[tauri::command]
+async fn analytics_status(slot: State<'_, Slot>) -> Result<Value, String> {
+    Ok(slot.runtime().await?.analytics_status())
+}
+#[tauri::command]
+async fn set_analytics(slot: State<'_, Slot>, enabled: bool) -> Result<Value, String> {
+    slot.runtime().await?.set_analytics(enabled)
+}
 /// Whether Switchboard opens at login (SB-28). Unavailable in a development build and the smoke
 /// check.
 #[tauri::command]
@@ -402,6 +419,7 @@ fn main() {
                     None => default_root(),
                 }),
                 smoke,
+                launch: if background { "background" } else { "ordinary" },
                 owner: tokio::sync::Mutex::new(None),
             };
             // SIGTERM and SIGINT are caught before the owner starts and publishes its control
@@ -471,6 +489,8 @@ fn main() {
             frontend_ready,
             login_item,
             set_login_item,
+            analytics_status,
+            set_analytics,
             snapshot,
             current_accounts,
             capture_current,
