@@ -113,6 +113,7 @@ export function createDemoAdapter(): Adapter {
     async setPolicy(policy) {
       await pause();
       if (policy.provider !== 'claude' && policy.target === 'claude_cli') throw new Error('Native rotation is available only for Claude OAuth accounts.');
+      if (policy.enabled && policy.target === 'claude_cli' && state.projects?.some((p) => p.pool === policy.pool)) throw new Error(PROJECT_NOT_NATIVE);
       const policies = state.policies!;
       const index = policies.findIndex((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
       if (index < 0) policies.push(structuredClone(policy)); else policies[index] = structuredClone(policy);

@@ -971,6 +971,10 @@ async fn execute(
             label,
             pool,
         } => {
+            // The CLI's own account is every folder's: it cannot land in a project's pool.
+            if store.snapshot()?.project_of_pool(&pool).is_some() {
+                return Err(PROJECT_ACCOUNT_IN_CLI.into());
+            }
             external::forget_current();
             if provider == Provider::Claude {
                 refresh::learn_live_owner(&store, native, refresh_state).await;
@@ -1014,6 +1018,10 @@ async fn execute(
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
             {
                 return Err("Label or pool is invalid".into());
+            }
+            // Claude Swap switches the ordinary Claude Code: its profiles are every folder's.
+            if store.snapshot()?.project_of_pool(&pool).is_some() {
+                return Err(switchboard_core::PROJECT_NOT_NATIVE.into());
             }
             let batch = (native.swap)()?;
             let (imported, failed, skipped) =
@@ -1861,6 +1869,27 @@ mod owner_tests {
             .execute(save_with(vec![b.id.clone()]))
             .await
             .unwrap();
+        // Nor can the CLI's account be captured, or Claude Swap's profiles imported, into it.
+        assert_eq!(
+            runtime
+                .execute(Operation::CaptureCurrent {
+                    provider: Provider::Claude,
+                    label: None,
+                    pool: "alpha".into(),
+                })
+                .await
+                .unwrap_err(),
+            PROJECT_ACCOUNT_IN_CLI
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::ImportClaudeSwap {
+                    pool: "alpha".into()
+                })
+                .await
+                .unwrap_err(),
+            switchboard_core::PROJECT_NOT_NATIVE
+        );
     }
     #[tokio::test]
     async fn a_project_account_never_becomes_the_ordinary_claude_code() {

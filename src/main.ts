@@ -43,7 +43,8 @@ const TOUR: { page: Page; target: string | null; title: string; text: string }[]
   { page: 'projects', target: '[data-focus="new-project"]', title: 'Give a project its own accounts', text: 'Press + New project, add the project\'s folders and choose its accounts. Sessions launched from those folders use only them, and other projects never switch to them.' },
   { page: 'agents', target: null, title: 'Agents, and it keeps running', text: 'Here, connect Claude Code and Codex agents so they can read usage and switch accounts. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.' },
 ];
-let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return null; } })();
+// Storage refused: the tour shows again next start rather than never (SCN-035).
+let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
