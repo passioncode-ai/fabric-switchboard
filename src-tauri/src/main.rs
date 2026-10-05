@@ -2,6 +2,7 @@
 use serde_json::{json, Value};
 use std::sync::Arc;
 mod residency;
+mod updates;
 use residency::reveal;
 
 struct SmokeMode(Option<tempfile::TempDir>);
@@ -440,6 +441,19 @@ fn set_login_item(
     }
     residency::set(&app, &default_root()?, enabled)
 }
+/// Automatic updates (SB-55): `{available, reason, enabled, state, current, version, …}`.
+#[tauri::command]
+fn update_status(updates: State<'_, updates::Updates>) -> Value {
+    updates.status()
+}
+#[tauri::command]
+fn set_auto_update(updates: State<'_, updates::Updates>, enabled: bool) -> Result<Value, String> {
+    updates.set(enabled)
+}
+#[tauri::command]
+async fn restart_to_update(app: tauri::AppHandle) -> Result<Value, String> {
+    updates::restart(app).await
+}
 
 fn main() {
     let Launch { smoke, background } = launch(std::env::args());
@@ -452,7 +466,8 @@ fn main() {
             .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
                 residency::second_launch(app, &args);
             }))
-            .plugin(residency::plugin());
+            .plugin(residency::plugin())
+            .plugin(tauri_plugin_updater::Builder::new().build());
     }
     if !smoke {
         if let Some(log) = switchboard_runtime::oplog::Log::default_location() {
@@ -513,6 +528,17 @@ fn main() {
                     residency::apply_at_start(app.handle(), &root);
                 }
             }
+            // Automatic updates (SB-55): never in the smoke check or a development build.
+            let available = if smoke {
+                Err(updates::UNAVAILABLE_DEVELOPMENT)
+            } else {
+                std::env::current_exe()
+                    .map_err(|_| updates::UNAVAILABLE_DEVELOPMENT)
+                    .and_then(|exe| updates::availability(&exe, residency::packaged(&exe)))
+            };
+            let root = if smoke { None } else { default_root().ok() };
+            app.manage(updates::Updates::new(available, root));
+            updates::start(app.handle());
             // The window is created hidden (tauri.conf.json): shown now on an ordinary start;
             // in the background, left hidden — opening the app again (`reveal`) brings it.
             if !background {
@@ -530,6 +556,7 @@ fn main() {
                         "stop_requested",
                         &[("signal", switchboard_runtime::oplog::Field::Code(signal))],
                     );
+                    handle.state::<updates::Updates>().note_signal();
                     switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
                     handle.exit(0);
                 }
@@ -547,6 +574,9 @@ fn main() {
             frontend_ready,
             login_item,
             set_login_item,
+            update_status,
+            set_auto_update,
+            restart_to_update,
             analytics_status,
             set_analytics,
             snapshot,
@@ -633,6 +663,8 @@ fn main() {
             if let Some(owner) = owner {
                 tauri::async_runtime::block_on(owner.shutdown(switchboard_runtime::DRAIN_DEADLINE));
             }
+            // After the drain: the Windows installer, or the relaunch after "Restart to update".
+            updates::finish(handle);
         }
     });
 }

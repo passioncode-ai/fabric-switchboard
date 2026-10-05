@@ -14,6 +14,7 @@ python3 scripts/check_plugin.py
 python3 -m unittest scripts/test_check_plugin.py
 python3 -m unittest scripts/test_nightly_clock.py
 python3 -m unittest scripts/test_prune_artifacts.py
+python3 -m unittest scripts/test_updater_artifacts.py
 python3 -m unittest scripts/test_build_macos.py scripts/test_package_windows.py scripts/test_windows_bundle.py scripts/test_release_preflight.py scripts/test_smoke_native.py
 python3 scripts/agents_doc.py --check
 python3 scripts/third_party_notices.py --check

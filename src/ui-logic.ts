@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, ProjectRule, RotationPolicy, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -277,4 +277,19 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
     },
     get running() { return handle !== undefined; },
   };
+}
+
+/** What About says about automatic updates (SB-55), and whether "Restart to update" is offered. */
+export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission'>): { text: string; restart: boolean } {
+  if (!status.available) return { text: status.reason ?? 'Automatic updates work in the installed app only.', restart: false };
+  if (status.state === 'ready' && status.version) {
+    return status.needs_permission
+      ? { text: `Version ${status.version} is ready. Restarting asks for an administrator password to replace the app.`, restart: true }
+      : { text: `Version ${status.version} is ready. It starts the next time Switchboard opens, or restart now.`, restart: true };
+  }
+  if (!status.enabled) return { text: `Version ${status.current}. Automatic updates are off.`, restart: false };
+  if (status.state === 'downloading' && status.version) return { text: `Downloading version ${status.version}…`, restart: false };
+  if (status.state === 'checking') return { text: 'Checking for updates…', restart: false };
+  if (status.state === 'failed' && status.error) return { text: status.error, restart: false };
+  return { text: `Version ${status.current} is the latest. Switchboard checks again every six hours.`, restart: false };
 }

@@ -39,6 +39,9 @@ export const nativeAdapter: Adapter = {
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
   setAnalytics: (enabled) => invoke('set_analytics', { enabled }),
+  updateStatus: () => readWithDeadline(invoke('update_status')),
+  setAutoUpdate: (enabled) => invoke('set_auto_update', { enabled }),
+  restartToUpdate: () => invoke('restart_to_update'),
 };
 
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
@@ -61,6 +64,15 @@ const safeErrors = new Set([
   'Usage analytics are available in the installed app only.',
   'Could not save the analytics choice.',
   'Opening at login is available in the installed app only.',
+  'Automatic updates work in the installed app only.',
+  'Move Fabric Switchboard to the Applications folder to receive updates.',
+  'Automatic updates are available on macOS and Windows.',
+  'No update is ready to install yet.',
+  'Could not check for updates. Switchboard tries again within the hour.',
+  'Could not download the update. Switchboard tries again within the hour.',
+  'The downloaded update did not pass its signature check and was discarded. Switchboard tries again within the hour.',
+  'The update needs an administrator password to replace Switchboard in this folder. It was not installed.',
+  'Could not install the update. Switchboard tries again within the hour.',
   'Could not save the choice in Switchboard\'s data folder.',
   'Could not add Switchboard to the login items. Check the system\'s login item settings.',
   'Could not remove Switchboard from the login items. Check the system\'s login item settings.',

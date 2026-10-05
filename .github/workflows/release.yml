@@ -4,6 +4,17 @@
 # it on (AZURE_SIGNING_ENABLED; docs/DISTRIBUTION.md). Then attested (Sigstore), summed,
 # GPG-signed and published by the organization's shared workflow.
 #
+# Automatic updates (SB-55, docs/DISTRIBUTION.md): each platform job also signs its updater
+# package with the updater key (TAURI_SIGNING_PRIVATE_KEY, release environment) — the macOS one
+# made from the stapled app, the Windows one from the final installer — and the `updater` job
+# writes latest.json and refuses it unless every entry names a file of this release with that
+# file's own signature. All of it is published, attested and summed with the rest.
+# The updater key reaches only the two signing steps, as environment variables (GitHub masks
+# secret values in logs; no step runs with `set -x`, and the script passes the key to
+# `tauri signer sign` through its environment, never its arguments, and prints neither).
+# Windows steps call `python`, as the job's other steps do: setup-python on windows-latest
+# provides `python.exe`, not `python3`.
+#
 # Signing happens only here, in the protected `release` environment: approved by a
 # person from release-approvers, who may be whoever pushed the tag; an agent approves only a
 # release the operator asked for (passioncode-ai/.github release-signing/README.md). A build signed anywhere else is a debug build and is never
@@ -113,6 +124,19 @@ jobs:
           RECEIPT: ${{ steps.build.outputs.receipt }}
           SUBMISSION: ${{ steps.notarize.outputs.submission }}
         run: python3 scripts/build_macos.py --finish-external "$RECEIPT" --app-submission "$SUBMISSION"
+      # From the stapled app: the archive is unpacked again and must still pass codesign, the
+      # staple and Gatekeeper before it is signed for the updater.
+      - name: Updater package from the stapled app
+        env:
+          APP: ${{ steps.build.outputs.app }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python3 scripts/updater_artifacts.py macos --app "$APP" --out artifacts/updater
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-macos
+          path: artifacts/updater/*
+          if-no-files-found: error
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos
@@ -269,6 +293,19 @@ jobs:
             }
           }
           ConvertTo-Json -InputObject @($report) | Set-Content "$env:RUNNER_TEMP\signatures.json"
+      # After the last Authenticode pass, so the signed bytes are the ones the updater checks.
+      - name: Updater package from the final installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          python scripts/updater_artifacts.py windows --nsis-dir target\release\bundle\nsis --out artifacts\updater
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-windows
+          path: artifacts/updater/*
+          if-no-files-found: error
       - name: Package the archive and its receipt
         run: |
           if ($env:SIGNING -eq 'true') {
@@ -285,8 +322,36 @@ jobs:
             artifacts/Fabric-Switchboard-*-windows-x64-receipt.json
           if-no-files-found: error
 
-  publish:
+  # latest.json for both platforms, checked against the files it names, then handed to the
+  # publish workflow as one more release-* artifact.
+  updater:
     needs: [macos, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: updater-*
+          path: updater
+          merge-multiple: true
+      - name: latest.json, and every entry checked against the release files
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/updater_artifacts.py manifest --tag "$TAG" --dir updater
+          python3 scripts/updater_artifacts.py check --tag "$TAG" --dir updater
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-updater
+          path: updater/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows, updater]
     permissions:
       contents: write
       id-token: write
