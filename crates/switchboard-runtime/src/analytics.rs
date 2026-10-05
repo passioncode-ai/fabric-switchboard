@@ -28,6 +28,24 @@ pub const SHARED_FILE: &str = "installation.json";
 /// This app's own bookkeeping in its data folder.
 pub const STATE_FILE: &str = "analytics-state.json";
 const SDK: &str = concat!("switchboard-analytics@", env!("CARGO_PKG_VERSION"));
+/// `production` for a release (a version without a pre-release part, built in release mode);
+/// `sandbox` for a debug build or a pre-release (`-rc.N` rehearsals, betas).
+const ENVIRONMENT: &str = if cfg!(debug_assertions) || has_prerelease(env!("CARGO_PKG_VERSION")) {
+    "sandbox"
+} else {
+    "production"
+};
+const fn has_prerelease(version: &str) -> bool {
+    let bytes = version.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'-' {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
 /// The server refuses events older than a day; keep a margin.
 const MAX_AGE_SECONDS: i64 = 23 * 3600;
 /// The server's batch cap.
@@ -237,6 +255,11 @@ impl Analytics {
         };
         let at = now();
         props.insert("install_id".into(), json!(id));
+        // sshlg-growth counts installs by `iid` and keeps only `production` and `sandbox`
+        // events (operator decision 2026-10-05, growth report 2026-10-05-analytics-platform-review
+        // decision 3): the same id under growth's name, and where the build came from.
+        props.insert("iid".into(), json!(id));
+        props.insert("environment".into(), json!(ENVIRONMENT));
         let event = Event {
             timestamp: rfc3339(at),
             session_id: self.session(at),
@@ -679,6 +702,11 @@ mod tests {
         let id = installation(&shared).unwrap().0.id;
         let sent = events(&server);
         assert!(sent.iter().all(|e| e["props"]["install_id"] == id));
+        // growth's names for the same facts, on every event.
+        assert!(sent.iter().all(|e| e["props"]["iid"] == id));
+        assert!(sent
+            .iter()
+            .all(|e| e["props"]["environment"] == ENVIRONMENT));
         assert_eq!(sent[0]["props"]["first_passioncode_app"], true);
         assert_eq!(sent[1]["props"]["launch"], "background");
         assert_eq!(sent[2]["props"]["accounts"], 1);
@@ -694,6 +722,15 @@ mod tests {
             .unwrap()
             .starts_with("switchboard-analytics@"));
         assert_eq!(client.pending(), 0);
+    }
+
+    #[test]
+    fn the_environment_follows_the_build_and_the_version() {
+        assert!(has_prerelease("0.6.2-rc.1"));
+        assert!(has_prerelease("0.5.5-beta.1"));
+        assert!(!has_prerelease("0.6.2"));
+        // Tests are debug builds.
+        assert_eq!(ENVIRONMENT, "sandbox");
     }
 
     #[tokio::test]
