@@ -287,4 +287,19 @@ check(() => {
   assert.equal(logic.resetCountdown(9e12, now), 'Time unavailable');
 });
 
+// SB-55: what About says about automatic updates, and when "Restart to update" appears.
+check(() => {
+  const base = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, error: null, needs_permission: false };
+  assert.deepEqual(logic.updateLine({ ...base, available: false, enabled: false, reason: 'Automatic updates work in the installed app only.' }), { text: 'Automatic updates work in the installed app only.', restart: false });
+  assert.match(logic.updateLine(base).text, /0\.6\.0 is the latest/);
+  assert.equal(logic.updateLine({ ...base, enabled: false }).text, 'Version 0.6.0. Automatic updates are off.');
+  assert.equal(logic.updateLine({ ...base, state: 'downloading', version: '0.7.0' }).text, 'Downloading version 0.7.0…');
+  assert.equal(logic.updateLine({ ...base, state: 'failed', error: 'Could not check for updates. Switchboard tries again within the hour.' }).text, 'Could not check for updates. Switchboard tries again within the hour.');
+  const ready = logic.updateLine({ ...base, state: 'ready', version: '0.7.0' });
+  assert.equal(ready.restart, true); assert.match(ready.text, /0\.7\.0 is ready/);
+  // A ready update stays offered even after the switch is turned off: it is already installed.
+  assert.equal(logic.updateLine({ ...base, enabled: false, state: 'ready', version: '0.7.0' }).restart, true);
+  assert.match(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', needs_permission: true }).text, /administrator password/);
+});
+
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

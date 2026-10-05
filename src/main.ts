@@ -5,8 +5,8 @@ import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -71,6 +71,8 @@ const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
 let loginItem: LoginItem | null = null;
 let loginItemError = false;
+let updateState: UpdateStatus | null = null;
+let updateError = false;
 let analyticsState: LoginItem | null = null;
 let analyticsError = false;
 let backupError = false;
@@ -133,6 +135,7 @@ async function reload() {
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
+  void loadUpdate();
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
   void readContext().then((context) => {
@@ -799,13 +802,32 @@ function residencyPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'residency-heading');
   const heading = el('h2', '', 'Running in the background'); heading.id = 'residency-heading';
   panel.append(heading, el('p', '', 'Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'));
-  if (loginItemError) { panel.append(el('p', 'form-note', 'The login setting is unavailable. Refresh to retry.')); return panel; }
-  if (!loginItem) { panel.append(el('p', 'form-note', 'Reading the login setting…')); return panel; }
+  if (loginItemError) { panel.append(el('p', 'form-note', 'The login setting is unavailable. Refresh to retry.')); updateControls(panel); return panel; }
+  if (!loginItem) { panel.append(el('p', 'form-note', 'Reading the login setting…')); updateControls(panel); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = loginItem.enabled; box.disabled = !loginItem.available; box.dataset.focus = 'login-item';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { loginItem = await adapter.setLoginItem(wanted); }, wanted ? 'Switchboard will open at login, in the background.' : 'Switchboard will no longer open at login.', 'login-item'); });
   option.append(box, el('span', '', 'Open at login, in the background'));
   panel.append(option, el('p', 'form-note', loginItem.available ? 'Starts without a window; open it from the menu-bar icon.' : 'Available in the installed app.'));
+  updateControls(panel);
   return panel;
+}
+/** SB-55: the backend checks, downloads and installs on its own; the window only reads the state, once a minute while a check can still change it. */
+async function loadUpdate() {
+  try { updateState = await adapter.updateStatus(); updateError = false; } catch { updateError = true; }
+  updatePoll.sync(!!updateState?.available && updateState.enabled && updateState.state !== 'ready');
+  backgroundRender();
+}
+const updatePoll = intervalWhile(() => { void loadUpdate(); }, 60_000);
+function updateControls(panel: HTMLElement) {
+  if (updateError) { panel.append(el('p', 'form-note', 'The update setting is unavailable. Refresh to retry.')); return; }
+  if (!updateState) { panel.append(el('p', 'form-note', 'Reading the update setting…')); return; }
+  const status = updateState;
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = status.enabled; box.disabled = !status.available; box.dataset.focus = 'auto-update';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { updateState = await adapter.setAutoUpdate(wanted); await loadUpdate(); }, wanted ? 'Switchboard will install new versions on its own.' : 'Automatic updates are off. Switchboard will not check for new versions.', 'auto-update'); });
+  option.append(box, el('span', '', 'Install updates automatically'));
+  const line = updateLine(status);
+  panel.append(option, el('p', 'form-note', line.text));
+  if (line.restart) panel.append(button('Restart to update', () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, 'Restarting Switchboard with the new version…', 'update-restart'), 'button', 'update-restart'));
 }
 /** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode app shares. */
 function analyticsPanel() {
