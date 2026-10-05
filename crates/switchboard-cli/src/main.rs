@@ -65,6 +65,21 @@ enum Command {
         #[arg(long)]
         working_directory: PathBuf,
     },
+    /// Continue an Observatory workflow whose executor ran out of its limit on another account of
+    /// the same provider: reads the workflow, offers it (reason `limit`) and launches the account's
+    /// session, which accepts the handoff itself. Requires a running desktop app or serve.
+    Continue {
+        /// The workflow id, `wf_` and 16 hex digits (`project-observatory full workflow list`).
+        workflow_id: String,
+        /// The account that continues it.
+        #[arg(long)]
+        account: String,
+        #[arg(long, value_enum, default_value = "isolated")]
+        mode: Mode,
+        /// The workflow's checkout to run in.
+        #[arg(long)]
+        dir: PathBuf,
+    },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
     Serve,
@@ -531,6 +546,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             }
             .into(),
             working_directory: working_directory.clone(),
+        },
+        Command::Continue {
+            workflow_id,
+            account,
+            mode,
+            dir,
+        } => Operation::Continue {
+            workflow_id: workflow_id.clone(),
+            id: account.clone(),
+            mode: match mode {
+                Mode::Isolated => "isolated",
+                Mode::Managed => "managed",
+            }
+            .into(),
+            working_directory: dir.clone(),
         },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,

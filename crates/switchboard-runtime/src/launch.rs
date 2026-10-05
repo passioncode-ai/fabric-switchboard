@@ -1,3 +1,4 @@
+use crate::continuation::{Continuation, McpServer};
 use serde_json::{json, Value};
 #[cfg(any(target_os = "macos", test))]
 use sha2::{Digest, Sha256};
@@ -73,7 +74,9 @@ pub fn agent_cli() -> Option<PathBuf> {
 }
 /// What a launched session needs to reach Switchboard's tools: Claude reads an extra MCP
 /// file named on its command line; Codex reads `[mcp_servers]` from its private config.
-/// Isolated sessions get the read-only set, since a route change cannot reach them.
+/// Isolated sessions get the read-only set, since a route change cannot reach them. A session
+/// that continues an Observatory workflow (SB-52) also gets the Observatory server there: the
+/// user scope is not visible in an isolated home.
 struct AgentTools {
     claude_config: Option<PathBuf>,
     codex_section: String,
@@ -85,26 +88,52 @@ fn agent_tools(
     provider: Provider,
     session: &str,
     read_only: bool,
+    observatory: Option<&McpServer>,
 ) -> Result<AgentTools, String> {
-    let Some(cli) = cli else {
+    // (name, command, args, the session variable when the server is Switchboard's own)
+    let mut servers: Vec<(&str, String, Vec<String>, Option<&str>)> = Vec::new();
+    if let Some(cli) = cli {
+        let mut args = vec![
+            "--data-dir".to_string(),
+            root.to_string_lossy().into_owned(),
+            "mcp".into(),
+        ];
+        if read_only {
+            args.push("--read-only".into());
+        }
+        servers.push((
+            "switchboard",
+            cli.to_string_lossy().into_owned(),
+            args,
+            Some(session),
+        ));
+    }
+    if let Some(server) = observatory {
+        servers.push((
+            "observatory",
+            server.command.clone(),
+            server.args.clone(),
+            None,
+        ));
+    }
+    if servers.is_empty() {
         return Ok(AgentTools {
             claude_config: None,
             codex_section: String::new(),
         });
-    };
-    let mut args = vec![
-        "--data-dir".to_string(),
-        root.to_string_lossy().into_owned(),
-        "mcp".into(),
-    ];
-    if read_only {
-        args.push("--read-only".into());
     }
-    let command = cli.to_string_lossy().into_owned();
     match provider {
         Provider::Claude => {
             let path = home.join("switchboard-mcp.json");
-            let config = json!({"mcpServers": {"switchboard": {"type": "stdio", "command": command, "args": args, "env": {"SWITCHBOARD_SESSION": session}}}});
+            let mut entries = serde_json::Map::new();
+            for (name, command, args, session) in servers {
+                let mut entry = json!({"type": "stdio", "command": command, "args": args});
+                if let Some(session) = session {
+                    entry["env"] = json!({"SWITCHBOARD_SESSION": session});
+                }
+                entries.insert(name.into(), entry);
+            }
+            let config = json!({ "mcpServers": entries });
             private_write(&path, config.to_string().as_bytes(), false)?;
             Ok(AgentTools {
                 claude_config: Some(path),
@@ -113,14 +142,23 @@ fn agent_tools(
         }
         Provider::Codex => {
             let quote = |v: &str| toml::Value::String(v.into()).to_string();
-            let args = args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(", ");
+            let mut section = String::new();
+            for (name, command, args, session) in servers {
+                let args = args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(", ");
+                section.push_str(&format!(
+                    "\n[mcp_servers.{name}]\ncommand = {}\nargs = [{args}]\n",
+                    quote(&command)
+                ));
+                if let Some(session) = session {
+                    section.push_str(&format!(
+                        "env = {{ SWITCHBOARD_SESSION = {} }}\n",
+                        quote(session)
+                    ));
+                }
+            }
             Ok(AgentTools {
                 claude_config: None,
-                codex_section: format!(
-                    "\n[mcp_servers.switchboard]\ncommand = {}\nargs = [{args}]\nenv = {{ SWITCHBOARD_SESSION = {} }}\n",
-                    quote(&command),
-                    quote(session)
-                ),
+                codex_section: section,
             })
         }
     }
@@ -870,17 +908,69 @@ pub fn launch(
     mode: &str,
     working_directory: &Path,
 ) -> Result<bool, String> {
-    launch_with(root, store, proxy, id, mode, working_directory, &NATIVE)
+    launch_with(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        &NATIVE,
+        None,
+    )
 }
-fn launch_with(
+/// Launches the account's session to continue an Observatory workflow (SB-52): the same launch,
+/// plus the workflow and handoff ids, the Observatory server and a first prompt to accept.
+pub fn launch_continuation(
     root: &Path,
     store: &Arc<Store>,
     proxy: &ProxyHandle,
     id: &str,
     mode: &str,
     working_directory: &Path,
-    host: &Host,
+    continuation: &Continuation,
 ) -> Result<bool, String> {
+    launch_with(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        &NATIVE,
+        Some(continuation),
+    )
+}
+/// Everything `launch` refuses before it touches a home: the folder, the mode, the account, its
+/// project and, for an isolated session, a credential that has not expired. A continuation runs
+/// it before offering the workflow, so a launch that would be refused never leaves an offer.
+pub fn preflight(
+    root: &Path,
+    store: &Store,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+) -> Result<(), String> {
+    let (_, account) = validate(root, store, id, mode, working_directory)?;
+    if mode == "managed" {
+        let (selected, _) = store.route(account.provider, &account.pool)?;
+        if selected.id != account.id {
+            return Err("Select this account before launching managed mode.".into());
+        }
+    } else {
+        // Store::credential refuses an expired credential.
+        store.credential(id)?;
+    }
+    Ok(())
+}
+/// The checks every launch makes before it touches a home.
+fn validate(
+    root: &Path,
+    store: &Store,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+) -> Result<(PathBuf, switchboard_core::Account), String> {
     if !working_directory.is_absolute() {
         return Err("Choose an existing project directory.".into());
     }
@@ -907,6 +997,20 @@ fn launch_with(
         return Err("Enable the account before launch.".into());
     }
     project_allows(&store.snapshot()?, &account, &working_directory)?;
+    Ok((working_directory, account))
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_with(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    host: &Host,
+    continuation: Option<&Continuation>,
+) -> Result<bool, String> {
+    let (working_directory, account) = validate(root, store, id, mode, working_directory)?;
     let program = (host.binary)(account.provider)?;
     let homes = root.join(if mode == "managed" {
         "runtimes"
@@ -935,8 +1039,14 @@ fn launch_with(
         account.provider,
         &session,
         mode != "managed",
+        continuation.map(|c| &c.observatory),
     )?;
     let mut env = BTreeMap::from([("SWITCHBOARD_SESSION".to_string(), session)]);
+    if let Some(c) = continuation {
+        // The Stop hook records the workflow on the session; the handoff id is what it accepts.
+        env.insert("OBSERVATORY_WORKFLOW_ID".into(), c.workflow_id.clone());
+        env.insert("OBSERVATORY_HANDOFF_ID".into(), c.handoff_id.clone());
+    }
     env.insert(
         match account.provider {
             Provider::Claude => "CLAUDE_CONFIG_DIR",
@@ -1021,10 +1131,15 @@ fn launch_with(
         .claude_config
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
-    let args: Vec<&str> = match &config {
+    let first = continuation.map(crate::continuation::prompt);
+    let mut args: Vec<&str> = match &config {
         Some(path) => vec!["--mcp-config", path.as_str()],
         None => Vec::new(),
     };
+    // Both CLIs start an interactive session with a positional first message.
+    if let Some(first) = &first {
+        args.push(first.as_str());
+    }
     (host.start_terminal)(&write_launch_script(
         &home,
         &script(&home, &program, &args, &env, false, &working_directory),
@@ -1103,6 +1218,7 @@ mod tests {
             Provider::Claude,
             "managed:claude:work",
             false,
+            None,
         )
         .unwrap();
         let config: serde_json::Value =
@@ -1122,6 +1238,7 @@ mod tests {
             Provider::Codex,
             "isolated:codex:x",
             true,
+            None,
         )
         .unwrap();
         let parsed: toml::Value =
@@ -1144,6 +1261,7 @@ mod tests {
             Provider::Claude,
             "managed:claude:work",
             false,
+            None,
         )
         .unwrap();
         assert!(none.claude_config.is_none() && none.codex_section.is_empty());
@@ -1581,6 +1699,7 @@ mod tests {
                 mode,
                 &self.project,
                 host,
+                None,
             )
         }
         /// Every file below the fixture's temporary directory, so a test can prove where a
@@ -1652,6 +1771,111 @@ mod tests {
         assert_eq!(fs::read_dir(&f.project).unwrap().count(), 0);
         let events = f.store.snapshot().unwrap().events;
         assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 2);
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            start_terminal: terminal_opens,
+        };
+        let resumed = Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "handoff:fedcba9876543210".into(),
+            observatory: McpServer {
+                command: "/opt/Observatory/bin/python".into(),
+                args: vec!["/opt/Observatory/engine/mcp/server.py".into()],
+            },
+        };
+        let before = f.files();
+        launch_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "isolated",
+            &f.project,
+            &host,
+            Some(&resumed),
+        )
+        .unwrap();
+        let home = f.root.join("homes").join(&id);
+        let text = fs::read_to_string(home.join("launch.command")).unwrap();
+        assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
+        assert!(text.contains("export OBSERVATORY_HANDOFF_ID='handoff:fedcba9876543210'\n"));
+        assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
+        let config: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join("switchboard-mcp.json")).unwrap()).unwrap();
+        assert_eq!(
+            config["mcpServers"]["observatory"],
+            json!({"type": "stdio", "command": "/opt/Observatory/bin/python", "args": ["/opt/Observatory/engine/mcp/server.py"]})
+        );
+        assert_eq!(
+            config["mcpServers"]["switchboard"]["env"]["SWITCHBOARD_SESSION"],
+            format!("isolated:claude:{id}")
+        );
+        // Switchboard never holds a lease token or the old session's transcript, so nothing it
+        // writes for the new session can carry one.
+        for path in f.files().difference(&before) {
+            let content = fs::read_to_string(path).unwrap_or_default();
+            assert!(!content.contains("wl_"), "{path:?}");
+            assert!(!content.contains(".jsonl"), "{path:?}");
+            assert!(
+                !content.contains("synthetic-refresh-must-not-export"),
+                "{path:?}"
+            );
+        }
+
+        // Codex declares the same server in its private config, beside Switchboard's.
+        let codex = f.add(
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "default",
+            "synthetic-codex-key",
+        );
+        launch_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            &codex,
+            "isolated",
+            &f.project,
+            &host,
+            Some(&resumed),
+        )
+        .unwrap();
+        let config: toml::Value = toml::from_str(
+            &fs::read_to_string(f.root.join("homes").join(&codex).join("config.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            config["mcp_servers"]["observatory"]["command"].as_str(),
+            Some("/opt/Observatory/bin/python")
+        );
+        assert!(config["mcp_servers"]["observatory"].get("env").is_none());
+        assert!(config["mcp_servers"]["switchboard"].get("env").is_some());
+    }
+    #[tokio::test]
+    async fn preflight_refuses_what_a_launch_would_refuse_without_writing() {
+        let f = fixture();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let before = f.files();
+        assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_ok());
+        assert_eq!(
+            preflight(&f.root, &f.store, &id, "sideways", &f.project).unwrap_err(),
+            "Choose isolated or managed launch."
+        );
+        assert_eq!(
+            preflight(&f.root, &f.store, "nobody", "isolated", &f.project).unwrap_err(),
+            "Account not found."
+        );
+        switchboard_core::Vault::delete(&*f.vault, &id).unwrap();
+        assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_err());
+        assert_eq!(f.files(), before);
     }
     #[cfg(not(windows))]
     #[tokio::test]
@@ -1857,7 +2081,7 @@ mod tests {
             ..TEST_HOST
         };
         let refuse = |wd: &Path, id: &str, mode: &str| {
-            launch_with(&f.root, &f.store, &proxy, id, mode, wd, &never).unwrap_err()
+            launch_with(&f.root, &f.store, &proxy, id, mode, wd, &never, None).unwrap_err()
         };
         let project = "Choose an existing project directory.";
         assert_eq!(refuse(Path::new("relative"), &id, "isolated"), project);
