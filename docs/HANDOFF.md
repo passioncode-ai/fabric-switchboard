@@ -10,9 +10,13 @@ carry projects, rules, selections and settings and restore a new install (#66); 
 of known accounts come back and uninstall keeps session history (#67). Installed here; its first
 update check answered `current`. Copies at 0.6.0 or earlier need one manual update.
 
-**Exact next task:** SB-52 — build the N-018 continuation skeleton from its
-[packet](packets/n-018-continuation.md). Then SB-49 (idle CPU ≈ 0.29 %), SB-57 (sign-in source
-flapping), SB-07, SB-16. **Waiting on the operator:** whether Fabric apps add `iid` and
+**SB-52 built** (in review, `agent/sb-52-continuation`): `switchboard continue <wf> --account <id>
+--dir <checkout>` hands an Observatory workflow to another account of the same provider and
+launches its session ([run record](packets/n-018-continuation.md#run-record-2026-10-05),
+CONTRACTS → Workflow continuation, SCN-038). Found an engine issue on the way (SB-58).
+
+**Exact next task:** SB-49 (idle CPU ≈ 0.29 %), then SB-57 (sign-in source flapping), SB-07,
+SB-16; SB-52 next steps are a desktop entry and the `switchboard_continue` MCP tool. **Waiting on the operator:** whether Fabric apps add `iid` and
 `environment` to analytics events so sshlg-growth counts them (asked by the growth session
 2026-10-05; ANALYTICS.md changes with it); SB-15 day of use incl. a project with two
 repositories and the first automatic update at the next release; SB-02 Windows; SB-03 Azure
