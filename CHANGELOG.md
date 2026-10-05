@@ -8,6 +8,23 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.3 — 2026-10-05
+
+Switchboard no longer re-reads your Claude Code sign-in every time Claude Code saves its settings,
+which it does several times a minute when many sessions are open. If you run 0.6.1 or 0.6.2, this
+version arrives on its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
+### Quieter in the background
+
+- Switchboard watches only the account part of Claude Code's `~/.claude.json`. Before, any change
+  to that file made it read your sign-in again, and a read that overlapped Claude Code's own
+  write was briefly reported as refused.
+
+### License
+
 - About → Version and license now points a commercial license request to the form at
   https://passioncode.ai/business/ instead of an email address.
 
