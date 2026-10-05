@@ -13,6 +13,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - Backups now also keep your projects, project rules, which account each pool's managed sessions
   use, and the open-at-login and auto-update settings. A change to a project rule triggers a
   backup too.
+- A restore now also gives back the credential of an account that is still listed but lost it
+  (after `switchboard uninstall --keep-data` or a removed Keychain item).
+- `switchboard uninstall` keeps the Claude Code and Codex history in Switchboard's session
+  folders and removes only the sign-in files in them; `--purge` removes those folders too.
 - After a reinstall or `switchboard uninstall`, the first start restores the newest backup on its
   own and says so; an empty account list with a backup beside it offers *Restore from backup*.
 

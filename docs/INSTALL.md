@@ -2,7 +2,7 @@
 
 Fabric Switchboard is a local account workbench for Claude Code and Codex CLI. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
 
-Find the selected release and platform links on the [Switchboard download page](https://passioncode.ai/switchboard/#download), or browse [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases). Release publication is separate from a successful build; see the [0.4.1 release record](evidence/release-0.4.1.md) for the current checks.
+Find the selected release and platform links on the [Switchboard download page](https://passioncode.ai/switchboard/#download), or browse [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases). Release publication is separate from a successful build; see the [release records](evidence/release-0.5.md) for each release's checks.
 
 ## Before opening a download
 
@@ -27,7 +27,7 @@ Releases up to 0.5.3-beta.1 were built by hand and carry `SHA256SUMS-X.Y.Z.txt` 
 Requires macOS 14 or later. The universal archive contains both Apple silicon and Intel executables.
 
 1. Download the macOS ZIP and compare its checksum.
-2. Double-click the ZIP in Finder to extract it. Open the extracted `Fabric-Switchboard-0.4.1-macos-universal` folder.
+2. Double-click the ZIP in Finder to extract it. Open the extracted `Fabric-Switchboard-<version>-macos-universal` folder.
 3. Drag `Fabric Switchboard.app` to your Applications folder, then open it from there.
 4. The optional `switchboard` executable is alongside the app. You can keep it in the extracted folder; installing it into your shell's PATH is optional. In Terminal, change to that folder and run `./switchboard --help` to inspect the CLI commands.
 5. Updating from 0.4.0 or earlier: quit the old app, replace it, then open the new one once. It moves the accounts the old version saved into the Keychain service `ai.passioncode.fabric-switchboard.shared`, which the app and its bundled CLI both read without asking. macOS may ask at most once per account during the move; choose **Always Allow**. Accounts saved earlier stay readable until the move succeeds; the CLI and `switchboard mcp` never show a Keychain dialog and, for an account not yet moved, say to open the app ([KEYCHAIN.md](KEYCHAIN.md#moving-items-written-by-earlier-versions)).
@@ -36,7 +36,7 @@ The app and CLI are Developer ID signed with hardened runtime and **notarized by
 
 ### Connect a coding agent (MCP)
 
-1. Put the CLI on your `PATH`, for example `mkdir -p ~/.local/bin && cp switchboard ~/.local/bin/` from the extracted folder (with `~/.local/bin` on `PATH`). The same signed CLI is inside the app at `Fabric Switchboard.app/Contents/MacOS/switchboard`.
+1. Put the CLI on your `PATH` as a **link** to the one inside the app, so it updates with the app: Agents → *Link switchboard into ~/.local/bin*, or `mkdir -p ~/.local/bin && ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" ~/.local/bin/switchboard` (with `~/.local/bin` on `PATH`). A copied CLI stays at the version it was copied from.
 2. Either install the plugin (the MCP server plus the `switching-accounts` skill): `claude plugin marketplace add passioncode-ai/fabric-switchboard`, then `claude plugin install switchboard@switchboard`; or register the server alone: `claude mcp add --scope user switchboard -- switchboard mcp` (Codex: `codex mcp add switchboard -- switchboard mcp`).
 3. `claude mcp list` shows `switchboard … ✔ Connected`. A safe first call is the read-only `switchboard_accounts` tool; an empty vault answers `{"accounts":[]}`. Switching the ordinary Claude Code login needs an explicit `global: true`. Tools and rules: [CLI — For agents](CLI.md#for-agents).
 
@@ -45,7 +45,7 @@ The app and CLI are Developer ID signed with hardened runtime and **notarized by
 The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe` CLI.
 
 1. Download the Windows ZIP, compare its checksum and use **Extract All** in File Explorer.
-2. Open the extracted `Fabric-Switchboard-0.4.1-windows-x64` folder. Run `Fabric Switchboard_0.4.1_x64-setup.exe` to install the desktop app for your user account.
+2. Open the extracted `Fabric-Switchboard-<version>-windows-x64` folder. Run `Fabric Switchboard_<version>_x64-setup.exe` to install the desktop app for your user account; since 0.6.0 it also installs `switchboard.exe` beside the app.
 3. Follow the installer prompts. The desktop app requires Microsoft WebView2; the installer handles its bootstrapper when needed. An internet connection may be needed for that runtime download.
 4. Open Fabric Switchboard from the Start menu. The installer also puts `switchboard.exe` beside the app (since 0.5.5); the Agents panel shows its path and the commands that register it. The separate CLI in the ZIP is the same program and can stay in the extracted folder. In PowerShell, change to that folder and run `.\switchboard.exe --help` to inspect commands.
 

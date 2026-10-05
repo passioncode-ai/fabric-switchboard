@@ -396,6 +396,17 @@ pub fn restore(
                     })
                 });
             if let Some(here) = here {
+                // Known but without a readable credential: the backup's copy brings it back.
+                if let Some(credential) = payload.credentials.get(&account.id) {
+                    if store
+                        .restore_missing_credential(&here, credential)
+                        .unwrap_or(false)
+                    {
+                        result.added += 1;
+                        ids.insert(account.id.clone(), here);
+                        continue;
+                    }
+                }
                 ids.insert(account.id.clone(), here);
             }
             result.skipped += 1;
@@ -548,7 +559,8 @@ impl BackupKey for KeychainKey {
     }
 }
 
-/// Windows key: DPAPI CurrentUser encryption in a private file under LOCALAPPDATA.
+/// Windows key: DPAPI CurrentUser encryption in `.backup-key.dpapi` inside the backups folder
+/// (`%APPDATA%\Fabric Switchboard Backups`), outside the data folder an uninstaller may remove.
 #[cfg(windows)]
 pub struct DpapiKey(pub std::path::PathBuf);
 #[cfg(windows)]
@@ -738,6 +750,28 @@ mod tests {
                 .trim(),
             "on"
         );
+    }
+    #[test]
+    fn a_known_account_that_lost_its_credential_gets_it_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let vault = Arc::new(MemoryVault::default());
+        let original = Store::open(temp.path().join("one"), vault.clone()).unwrap();
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        // `uninstall --keep-data`: the entry stays, the credential is gone.
+        crate::Vault::delete(vault.as_ref(), &a.id).unwrap();
+        assert!(original.stored_credential(&a.id).is_err());
+        let restored = restore(&original, &backups, &info.file, &keys).unwrap();
+        assert_eq!((restored.added, restored.skipped), (1, 0));
+        assert_eq!(
+            original.stored_credential(&a.id).unwrap().access_token,
+            "token-a-secret"
+        );
+        // With a working credential, a restore never replaces it.
+        let again = restore(&original, &backups, &info.file, &keys).unwrap();
+        assert_eq!((again.added, again.skipped), (0, 1));
     }
     #[test]
     fn a_rule_change_counts_for_the_next_backup() {

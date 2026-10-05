@@ -25,10 +25,23 @@ const OWNED: &[&str] = &[
     "limit-evidence.json",
     "backup-id",
     "login-item",
-    "homes",
-    "runtimes",
     "logins",
     "vault",
+];
+/// Session homes: the CLIs' own history (conversations, project memory) lives there, so
+/// uninstall keeps them and removes only the credential-bearing files Switchboard or a sign-in
+/// put there; `purge` removes them whole.
+const HOME_DIRS: &[&str] = &["homes", "runtimes"];
+const HOME_SECRETS: &[&str] = &[
+    "settings.json",
+    "auth.json",
+    ".credentials.json",
+    "launch.command",
+    "launch.ps1",
+    "switchboard-mcp.json",
+    ".launch-pending",
+    ".session-pid",
+    ".session-process",
 ];
 /// The 0.5.0 sealed-vault key: Keychain service and account. 0.5.1 and later never read it.
 pub(crate) const ORPHAN_KEY: (&str, &str) = ("ai.passioncode.fabric-switchboard.vault-key", "v1");
@@ -127,6 +140,17 @@ pub fn uninstall(
     apply: bool,
     places: &Places,
 ) -> Result<Value, String> {
+    uninstall_with(root, vault, keep_data, false, apply, places)
+}
+/// `purge` also removes the session homes and the CLIs' history in them.
+pub fn uninstall_with(
+    root: &Path,
+    vault: Arc<dyn Vault>,
+    keep_data: bool,
+    purge: bool,
+    apply: bool,
+    places: &Places,
+) -> Result<Value, String> {
     let store = Store::open(root.to_owned(), vault.clone())?;
     let accounts: Vec<String> = store
         .snapshot()?
@@ -140,9 +164,16 @@ pub fn uninstall(
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    let (owned, foreign): (Vec<String>, Vec<String>) = entries
-        .into_iter()
-        .partition(|name| OWNED.contains(&name.as_str()) || name.starts_with(".private-"));
+    let (owned, foreign): (Vec<String>, Vec<String>) = entries.into_iter().partition(|name| {
+        OWNED.contains(&name.as_str())
+            || name.starts_with(".private-")
+            || HOME_DIRS.contains(&name.as_str())
+    });
+    let homes: Vec<String> = owned
+        .iter()
+        .filter(|n| HOME_DIRS.contains(&n.as_str()))
+        .cloned()
+        .collect();
     let mut plan = json!({
         "data_folder": root,
         "accounts": accounts.len(),
@@ -154,7 +185,9 @@ pub fn uninstall(
             "foreign_entries": foreign,
             "backups": "kept, with their key: a reinstall restores them",
             "provider_sign_ins": "the ordinary Claude Code and Codex sign-ins are not touched",
+            "session_history": if purge || keep_data { json!([]) } else { json!(homes) },
         },
+        "purge": purge,
         "applied": apply,
     });
     if !apply {
@@ -182,6 +215,20 @@ pub fn uninstall(
     if !keep_data {
         for name in &owned {
             let path = root.join(name);
+            if HOME_DIRS.contains(&name.as_str()) && !purge {
+                // History stays; every credential file in each home goes.
+                for home in std::fs::read_dir(&path).into_iter().flatten().flatten() {
+                    for secret in HOME_SECRETS {
+                        let file = home.path().join(secret);
+                        if std::fs::symlink_metadata(&file).is_ok()
+                            && std::fs::remove_file(&file).is_err()
+                        {
+                            failures.push(json!({"path": file, "error": "Could not remove."}));
+                        }
+                    }
+                }
+                continue;
+            }
             let removed = match std::fs::symlink_metadata(&path) {
                 Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(&path),
                 Ok(_) => std::fs::remove_file(&path),
@@ -228,6 +275,8 @@ mod tests {
                 .unwrap();
         }
         std::fs::create_dir_all(root.join("homes/x")).unwrap();
+        std::fs::write(root.join("homes/x/settings.json"), "{\"env\":{}}").unwrap();
+        std::fs::write(root.join("homes/x/history.jsonl"), "{}").unwrap();
         std::fs::write(root.join("usage-holds.json"), "{}").unwrap();
         (temp, root, vault)
     }
@@ -284,7 +333,10 @@ mod tests {
             !bin.join("switchboard").exists()
                 && std::fs::symlink_metadata(bin.join("switchboard")).is_err()
         );
-        assert!(!root.join("accounts.json").exists() && !root.join("homes").exists());
+        assert!(!root.join("accounts.json").exists());
+        // The session home's history stays; its credential file goes.
+        assert!(root.join("homes/x/history.jsonl").exists());
+        assert!(!root.join("homes/x/settings.json").exists());
         assert!(
             root.join("my-notes.txt").exists(),
             "a file Switchboard did not create stays"
@@ -377,7 +429,8 @@ mod tests {
             "store in use"
         );
         drop(held);
-        let done = uninstall(&root, vault, false, true, &places).unwrap();
+        // `purge` removes the homes too, and the folder with them.
+        let done = uninstall_with(&root, vault, false, true, true, &places).unwrap();
         assert_eq!(done["data_folder_removed"], true);
     }
 }

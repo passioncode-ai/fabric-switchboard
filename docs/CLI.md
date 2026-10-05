@@ -63,6 +63,7 @@ Select another same-pool account while the managed response streams: the current
 switchboard uninstall              # the plan; nothing changes
 switchboard uninstall --yes        # remove credentials, the CLI link and the data folder's own entries
 switchboard uninstall --keep-data --yes
+switchboard uninstall --purge --yes    # also the session homes and the CLIs' history in them
 ```
 
 Quit the app and `serve` first (the store is opened exclusively). What is and is not removed: [OPERATIONS → uninstall](OPERATIONS.md#corrupt-metadata-backup-and-uninstall) (SB-29).

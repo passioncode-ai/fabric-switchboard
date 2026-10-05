@@ -801,6 +801,35 @@ impl Store {
         credential.validate(a.provider, a.kind)?;
         Ok(credential)
     }
+    /// A restore gives an account back the credential it lost (`switchboard uninstall
+    /// --keep-data`, a removed Keychain item): only when none can be read for it now, so a
+    /// working — possibly newer — credential is never replaced by an older backup.
+    pub fn restore_missing_credential(
+        &self,
+        id: &str,
+        credential: &Credential,
+    ) -> Result<bool, String> {
+        let state = self.lock()?;
+        let a = state
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or("Account not found")?;
+        if self
+            .vault
+            .get(id)
+            .is_ok_and(|c| c.validate(a.provider, a.kind).is_ok())
+        {
+            return Ok(false);
+        }
+        credential.validate(a.provider, a.kind)?;
+        self.vault
+            .put(id, credential)
+            .map_err(vault::surface("Credential storage unavailable"))?;
+        drop(state);
+        self.changed();
+        Ok(true)
+    }
     /// A refresh grant consumed `consumed` and returned `refreshed`. Every stored copy of that
     /// lineage — the same identity may sit in several pools — takes the new generation, or its
     /// next use would present a refresh token the provider has already rotated away. Quota

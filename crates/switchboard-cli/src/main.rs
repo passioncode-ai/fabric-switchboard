@@ -73,7 +73,8 @@ enum Command {
         #[command(subcommand)]
         command: Project,
     },
-    /// Encrypted account backups in ~/Library/Application Support/Fabric Switchboard Backups (this machine's key).
+    /// Encrypted backups (accounts, projects, rules, settings) in the "Fabric Switchboard Backups"
+    /// folder: ~/Library/Application Support on macOS, %APPDATA% on Windows (this machine's key).
     Backup {
         #[command(subcommand)]
         command: Backup,
@@ -85,12 +86,17 @@ enum Command {
         read_only: bool,
     },
     /// Remove what Switchboard created on this machine: saved accounts' credentials, the
-    /// ~/.local/bin link and its data folder. Shows the plan unless --yes. Backups, their key and
-    /// the ordinary Claude Code and Codex sign-ins are never touched. Quit the app first.
+    /// ~/.local/bin link, the login item and its data folder. Session homes keep the CLIs'
+    /// history (their credential files go) unless --purge. Shows the plan unless --yes. Backups,
+    /// their key and the ordinary Claude Code and Codex sign-ins are never touched: the next
+    /// install restores the newest backup on its own. Quit the app first.
     Uninstall {
         /// Keep the data folder (accounts list, settings); remove credentials and the link only.
         #[arg(long)]
         keep_data: bool,
+        /// Also remove the session homes and the Claude Code / Codex history inside them.
+        #[arg(long)]
+        purge: bool,
         /// Remove for real; without it nothing changes.
         #[arg(long)]
         yes: bool,
@@ -332,11 +338,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
-    if let Command::Uninstall { keep_data, yes } = cli.command {
-        return switchboard_runtime::uninstall::uninstall(
+    if let Command::Uninstall {
+        keep_data,
+        purge,
+        yes,
+    } = cli.command
+    {
+        return switchboard_runtime::uninstall::uninstall_with(
             &root,
             std::sync::Arc::new(switchboard_core::NativeVault::new()),
             keep_data,
+            purge,
             yes,
             &switchboard_runtime::uninstall::places(),
         );
