@@ -421,3 +421,25 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
+
+### Release v0.6.2 (2026-10-05) — the first automatic update
+
+0.6.2: the limit scan reads recent Claude transcripts only where they grew (SB-49, #74),
+`switchboard continue` hands an Observatory workflow to another account (SB-52, #73), analytics
+events carry `iid` and `environment` (#75, operator decision via sshlg-growth).
+
+| Step | Result |
+|---|---|
+| Source | `main` `bc8b8ba` ([#76](https://github.com/passioncode-ai/fabric-switchboard/pull/76)), tag `v0.6.2`; `release_preflight.py --tag v0.6.2 --publish true` ok; local gate exit 0; `npm run app:build` ok; `smoke_native.py --version 0.6.2` PASS ordinary (visible, tray) and `--background` (hidden, tray) |
+| Release run | [37332537373](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37332537373), started by the tag push: preflight, windows, macos, updater, publish all success; both gates approved by the agent on the operator's instruction |
+| Published | 2026-10-05T15:44:19Z, **not a prerelease**, 11 assets |
+| Downloaded set | `SHA256SUMS` 9/9 OK (macOS zip `39d9adee34a2e318e9b04c7907582c1f5b92ddff9f8092cb862bc973f70b9983`, Windows setup `8679c5ce209991ba905f4c828817b173a79cafa7940599c0a537d653044ad841`); GPG good signature, organization key; `gh attestation verify --signer-repo passioncode-ai/.github` exit 0 ×2; `spctl` → `accepted, Notarized Developer ID`; stapled; notarization app `dd46b287-dcde-4092-8b9e-98b92c396477`, CLI `7954aba6-a097-44da-b07c-9b8fb7422a8b`; receipt commit `bc8b8ba`; CLI `switchboard 0.6.2` |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.2`, platforms `darwin-aarch64`, `darwin-universal`, `darwin-x86_64`, `windows-x86_64` |
+| **Automatic update, live (SB-55)** | Installed 0.6.1 restarted by the broker at 15:45:40Z (owner drained in 126 ms). With no person acting, its first check 93 s later downloaded, verified and installed 0.6.2 into the bundle: log `update_install installed`, `update_check ready` at 15:47:13Z; `/Applications/Fabric Switchboard.app` → `0.6.2`; the replaced bundle passes `spctl` (`Notarized Developer ID`), `codesign --verify --deep --strict` and `stapler validate`; `~/.local/bin/switchboard` (a link into the bundle) → `0.6.2`. The running process stayed 0.6.1 until the next start, as designed |
+| Next start | broker `restart` first answered `verification_pending`: the broker re-verifies a bundle whose bytes changed before it starts it, and caches the result; the retry → `ready`, pid 90628 `--background`, 0.6.2; `analytics_flush sent` at 15:57:45Z (the first events with `iid` and `environment`) |
+| Analytics in growth | sshlg-growth `growth.analytics.stats.get` (fabric-switchboard, production, 2026-10-05 15:00–24:00 UTC): `app_started` 1, `uniqueInstalls` 1 — the 0.6.2 batch is counted; one event from an older copy still excluded (`missingId` 1, `invalidEnvironment` 1) until it updates (reported by the growth session) |
+| Idle CPU (SB-49) | installed 0.6.2, broker-started `--background`, sampled every 10 s, 15:57:56–16:27:55Z: 5.96 s CPU over 1790 s = **0.33 %**, RSS 81 MB avg / 102 MB peak. Undisturbed 3-minute windows 15:58–16:16: 0.19–0.29 %; 16:16–16:19 0.71 % with Time Profiler attached; 0.37–0.46 % after it. Before (0.6.1, same machine, 14:42–15:12Z): 0.44 %. Time Profiler, 90 s at 16:16Z: 141 CPU samples (1 ms), 127 on Tokio workers; 45 in Security.framework (Keychain decryption — the stored token each quota check needs: native rotation on a 15-account pool checks one about every 12 s, SB-48 cadence), about 16 listing transcript folders (`getdirentries`, `lstat`). Measured separately: a new HTTP client per quota check costs 3.1 ms CPU against 0.17 ms on a shared one. Target < 0.2 % not met yet |
+| Rollback | the 0.6.0 copy stays at `$HOME/DATA/_archive/switchboard-installed-rollback-0.6.0-2026-10-05/`; 0.6.1 was replaced by the updater itself |
+
+Copies at 0.6.1 receive 0.6.2 on their own within six hours of the release (or 90 s after
+their next start); copies at 0.6.0 or earlier need one manual update.

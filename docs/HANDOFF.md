@@ -1,3 +1,23 @@
+# Released — Switchboard v0.6.2, the first automatic update (2026-10-05)
+
+[Release record](evidence/release-0.5.md#release-v062-2026-10-05--the-first-automatic-update).
+0.6.2 ships SB-49 (the limit scan reads only what each transcript appended: 66 ms → 1.25 ms per
+pass with 22 sessions, #74), SB-52 (`switchboard continue`, #73) and analytics `iid` +
+`environment` (#75). **SB-55 accepted live:** the installed 0.6.1 updated itself to 0.6.2 with no
+person acting. #72 (commercial licensing → passioncode.ai/business) is merged after 0.6.2 and goes
+out with the next release. sshlg-growth was told to re-check its counts; Fabric (0.3.2) and Fabric
+Inbox (0.10.2) carry the same props in their next releases.
+
+**Exact next task:** SB-49 is down from 0.44 % to 0.33 % (undisturbed 0.19–0.29 %), not yet under 0.2 %: next a shared HTTP client for quota checks and re-listing a transcript folder only when it changed (backlog row has the profile). Then SB-57 (sign-in
+source flapping, P3), SB-07, SB-16; SB-58 waits for the Observatory owners; SB-52 next steps are a
+desktop entry and the `switchboard_continue` MCP tool. **Operator:** SB-15 day of use incl. a
+project with two repositories; SB-02 Windows; SB-03 Azure signing; `switchboard uninstall --yes`
+acceptance; a live `switchboard continue` on a second real account after a real limit; a live
+third-party agent run needs an API-key account; the Anthropic-terms question on intermediating
+Claude.ai sign-ins.
+
+---
+
 # Released — Switchboard v0.6.1 (2026-10-05)
 
 [Release record](evidence/release-0.5.md#release-v061-2026-10-05--automatic-updates-other-agents-complete-backups).
