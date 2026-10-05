@@ -1,3 +1,26 @@
+# Released — Switchboard v0.6.1 (2026-10-05)
+
+[Release record](evidence/release-0.5.md#release-v061-2026-10-05--automatic-updates-other-agents-complete-backups).
+New since 0.6.0: **automatic updates** on by default (SB-55, #68) — the installed app checks
+`latest.json` 90 s after start and every 6 h, verifies and installs on its own; **the 30 most used
+coding agents** work through Switchboard's tools, proxy or launch (SB-56, #69,
+[AGENT-SUPPORT.md](AGENT-SUPPORT.md)), with a public page at
+`https://passioncode.ai/switchboard/agents/` (passioncode-ai.github.io #46); **complete backups**
+carry projects, rules, selections and settings and restore a new install (#66); lost credentials
+of known accounts come back and uninstall keeps session history (#67). Installed here; its first
+update check answered `current`. Copies at 0.6.0 or earlier need one manual update.
+
+**Exact next task:** SB-52 — build the N-018 continuation skeleton from its
+[packet](packets/n-018-continuation.md). Then SB-49 (idle CPU ≈ 0.29 %), SB-57 (sign-in source
+flapping), SB-07, SB-16. **Waiting on the operator:** whether Fabric apps add `iid` and
+`environment` to analytics events so sshlg-growth counts them (asked by the growth session
+2026-10-05; ANALYTICS.md changes with it); SB-15 day of use incl. a project with two
+repositories and the first automatic update at the next release; SB-02 Windows; SB-03 Azure
+signing; `switchboard uninstall --yes` acceptance; a live third-party agent run needs an API-key
+account. **Other apps:** analytics integration passioncode-ai/fabric#12, passioncode-ai/fabric-inbox#27.
+
+---
+
 # Released — Switchboard v0.6.0, the first stable release (2026-10-05)
 
 [Release record](evidence/release-0.5.md#release-v060-2026-10-05--the-first-stable-release).
