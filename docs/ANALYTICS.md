@@ -4,7 +4,7 @@
 an App Key. Source: [`crates/switchboard-runtime/src/analytics.rs`](../crates/switchboard-runtime/src/analytics.rs).
 
 Switchboard counts installs, days of use and connected accounts so PassionCode can see how its
-apps are used, and so one person using several PassionCode apps (Switchboard, Fabric, Fabric
+apps are used, and so one person using several PassionCode.ai tools (Switchboard, Fabric, Fabric
 Inbox) counts once. Events go to the self-hosted Aptabase at `https://analytics.sshlg.me`
 (`ssheleg/sshlg-analytics`, [ingestion contract](https://github.com/ssheleg/sshlg-analytics/blob/main/docs/client-contract.md)).
 
@@ -34,7 +34,7 @@ An account added or removed while analytics is off is never reported later.
 
 ## The shared installation id
 
-All PassionCode apps share one file:
+All PassionCode.ai tools share one file:
 
 | OS | Path |
 |---|---|
@@ -51,7 +51,7 @@ All PassionCode apps share one file:
 - **Never repaired.** A file that does not parse or whose `id` is not a UUID is left as it is, and
   analytics stays off (fail closed).
 - **Unknown fields are kept** when an app rewrites it, so apps can add their own.
-- **`analytics: false` turns analytics off for every PassionCode app on the machine.** About →
+- **`analytics: false` turns analytics off for every PassionCode.ai tool on the machine.** About →
   *Share anonymous usage counts* writes it; turning it off also drops events still waiting.
 
 Other apps adopt the same file, fields and rule (Fabric and Fabric Inbox tasks below).

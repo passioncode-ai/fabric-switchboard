@@ -8,6 +8,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.1 — 2026-10-05
+
+Switchboard now updates itself: from this version on, new releases arrive and install without
+you doing anything (turn it off in About). It also works with the popular coding agents beyond
+Claude Code and Codex, and a reinstall gets everything back. Install this one by hand; every
+later release arrives on its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Other agents
 
 - Switchboard now works with the popular coding agents beyond Claude Code and Codex — Hermes,
@@ -78,9 +88,9 @@ Authenticode-signed until the organization's Azure signing account exists; Smart
 
 - Release builds count installs, days of use and connected accounts — numbers and kinds only,
   never account names, e-mail addresses, sign-ins or pool names — with PassionCode's own
-  analytics server. A random installation number shared by PassionCode apps on this computer
+  analytics server. A random installation number shared by PassionCode.ai tools on this computer
   lets one person using several of them count once. Turn it off in About → *Share anonymous
-  usage counts*; that switch applies to every PassionCode app. What is sent:
+  usage counts*; that switch applies to every PassionCode.ai tool. What is sent:
   [ANALYTICS.md](docs/ANALYTICS.md).
 
 ### Stays running
