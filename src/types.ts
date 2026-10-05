@@ -73,9 +73,26 @@ export interface Adapter {
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<LoginItem>;
   setAnalytics(enabled: boolean): Promise<LoginItem>;
+  /** Automatic updates (SB-55): on by default; unavailable outside the installed app. */
+  updateStatus(): Promise<UpdateStatus>;
+  setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;
+  /** Quits through the drain and starts the new version; refused when nothing is ready. */
+  restartToUpdate(): Promise<UpdateStatus>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */
 export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }
+export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';
+export interface UpdateStatus {
+  available: boolean;
+  reason: string | null;
+  enabled: boolean;
+  state: UpdatePhase;
+  current: string;
+  version: string | null;
+  checked_at: number | null;
+  error: string | null;
+  needs_permission: boolean;
+}

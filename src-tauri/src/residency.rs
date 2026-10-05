@@ -168,14 +168,38 @@ pub fn second_launch(app: &AppHandle, args: &[String]) {
     }
 }
 
-/// The menu-bar (macOS) or notification-area (Windows) icon: Open and Quit.
-pub fn tray(app: &AppHandle) -> tauri::Result<()> {
+/// The tray menu: Open and Quit, and "Restart to update" once an update is ready (SB-55).
+fn menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let open = MenuItemBuilder::with_id("open", "Open Switchboard").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "Quit Switchboard").build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = MenuBuilder::new(app)
-        .items(&[&open, &separator, &quit])
-        .build()?;
+    match update {
+        Some(version) => {
+            let restart = MenuItemBuilder::with_id("update", restart_label(version)).build(app)?;
+            MenuBuilder::new(app)
+                .items(&[&open, &restart, &separator, &quit])
+                .build()
+        }
+        None => MenuBuilder::new(app)
+            .items(&[&open, &separator, &quit])
+            .build(),
+    }
+}
+
+pub fn restart_label(version: &str) -> String {
+    format!("Restart to update to {version}")
+}
+
+/// Adds "Restart to update" to the tray menu once an update is ready.
+pub fn show_update(app: &AppHandle, version: &str) {
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, Some(version))) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// The menu-bar (macOS) or notification-area (Windows) icon: Open and Quit.
+pub fn tray(app: &AppHandle) -> tauri::Result<()> {
+    let menu = menu(app, None)?;
     let builder = TrayIconBuilder::with_id("switchboard")
         .tooltip("Fabric Switchboard")
         .menu(&menu)
@@ -183,6 +207,15 @@ pub fn tray(app: &AppHandle) -> tauri::Result<()> {
             "open" => reveal(app),
             // Through the exit event, which drains the owner (LC-01).
             "quit" => app.exit(0),
+            "update" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if crate::updates::restart(app.clone()).await.is_err() {
+                        // A refused password or a vanished update: the window says why.
+                        reveal(&app);
+                    }
+                });
+            }
             _ => {}
         });
     #[cfg(target_os = "macos")]
@@ -233,6 +266,11 @@ mod tests {
         assert!(!packaged(Path::new(
             "/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard"
         )));
+    }
+
+    #[test]
+    fn the_tray_names_the_version_it_restarts_into() {
+        assert_eq!(restart_label("0.7.0"), "Restart to update to 0.7.0");
     }
 
     #[test]
