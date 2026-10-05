@@ -15,10 +15,11 @@ import sys
 args = sys.argv[1:]
 assert args[0] == '--smoke-test'
 hidden = '--background' in args
-state = sys.argv[0].rsplit('-', 1)[-1]  # 'honest' or 'liar'
+state = sys.argv[0].rsplit('-', 1)[-1]  # 'honest', 'liar' or 'trayless'
 if state == 'liar':
     hidden = not hidden
 print('SWITCHBOARD_WINDOW ' + ('hidden' if hidden else 'visible'))
+print('SWITCHBOARD_TRAY ' + ('missing' if state == 'trayless' else 'present'))
 print('SWITCHBOARD_FRONTEND_READY 9.9.9')
 """
 
@@ -44,6 +45,13 @@ class SmokeNativeTest(unittest.TestCase):
                 verify(liar, '9.9.9')
             with self.assertRaises(RuntimeError):
                 verify(liar, '9.9.9', background=True)
+
+    def test_a_missing_menu_bar_icon_fails(self):
+        with tempfile.TemporaryDirectory() as folder:
+            trayless = self.fake(folder, 'trayless')
+            with self.assertRaises(RuntimeError):
+                verify(trayless, '9.9.9', background=True)
+            self.assertEqual(verify(self.fake(folder, 'honest'), '9.9.9')['tray'], 'present')
 
 
 if __name__ == '__main__':

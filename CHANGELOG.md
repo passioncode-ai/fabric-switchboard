@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Stays running
+
+- Closing the window no longer quits Switchboard: quota checks, automatic switching, sign-in
+  renewal and backups keep running. A menu-bar icon (on Windows, in the notification area)
+  opens the window again or quits Switchboard.
+- Switchboard opens at login, in the background, without a window. Turn it off in About →
+  *Open at login*. `switchboard uninstall` removes the login item.
+
 ### Quota checks
 
 - Accounts nobody is using are checked every ten minutes instead of every three, and again just

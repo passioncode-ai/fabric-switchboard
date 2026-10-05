@@ -260,3 +260,4 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .reset-display { display: inline-flex; flex-wrap: wrap; column-gap: var(--space-2); white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
 .reset-display .reset-remaining::before { content: "·"; margin-right: var(--space-2); color: var(--muted); }
 .reset-remaining { font-variant-numeric: tabular-nums; color: var(--ink); }
+.login-option { width: fit-content; margin-top: var(--space-2); }

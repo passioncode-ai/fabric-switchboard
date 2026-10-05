@@ -4,7 +4,8 @@
 //! Removed: every saved account's credential (the vault's own items — on macOS the shared and the
 //! pre-0.4.1 Keychain items, on Windows the DPAPI files), the 0.5.0 `vault-key` Keychain item
 //! nothing reads any more (F8), the `~/.local/bin/switchboard` link when it points to a
-//! Switchboard CLI, and — unless `keep_data` — the entries Switchboard writes in its data folder.
+//! Switchboard CLI, the login item that opens the desktop app at login (SB-28), and — unless
+//! `keep_data` — the entries Switchboard writes in its data folder.
 //! Never touched: the ordinary Claude Code and Codex sign-ins, encrypted backups and their key (a
 //! reinstall restores them), files in the data folder Switchboard did not create, and the app
 //! bundle itself (moved to the Trash by the person).
@@ -23,6 +24,7 @@ const OWNED: &[&str] = &[
     "usage-holds.json",
     "limit-evidence.json",
     "backup-id",
+    "login-item",
     "homes",
     "runtimes",
     "logins",
@@ -42,14 +44,58 @@ pub struct Places {
     pub bin: Option<PathBuf>,
     /// Removes the orphaned 0.5.0 key item; absent is success.
     pub remove_orphan_key: fn() -> Result<(), String>,
+    /// Removes the desktop app's login item (SB-28); absent is success.
+    pub remove_login_item: fn() -> Result<(), String>,
 }
+/// The desktop app's login item: on macOS the LaunchAgent the autostart plugin writes, on Windows
+/// the value under the user's `Run` key (`src-tauri/src/residency.rs`).
+pub const LOGIN_ITEM_MACOS: &str = "Library/LaunchAgents/ai.passioncode.fabric-switchboard.plist";
+pub const LOGIN_ITEM_WINDOWS: &str = "Fabric Switchboard";
 
 /// The real places: `~/.local/bin` and, on macOS, the login Keychain.
 pub fn places() -> Places {
     Places {
         bin: dirs::home_dir().map(|h| h.join(".local/bin")),
         remove_orphan_key,
+        remove_login_item,
     }
+}
+#[cfg(target_os = "macos")]
+fn remove_login_item() -> Result<(), String> {
+    let Some(path) = dirs::home_dir().map(|h| h.join(LOGIN_ITEM_MACOS)) else {
+        return Ok(());
+    };
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err("Could not remove the login item.".into())
+        }
+        _ => Ok(()),
+    }
+}
+#[cfg(windows)]
+fn remove_login_item() -> Result<(), String> {
+    for key in [
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+    ] {
+        let present = std::process::Command::new("reg")
+            .args(["query", key, "/v", LOGIN_ITEM_WINDOWS])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if present
+            && !std::process::Command::new("reg")
+                .args(["delete", key, "/v", LOGIN_ITEM_WINDOWS, "/f"])
+                .output()
+                .is_ok_and(|o| o.status.success())
+        {
+            return Err("Could not remove the login item.".into());
+        }
+    }
+    Ok(())
+}
+#[cfg(not(any(target_os = "macos", windows)))]
+fn remove_login_item() -> Result<(), String> {
+    Ok(())
 }
 #[cfg(target_os = "macos")]
 fn remove_orphan_key() -> Result<(), String> {
@@ -102,6 +148,7 @@ pub fn uninstall(
         "accounts": accounts.len(),
         "cli_link": link,
         "orphan_keychain_item": cfg!(target_os = "macos").then_some(ORPHAN_KEY.0),
+        "login_item": if cfg!(windows) { LOGIN_ITEM_WINDOWS } else { LOGIN_ITEM_MACOS },
         "data_entries": if keep_data { json!([]) } else { json!(owned) },
         "kept": {
             "foreign_entries": foreign,
@@ -121,6 +168,9 @@ pub fn uninstall(
     }
     if let Err(error) = (places.remove_orphan_key)() {
         failures.push(json!({"item": ORPHAN_KEY.0, "error": error}));
+    }
+    if let Err(error) = (places.remove_login_item)() {
+        failures.push(json!({"item": "login_item", "error": error}));
     }
     if let Some(link) = &link {
         if std::fs::remove_file(link).is_err() {
@@ -188,6 +238,7 @@ mod tests {
         let places = Places {
             bin: Some(temp.path().join("bin")),
             remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
         };
         let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
         assert_eq!(plan["accounts"], 1);
@@ -224,6 +275,7 @@ mod tests {
         let places = Places {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
         };
         let done = uninstall(&root, vault.clone(), false, true, &places).unwrap();
         assert_eq!(done["failures"], json!([]));
@@ -251,6 +303,7 @@ mod tests {
         let places = Places {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
         };
         let done = uninstall(&root, vault, true, true, &places).unwrap();
         assert!(root.join("accounts.json").exists());
@@ -262,12 +315,62 @@ mod tests {
     }
 
     #[test]
+    fn the_login_item_is_removed_and_a_failure_is_reported_not_fatal() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn counted() -> Result<(), String> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn refused() -> Result<(), String> {
+            Err("Could not remove the login item.".into())
+        }
+        let (_temp, root, vault) = setup();
+        std::fs::write(root.join("login-item"), "on\n").unwrap();
+        let plan = uninstall(
+            &root,
+            vault.clone(),
+            false,
+            false,
+            &Places {
+                bin: None,
+                remove_orphan_key: removed_ok,
+                remove_login_item: counted,
+            },
+        )
+        .unwrap();
+        assert!(plan["login_item"].is_string());
+        assert_eq!(CALLS.load(Ordering::SeqCst), 0, "a plan removes nothing");
+        assert!(plan["data_entries"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("login-item")));
+        let done = uninstall(
+            &root,
+            vault,
+            true,
+            true,
+            &Places {
+                bin: None,
+                remove_orphan_key: removed_ok,
+                remove_login_item: refused,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            done["failures"],
+            json!([{"item": "login_item", "error": "Could not remove the login item."}])
+        );
+    }
+
+    #[test]
     fn an_empty_folder_is_removed_and_a_running_owner_refuses() {
         let (_temp, root, vault) = setup();
         let held = Store::open(root.clone(), vault.clone()).unwrap();
         let places = Places {
             bin: None,
             remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
         };
         assert!(
             uninstall(&root, vault.clone(), false, true, &places).is_err(),

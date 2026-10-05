@@ -34,7 +34,10 @@ def _verify(binary, version, timeout, env, background=False):
     window = b'SWITCHBOARD_WINDOW hidden' if background else b'SWITCHBOARD_WINDOW visible'
     if window not in lines:
         raise RuntimeError(f'Native window state is not {window.decode().split()[-1]} for this launch.')
-    return {'status': 'PASS', 'version': version, 'mode': 'temporary store, memory vault, native IPC and bundled frontend', 'launch': 'background' if background else 'ordinary', 'window': window.decode().split()[-1], 'real_provider_auth': 'NOT_READ'}
+    # Residency (SB-28): the menu-bar icon keeps Open and Quit reachable while the window is hidden.
+    if b'SWITCHBOARD_TRAY present' not in lines:
+        raise RuntimeError('Native menu-bar icon is missing; a hidden window would leave no way to open or quit Switchboard.')
+    return {'status': 'PASS', 'version': version, 'mode': 'temporary store, memory vault, native IPC and bundled frontend', 'launch': 'background' if background else 'ordinary', 'window': window.decode().split()[-1], 'tray': 'present', 'real_provider_auth': 'NOT_READ'}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

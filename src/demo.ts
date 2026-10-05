@@ -70,6 +70,7 @@ export function createDemoAdapter(): Adapter {
     codex.usage!.used_percent = 100;
   }
   const signInRequired = new Set(['demo-claude-meadow']);
+  const loginItem = { available: true, enabled: true };
   const backups: { file: string; created_at: number; accounts: number }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11 }];
   return {
     async currentAccounts() { return structuredClone(current); },
@@ -166,6 +167,8 @@ export function createDemoAdapter(): Adapter {
     async backups() { return { directory: '~/Library/Application Support/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },
     async backupNow() { await pause(); const info = { file: `switchboard-backup-${now()}.json`, created_at: now(), accounts: state.accounts.length }; backups.unshift(info); backups.splice(10); return structuredClone(info); },
     async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
+    async loginItem() { return { ...loginItem }; },
+    async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
     async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage.observed', id, 'Synthetic usage observation'); return structuredClone(usage); },
   };

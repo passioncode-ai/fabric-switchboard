@@ -40,6 +40,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-030 | Get accounts back after reinstalling Switchboard | draft |
 | SCN-031 | Move off an account that hit a limit the quota does not show | draft |
 | SCN-032 | Find remaining quota and compare account waits | draft |
+| SCN-033 | Keep Switchboard working with its window closed | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -637,3 +638,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** [UI logic tests](../../scripts/test-ui-logic.mjs), [renderer](../../src/main.ts), [synthetic demo](../../src/demo.ts), [verification](../../docs/evidence/quota-order-2026-10-04.md). Compact two-line rows observed with `?demo=1&quota-review=1` on 2026-10-05: row height 52–55 CSS px at 1280 px (was four to six lines), 93–95 px at 740 px where the quota moves under the name, no horizontal overflow, light and dark; Pause countdown keeps the compact and long countdowns frozen; the limited row's disclosure 168 px at 1280 px.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
+
+## SCN-033 — Keep Switchboard working with its window closed
+**Persona:** P-01
+**Goal:** Rotation, renewal, quota checks and backups keep running without the window open, and Switchboard ends only when the person quits it.
+**Preconditions:** the installed app (a development build never registers a login item).
+**Entry point:** the window's close button; the menu-bar icon (Windows: notification area); About.
+**Steps:**
+1. Close the window → it disappears (macOS: so does the Dock icon); the menu-bar icon stays; the owner keeps running.
+2. Menu-bar icon → *Open Switchboard* → the window returns in front. Opening the app again (Finder, Spotlight; Windows: launching it, or a left click on the icon) does the same.
+3. Log out and in → Switchboard starts in the background with no window and no focus taken.
+4. About → *Running in the background* → uncheck *Open at login, in the background* → “Switchboard will no longer open at login.”; the choice survives restarts.
+5. Menu-bar icon → *Quit Switchboard* (or the app menu's Quit, Cmd-Q) → the owner drains and the app ends (LC-01).
+**Alt paths:** A second launch that is itself a background start (the login item, the lifecycle broker) leaves the window hidden. A login item the system refuses reads “Could not add Switchboard to the login items. Check the system's login item settings.” With the lifecycle broker enrolling the app `always_on`, a Quit is undone by the broker; the operator sets it `on_demand`.
+**Expected result:** background work never depends on the window; only an explicit Quit ends it.
+**UI elements:** tray menu (Open Switchboard, Quit Switchboard), About residency panel and checkbox.
+**States covered:** window shown, window hidden, background start, login item on/off/unavailable, quit.
+**Errors & recovery:** a failed login-item change keeps the previous state and shows the error; quitting always drains.
+**Status:** draft
+**Meaning:** operator decision 2026-10-05 («свитчер должен сам запускаться и не выключаться пока его не закрою через меню выйти»).
+**Coverage:** `residency::tests` (default on, saved choice, development build never registers), `the_login_item_is_removed_and_a_failure_is_reported_not_fatal`, `scripts/test_smoke_native.py` (tray required), browser demo of the About panel; Windows build checked with `cargo xwin check -p fabric-switchboard`. Live close/reopen/login on the operator's Mac is acceptance (SB-15).
+**Product:** unobserved
+**Traces:** SB-28, LC-09
