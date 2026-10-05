@@ -218,6 +218,30 @@ check(() => {
   assert.equal(logic.limitLabel({ until: 200, resets_at: 100 }), 'Retry hold until', 'a longer hold is not the reset');
 });
 
+// Compact cards: a two-line card's wait and its at-a-glance state.
+check(() => {
+  const now = 1_000_000;
+  assert.equal(logic.compactCountdown(now + 4 * 86400 + 22 * 3600 + 36 * 60, now), '4d 22h');
+  assert.equal(logic.compactCountdown(now + 2 * 3600 + 5 * 60, now), '2h 5m');
+  assert.equal(logic.compactCountdown(now + 36 * 60, now), '36m');
+  assert.equal(logic.compactCountdown(now + 30, now), '<1m');
+  assert.equal(logic.compactCountdown(now, now), 'now');
+  assert.equal(logic.compactCountdown(NaN, now), '—');
+  const base = { id: 'a', label: 'a', provider: 'claude', pool: 'p', enabled: true, kind: 'oauth', created_at: 1 };
+  const usage = (used, extra = {}) => ({ used_percent: used, observed_at: now - 10, resets_at: now + 3600, source: 'claude_oauth', windows: [{ name: 'five_hour', used_percent: used, resets_at: now + 3600 }], ...extra });
+  const ctx = { nowSeconds: now };
+  assert.equal(logic.cardState({ ...base, usage: usage(30), usage_health: { status: 'ok', checked_at: now - 10, next_check_at: now + 170 } }, ctx), 'available');
+  assert.equal(logic.cardState({ ...base, usage: usage(85) }, ctx), 'low');
+  assert.equal(logic.cardState({ ...base, usage: usage(100) }, ctx), 'blocked');
+  assert.equal(logic.cardState({ ...base, usage: usage(30, { observed_at: now - 900 }) }, ctx), 'stale');
+  assert.equal(logic.cardState({ ...base, usage: usage(30), usage_health: { status: 'failed', checked_at: now, next_check_at: now + 900 } }, ctx), 'failed');
+  assert.equal(logic.cardState({ ...base, usage: null }, ctx), 'unknown');
+  assert.equal(logic.cardState({ ...base, usage: null }, { nowSeconds: now, signInRequired: ['a'] }), 'sign_in');
+  assert.equal(logic.cardState({ ...base, enabled: false, usage: usage(30) }, ctx), 'disabled');
+  assert.equal(logic.cardState({ ...base, kind: 'api_key', usage: null }, ctx), 'no_quota');
+  assert.equal(logic.cardState({ ...base, usage: usage(30) }, { nowSeconds: now, limits: [{ account_id: 'a', until: now + 600 }] }), 'blocked', 'a hold blocks');
+});
+
 // R3–R5: quota ordering is explicit, conservative and independent of input order.
 check(() => {
   const now = 1_000_000;

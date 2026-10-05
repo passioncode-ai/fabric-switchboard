@@ -160,7 +160,7 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .policy-actions { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; }
 .quota-details { font-size: var(--t-chip); color: var(--muted); margin-top: var(--space-1); }
 .quota-details summary { cursor: pointer; padding: var(--space-1) 0; }
-.quota-window { margin-bottom: var(--space-2); }
+.quota-window { margin-bottom: var(--space-1); display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); }
 .quota-window strong { color: var(--ink); font-weight: 500; }
 .management-actions, .header-actions { flex-wrap: wrap; }
 .management-actions { display: flex; gap: var(--space-4); }
@@ -188,11 +188,17 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .group-heading h2 { font-size: var(--t-label); font-weight: 650; letter-spacing: .02em; }
 .pool-heading { margin: var(--space-3) 0 var(--space-1); font-size: var(--t-chip); font-weight: 600; color: var(--muted); letter-spacing: .04em; }
 .account-group .account-list { gap: 0; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
-.account-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(120px, 172px) 92px 32px; align-items: center; column-gap: var(--space-3); padding: var(--space-2) var(--space-3); min-height: 48px; border-top: 1px solid var(--border); position: relative; }
+.account-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(176px, 248px) 92px 32px; align-items: center; column-gap: var(--space-3); padding: var(--space-2) var(--space-3); min-height: 48px; border-top: 1px solid var(--border); position: relative; }
 .account-row:first-child { border-top: 0; }
 .account-row.is-current { box-shadow: inset 3px 0 0 var(--info); }
 .account-row.is-disabled .row-name, .account-row.is-disabled .row-usage { opacity: .55; }
-.account-row .provider-icon { width: 28px; height: 28px; font-size: var(--t-card); }
+.account-row .provider-icon { width: 28px; height: 28px; font-size: var(--t-card); position: relative; }
+/* Account status mark: one dot on the provider icon, colour by card state (SCN-021). */
+.account-row .provider-icon::after { content: ""; position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: var(--r-pill); border: 2px solid var(--panel); background: var(--muted); }
+.account-row[data-state="available"] .provider-icon::after { background: var(--ok); }
+.account-row[data-state="low"] .provider-icon::after, .account-row[data-state="stale"] .provider-icon::after { background: var(--warn); }
+.account-row[data-state="blocked"] .provider-icon::after, .account-row[data-state="failed"] .provider-icon::after, .account-row[data-state="sign_in"] .provider-icon::after { background: var(--danger); }
+.account-row[data-state="no_quota"] .provider-icon::after, .account-row[data-state="disabled"] .provider-icon::after { display: none; }
 .account-row.is-current .provider-icon { border-color: var(--info); }
 .row-name { min-width: 0; display: grid; }
 .row-title { display: flex; align-items: center; gap: var(--space-2); min-width: 0; flex-wrap: wrap; }
@@ -201,14 +207,27 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .row-sub:empty { display: none; }
 .selected-badge { color: var(--accent-text); border-color: var(--accent-text); background: var(--accent-weak); }
 .danger-badge { color: var(--danger); border-color: var(--danger); background: var(--danger-weak); }
-.row-usage { display: grid; gap: 3px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: var(--t-chip); }
-button.row-usage:hover:not(:disabled) .usage-line strong { text-decoration: underline; text-underline-offset: 3px; }
-.usage-line { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--muted); white-space: nowrap; overflow: hidden; }
-.usage-line strong { color: var(--ink); font-weight: 600; }
-.usage-line .stale { color: var(--warn); }
-.row-usage .usage-meter { margin-top: 0; height: 3px; }
-.usage-meter.is-high::-webkit-progress-value { background: var(--warn); }
-.usage-meter.is-high::-moz-progress-bar { background: var(--warn); }
+.row-usage { display: grid; gap: 2px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: var(--t-chip); line-height: 1.35; }
+button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; text-underline-offset: 3px; }
+/* Compact quota cell: line one is meter + share + age, line two the one time that matters. */
+.usage-line { display: grid; grid-template-columns: minmax(32px, 1fr) 4.5ch 7.5ch; align-items: center; gap: var(--space-2); color: var(--muted); white-space: nowrap; min-width: 0; }
+.usage-line:has(.usage-unknown) { display: block; }
+.row-usage .usage-meter { width: 100%; margin-top: 0; height: 4px; }
+.usage-pct { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.usage-age { font-variant-numeric: tabular-nums; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.usage-age.is-warn { color: var(--warn); }
+.usage-line .usage-unknown { font-size: var(--t-chip); }
+.usage-sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.usage-countdown { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage-sub.is-blocked, .usage-sub.is-blocked .usage-countdown { color: var(--danger); }
+.usage-sub.is-failed, .usage-sub.is-sign_in { color: var(--danger); }
+.usage-sub.is-stale { color: var(--warn); }
+.usage-meter.is-low::-webkit-progress-value, .usage-meter.is-stale::-webkit-progress-value { background: var(--warn); }
+.usage-meter.is-low::-moz-progress-bar, .usage-meter.is-stale::-moz-progress-bar { background: var(--warn); }
+.usage-meter.is-blocked::-webkit-progress-value { background: var(--danger); }
+.usage-meter.is-blocked::-moz-progress-bar { background: var(--danger); }
+.usage-meter.is-failed::-webkit-progress-value { background: var(--muted); }
+.usage-meter.is-failed::-moz-progress-bar { background: var(--muted); }
 .row-primary { justify-self: end; }
 .row-button { min-height: 30px; padding: var(--space-1) var(--space-3); font-size: var(--t-label); }
 .row-state { font-size: var(--t-chip); font-weight: 600; color: var(--info); white-space: nowrap; }
@@ -228,8 +247,8 @@ button.row-usage:hover:not(:disabled) .usage-line strong { text-decoration: unde
 .login-copy span { color: var(--muted); }
 .login-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
 @media (max-width: 820px) {
-  .account-row { grid-template-columns: 28px minmax(0, 1fr) 88px 32px; row-gap: var(--space-1); }
-  .account-row .row-usage { grid-column: 2 / 3; grid-row: 2; }
+  .account-row { grid-template-columns: 28px minmax(0, 1fr) 88px 32px; row-gap: 2px; }
+  .account-row .row-usage { grid-column: 2 / 3; grid-row: 2; max-width: 360px; }
   .rotation-bar, .login-banner { flex-direction: column; align-items: stretch; }
   .proxy-status { margin-left: 0; }
 }
@@ -238,5 +257,6 @@ button.row-usage:hover:not(:disabled) .usage-line strong { text-decoration: unde
 
 /* Quota date and elapsed wait use the existing operational token layer. */
 .account-sort-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); color: var(--muted); font-size: var(--t-chip); }
-.reset-display { display: grid; gap: var(--space-1); white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
+.reset-display { display: inline-flex; flex-wrap: wrap; column-gap: var(--space-2); white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
+.reset-display .reset-remaining::before { content: "·"; margin-right: var(--space-2); color: var(--muted); }
 .reset-remaining { font-variant-numeric: tabular-nums; color: var(--ink); }

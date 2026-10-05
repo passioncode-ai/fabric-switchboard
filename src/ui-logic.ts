@@ -167,6 +167,33 @@ export function resetCountdown(until: number, nowSeconds: number): string {
   return `${days ? `${days}d ` : ''}${hours || days ? `${hours}h ` : ''}${mins}m remaining`;
 }
 
+/** The compact wait shown on a card's second line: "4d 22h", "2h 5m", "36m", "<1m", or "now" once due. */
+export function compactCountdown(until: number, nowSeconds: number): string {
+  if (!validTime(until) || !Number.isFinite(nowSeconds)) return '—';
+  const remaining = until - nowSeconds;
+  if (remaining <= 0) return 'now';
+  if (remaining < 60) return '<1m';
+  const minutes = Math.ceil(remaining / 60), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60), mins = minutes % 60;
+  if (days) return `${days}d ${hours}h`;
+  return hours ? `${hours}h ${mins}m` : `${mins}m`;
+}
+
+/** A card's at-a-glance state (compact list): what the status mark shows and how line two reads. */
+export type CardState = 'available' | 'low' | 'blocked' | 'stale' | 'failed' | 'unknown' | 'sign_in' | 'disabled' | 'no_quota';
+/** Used at or above this share of the account's capacity, an available account reads as running low. */
+export const LOW_AT_PERCENT = 80;
+export function cardState(account: Account, context: QuotaOrderContext): CardState {
+  if (!account.enabled) return 'disabled';
+  if (context.signInRequired?.includes(account.id)) return 'sign_in';
+  if (account.kind !== 'oauth') return 'no_quota';
+  const order = quotaOrder(account, context);
+  if (order.state === 'blocked') return 'blocked';
+  if (order.state === 'available') return order.used >= LOW_AT_PERCENT ? 'low' : 'available';
+  const health = account.usage_health?.status;
+  if (health === 'failed' || health === 'unavailable') return 'failed';
+  return account.usage ? 'stale' : 'unknown';
+}
+
 type Groupable = Pick<Account, 'provider' | 'pool' | 'enabled' | 'created_at'>;
 export interface AccountGroup<T> { provider: Account['provider']; count: number; pools: { pool: string; accounts: T[] }[] }
 /** Provider and pool boundaries survive quota ordering; old callers retain structural order. */
