@@ -1,3 +1,23 @@
+# Released — Switchboard v0.5.5-beta.1 (2026-10-05)
+
+[Release record](evidence/release-0.5.md#release-v055-beta1-2026-10-05). Operator decisions of
+2026-10-05 built and shipped: compact two-line account cards with a status mark (#54); adaptive
+quota cadence SB-48 — 180 s for rotation pools, the managed route and the CLI's account, 600 s
+otherwise and just after a reset (#55); residency SB-28 — close hides, tray Open/Quit, login item
+with `--background` (#56); anonymous usage analytics SB-50 with a PassionCode-wide installation id
+([ANALYTICS.md](ANALYTICS.md), #57). Installed here; the broker target is `on_demand` (no idle
+stop, policyRevision 6) so a Quit stays a Quit. Agents may release when the operator asks
+([DISTRIBUTION.md](DISTRIBUTION.md)).
+
+**Exact next task:** SB-49 — read the idle hour of 0.5.5 (sampler `target/tmp/idle.sh`, log
+`target/tmp/idle055.log`, both untracked) into the release record and decide whether the 0.2 %
+target holds. Then SB-51 (growth registry; asked the growth session), SB-07, SB-16 (needs the
+operator's go). **Operator:** SB-15 day of use incl. close/reopen/login on this Mac, SB-02
+Windows, SB-03 Azure, SB-31 stable timing, `switchboard uninstall --yes` acceptance.
+**Other apps:** analytics integration tasks passioncode-ai/fabric#12, passioncode-ai/fabric-inbox#27.
+
+---
+
 # Released — Switchboard v0.5.4-beta.3 (2026-10-05)
 
 [Release record](evidence/release-0.5.md#release-v054-beta3-2026-10-05). Published from `023314c` by run
