@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- About → Version and license now points a commercial license request to the form at
+  https://passioncode.ai/business/ instead of an email address.
+
 ## 0.6.2 — 2026-10-05
 
 Switchboard uses far less of your Mac in the background, and an agent that runs out of its limit

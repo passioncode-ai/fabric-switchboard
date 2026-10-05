@@ -68,6 +68,6 @@ home paths, evals that parse.
 ## License
 
 Open source under the GNU AGPL-3.0; a commercial license is available for use that does not
-meet the AGPL's terms — contact@passioncode.ai. SPDX:
+meet the AGPL's terms — [passioncode.ai/business](https://passioncode.ai/business/). SPDX:
 `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`. Plugin 0.4.0 and earlier were released
 under PolyForm Noncommercial or Internal Use.
