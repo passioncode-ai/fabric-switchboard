@@ -35,6 +35,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
+  // as a project not put back and never returns the message.
+  'Project already here.': 'swallowed by backup restore',
   // runtime analytics.rs installation()/set_shared_enabled(): internal. status() reads them as
   // "off"; set_enabled() replaces every one with "Could not save the analytics choice.".
   'Installation folder unavailable.': 'replaced by the analytics choice error',

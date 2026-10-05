@@ -13,8 +13,9 @@ export interface RotationPolicy {
 }
 /** A provider limit on an account (SB-41). `resets_at` is the provider's own reset; `until` is when the account may be tried again — that reset or an estimated hold. Scope is unknown until a provider states it. */
 export interface AccountLimit { account_id: string; until: number; source: 'managed' | 'claude_code'; kind?: 'quota' | 'unknown'; resets_at?: number | null; confidence?: 'attributed' | 'inferred'; scope?: 'unknown'; observed_at?: number; event_id?: string }
-export interface BackupInfo { file: string; created_at: number; accounts: number }
-export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null }
+export interface BackupInfo { file: string; created_at: number; accounts: number; missing?: number; own?: boolean; openable?: boolean }
+export interface Restored { added: number; skipped: number; failed: number; projects?: number; rules?: number; routes?: number; settings?: number }
+export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null; restored_at_start?: { file: string; created_at: number; restored: Restored } | null }
 export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; claude_swap_accounts?: number; renewal_blocked?: boolean; claude_swap_switching?: boolean; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number; claude_swap_running?: boolean }
@@ -59,7 +60,7 @@ export interface Adapter {
   agentSetup(): Promise<AgentSetup>;
   backups(): Promise<BackupStatus>;
   backupNow(): Promise<BackupInfo | null>;
-  restoreBackup(file: string): Promise<{ added: number; skipped: number; failed: number }>;
+  restoreBackup(file: string): Promise<Restored>;
   linkCli(): Promise<{ linked_cli: string }>;
   /** Whether Switchboard opens at login in the background (SB-28); unavailable outside the installed app. */
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */

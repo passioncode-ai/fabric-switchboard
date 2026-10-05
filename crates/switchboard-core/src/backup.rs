@@ -4,7 +4,7 @@
 //! through `/usr/bin/security` on macOS, a DPAPI-protected file on Windows. Operator decision:
 //! no passphrase, so a backup restores after reinstalling Switchboard, not on another machine
 //! or after the Keychain is lost (docs/PLAN-0.5.md, D-5).
-use crate::{private_fs, Account, Credential, RotationPolicy, Store};
+use crate::{private_fs, Account, Credential, Project, ProjectRule, RotationPolicy, Store};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use ring::{
     aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN},
@@ -45,12 +45,25 @@ pub struct Info {
     #[serde(default)]
     pub openable: bool,
 }
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Default, Serialize, PartialEq)]
 pub struct Restored {
     pub added: usize,
     pub skipped: usize,
     pub failed: usize,
+    /// Projects, project rules and managed selections put back (0.6); settings restored.
+    #[serde(default)]
+    pub projects: usize,
+    #[serde(default)]
+    pub rules: usize,
+    #[serde(default)]
+    pub routes: usize,
+    #[serde(default)]
+    pub settings: usize,
 }
+/// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
+/// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
+pub const SETTING_FILES: &[&str] = &["login-item", "auto-update"];
+const MAX_SETTING: u64 = 64;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +86,17 @@ struct Payload {
     accounts: Vec<Account>,
     policies: Vec<RotationPolicy>,
     credentials: BTreeMap<String, Credential>,
+    // 0.6: everything else a reinstall must get back. A 0.5 backup has none of them (default);
+    // a 0.5 reader ignores them.
+    #[serde(default)]
+    rules: Vec<ProjectRule>,
+    #[serde(default)]
+    projects: Vec<Project>,
+    /// Managed selections, `provider:pool` → account id.
+    #[serde(default)]
+    routes: BTreeMap<String, String>,
+    #[serde(default)]
+    settings: BTreeMap<String, String>,
 }
 
 fn key(keys: &dyn BackupKey, create: bool) -> Result<(LessSafeKey, String), String> {
@@ -162,10 +186,22 @@ pub fn write(
         .filter(|a| credentials.contains_key(&a.id))
         .collect();
     let count = accounts.len();
+    let settings = SETTING_FILES
+        .iter()
+        .filter_map(|name| {
+            let bytes = private_fs::read_private(&store.root().join(name), MAX_SETTING).ok()?;
+            let text = String::from_utf8(bytes).ok()?.trim().to_owned();
+            (!text.is_empty()).then(|| ((*name).to_owned(), text))
+        })
+        .collect();
     let payload = serde_json::to_vec(&Payload {
         accounts,
         policies: snapshot.policies,
         credentials,
+        rules: snapshot.rules,
+        projects: snapshot.projects,
+        routes: snapshot.routes,
+        settings,
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -312,8 +348,14 @@ pub fn restore(
         added: 0,
         skipped: 0,
         failed: 0,
+        projects: 0,
+        rules: 0,
+        routes: 0,
+        settings: 0,
     };
     let existing = store.snapshot()?;
+    // Backup account id → the id it has here, for rules and selections.
+    let mut ids: BTreeMap<String, String> = BTreeMap::new();
     for account in payload.accounts {
         let token = payload
             .credentials
@@ -339,6 +381,23 @@ pub fn restore(
                     })
             });
         if known {
+            let here = existing
+                .accounts
+                .iter()
+                .find(|a| a.id == account.id)
+                .map(|a| a.id.clone())
+                .or_else(|| {
+                    account.external_identity.as_ref().and_then(|identity| {
+                        store
+                            .match_external(account.provider, &account.pool, identity)
+                            .ok()
+                            .flatten()
+                            .map(|a| a.id)
+                    })
+                });
+            if let Some(here) = here {
+                ids.insert(account.id.clone(), here);
+            }
             result.skipped += 1;
             continue;
         }
@@ -385,6 +444,7 @@ pub fn restore(
                 if !account.enabled {
                     let _ = store.update(&saved.id, saved.label.clone(), false);
                 }
+                ids.insert(account.id.clone(), saved.id.clone());
                 result.added += 1;
             }
             Err(_) => result.failed += 1,
@@ -400,6 +460,65 @@ pub fn restore(
             let mut policy = policy;
             policy.enabled = false;
             let _ = store.set_policy(policy);
+        }
+    }
+    // Projects first: their accounts are already in their pools; only the reservation returns.
+    for project in payload.projects {
+        if store.restore_project(project).is_ok() {
+            result.projects += 1;
+        }
+    }
+    let now = crate::now();
+    let here = store.snapshot()?;
+    for rule in payload.rules {
+        let Some(id) = ids.get(&rule.account_id) else {
+            continue;
+        };
+        let taken = here
+            .rules
+            .iter()
+            .any(|r| r.path == rule.path && r.provider == rule.provider);
+        // An expired rule never applies again; one that is still running keeps its end.
+        if taken || rule.expires_at.is_some_and(|t| t <= now) {
+            continue;
+        }
+        if store
+            .set_rule(
+                Path::new(&rule.path),
+                id,
+                &rule.target,
+                rule.enabled,
+                rule.expires_at,
+            )
+            .is_ok()
+        {
+            result.rules += 1;
+        }
+    }
+    for (key, old) in payload.routes {
+        let (Some((provider, pool)), Some(id)) = (key.split_once(':'), ids.get(&old)) else {
+            continue;
+        };
+        let Ok(provider) = serde_json::from_value::<crate::Provider>(serde_json::json!(provider))
+        else {
+            continue;
+        };
+        if store.snapshot()?.routes.contains_key(&key) {
+            continue;
+        }
+        if store.select(provider, pool, id).is_ok() {
+            result.routes += 1;
+        }
+    }
+    for (name, value) in payload.settings {
+        let path = store.root().join(&name);
+        // Only the known settings, never over a choice made on this install.
+        if SETTING_FILES.contains(&name.as_str())
+            && value.len() as u64 <= MAX_SETTING
+            && !path.exists()
+            && private_fs::private_write(&path, format!("{value}\n").as_bytes()).is_ok()
+        {
+            result.settings += 1;
         }
     }
     Ok(result)
@@ -542,6 +661,96 @@ mod tests {
     }
 
     #[test]
+    fn a_reinstall_gets_projects_rules_selections_and_settings_back() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let b = save(&original, "synthetic-b", "token-b-secret");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        original
+            .save_project(
+                None,
+                "Alpha",
+                std::slice::from_ref(&repo),
+                std::slice::from_ref(&a.id),
+            )
+            .unwrap();
+        original
+            .set_rule(&repo, &a.id, "managed", true, None)
+            .unwrap();
+        original.select(Provider::Claude, "default", &b.id).unwrap();
+        original.select(Provider::Claude, "alpha", &a.id).unwrap();
+        std::fs::write(original.root().join("login-item"), "off\n").unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        // Reinstall: `switchboard uninstall` removed the data folder; the backups stayed.
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(
+            (
+                restored.added,
+                restored.projects,
+                restored.rules,
+                restored.routes,
+                restored.settings
+            ),
+            (2, 1, 1, 2, 1)
+        );
+        let snap = fresh.snapshot().unwrap();
+        let by_label = |l: &str| snap.accounts.iter().find(|x| x.label == l).unwrap().clone();
+        let (a2, b2) = (by_label("synthetic-a"), by_label("synthetic-b"));
+        assert_eq!(snap.projects[0].name, "Alpha");
+        assert_eq!(
+            a2.pool, "alpha",
+            "the project's account is back in its pool"
+        );
+        assert_eq!(
+            snap.rules[0].account_id, a2.id,
+            "the rule points at the restored account"
+        );
+        assert_eq!(snap.routes.get("claude:default"), Some(&b2.id));
+        assert_eq!(snap.routes.get("claude:alpha"), Some(&a2.id));
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("login-item"))
+                .unwrap()
+                .trim(),
+            "off"
+        );
+        // A second restore changes nothing and never overwrites a choice made here.
+        std::fs::write(fresh.root().join("login-item"), "on\n").unwrap();
+        let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(
+            (
+                again.added,
+                again.skipped,
+                again.projects,
+                again.rules,
+                again.routes,
+                again.settings
+            ),
+            (0, 2, 0, 0, 0, 0)
+        );
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("login-item"))
+                .unwrap()
+                .trim(),
+            "on"
+        );
+    }
+    #[test]
+    fn a_rule_change_counts_for_the_next_backup() {
+        let temp = tempfile::tempdir().unwrap();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a");
+        let before = original.changes();
+        original
+            .set_rule(temp.path(), &a.id, "managed", true, None)
+            .unwrap();
+        assert!(original.changes() > before);
+    }
+    #[test]
     fn a_backup_restores_into_a_fresh_install_and_is_sealed_on_disk() {
         let temp = tempfile::tempdir().unwrap();
         let backups = temp.path().join("backups");
@@ -563,7 +772,8 @@ mod tests {
             Restored {
                 added: 2,
                 skipped: 0,
-                failed: 0
+                failed: 0,
+                ..Restored::default()
             }
         );
         let accounts = fresh.snapshot().unwrap().accounts;
@@ -595,7 +805,8 @@ mod tests {
             Restored {
                 added: 0,
                 skipped: 1,
-                failed: 0
+                failed: 0,
+                ..Restored::default()
             }
         );
         assert_eq!(
@@ -879,7 +1090,8 @@ mod tests {
             Restored {
                 added: 0,
                 skipped: 1,
-                failed: 0
+                failed: 0,
+                ..Restored::default()
             }
         );
         let after = fresh.snapshot().unwrap().accounts.remove(0);

@@ -239,6 +239,8 @@ pub struct Runtime {
     /// Anonymous usage analytics; only the desktop app of the real data folder, in a release
     /// build, starts it (docs/ANALYTICS.md).
     analytics: Mutex<Option<Arc<analytics::Analytics>>>,
+    /// The backup restored automatically when this install started with a new data folder.
+    restored_at_start: Mutex<Option<Value>>,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -298,6 +300,7 @@ impl Runtime {
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
             analytics: Mutex::new(None),
+            restored_at_start: Mutex::new(None),
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
@@ -548,6 +551,45 @@ impl Runtime {
         }
         if client.pending() > 0 {
             tokio::spawn(async move { client.flush().await });
+        }
+    }
+    /// A new data folder with backups this machine can open beside it: the newest is restored at
+    /// once, so a reinstall gets its accounts, projects, rules, selections and settings back
+    /// without a step. Never on a store that existed before this start — a person who removed
+    /// their accounts keeps them removed.
+    fn restore_at_start(&self) {
+        let (Some(dir), Some(key)) = (self.backup_folder(), self.backup_key()) else {
+            return;
+        };
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        if !snapshot.accounts.is_empty() {
+            return;
+        }
+        let Some(newest) = switchboard_core::backup::list(&dir, &self.store, key.as_ref())
+            .into_iter()
+            .filter(|b| b.openable && b.accounts > 0)
+            .max_by_key(|b| b.created_at)
+        else {
+            return;
+        };
+        match switchboard_core::backup::restore(&self.store, &dir, &newest.file, key.as_ref()) {
+            Ok(restored) => {
+                oplog::event(
+                    "backup_restored_at_start",
+                    &[("accounts", oplog::Field::Number(restored.added as i64))],
+                );
+                if let Ok(mut slot) = self.restored_at_start.lock() {
+                    *slot = Some(
+                        json!({"file": newest.file, "created_at": newest.created_at, "restored": restored}),
+                    );
+                }
+            }
+            Err(_) => oplog::event(
+                "backup_restored_at_start",
+                &[("outcome", oplog::Field::Code("failed"))],
+            ),
         }
     }
     fn backup_folder(&self) -> Option<PathBuf> {
@@ -802,6 +844,8 @@ impl Owner {
         native_sources: bool,
     ) -> Result<Self, String> {
         let sources = if native_sources { NATIVE } else { UNAVAILABLE };
+        // A data folder created by this start: a new install, or one after `switchboard uninstall`.
+        let fresh = !root.join("accounts.json").exists();
         let runtime = Runtime::open_with(root, vault, sources).await?;
         let control = control::ControlHandle::start(runtime.clone()).await?;
         // Only the real data folder is backed up: a `--data-dir` scratch store must never
@@ -810,6 +854,9 @@ impl Owner {
         if native_sources && default_store {
             if let Some(dir) = backup_dir() {
                 runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
+            }
+            if fresh {
+                runtime.restore_at_start();
             }
         }
         // One renewer per lineage: only the owner of the real data folder spends refresh
@@ -1239,6 +1286,7 @@ async fn execute(
                 "backups": backups,
                 "last_error": last_error,
                 "last_written_at": (written_at > 0).then_some(written_at),
+                "restored_at_start": runtime.and_then(|r| r.restored_at_start.lock().ok().and_then(|s| s.clone())),
             }))
         }
         Operation::BackupNow => match runtime {
@@ -1843,6 +1891,43 @@ mod owner_tests {
         assert_eq!(value["claude"]["account_ids"], json!([work.id, team.id]));
         assert_eq!(value["codex"]["status"], "missing");
         assert_eq!(value["codex"]["account_ids"], json!([]));
+    }
+    #[tokio::test]
+    async fn a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does() {
+        struct Key;
+        impl switchboard_core::backup::BackupKey for Key {
+            fn load(&self) -> Result<Option<[u8; 32]>, String> {
+                Ok(Some([7; 32]))
+            }
+            fn create(&self, _: &[u8; 32]) -> Result<bool, String> {
+                Ok(false)
+            }
+        }
+        let backups = tempfile::tempdir().unwrap();
+        // The install that wrote the backups.
+        let old = tempfile::tempdir().unwrap();
+        let first = fixtures::runtime(old.path(), signed_out, activates).await;
+        first.enable_backups(Some(Arc::new(Key)), Some(backups.path().to_owned()));
+        save(&first.store, "synthetic-a", "default");
+        first.maybe_backup(1_000, true).unwrap();
+        save(&first.store, "synthetic-b", "default");
+        first.maybe_backup(2_000, true).unwrap();
+        // A reinstall: a new, empty data folder restores the newest backup on its own.
+        let new = tempfile::tempdir().unwrap();
+        let second = fixtures::runtime(new.path(), signed_out, activates).await;
+        second.enable_backups(Some(Arc::new(Key)), Some(backups.path().to_owned()));
+        second.restore_at_start();
+        assert_eq!(second.store.snapshot().unwrap().accounts.len(), 2);
+        let status = second.execute(Operation::Backups).await.unwrap();
+        assert_eq!(status["restored_at_start"]["restored"]["added"], 2);
+        // A store that already has accounts is never touched.
+        let kept = tempfile::tempdir().unwrap();
+        let third = fixtures::runtime(kept.path(), signed_out, activates).await;
+        third.enable_backups(Some(Arc::new(Key)), Some(backups.path().to_owned()));
+        save(&third.store, "synthetic-c", "default");
+        third.restore_at_start();
+        assert_eq!(third.store.snapshot().unwrap().accounts.len(), 1);
+        assert!(third.execute(Operation::Backups).await.unwrap()["restored_at_start"].is_null());
     }
     #[tokio::test]
     async fn the_account_the_cli_uses_cannot_join_a_project() {

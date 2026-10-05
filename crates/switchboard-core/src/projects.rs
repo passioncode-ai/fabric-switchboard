@@ -131,6 +131,7 @@ impl Store {
         let detail = if enabled { "saved" } else { "paused" };
         append_event(&mut candidate, "project_rule", Some(account_id), detail);
         self.publish(&mut state, candidate)?;
+        self.changed();
         Ok(rule)
     }
     pub fn remove_rule(&self, path: &Path, provider: Provider) -> Result<ProjectRule, String> {
@@ -153,6 +154,7 @@ impl Store {
             "removed",
         );
         self.publish(&mut state, candidate)?;
+        self.changed();
         Ok(rule)
     }
     /// Component-wise longest prefix; `/a` never matches `/ab`.
@@ -417,6 +419,22 @@ impl Store {
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(project)
+    }
+    /// Puts a project back from a backup as it was: its accounts are already in its pool. A
+    /// project whose pool or folders this install already uses is left out.
+    pub fn restore_project(&self, project: Project) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if candidate.projects.iter().any(|p| p.pool == project.pool) {
+            return Err("Project already here.".into());
+        }
+        candidate.projects.push(project);
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        append_event(&mut candidate, "project", None, "created");
+        // Validation refuses an overlap with this install's folders or a bad record.
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
     pub fn remove_project(&self, pool: &str) -> Result<Project, String> {
