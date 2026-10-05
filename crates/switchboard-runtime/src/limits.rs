@@ -99,6 +99,9 @@ pub(crate) struct LimitState {
     /// Where evidence is kept across restarts (SES-06); every owner sets it, a bare state
     /// (tests) has none.
     path: Mutex<Option<PathBuf>>,
+    /// What each recent transcript held at its last read, so a pass reads only what was
+    /// appended since (SB-49).
+    transcripts: Mutex<TranscriptCache>,
 }
 
 /// A marker as found: its session, when that session began, when it was written, the hold it
@@ -406,7 +409,12 @@ impl LimitState {
             })
             .unwrap_or_default();
         let mut changed = false;
-        for found in markers(transcripts, since, now) {
+        let found_markers = self
+            .transcripts
+            .lock()
+            .map(|mut cache| cache.markers(transcripts, since, now))
+            .unwrap_or_default();
+        for found in found_markers {
             // A session pointed at the proxy writes its 429 to these transcripts too.
             if managed
                 .iter()
@@ -565,39 +573,170 @@ pub(crate) fn latest_limit(files: &[PathBuf], since: i64, now: i64) -> Option<i6
         .map(|m| m.hold)
         .max()
 }
-/// Every rate-limit marker at or after `since`, with its session. Attribution — which account
-/// a marker is charged to — is `LimitState::native`'s.
+/// Every rate-limit marker at or after `since`, with its session, read afresh. The owner's
+/// passes go through `TranscriptCache`, which gives the same answer from what was appended.
+#[cfg(test)]
 pub(crate) fn markers(files: &[PathBuf], since: i64, now: i64) -> Vec<Marker> {
-    let mut found = Vec::new();
-    for path in files {
-        let Some(tail) = tail(path) else {
-            continue;
-        };
-        let session = session_id(path);
-        let began = session_start(path);
-        for line in tail.split(|b| *b == b'\n') {
-            // Cheap byte checks first: a line that is not an API error is never parsed.
-            if !contains(line, b"\"isApiErrorMessage\":true") || !contains(line, b"rate_limit") {
+    TranscriptCache::default().markers(files, since, now)
+}
+
+/// The flagged lines of each recent transcript and how far it was read (SB-49). Before it,
+/// every 30 s pass read the last 256 KiB and the first 64 KiB of every transcript written in
+/// the last quarter hour — about 3 MB and 16 ms per pass with a dozen active sessions
+/// (measured 2026-10-05). Now an unchanged file is not opened, a grown one is read from where
+/// the last read stopped, and only lines that pass the cheap API-error checks are kept.
+#[derive(Default)]
+pub(crate) struct TranscriptCache {
+    files: HashMap<PathBuf, Scanned>,
+    /// Bytes read from transcripts since the cache was made, and how many reads, for the tests'
+    /// cost assertions.
+    read: u64,
+    opened: u64,
+}
+struct Scanned {
+    /// The file's identity and state at the last read: a different creation time, a shorter
+    /// length or an older modification means it was replaced or rewritten, and is read afresh.
+    created: Option<std::time::SystemTime>,
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+    /// The end of the last complete line read; a partial last line is read again next time.
+    scanned_to: u64,
+    session: String,
+    began: Option<i64>,
+    /// API-error lines that mention a rate limit, newest last.
+    flagged: Vec<Vec<u8>>,
+    /// The text after the last newline when it passes the same checks: a line still being
+    /// written, or a last line written without a newline. Read again with the next growth.
+    pending: Option<Vec<u8>>,
+}
+/// Flagged lines kept per transcript: a marker matters for a quarter of an hour, and a session
+/// that writes more than this many limit errors in that time is limited either way.
+const MAX_FLAGGED: usize = 64;
+impl TranscriptCache {
+    pub(crate) fn markers(&mut self, files: &[PathBuf], since: i64, now: i64) -> Vec<Marker> {
+        let wanted: HashSet<&PathBuf> = files.iter().collect();
+        self.files.retain(|path, _| wanted.contains(path));
+        let mut found = Vec::new();
+        for path in files {
+            let Some(scanned) = self.scan(path) else {
                 continue;
-            }
-            if let Some((at, reset, limit_type)) = marker(line, since, now) {
-                // Bounded from the marker's own time, so the hold is the same on every pass.
-                let hold = reset
-                    .unwrap_or(at + DEFAULT_HOLD_SECONDS)
-                    .min(at.saturating_add(MAX_HOLD_SECONDS));
-                found.push(Marker {
-                    session: session.clone(),
-                    began,
-                    at,
-                    hold,
-                    reported: reset.is_some(),
-                    reset,
-                    limit_type,
-                });
+            };
+            for line in scanned.flagged.iter().chain(scanned.pending.as_ref()) {
+                if let Some((at, reset, limit_type)) = marker(line, since, now) {
+                    // Bounded from the marker's own time, so the hold is the same on every pass.
+                    let hold = reset
+                        .unwrap_or(at + DEFAULT_HOLD_SECONDS)
+                        .min(at.saturating_add(MAX_HOLD_SECONDS));
+                    found.push(Marker {
+                        session: scanned.session.clone(),
+                        began: scanned.began,
+                        at,
+                        hold,
+                        reported: reset.is_some(),
+                        reset,
+                        limit_type,
+                    });
+                }
             }
         }
+        found
     }
-    found
+    /// The file's flagged lines, read only as far as it changed.
+    fn scan(&mut self, path: &PathBuf) -> Option<&Scanned> {
+        let meta = fs::metadata(path).ok()?;
+        let (len, created, modified) = (meta.len(), meta.created().ok(), meta.modified().ok());
+        let fresh = match self.files.get(path) {
+            Some(old) => {
+                old.created != created
+                    || len < old.scanned_to
+                    || modified.is_some_and(|m| old.modified.is_some_and(|o| m < o))
+            }
+            None => true,
+        };
+        if fresh {
+            self.files.remove(path);
+        }
+        let unchanged = self
+            .files
+            .get(path)
+            .is_some_and(|old| old.len == len && old.modified == modified);
+        if !unchanged {
+            let from = self.files.get(path).map(|old| old.scanned_to);
+            // A first read, or growth past the tail bound, reads the last TAIL_BYTES only.
+            let start = match from {
+                Some(at) if len - at <= TAIL_BYTES => at,
+                _ => len.saturating_sub(TAIL_BYTES),
+            };
+            let (lines, pending, end) = complete_lines(
+                path,
+                start,
+                len,
+                from.is_none() || start != from.unwrap_or(0),
+            )?;
+            self.read += end.saturating_sub(start);
+            self.opened += 1;
+            let entry = self.files.entry(path.clone()).or_insert_with(|| Scanned {
+                created,
+                modified,
+                len,
+                scanned_to: start,
+                session: session_id(path),
+                began: session_start(path),
+                flagged: Vec::new(),
+                pending: None,
+            });
+            entry.pending = pending;
+            entry.flagged.extend(lines);
+            if entry.flagged.len() > MAX_FLAGGED {
+                let excess = entry.flagged.len() - MAX_FLAGGED;
+                entry.flagged.drain(..excess);
+            }
+            entry.created = created;
+            entry.modified = modified;
+            entry.len = len;
+            entry.scanned_to = entry.scanned_to.max(end);
+        }
+        self.files.get(path)
+    }
+}
+/// The complete lines between `start` and `len` that pass the cheap API-error checks, the text
+/// after the last newline when it passes them too, and the offset just past the last complete
+/// line. `skip_partial` drops the first line, which a read starting mid-file cuts.
+#[allow(clippy::type_complexity)]
+fn complete_lines(
+    path: &Path,
+    start: u64,
+    len: u64,
+    skip_partial: bool,
+) -> Option<(Vec<Vec<u8>>, Option<Vec<u8>>, u64)> {
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(len - start).read_to_end(&mut bytes).ok()?;
+    // Cheap byte checks first: a line that is not an API error is never parsed.
+    let flagged = |line: &[u8]| {
+        contains(line, b"\"isApiErrorMessage\":true") && contains(line, b"rate_limit")
+    };
+    let (mut body, rest, end) = match bytes.iter().rposition(|b| *b == b'\n') {
+        Some(last) => (&bytes[..last], &bytes[last + 1..], start + last as u64 + 1),
+        None => (&bytes[..0], &bytes[..], start),
+    };
+    let mut rest_cut = false;
+    if skip_partial && start > 0 {
+        match body.iter().position(|b| *b == b'\n') {
+            Some(cut) => body = &body[cut + 1..],
+            None if end > start => body = &[],
+            // No newline at all: the whole read is the cut first line.
+            None => rest_cut = true,
+        }
+    }
+    let lines = body
+        .split(|b| *b == b'\n')
+        .filter(|line| flagged(line))
+        .map(<[u8]>::to_vec)
+        .collect();
+    let pending = (!rest_cut && flagged(rest)).then(|| rest.to_vec());
+    Some((lines, pending, end))
 }
 /// The time of the first timestamped entry of a session transcript (its first 64 KiB).
 fn session_start(path: &Path) -> Option<i64> {
@@ -664,20 +803,6 @@ fn limit_type(raw: &str) -> Option<String> {
 fn quota_window(limit_type: &str) -> bool {
     limit_type == "five_hour" || limit_type == "seven_day" || limit_type.starts_with("seven_day_")
 }
-fn tail(path: &Path) -> Option<Vec<u8>> {
-    let mut file = fs::File::open(path).ok()?;
-    let length = file.metadata().ok()?.len();
-    let start = length.saturating_sub(TAIL_BYTES);
-    file.seek(SeekFrom::Start(start)).ok()?;
-    let mut bytes = Vec::new();
-    file.take(TAIL_BYTES).read_to_end(&mut bytes).ok()?;
-    if start > 0 {
-        // Drop the partial first line.
-        let cut = bytes.iter().position(|b| *b == b'\n')? + 1;
-        bytes.drain(..cut);
-    }
-    Some(bytes)
-}
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
@@ -707,6 +832,133 @@ mod tests {
         let path = project.join(format!("{}.jsonl", uuid::Uuid::new_v4()));
         fs::write(&path, lines.join("\n") + "\n").unwrap();
         path
+    }
+    fn append(path: &Path, text: &str) {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        file.write_all(text.as_bytes()).unwrap();
+    }
+    fn quiet_line(i: usize) -> String {
+        serde_json::json!({"type":"user","timestamp":rfc(NOW - 600),"message":{"content":format!("ordinary prompt {i} {}", "x".repeat(200))}}).to_string()
+    }
+    #[test]
+    fn an_unchanged_transcript_is_not_read_again_and_answers_the_same() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(
+            dir.path(),
+            &[
+                quiet_line(0),
+                error_line(NOW - 120, Some(NOW + 3600)),
+                quiet_line(1),
+            ],
+        );
+        let mut cache = TranscriptCache::default();
+        let first = cache.markers(std::slice::from_ref(&path), NOW - 900, NOW);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first, markers(std::slice::from_ref(&path), NOW - 900, NOW));
+        let (read, opened) = (cache.read, cache.opened);
+        assert!(read > 0);
+        let second = cache.markers(std::slice::from_ref(&path), NOW - 900, NOW);
+        assert_eq!(second, first);
+        assert_eq!(
+            (cache.read, cache.opened),
+            (read, opened),
+            "an unchanged file is not opened"
+        );
+    }
+    #[test]
+    fn a_grown_transcript_is_read_from_where_the_last_read_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(dir.path(), &(0..50).map(quiet_line).collect::<Vec<_>>());
+        let mut cache = TranscriptCache::default();
+        assert!(cache
+            .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+            .is_empty());
+        let before = cache.read;
+        let addition = format!("{}\n{}\n", quiet_line(51), error_line(NOW - 60, None));
+        append(&path, &addition);
+        let found = cache.markers(std::slice::from_ref(&path), NOW - 900, NOW);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found, markers(std::slice::from_ref(&path), NOW - 900, NOW));
+        assert_eq!(
+            cache.read - before,
+            addition.len() as u64,
+            "only the appended bytes"
+        );
+    }
+    #[test]
+    fn a_line_cut_by_the_read_is_finished_on_the_next_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(dir.path(), &[quiet_line(0)]);
+        let line = error_line(NOW - 30, Some(NOW + 600));
+        let (head, rest) = line.split_at(line.len() / 2);
+        append(&path, head);
+        let mut cache = TranscriptCache::default();
+        assert!(cache
+            .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+            .is_empty());
+        append(&path, &format!("{rest}\n"));
+        let found = cache.markers(std::slice::from_ref(&path), NOW - 900, NOW);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].reset, Some(NOW + 600));
+    }
+    #[test]
+    fn a_rewritten_or_vanished_transcript_is_read_afresh_or_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = transcript(
+            dir.path(),
+            &[quiet_line(0), quiet_line(1), error_line(NOW - 120, None)],
+        );
+        let mut cache = TranscriptCache::default();
+        assert_eq!(
+            cache
+                .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+                .len(),
+            1
+        );
+        // Shorter than what was read: rewritten, so the old marker is gone with it.
+        fs::write(&path, quiet_line(2) + "\n").unwrap();
+        assert!(cache
+            .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+            .is_empty());
+        // A file no longer among the recent ones leaves the cache.
+        let other = transcript(dir.path(), &[error_line(NOW - 100, None)]);
+        assert_eq!(
+            cache
+                .markers(std::slice::from_ref(&other), NOW - 900, NOW)
+                .len(),
+            1
+        );
+        assert_eq!(cache.files.len(), 1);
+        fs::remove_file(&other).unwrap();
+        assert!(cache
+            .markers(std::slice::from_ref(&other), NOW - 900, NOW)
+            .is_empty());
+    }
+    #[test]
+    fn a_first_read_and_a_large_growth_stay_within_the_tail_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        // A marker followed by more than TAIL_BYTES of ordinary lines is outside the tail, as
+        // before the cache.
+        let mut lines = vec![error_line(NOW - 300, None)];
+        lines.extend((0..2000).map(quiet_line));
+        let path = transcript(dir.path(), &lines);
+        let mut cache = TranscriptCache::default();
+        assert!(cache
+            .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+            .is_empty());
+        assert!(cache.read <= TAIL_BYTES);
+        let before = cache.read;
+        let mut growth: String = (2000..4000).map(|i| quiet_line(i) + "\n").collect();
+        growth.push_str(&(error_line(NOW - 10, None) + "\n"));
+        append(&path, &growth);
+        assert_eq!(
+            cache
+                .markers(std::slice::from_ref(&path), NOW - 900, NOW)
+                .len(),
+            1
+        );
+        assert!(cache.read - before <= TAIL_BYTES);
     }
     fn identity(id: &str) -> ExternalIdentity {
         ExternalIdentity {
