@@ -492,7 +492,10 @@ fn capture(
         return Err("No current Claude sign-in found.".into());
     }
     let result = claude_profile(&auth, &config, None)?;
-    if reader.read(&c.config, CAP)?.as_deref() != Some(config.as_slice())
+    // Only the part of the config the profile came from must hold still: Claude Code rewrites
+    // the rest of the file all the time (SB-57).
+    let config_after = reader.read(&c.config, CAP)?;
+    if config_after.as_deref().and_then(account_section) != account_section(&config)
         || current_auth(reader, c)?.as_deref() != Some(auth.as_slice())
     {
         return Err("Current sign-in changed during capture. Try again.".into());
@@ -544,6 +547,11 @@ pub(crate) enum Stamp {
     File(Option<(u64, u64, u64, i128)>),
     /// A Keychain item's creation and modification stamps; None when absent.
     Item(Option<(i64, i64)>),
+    /// The part of Claude Code's `~/.claude.json` a read uses (`oauthAccount`), as a digest;
+    /// None when the file or the section is absent or unreadable. Claude Code rewrites the
+    /// rest of that file several times a minute with many sessions open (7 of 60 seconds on
+    /// 2026-10-05), and each rewrite used to count as a changed sign-in (SB-57, SB-49).
+    Account(Option<[u8; 32]>),
 }
 /// What a probe of a source found.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -773,6 +781,10 @@ type ItemLook = Result<Option<((i64, i64), bool)>, Probe>;
 /// How a probe looks at files and Keychain items; tests substitute their own.
 trait Inspector {
     fn file(&self, path: &Path) -> Stamp;
+    /// Claude Code's config: the digest of the section a read uses.
+    fn config(&self, path: &Path) -> Stamp {
+        self.file(path)
+    }
     /// (stamps, trusted by `/usr/bin/security`) or the reason it cannot be examined.
     fn item(&self, service: &str, account: &str) -> ItemLook;
 }
@@ -780,6 +792,9 @@ struct NativeProbe;
 impl Inspector for NativeProbe {
     fn file(&self, path: &Path) -> Stamp {
         Stamp::File(file_stamp(path))
+    }
+    fn config(&self, path: &Path) -> Stamp {
+        config_stamp(path)
     }
     fn item(&self, service: &str, account: &str) -> ItemLook {
         #[cfg(target_os = "macos")]
@@ -819,6 +834,37 @@ fn file_stamp(path: &Path) -> Option<(u64, u64, u64, i128)> {
     {
         Some((0, 0, meta.len(), nanos))
     }
+}
+/// The digest of the section of Claude Code's config a read uses, read again only when the
+/// file's own stamp changed since the last call.
+type FileStamp = Option<(u64, u64, u64, i128)>;
+fn config_stamp(path: &Path) -> Stamp {
+    /// The config last digested: its path, its file stamp then, and the digest.
+    static LAST: std::sync::Mutex<Option<(PathBuf, FileStamp, Stamp)>> =
+        std::sync::Mutex::new(None);
+    let file = file_stamp(path);
+    let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((at, stamp, digest)) = last.as_ref() {
+        if at == path && *stamp == file {
+            return digest.clone();
+        }
+    }
+    let digest = Stamp::Account(
+        Native
+            .read(path, CAP)
+            .ok()
+            .flatten()
+            .and_then(|bytes| account_section(&bytes)),
+    );
+    *last = Some((path.to_owned(), file, digest.clone()));
+    digest
+}
+/// `oauthAccount` of a Claude Code config, canonically serialized and digested; None when the
+/// config is not JSON or has no such section.
+fn account_section(config: &[u8]) -> Option<[u8; 32]> {
+    let value: Value = serde_json::from_slice(config).ok()?;
+    let section = value.get("oauthAccount")?;
+    Some(Sha256::digest(serde_json::to_vec(section).ok()?).into())
 }
 /// Keychain stamps are CFAbsoluteTime bit patterns (seconds since 2001-01-01).
 fn item_seconds(bits: i64) -> i64 {
@@ -870,8 +916,8 @@ fn probe_context(provider: Provider, c: &Context, inspector: &dyn Inspector) -> 
         return blocked;
     }
     let files: Vec<PathBuf> = if provider == Provider::Claude {
+        stamps.push(inspector.config(&c.config));
         vec![
-            c.config.clone(),
             c.home.join(".config.json"),
             c.home.join(".credentials.json"),
         ]
@@ -1934,6 +1980,101 @@ mod tests {
             user: "fixture".into(),
             mac: false,
         }
+    }
+    /// A config whose unrelated parts change between the two reads of a capture: Claude Code
+    /// rewrites `~/.claude.json` several times a minute (SB-57).
+    struct Rewriting {
+        base: Fixture,
+        reads: Cell<usize>,
+        second: Vec<u8>,
+    }
+    impl Reader for Rewriting {
+        fn read(&self, p: &Path, cap: usize) -> Result<Option<Vec<u8>>, String> {
+            if p.ends_with(".claude.json") {
+                let n = self.reads.get();
+                self.reads.set(n + 1);
+                if n > 0 {
+                    return Ok(Some(self.second.clone()));
+                }
+            }
+            self.base.read(p, cap)
+        }
+        fn keychain(&self, s: &str, a: &str) -> Result<Option<Vec<u8>>, String> {
+            self.base.keychain(s, a)
+        }
+    }
+    #[test]
+    fn a_config_rewritten_elsewhere_during_capture_is_still_the_same_sign_in() {
+        let c = ctx();
+        let rewriting = |second: Vec<u8>| {
+            let f = Rewriting {
+                base: Fixture::new(),
+                reads: Cell::new(0),
+                second,
+            };
+            f.base.put(&c.config, &config("a@example.test"));
+            f.base
+                .put(&c.home.join(".credentials.json"), &auth("synthetic-token"));
+            f
+        };
+        let mut other = serde_json::from_slice::<Value>(&config("a@example.test")).unwrap();
+        other["numStartups"] = json!(42);
+        other["projects"] = json!({"another": {"lastCost": 1}});
+        let f = rewriting(serde_json::to_vec(&other).unwrap());
+        let p = capture(&f, Provider::Claude, &c).unwrap();
+        assert_eq!(p.identity.email.as_deref(), Some("a@example.test"));
+        // The account itself changing mid-read is still refused.
+        let f = rewriting(config("b@example.test"));
+        assert_eq!(
+            capture(&f, Provider::Claude, &c).err().as_deref(),
+            Some("Current sign-in changed during capture. Try again.")
+        );
+    }
+    #[test]
+    fn the_config_stamp_follows_the_account_section_only() {
+        let a = account_section(&config("a@example.test")).unwrap();
+        let mut other = serde_json::from_slice::<Value>(&config("a@example.test")).unwrap();
+        other["numStartups"] = json!(7);
+        other["tipsHistory"] = json!({"x": 1});
+        assert_eq!(
+            account_section(&serde_json::to_vec(&other).unwrap()),
+            Some(a)
+        );
+        assert_ne!(account_section(&config("b@example.test")), Some(a));
+        assert_eq!(account_section(br#"{"projects":{}}"#), None);
+        assert_eq!(account_section(b"not json"), None);
+        // The native stamp re-reads only when the file's own stamp changed, and an unrelated
+        // rewrite leaves it equal.
+        let dir = tempfile::tempdir().unwrap();
+        // The reader refuses a path through a link, and macOS's temporary folder is behind one.
+        let path = dir.path().canonicalize().unwrap().join(".claude.json");
+        fs::write(&path, config("a@example.test")).unwrap();
+        let first = config_stamp(&path);
+        assert_eq!(first, Stamp::Account(Some(a)));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+        assert_eq!(config_stamp(&path), first);
+        fs::write(&path, config("b@example.test")).unwrap();
+        assert_ne!(config_stamp(&path), first);
+
+        // The probe the background runs takes that stamp: an unrelated rewrite of the config
+        // is no change of the sign-in source, a new account is.
+        let home = dir.path().canonicalize().unwrap().join(".claude");
+        fs::create_dir(&home).unwrap();
+        let c = Context {
+            home,
+            config: path.clone(),
+            service: "Claude Code-credentials".into(),
+            user: "fixture".into(),
+            mac: false,
+        };
+        fs::write(&path, config("a@example.test")).unwrap();
+        let before = probe_context(Provider::Claude, &c, &NativeProbe);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+        assert_eq!(probe_context(Provider::Claude, &c, &NativeProbe), before);
+        fs::write(&path, config("b@example.test")).unwrap();
+        assert_ne!(probe_context(Provider::Claude, &c, &NativeProbe), before);
     }
     #[test]
     fn current_capture_preserves_native_fields_and_does_not_write() {

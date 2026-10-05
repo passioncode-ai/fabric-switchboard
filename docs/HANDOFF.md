@@ -8,7 +8,7 @@ person acting. #72 (commercial licensing → passioncode.ai/business) is merged 
 out with the next release. sshlg-growth was told to re-check its counts; Fabric (0.3.2) and Fabric
 Inbox (0.10.2) carry the same props in their next releases.
 
-**Exact next task:** SB-49 is down from 0.44 % to 0.33 % (undisturbed 0.19–0.29 %), not yet under 0.2 %: next a shared HTTP client for quota checks and re-listing a transcript folder only when it changed (backlog row has the profile). Then SB-57 (sign-in
+**SB-57 fixed** (`agent/sb-57-config-section`): every rewrite of `~/.claude.json` counted as a changed sign-in — a fresh read through `/usr/bin/security` on most passes and the `refused` flips; the probe and capture now look at `oauthAccount` only. This is also the likely rest of SB-49's idle CPU (0.44 % → 0.33 % in 0.6.2); confirm both on the next release. A shared HTTP client for quota checks was weighed and declined: one connection carrying several accounts' tokens links them for the provider. **Exact next task:** release 0.6.3 with SB-57 and #72, then an undisturbed idle hour for SB-49. Then (sign-in
 source flapping, P3), SB-07, SB-16; SB-58 waits for the Observatory owners; SB-52 next steps are a
 desktop entry and the `switchboard_continue` MCP tool. **Operator:** SB-15 day of use incl. a
 project with two repositories; SB-02 Windows; SB-03 Azure signing; `switchboard uninstall --yes`
