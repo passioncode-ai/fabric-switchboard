@@ -14,7 +14,7 @@ Do not edit it by hand.
 
 - Rust crates: 368 (309 linked, 59 build-time only)
 - JavaScript packages bundled into the desktop UI: 2
-- Distinct license and notice texts reproduced: 204
+- Distinct license and notice texts reproduced: 205
 - Components whose license could not be read: 0
 
 Where a component offers a choice of licenses (an `OR` expression, or `/` in older
@@ -401,8 +401,8 @@ binaries.
 
 | Package | Version | License | Texts |
 |---|---|---|---|
-| [@tauri-apps/api](https://www.npmjs.com/package/@tauri-apps/api/v/2.11.1) | 2.11.1 | Apache-2.0 OR MIT | [162](#text-162) |
-| [vite (module-preload helper only)](https://www.npmjs.com/package/vite/v/7.3.6) | 7.3.6 | MIT | [204](#text-204) |
+| [@tauri-apps/api](https://www.npmjs.com/package/@tauri-apps/api/v/2.12.1) | 2.12.1 | Apache-2.0 OR MIT | [162](#text-162), [204](#text-204) |
+| [vite (module-preload helper only)](https://www.npmjs.com/package/vite/v/7.3.6) | 7.3.6 | MIT | [205](#text-205) |
 
 Vite is a build tool and is not shipped, except for the small module-preload helper
 it injects into the production bundle; that helper is covered by Vite's core license
@@ -9565,7 +9565,7 @@ Creator: Person: Daniel Thompson-Yvetot
 
 ### Text 162
 
-Used by: tauri 2.12.1 (LICENSE-MIT); tauri-build 2.7.1 (LICENSE-MIT); tauri-codegen 2.7.1 (LICENSE-MIT); tauri-macros 2.7.1 (LICENSE-MIT); tauri-plugin-autostart 2.7.0 (LICENSE_MIT); tauri-runtime 2.12.1 (LICENSE-MIT); tauri-runtime-wry 2.12.1 (LICENSE-MIT); tauri-utils 2.10.1 (LICENSE-MIT); @tauri-apps/api 2.11.1 (LICENSE_MIT)
+Used by: tauri 2.12.1 (LICENSE-MIT); tauri-build 2.7.1 (LICENSE-MIT); tauri-codegen 2.7.1 (LICENSE-MIT); tauri-macros 2.7.1 (LICENSE-MIT); tauri-plugin-autostart 2.7.0 (LICENSE_MIT); tauri-runtime 2.12.1 (LICENSE-MIT); tauri-runtime-wry 2.12.1 (LICENSE-MIT); tauri-utils 2.10.1 (LICENSE-MIT); @tauri-apps/api 2.12.1 (LICENSE-MIT)
 
 ```text
 MIT License
@@ -11625,6 +11625,35 @@ freely, subject to the following restrictions:
 <a id="text-204"></a>
 
 ### Text 204
+
+Used by: @tauri-apps/api 2.12.1 (LICENSE.spdx)
+
+```text
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: tauri
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2019-2025, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Tauri is a rust project that enables developers to make secure
+and small desktop applications using a web frontend.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2019-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/tauri
+PackageDownloadLocation: git+https://github.com/tauri-apps/tauri.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
+Creator: Person: Daniel Thompson-Yvetot
+```
+
+<a id="text-205"></a>
+
+### Text 205
 
 Used by: vite (module-preload helper only) 7.3.6 (LICENSE.md (Vite core section))
 
