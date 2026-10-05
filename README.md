@@ -8,11 +8,11 @@ request. It is a desktop app plus the `switchboard` command-line tool, for macOS
 Windows. It is Fabric's account tool and works on its own; built by
 [PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
 
-**Status: beta. [v0.5.3-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1)
-is published** (prerelease: macOS universal notarized by Apple and stapled; Windows x64 unsigned
-and cross-built). From the next release, builds are made and signed only by the
-[release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Real provider login and
-end-to-end requests with live accounts are not yet verified.
+**Status: [v0.6.0](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.0)**,
+the first stable release (macOS universal, notarized by Apple and stapled; Windows x64 built
+natively, not yet Authenticode-signed). Builds are made and signed only by the
+[release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Live provider acceptance on
+each platform is tracked on the [board](docs/evidence/backlog.md) (SB-01, SB-02, SB-15).
 
 - **Download:** [macOS](https://passioncode.ai/switchboard/download/macos) ·
   [Windows](https://passioncode.ai/switchboard/download/windows) ·
@@ -43,14 +43,13 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
 ## Quick start for a new teammate
 
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
-   (redirects to the [v0.4.1-beta.1 release](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.4.1-beta.1)),
-   check it against `SHA256SUMS-0.4.1.txt` from the release
-   (`shasum -a 256 -c SHA256SUMS-0.4.1.txt --ignore-missing` → `OK`), then follow
+   (redirects to the [latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)),
+   check it against `SHA256SUMS` from the release
+   (`shasum -a 256 -c SHA256SUMS --ignore-missing` → `OK`), then follow
    [docs/INSTALL.md](docs/INSTALL.md). The app is Developer ID signed, notarized and stapled
    (`spctl -a -vv "Fabric Switchboard.app"` → `accepted, source=Notarized Developer ID`); the
-   CLI beside it runs (`./switchboard --version` → `switchboard 0.4.1`). Open the app once
-   after installing: it moves accounts saved by earlier versions, and macOS may ask at most
-   once per account during that move.
+   CLI beside it runs (`./switchboard --version`). Open the app once after installing: it moves
+   accounts saved by earlier versions, opens at login from then on, and shows a five-step tour.
 2. **Configure:** nothing to set before first run. Accounts are added in the app or with
    `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
    sign-in and go to the OS vault, never into an environment variable or an argument.
