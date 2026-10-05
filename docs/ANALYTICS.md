@@ -18,9 +18,10 @@ identifies the machine or the person.
 |---|---|---|
 | `app_installed` | first start of this app on this machine (once, kept in `<data>/analytics-state.json`) | the counts below; `first_passioncode_app` — no PassionCode app had run here before |
 | `app_started` | every start of the desktop app | `launch`: `ordinary` or `background` (login item, lifecycle broker) |
-| `app_active` | once per UTC day while the app runs, window open or not | `accounts`, `enabled`, `claude`, `codex`, `oauth`, `api_key`, `setup_token`, `pools` (a count), `rotation_on` (enabled policies), `project_rules` |
+| `app_active` | once per UTC day while the app runs, window open or not | `accounts`, `enabled`, `claude`, `codex`, `oauth`, `api_key`, `setup_token`, `pools` (a count), `rotation_on` (enabled policies), `project_rules`, `projects` |
 | `account_added` | an account appears | `provider`, `kind`, `method` (`sign_in`, `capture`, `import_claude_swap`, `manual`, `restore`, `sync`), `accounts` (total after) |
 | `account_removed` | an account disappears | `provider`, `kind`, `accounts` |
+| `project_changed` | a project created, changed or removed | `change` (`created`, `updated`, `removed`), `projects`, `folders`, `project_accounts` — counts, never a name or a path |
 | `account_switched` | the account in use or a pool's managed route changes | `provider`, `target` (`native`, `managed`), `cause` (`manual`, `rotation`, `limit`) |
 
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,

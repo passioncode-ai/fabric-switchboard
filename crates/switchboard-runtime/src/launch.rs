@@ -767,6 +767,37 @@ fn codex_auth_snapshot(
         AuthKind::SetupToken => Err("Codex does not support setup tokens.".into()),
     }
 }
+pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
+    "This account belongs to a project. Launch it from one of the project's folders.";
+pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
+    "This folder belongs to a project. Launch one of the project's accounts.";
+/// Projects reserve their accounts (0.6): a project's account starts only inside the project's
+/// folders, and inside them a provider the project has accounts for uses only those.
+pub(crate) fn project_allows(
+    snapshot: &switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    folder: &Path,
+) -> Result<(), String> {
+    if let Some(owner) = snapshot.project_of_pool(&account.pool) {
+        if !owner
+            .folders
+            .iter()
+            .any(|f| folder.starts_with(Path::new(f)))
+        {
+            return Err(PROJECT_ACCOUNT_OUTSIDE.into());
+        }
+    }
+    if let Some(here) = snapshot.project_for(folder) {
+        let has_own = snapshot
+            .accounts
+            .iter()
+            .any(|a| a.pool == here.pool && a.provider == account.provider && a.enabled);
+        if has_own && account.pool != here.pool {
+            return Err(PROJECT_FOLDER_FOREIGN.into());
+        }
+    }
+    Ok(())
+}
 pub fn launch(
     root: &Path,
     store: &Arc<Store>,
@@ -811,6 +842,7 @@ fn launch_with(
     if !account.enabled {
         return Err("Enable the account before launch.".into());
     }
+    project_allows(&store.snapshot()?, &account, &working_directory)?;
     let program = (host.binary)(account.provider)?;
     let homes = root.join(if mode == "managed" {
         "runtimes"
@@ -943,6 +975,56 @@ fn journal_launch(store: &Store, id: &str, mode: &str) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_project_account_starts_only_in_its_folders_and_its_folders_use_only_its_accounts() {
+        use switchboard_core::{Account, Project, Snapshot};
+        let account = |id: &str, pool: &str, provider: Provider| Account {
+            id: id.into(),
+            label: id.into(),
+            provider,
+            kind: AuthKind::OAuth,
+            pool: pool.into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("own", "alpha", Provider::Claude),
+                account("other", "default", Provider::Claude),
+                account("codex", "default", Provider::Codex),
+            ],
+            projects: vec![Project {
+                pool: "alpha".into(),
+                name: "Alpha".into(),
+                folders: vec!["/work/web".into(), "/work/api".into()],
+                created_at: 1,
+            }],
+            ..Default::default()
+        };
+        let a = |i: usize| snapshot.accounts[i].clone();
+        // Its own account: inside any of its folders, never outside.
+        assert!(project_allows(&snapshot, &a(0), Path::new("/work/api/src")).is_ok());
+        assert_eq!(
+            project_allows(&snapshot, &a(0), Path::new("/work/other")).unwrap_err(),
+            PROJECT_ACCOUNT_OUTSIDE
+        );
+        // Inside, another pool's Claude account is refused while the project has one.
+        assert_eq!(
+            project_allows(&snapshot, &a(1), Path::new("/work/web")).unwrap_err(),
+            PROJECT_FOLDER_FOREIGN
+        );
+        // A provider the project has no account for keeps working there.
+        assert!(project_allows(&snapshot, &a(2), Path::new("/work/web")).is_ok());
+        // Outside every project, ordinary accounts are unaffected.
+        assert!(project_allows(&snapshot, &a(1), Path::new("/elsewhere")).is_ok());
+        // `/work/webapp` is not inside `/work/web`.
+        assert!(project_allows(&snapshot, &a(1), Path::new("/work/webapp")).is_ok());
+    }
+
     use super::*;
     #[test]
     fn launched_sessions_get_switchboard_tools_with_exact_quoting() {

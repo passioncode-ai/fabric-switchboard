@@ -47,7 +47,7 @@ fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, and the lowest remaining quota.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account and is refused within 60 seconds of its last check, and until the time the provider asked for after answering a check with 429; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own pool for any managed session; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_project_context","title":"Project rule","description":"The optional project rule for a folder, per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove project rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply project rule","description":"Apply the folder's rule to this session when you start work in a project. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session or needs_global. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
@@ -597,6 +597,23 @@ fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
     view
 }
 
+/// Projects with their accounts (no credential), from a snapshot.
+pub(crate) fn project_views(snapshot: &Value) -> Vec<Value> {
+    let accounts = snapshot["accounts"].as_array().cloned().unwrap_or_default();
+    snapshot["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let own: Vec<Value> = accounts
+                .iter()
+                .filter(|a| a["pool"] == p["pool"])
+                .map(|a| json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "enabled": a["enabled"]}))
+                .collect();
+            json!({"pool": p["pool"], "name": p["name"], "folders": p["folders"], "accounts": own})
+        })
+        .collect()
+}
 pub(crate) fn rule_views(snapshot: &Value, time: i64) -> Vec<Value> {
     let accounts = snapshot["accounts"].as_array().cloned().unwrap_or_default();
     snapshot["rules"]

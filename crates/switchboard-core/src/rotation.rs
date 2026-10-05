@@ -53,6 +53,13 @@ impl Store {
         policy.validate()?;
         let mut state = self.lock()?;
         let mut candidate = state.clone();
+        // The ordinary Claude Code serves every folder; a project's accounts serve only its own.
+        if policy.enabled
+            && policy.target == "claude_cli"
+            && candidate.project_of_pool(&policy.pool).is_some()
+        {
+            return Err(crate::PROJECT_NOT_NATIVE.into());
+        }
         if let Some(old) = candidate.policies.iter_mut().find(|p| {
             p.provider == policy.provider && p.pool == policy.pool && p.target == policy.target
         }) {

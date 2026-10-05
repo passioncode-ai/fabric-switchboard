@@ -1134,3 +1134,135 @@ fn becoming_the_account_in_use_pulls_its_check_in_without_a_write() {
     store.set_in_use(Default::default()).unwrap();
     assert_eq!(next_check(&store, &target), now + CHECK_ACTIVE_SECONDS);
 }
+
+// Projects (0.6): a project reserves a pool for its folders.
+#[test]
+fn a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out() {
+    let (root, vault, store) = setup();
+    let now = clock();
+    let a = account_in(&store, "org-a", "default", now);
+    let b = account_in(&store, "org-b", "default", now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (one, two) = (dir.path().join("web"), dir.path().join("api"));
+    let project = store
+        .save_project(
+            None,
+            "Alpha Web",
+            &[one.clone(), two.clone()],
+            std::slice::from_ref(&a),
+        )
+        .unwrap();
+    assert_eq!(project.pool, "alpha-web");
+    let snap = store.snapshot().unwrap();
+    let pool = |id: &str| {
+        snap.accounts
+            .iter()
+            .find(|x| x.id == id)
+            .unwrap()
+            .pool
+            .clone()
+    };
+    assert_eq!((pool(&a), pool(&b)), ("alpha-web".into(), "default".into()));
+    assert!(
+        !snap.routes.contains_key("claude:default"),
+        "its old route no longer applies"
+    );
+    assert_eq!(
+        snap.project_for(&two.join("src")).unwrap().pool,
+        "alpha-web"
+    );
+    assert!(snap.project_for(dir.path()).is_none());
+    // Updating the set: b in, a out (back to default).
+    store
+        .save_project(
+            Some("alpha-web"),
+            "Alpha Web",
+            std::slice::from_ref(&one),
+            std::slice::from_ref(&b),
+        )
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    let pool = |id: &str| {
+        snap.accounts
+            .iter()
+            .find(|x| x.id == id)
+            .unwrap()
+            .pool
+            .clone()
+    };
+    assert_eq!((pool(&a), pool(&b)), ("default".into(), "alpha-web".into()));
+    assert_eq!(snap.projects[0].folders.len(), 1);
+    // Survives a restart, and removing the project keeps the accounts where they are.
+    drop(store);
+    let store = Store::open(root.path().into(), vault).unwrap();
+    assert_eq!(store.snapshot().unwrap().projects.len(), 1);
+    store.remove_project("alpha-web").unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.projects.is_empty());
+    assert_eq!(
+        snap.accounts.iter().find(|x| x.id == b).unwrap().pool,
+        "alpha-web"
+    );
+}
+
+#[test]
+fn projects_never_share_a_folder_or_an_account_identity() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account_in(&store, "org-a", "default", now);
+    let dir = tempfile::tempdir().unwrap();
+    store
+        .save_project(None, "One", &[dir.path().join("repo")], &[])
+        .unwrap();
+    // A folder inside another project's folder, or around it, is refused.
+    assert!(store
+        .save_project(None, "Two", &[dir.path().join("repo/sub")], &[])
+        .is_err());
+    assert!(store
+        .save_project(None, "Two", &[dir.path().to_owned()], &[])
+        .is_err());
+    // Same name twice gets its own pool.
+    let again = store
+        .save_project(None, "One", &[dir.path().join("other")], &[])
+        .unwrap();
+    assert_eq!(again.pool, "one-2");
+    // The same identity already saved in the target pool cannot move in beside itself.
+    let copy = account_in(&store, "org-a", "one", now);
+    let err = store
+        .save_project(Some("one"), "One", &[dir.path().join("repo")], &[a, copy])
+        .unwrap_err();
+    assert!(err.contains("already saved in that pool"), "{err}");
+}
+
+#[test]
+fn a_project_pool_never_drives_the_ordinary_claude_code() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account_in(&store, "org-a", "alpha", now);
+    let mut native = policy();
+    native.pool = "alpha".into();
+    native.target = "claude_cli".into();
+    store.set_policy(native.clone()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    store
+        .save_project(
+            None,
+            "alpha",
+            &[dir.path().join("repo")],
+            std::slice::from_ref(&a),
+        )
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(
+        !snap
+            .policies
+            .iter()
+            .any(|p| p.pool == "alpha" && p.target == "claude_cli" && p.enabled),
+        "adopting the pool switched its native policy off"
+    );
+    assert_eq!(
+        store.set_policy(native).unwrap_err(),
+        switchboard_core::PROJECT_NOT_NATIVE
+    );
+}

@@ -186,7 +186,24 @@ pub(crate) fn resolve(store: &Store, path: &Path, now: i64) -> Result<Value, Str
             },
         )
         .collect();
-    Ok(json!({"path": path, "rules": results}))
+    let project = snapshot
+        .project_for(path)
+        .map(|p| project_view(&snapshot, p));
+    Ok(json!({"path": path, "rules": results, "project": project}))
+}
+
+/// A project with its accounts (no credential): what the UI, the CLI and MCP show.
+pub(crate) fn project_view(
+    snapshot: &switchboard_core::Snapshot,
+    project: &switchboard_core::Project,
+) -> Value {
+    let accounts: Vec<Value> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.pool == project.pool)
+        .map(account_view)
+        .collect();
+    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "accounts": accounts})
 }
 
 fn outcome(provider: Provider, action: &str, account: Option<&Account>, message: String) -> Value {

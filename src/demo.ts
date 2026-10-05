@@ -3,6 +3,7 @@ import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, L
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
+const PROJECT_NOT_NATIVE = "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.";
 export function createDemoAdapter(): Adapter {
   const now = () => Math.floor(Date.now() / 1000);
   const studio: ExternalIdentity = { account_id: 'synthetic-studio', organization_id: 'synthetic-work', email: 'studio@example.test' };
@@ -104,6 +105,7 @@ export function createDemoAdapter(): Adapter {
     },
     async activateNative(id) {
       await pause(); const item = enabled(id);
+      if (state.projects?.some((p) => p.pool === item.pool)) throw new Error(PROJECT_NOT_NATIVE);
       if (item.provider !== 'claude' || item.kind !== 'oauth' || !item.external_identity) throw new Error('Native activation requires a Claude OAuth account with an external identity.');
       current.claude = { status: 'available', identity: structuredClone(item.external_identity), account_id: id };
       log('native.activated', id, 'Synthetic native Claude account activation');
@@ -163,6 +165,36 @@ export function createDemoAdapter(): Adapter {
       if (index < 0) rules.push(rule); else rules[index] = rule;
       log('project_rule', item.id, input.enabled ? 'saved' : 'paused'); return structuredClone(rule);
     },
+    async saveProject(input) {
+      await pause();
+      const projects = state.projects ??= [];
+      const name = input.name.trim(); if (!name) throw new Error('Name the project.');
+      const folders = [...new Set(input.folders.map((f) => f.trim()).filter(Boolean))];
+      if (!folders.length || folders.length > 16) throw new Error('Add between one and sixteen project folders.');
+      if (folders.some((f) => !f.startsWith('/'))) throw new Error('Choose absolute project folders.');
+      const existing = input.pool ? projects.find((p) => p.pool === input.pool) : undefined;
+      if (input.pool && !existing) throw new Error('Project not found.');
+      const inside = (a: string, b: string) => a === b || a.startsWith(b.endsWith('/') ? b : `${b}/`);
+      let pool = existing?.pool;
+      if (!pool) {
+        const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'project';
+        pool = base; let n = 2;
+        while (pool === 'default' || projects.some((p) => p.pool === pool) || state.accounts.some((a) => a.pool === pool && !input.accountIds.includes(a.id))) pool = `${base}-${n++}`;
+      }
+      if (input.accountIds.some((id) => (current.claude.account_id === id || current.codex.account_id === id) && state.accounts.find((a) => a.id === id)?.pool !== pool)) throw new Error('This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.');
+      for (const other of projects.filter((p) => p.pool !== pool)) for (const f of folders) if (other.folders.some((g) => inside(f, g) || inside(g, f))) throw new Error('A folder is already part of another project.');
+      for (const account of state.accounts) {
+        const target = input.accountIds.includes(account.id) ? pool : account.pool === pool ? 'default' : account.pool;
+        if (target !== account.pool) { const old = `${account.provider}:${account.pool}`; if (state.routes[old] === account.id) delete state.routes[old]; account.pool = target; }
+      }
+      for (const policy of state.policies ?? []) if (policy.pool === pool && policy.target === 'claude_cli') policy.enabled = false;
+      const project = { pool, name, folders, created_at: existing?.created_at ?? now() };
+      if (existing) Object.assign(existing, project); else projects.push(project);
+      projects.sort((a, b) => a.name.localeCompare(b.name));
+      log('project', '', existing ? 'updated' : 'created');
+      return structuredClone(project);
+    },
+    async removeProject(pool) { await pause(); const before = state.projects?.length ?? 0; state.projects = (state.projects ?? []).filter((p) => p.pool !== pool); if (state.projects.length === before) throw new Error('Project not found.'); log('project', '', 'removed'); },
     async removeProjectRule(path, provider) { await pause(); const before = state.rules!.length; state.rules = state.rules!.filter((rule) => !(rule.path === path && rule.provider === provider)); if (state.rules.length === before) throw new Error('Project rule not found.'); log('project_rule', '', 'removed'); },
     async agentSetup() { return structuredClone(setup); },
     async backups() { return { directory: '~/Library/Application Support/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },

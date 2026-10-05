@@ -124,6 +124,16 @@ pub enum Operation {
     ResolveProject {
         path: PathBuf,
     },
+    /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
+    SaveProject {
+        pool: Option<String>,
+        name: String,
+        folders: Vec<PathBuf>,
+        account_ids: Vec<String>,
+    },
+    RemoveProject {
+        pool: String,
+    },
     ApplyProject {
         path: PathBuf,
         session: projects::Session,
@@ -530,6 +540,11 @@ impl Runtime {
             Reported::Switch { provider, target } => {
                 client.switched(provider.as_str(), target, "manual");
             }
+            Reported::Project(change) => {
+                if let Ok(snapshot) = self.store.snapshot() {
+                    client.project(change, &snapshot);
+                }
+            }
         }
         if client.pending() > 0 {
             tokio::spawn(async move { client.flush().await });
@@ -874,6 +889,8 @@ impl Owner {
     }
 }
 
+/// Refusal: an account the ordinary CLI is signed in to cannot join a project.
+pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
 /// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
 enum Reported {
     /// Accounts may have been added or removed; additions are attributed to this method.
@@ -882,6 +899,8 @@ enum Reported {
         provider: Provider,
         target: &'static str,
     },
+    /// A project was created, changed or removed: counts only.
+    Project(&'static str),
 }
 impl Reported {
     fn of(operation: &Operation, store: &Store) -> Option<Self> {
@@ -892,6 +911,10 @@ impl Reported {
             Operation::FinishLogin { .. } => Self::Accounts("sign_in"),
             Operation::RestoreBackup { .. } => Self::Accounts("restore"),
             Operation::Remove { .. } => Self::Accounts("removed"),
+            Operation::SaveProject { pool, .. } => {
+                Self::Project(if pool.is_some() { "updated" } else { "created" })
+            }
+            Operation::RemoveProject { .. } => Self::Project("removed"),
             Operation::Select { provider, .. } => Self::Switch {
                 provider: *provider,
                 target: "managed",
@@ -1136,6 +1159,46 @@ async fn execute(
             let rule = store.set_rule(&path, &account_id, &target, enabled, expires_at)?;
             Ok(projects::rule_view(&store, &rule, monitor::now()))
         }
+        Operation::SaveProject {
+            pool,
+            name,
+            folders,
+            account_ids,
+        } => {
+            let folders = folders
+                .iter()
+                .map(|f| projects::project_dir(root, f))
+                .collect::<Result<Vec<_>, _>>()?;
+            // The account the ordinary CLI is signed in to would keep serving every folder.
+            let current = match runtime {
+                Some(runtime) => runtime.current_accounts()?,
+                None => observe_current(&store, native.current),
+            };
+            let in_cli = |id: &String| {
+                ["claude", "codex"].iter().any(|p| {
+                    current[*p]["account_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.iter().any(|v| v == id.as_str()))
+                })
+            };
+            let snapshot = store.snapshot()?;
+            if account_ids.iter().any(|id| {
+                in_cli(id)
+                    && snapshot
+                        .accounts
+                        .iter()
+                        .find(|a| &a.id == id)
+                        .is_some_and(|a| Some(a.pool.as_str()) != pool.as_deref())
+            }) {
+                return Err(PROJECT_ACCOUNT_IN_CLI.into());
+            }
+            let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            Ok(projects::project_view(&store.snapshot()?, &project))
+        }
+        Operation::RemoveProject { pool } => {
+            let project = store.remove_project(&pool)?;
+            Ok(json!({"removed": project.pool, "name": project.name}))
+        }
         Operation::RemoveProjectRule { path, provider } => {
             let path = projects::rule_path(root, &path)?;
             let rule = store.remove_rule(&path, provider)?;
@@ -1267,6 +1330,16 @@ fn activate_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
+    // A project's account never becomes the ordinary Claude Code's: that serves every folder.
+    let snapshot = store.snapshot()?;
+    if snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .is_some_and(|a| snapshot.project_of_pool(&a.pool).is_some())
+    {
+        return Err(switchboard_core::PROJECT_NOT_NATIVE.into());
+    }
     // A renewal of this account is in flight: its stored token is being spent right now.
     if refresh.is_some_and(|state| state.in_flight(store, id)) {
         return Err(refresh::RENEWING.into());
@@ -1762,6 +1835,69 @@ mod owner_tests {
         assert_eq!(value["claude"]["account_ids"], json!([work.id, team.id]));
         assert_eq!(value["codex"]["status"], "missing");
         assert_eq!(value["codex"]["account_ids"], json!([]));
+    }
+    #[tokio::test]
+    async fn the_account_the_cli_uses_cannot_join_a_project() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let repo = tempfile::tempdir().unwrap();
+        let save_with = |ids: Vec<String>| Operation::SaveProject {
+            pool: None,
+            name: "Alpha".into(),
+            folders: vec![repo.path().to_owned()],
+            account_ids: ids,
+        };
+        assert_eq!(
+            runtime
+                .execute(save_with(vec![a.id.clone()]))
+                .await
+                .unwrap_err(),
+            PROJECT_ACCOUNT_IN_CLI
+        );
+        assert!(runtime.store.snapshot().unwrap().projects.is_empty());
+        runtime
+            .execute(save_with(vec![b.id.clone()]))
+            .await
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_project_account_never_becomes_the_ordinary_claude_code() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let repo = tempfile::tempdir().unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Alpha".into(),
+                folders: vec![repo.path().to_owned()],
+                account_ids: vec![b.id.clone()],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative { id: b.id.clone() })
+                .await
+                .unwrap_err(),
+            switchboard_core::PROJECT_NOT_NATIVE
+        );
+        assert!(
+            events(&runtime.store, "activation").is_empty(),
+            "nothing was attempted"
+        );
+        // The folder resolves to the project, with its account and no credential.
+        let inside = repo.path().canonicalize().unwrap().join("src");
+        std::fs::create_dir_all(&inside).unwrap();
+        let resolved = runtime
+            .execute(Operation::ResolveProject { path: inside })
+            .await
+            .unwrap();
+        assert_eq!(resolved["project"]["pool"], "alpha");
+        assert_eq!(resolved["project"]["accounts"][0]["id"], b.id.as_str());
+        assert!(!resolved.to_string().contains("synthetic-b-token"));
     }
     #[tokio::test]
     async fn activation_after_claude_logout_proceeds_and_is_journaled() {

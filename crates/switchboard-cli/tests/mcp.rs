@@ -364,7 +364,55 @@ fn project_commands_work_offline_from_the_cli() {
         .unwrap();
     assert!(output.status.success());
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["data"], json!([]));
+    assert_eq!(value["data"], json!({"projects": [], "rules": []}));
+    // A project with two folders, listed with its folders and no account yet, then deleted.
+    let web = projects.path().join("web");
+    let api = projects.path().join("api");
+    std::fs::create_dir_all(&web).unwrap();
+    std::fs::create_dir_all(&api).unwrap();
+    let saved = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args([
+            "--json",
+            "project",
+            "save",
+            "--name",
+            "Alpha Web",
+            "--folder",
+        ])
+        .arg(&web)
+        .arg("--folder")
+        .arg(&api)
+        .output()
+        .unwrap();
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["--json", "project", "list"])
+        .output()
+        .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["data"]["projects"][0]["pool"], "alpha-web");
+    assert_eq!(
+        value["data"]["projects"][0]["folders"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let deleted = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args(["project", "delete", "--pool", "alpha-web"])
+        .output()
+        .unwrap();
+    assert!(deleted.status.success());
     let output = Command::new(env!("CARGO_BIN_EXE_switchboard"))
         .arg("--data-dir")
         .arg(data.path())

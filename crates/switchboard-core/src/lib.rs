@@ -23,7 +23,7 @@ mod vault;
 pub mod windows;
 
 pub use credential::Credential;
-pub use projects::{ProjectRule, RuleResolution};
+pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution};
 pub use rotation::{RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 
@@ -127,6 +127,8 @@ pub struct Usage {
 /// `additional_rate_limits`, SB-40), not the account itself. They stay in `windows` and in the
 /// stored `used_percent`, so an older build reads them conservatively.
 pub const FEATURE_WINDOW_PREFIX: &str = "feature_";
+/// Refusal for anything that would put a project's account into the ordinary Claude Code.
+pub const PROJECT_NOT_NATIVE: &str = "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.";
 /// Quota-check cadence (SB-48): an account whose numbers decide something right now — its pool
 /// switches automatically, it serves the pool's managed requests, or the ordinary CLI is signed
 /// in to it — is checked every three minutes; any other account every ten, and again just after
@@ -218,6 +220,9 @@ pub struct Snapshot {
     pub events: Vec<Event>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<ProjectRule>,
+    /// Projects reserving pools for their folders (0.6). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<Project>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -247,7 +252,7 @@ pub(crate) fn now() -> i64 {
 pub(crate) fn ahead(time: i64) -> bool {
     time > now() + 60
 }
-fn label_valid(s: &str) -> bool {
+pub(crate) fn label_valid(s: &str) -> bool {
     !s.trim().is_empty() && s.len() <= 80 && !s.chars().any(char::is_control)
 }
 pub(crate) fn pool_valid(s: &str) -> bool {
@@ -338,6 +343,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
                 | "5xx"
         ),
         "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
+        "project" => matches!(detail, "created" | "updated" | "removed"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
@@ -414,6 +420,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
         }
     }
     projects::validate_rules(s)?;
+    projects::validate_projects(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)

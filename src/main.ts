@@ -6,7 +6,7 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -32,7 +32,36 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-let page: 'accounts' | 'projects' | 'agents' | 'activity' | 'about' = 'accounts';
+type Page = 'accounts' | 'projects' | 'agents' | 'activity' | 'about';
+let page: Page = 'accounts';
+/** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
+const TOUR_KEY = 'switchboard.tour';
+const TOUR: { page: Page; target: string | null; title: string; text: string }[] = [
+  { page: 'accounts', target: null, title: 'Welcome to Switchboard', text: 'Switchboard keeps your Claude Code and Codex accounts on this computer and moves your work between them, so a usage limit doesn\'t stop a session.' },
+  { page: 'accounts', target: '[data-focus="menu-add"]', title: 'Add your accounts', text: 'Press + Add account to sign in to another account, or to save the one Claude Code already uses. Each row then shows how much is used and when it resets.' },
+  { page: 'accounts', target: '.rotation-bar', title: 'Switch, by hand or automatically', text: 'Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.' },
+  { page: 'projects', target: '[data-focus="new-project"]', title: 'Give a project its own accounts', text: 'Press + New project, add the project\'s folders and choose its accounts. Sessions launched from those folders use only them, and other projects never switch to them.' },
+  { page: 'agents', target: null, title: 'Agents, and it keeps running', text: 'Here, connect Claude Code and Codex agents so they can read usage and switch accounts. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.' },
+];
+let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return null; } })();
+function tourGo(step: number | null) {
+  tourStep = step;
+  if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
+  page = TOUR[step].page; render(); restoreFocus('tour-title');
+}
+function tourCard(step: number) {
+  const item = TOUR[step]; const last = step === TOUR.length - 1;
+  const card = el('section', 'tour-card'); card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'false'); card.setAttribute('aria-labelledby', 'tour-title');
+  const count = el('p', 'eyebrow', `Step ${step + 1} of ${TOUR.length}`);
+  const title = el('h2', '', item.title); title.id = 'tour-title'; title.tabIndex = -1; title.dataset.focus = 'tour-title';
+  const dots = el('div', 'tour-dots'); dots.setAttribute('aria-hidden', 'true'); TOUR.forEach((_, i) => dots.append(el('span', i === step ? 'is-on' : '')));
+  const actions = el('div', 'tour-actions');
+  actions.append(button('Skip tour', () => tourGo(null), 'text-button', 'tour-skip'));
+  if (step > 0) actions.append(button('Back', () => tourGo(step - 1), 'button', 'tour-back'));
+  actions.append(button(last ? 'Start using Switchboard' : 'Next', () => tourGo(last ? null : step + 1), 'button primary', 'tour-next'));
+  card.append(count, title, el('p', '', item.text), dots, actions);
+  return card;
+}
 let agentSetup: AgentSetup | null = null;
 let agentSetupError = false;
 let openMenu: string | null = null;
@@ -135,10 +164,17 @@ function render(options: { background?: boolean } = {}): boolean {
   const openDetails = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[open]')].map((details) => details.querySelector<HTMLElement>('summary')?.dataset.focus));
   const shell = el('div', 'shell');
   const commit = () => {
+    withTour();
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
     lastRendered = markup; root.replaceChildren(shell); syncCountdown(); return true;
+  };
+  const withTour = () => {
+    if (tourStep !== null && (native || demo)) {
+      const target = TOUR[tourStep].target; if (target) shell.querySelector(target)?.classList.add('tour-target');
+      shell.append(tourCard(tourStep));
+    }
   };
   const sidebar = el('aside', 'sidebar');
   const brand = el('div', 'brand');
@@ -163,13 +199,13 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', 'SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.'));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: 'Accounts', projects: 'Projects', agents: 'Agents', activity: 'Activity', about: 'About Switchboard' }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Switch Claude Code, keep sign-ins fresh and watch quota.', projects: 'Optional rules: a project folder starts on a chosen account.', agents: 'Let coding agents read usage and switch accounts.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
+  heading.append(el('p', 'eyebrow', 'FABRIC SWITCHBOARD'), title, el('p', 'subtitle', { accounts: 'Switch Claude Code, keep sign-ins fresh and watch quota.', projects: 'Give a project its own accounts, and keep other projects off them.', agents: 'Let coding agents read usage and switch accounts.', activity: 'Local account and session events.', about: 'Deliberate account switching for coding sessions.' }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? 'Loading…' : 'Refresh', () => void reload(), 'button quiet', 'refresh'));
     if (page === 'accounts') actions.append(addMenu());
-    if (page === 'projects' && snapshot?.accounts.length) actions.append(button('+ Add rule', () => ruleDialog(), 'button primary', 'add-rule'));
+    if (page === 'projects') actions.append(button('+ New project', () => projectDialog(), 'button primary', 'new-project'));
     header.append(actions);
   }
   main.append(header);
@@ -205,12 +241,68 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
+  main.append(projectsSection(), rulesSection());
+}
+/** Projects (0.6): folders that reserve their own accounts (core `save_project`). */
+function projectsSection() {
+  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'projects-heading');
+  const heading = el('h2', 'section-heading', 'Projects'); heading.id = 'projects-heading';
+  section.append(heading, el('p', 'surface-note', 'A project is one or more folders, such as related repositories, with accounts of its own. Sessions launched from its folders use only its accounts, rotation stays inside them, and no other project or the ordinary Claude Code switches to them.'));
+  const projects = snapshot!.projects ?? [];
+  if (!projects.length) {
+    const empty = emptyState('No projects yet', 'Create one when a client or a team should work only on its own subscriptions. Its accounts move into the project, and its folders stay on them.');
+    empty.append(button('New project', () => projectDialog(), 'button primary', 'empty-new-project'));
+    section.append(empty); return section;
+  }
+  const list = el('div', 'account-list'); list.setAttribute('aria-label', 'Projects');
+  for (const project of projects) {
+    const accounts = snapshot!.accounts.filter((a) => a.pool === project.pool);
+    const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${project.name}, ${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}`);
+    const details = el('div', 'account-details'); const title = el('div', 'account-title');
+    title.append(el('h2', '', project.name), el('span', 'badge muted', `${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}`));
+    const folders = el('ul', 'project-folders'); for (const folder of project.folders) { const item = el('li', 'account-meta', folder); item.title = folder; folders.append(item); }
+    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : 'No accounts yet — sessions in these folders use your other accounts until you add one.');
+    details.append(title, folders, chips);
+    const actions = el('div', 'management-actions');
+    actions.append(button('Edit', () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button('Delete', () => void mutate(() => adapter.removeProject(project.pool), `Project “${project.name}” deleted. Its accounts stay in the pool ${project.pool}, no longer reserved.`, 'new-project'), 'text-button danger-text', `delete-project-${project.pool}`));
+    card.append(details, actions); list.append(card);
+  }
+  section.append(list); return section;
+}
+function projectDialog(existing?: Project) {
+  const context = openDialog(existing ? `Edit ${existing.name}` : 'New project', 'Add the project\'s folders and choose the accounts that belong to it. An account belongs to one project at a time.');
+  const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = 'e.g. Client Alpha';
+  const folders = el('textarea'); folders.rows = 3; folders.required = true; folders.spellcheck = false; folders.value = (existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : [])).join('\n'); folders.placeholder = projectPathExample(runtime?.platform);
+  const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', 'Accounts'));
+  const usable = snapshot!.accounts;
+  if (!usable.length) picker.append(el('p', 'form-note', 'No accounts yet. Add accounts first, or save the project now and add them later.'));
+  for (const account of usable) {
+    const owner = projectOf(account.pool);
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = !!existing && account.pool === existing.pool;
+    const note = owner && owner.pool !== existing?.pool ? ` · in ${owner.name}, moves here` : '';
+    option.append(box, el('span', '', `${account.label} · ${providerName(account.provider)}${note}`)); picker.append(option);
+  }
+  const grid = el('div', 'form-grid'); grid.append(field('Project name', name), field('Folders', folders, 'One absolute path per line: the repositories and folders of this project. Subfolders are included.'));
+  context.body.append(grid, picker, el('p', 'form-note', 'Accounts you leave out move back to the default pool.'));
+  context.actions.append(submit(existing ? 'Save project' : 'Create project'));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
+    const list = folders.value.split('\n').map((line) => line.trim()).filter(Boolean);
+    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds }), existing ? `Project “${name.value.trim()}” saved.` : `Project “${name.value.trim()}” created. Launch its accounts from its folders.`);
+  });
+}
+function rulesSection() {
+  const main = el('section', 'project-section'); main.setAttribute('aria-labelledby', 'rules-heading');
+  const heading = el('div', 'section-heading-row'); const h = el('h2', 'section-heading', 'Project rules'); h.id = 'rules-heading';
+  heading.append(h); if (snapshot!.accounts.length) heading.append(button('+ Add rule', () => ruleDialog(), 'button quiet', 'add-rule'));
+  main.append(heading);
   const rules = snapshot!.rules ?? [];
   main.append(el('p', 'surface-note', 'Rules are optional. With none, Switchboard follows your selection and rotation in every project. A rule applies when an agent or switchboard project apply asks for it, only to that session, and never turns rotation off.'));
   if (!rules.length) {
     const empty = emptyState('No project rules', snapshot!.accounts.length ? 'Add a rule when one project should start on a specific account, for example a client project on its own subscription. Prefer an expiry.' : 'Add an account first; a rule names one of your accounts.');
     if (snapshot!.accounts.length) empty.append(button('Add rule', () => ruleDialog(), 'button primary', 'empty-add-rule'));
-    main.append(empty); return;
+    main.append(empty); return main;
   }
   const now = Date.now() / 1000;
   const list = el('div', 'account-list'); list.setAttribute('aria-label', 'Project rules');
@@ -228,6 +320,7 @@ function renderProjects(main: HTMLElement) {
     card.append(details, actions); list.append(card);
   }
   main.append(list);
+  return main;
 }
 function ruleDialog(existing?: ProjectRule) {
   const context = openDialog(existing ? 'Edit project rule' : 'Add project rule', 'Sessions in this folder and its subfolders start on the chosen account when the rule is applied. Rotation still runs.');
@@ -304,6 +397,8 @@ function resetDisplay(until: number, label = 'Resets') {
   // Informational timer: screen readers can inspect it without minute-by-minute announcements.
   remaining.setAttribute('aria-live', 'off'); wrapper.append(time, remaining); return wrapper;
 }
+/** The project that reserves `pool`, if any. */
+const projectOf = (pool: string) => snapshot?.projects?.find((p) => p.pool === pool);
 const quotaContext = () => ({ nowSeconds: Date.now() / 1000, policies: snapshot?.policies, limits: monitor?.limited, signInRequired: monitor?.sign_in_required });
 // #endregion quota-countdown
 /** A menu is part of the render: `openMenu` names the one that is open. */
@@ -448,7 +543,8 @@ function renderAccounts(main: HTMLElement) {
     heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${group.count} ${group.count === 1 ? 'account' : 'accounts'}`));
     section.append(heading);
     for (const pool of group.pools) {
-      if (group.pools.length > 1) section.append(el('h3', 'pool-heading', `Pool · ${pool.pool}`));
+      const owner = projectOf(pool.pool);
+      if (group.pools.length > 1 || owner) section.append(el('h3', 'pool-heading', owner ? `Project · ${owner.name}` : `Pool · ${pool.pool}`));
       const list = el('div', 'account-list'); list.setAttribute('role', 'list');
       pool.accounts.forEach((account) => list.append(accountRow(account)));
       section.append(list);
@@ -471,12 +567,13 @@ function accountRow(account: Account) {
   if (!account.enabled) title.append(el('span', 'badge muted', 'Disabled'));
   const email = account.external_identity?.email;
   name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? 'OAuth' : '')));
-  row.append(icon, name, usageCell(account), primaryButton(account, { current, selected: active, signIn }), rowMenu(account, { current, selected: active, signIn }));
+  const project = !!projectOf(account.pool);
+  row.append(icon, name, usageCell(account), primaryButton(account, { current, selected: active, signIn, project }), rowMenu(account, { current, selected: active, signIn, project }));
   if (quotaOpen.has(account.id) && account.usage) row.append(quotaDetails(account));
   if (usageErrors.has(account.id)) row.append(el('p', 'row-error', usageErrors.get(account.id)!));
   return row;
 }
-function primaryButton(account: Account, state: { current: boolean; selected: boolean; signIn: boolean }) {
+function primaryButton(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const slot = el('div', 'row-primary'); const key = `primary-${account.id}`;
   const action = primaryAction(account, state);
   const status = (text: string) => { const label = el('span', 'row-state', text); label.tabIndex = -1; label.dataset.focus = key; return label; };
@@ -488,9 +585,9 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else slot.append(button('Enable', () => void mutate(() => adapter.update(account.id, account.label, true), `${account.label} enabled.`, key), 'button row-button quiet', key));
   return slot;
 }
-function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean }) {
+function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const items: ([string, () => void] | [string, () => void, string])[] = [];
-  if (account.enabled && canSwitchNative(account) && !state.selected) items.push(['Select for managed sessions', () => void mutate(() => adapter.select(account), `${account.label} selected for the next managed request in ${account.pool}.`, `menu-${account.id}`)]);
+  if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push(['Select for managed sessions', () => void mutate(() => adapter.select(account), `${account.label} selected for the next managed request in ${account.pool}.`, `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push(['Check usage', () => void mutate(() => adapter.probe(account.id), 'Usage observation updated.', `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push(['Launch isolated…', () => launchDialog(account, 'isolated')]);
   if (account.enabled && state.selected && !runtimeError) items.push(['Launch managed…', () => launchDialog(account, 'managed')]);
@@ -646,7 +743,7 @@ function renderPolicies(main: HTMLElement) {
   if (monitor?.renewal_blocked) copy.append(el('span', 'usage-caption', 'Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.'));
   if (demo) copy.append(el('span', 'usage-caption', 'Demo policies are editable fixtures; no switching runs here.'));
   const actions = el('div', 'rotation-actions');
-  const pool = autoSwitchPool(snapshot!.accounts, policies);
+  const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
   if (pool) actions.append(button('Turn on for Claude Code', () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), `Automatic switching is on for Claude Code in ${pool}. It moves at 90% used to an account with at least 10 points more headroom.`, 'menu-policies'); }, 'button primary row-button', 'auto-on'));
   for (const policy of enabled) actions.append(button(enabled.length > 1 ? `Stop ${policy.pool}` : 'Stop', () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), 'Automatic switching stopped for this provider, pool and target.', 'policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', 'Automatic switching settings', [...policies.map((policy): [string, () => void] => [`Edit ${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)}…`, () => policyDialog(policy)]), ['New policy…', () => policyDialog()]], 'icon-button', '⚙'));
@@ -679,7 +776,8 @@ function renderAbout(main: HTMLElement) {
     ['Native Claude activation', 'An explicit update of the local Claude Code account. CLI reload timing is not a guarantee that a running session has changed account.'],
     ['Automatic rotation', 'Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
-  section.append(definitions); main.append(section, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), productPanel());
+  section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', 'Tour'), el('p', '', 'Five short steps: what Switchboard does and where to press.'), button('Show the tour again', () => tourGo(0), 'button', 'tour-again'));
+  main.append(section, tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), productPanel());
 }
 async function loadBackups() {
   try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
@@ -890,7 +988,7 @@ void reload();
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
 // Menus close on Escape and on a click anywhere outside them.
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !openMenu && tourStep !== null && !document.querySelector('dialog[open]')) { tourGo(null); return; } if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
 document.addEventListener('click', (event) => { if (openMenu && !(event.target as HTMLElement | null)?.closest('.menu-root')) { openMenu = null; render(); } });
 function backgroundRefresh() {
   if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
