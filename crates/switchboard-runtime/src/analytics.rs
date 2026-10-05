@@ -143,6 +143,9 @@ struct Event {
     props: Value,
     #[serde(skip)]
     at: i64,
+    /// Removes exactly what was sent, whatever the queue did meanwhile.
+    #[serde(skip)]
+    seq: u64,
 }
 
 /// Sends events for one app. Built only with an App Key; every failure is swallowed after
@@ -157,6 +160,7 @@ pub struct Analytics {
     queue: Mutex<VecDeque<Event>>,
     retry_at: AtomicI64,
     flushing: AtomicBool,
+    next_seq: std::sync::atomic::AtomicU64,
     http: reqwest::Client,
 }
 
@@ -177,6 +181,7 @@ impl Analytics {
             queue: Mutex::new(VecDeque::new()),
             retry_at: AtomicI64::new(0),
             flushing: AtomicBool::new(false),
+            next_seq: std::sync::atomic::AtomicU64::new(0),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
@@ -244,6 +249,7 @@ impl Analytics {
             }),
             props: Value::Object(props),
             at,
+            seq: self.next_seq.fetch_add(1, Ordering::SeqCst),
         };
         let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
         queue.push_back(event);
@@ -261,6 +267,14 @@ impl Analytics {
         {
             return;
         }
+        // Cleared on every exit, a panic or a dropped future included.
+        struct Flushing<'a>(&'a AtomicBool);
+        impl Drop for Flushing<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _flushing = Flushing(&self.flushing);
         loop {
             let batch: Vec<Event> = {
                 let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
@@ -297,12 +311,10 @@ impl Analytics {
                 break;
             }
             self.retry_at.store(0, Ordering::SeqCst);
+            let sent: std::collections::BTreeSet<u64> = batch.iter().map(|e| e.seq).collect();
             let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
-            for _ in 0..batch.len().min(queue.len()) {
-                queue.pop_front();
-            }
+            queue.retain(|e| !sent.contains(&e.seq));
         }
-        self.flushing.store(false, Ordering::SeqCst);
     }
 
     pub fn pending(&self) -> usize {
@@ -742,6 +754,45 @@ mod tests {
             .map(|b| b.as_array().unwrap().len())
             .collect();
         assert_eq!(sizes, [25, 25, 5]);
+    }
+
+    #[tokio::test]
+    async fn only_what_was_sent_leaves_the_queue() {
+        let server = Server::default();
+        let url = serve(server.clone()).await;
+        let folder = tempfile::tempdir().unwrap();
+        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        for _ in 0..3 {
+            client.track("first", Map::new());
+        }
+        // The front of the queue changes while the batch is out: the oldest event is trimmed.
+        let sending = client.flush();
+        tokio::pin!(sending);
+        tokio::select! {
+            biased;
+            _ = &mut sending => {}
+            _ = async {
+                client.queue.lock().unwrap().pop_front();
+                client.track("second", Map::new());
+                std::future::pending::<()>().await
+            } => {}
+        }
+        let left: Vec<String> = client
+            .queue
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| e.event_name.clone())
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+        // The event tracked during the send went out in the next batch; nothing was lost.
+        let sent = names(&server);
+        assert_eq!(
+            sent.iter().filter(|n| *n == "second").count(),
+            1,
+            "{sent:?}"
+        );
+        assert!(!client.flushing.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
