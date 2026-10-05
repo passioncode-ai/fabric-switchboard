@@ -8,7 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-## 0.6.3 — 2026-10-05
+## 0.6.4 — 2026-10-05
+
+The tag `v0.6.3` was never published: a test of this change failed on Windows before the
+release step, and 0.6.4 carries the same change with the test fixed.
 
 Switchboard no longer re-reads your Claude Code sign-in every time Claude Code saves its settings,
 which it does several times a minute when many sessions are open. If you run 0.6.1 or 0.6.2, this

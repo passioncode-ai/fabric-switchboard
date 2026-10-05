@@ -2046,8 +2046,15 @@ mod tests {
         // The native stamp re-reads only when the file's own stamp changed, and an unrelated
         // rewrite leaves it equal.
         let dir = tempfile::tempdir().unwrap();
-        // The reader refuses a path through a link, and macOS's temporary folder is behind one.
-        let path = dir.path().canonicalize().unwrap().join(".claude.json");
+        // The reader refuses a path through a link: macOS's temporary folder is behind one, so
+        // the canonical path is used there; on Windows canonicalisation adds the `\\?\`
+        // prefix, whose ancestors the reader cannot examine, so the plain path is used.
+        let base = if cfg!(windows) {
+            dir.path().to_path_buf()
+        } else {
+            dir.path().canonicalize().unwrap()
+        };
+        let path = base.join(".claude.json");
         fs::write(&path, config("a@example.test")).unwrap();
         let first = config_stamp(&path);
         assert_eq!(first, Stamp::Account(Some(a)));
@@ -2059,7 +2066,7 @@ mod tests {
 
         // The probe the background runs takes that stamp: an unrelated rewrite of the config
         // is no change of the sign-in source, a new account is.
-        let home = dir.path().canonicalize().unwrap().join(".claude");
+        let home = base.join(".claude");
         fs::create_dir(&home).unwrap();
         let c = Context {
             home,
