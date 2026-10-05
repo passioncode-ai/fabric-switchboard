@@ -35,6 +35,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime uninstall.rs remove_login_item(): `switchboard uninstall --yes` lists it under
+  // `failures` in CLI output; uninstall is never a desktop operation (SB-28).
+  'Could not remove the login item.': 'uninstall CLI output only',
   // runtime lib.rs StopSignals (listen/requested): used by `switchboard serve` (CLI output) and
   // by the desktop app's signal task, which ignores an error; never a renderer reply.
   'Shutdown signal unavailable.': 'serve CLI and the desktop signal task only',

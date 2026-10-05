@@ -11,8 +11,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 switchboard-runtime = { path = "../crates/switchboard-runtime" }
 switchboard-core = { path = "../crates/switchboard-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "~2.4.0"
+tauri-plugin-autostart = "2"
 tokio.workspace = true
 serde_json.workspace = true
 tempfile = "3"

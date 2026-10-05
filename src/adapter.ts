@@ -31,11 +31,17 @@ export const nativeAdapter: Adapter = {
   backupNow: () => invoke('backup_now'),
   restoreBackup: (file) => invoke('restore_backup', { file }),
   linkCli: () => invoke('link_cli'),
+  loginItem: () => readWithDeadline(invoke('login_item')),
+  setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
 };
 
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'Opening at login is available in the installed app only.',
+  'Could not save the choice in Switchboard\'s data folder.',
+  'Could not add Switchboard to the login items. Check the system\'s login item settings.',
+  'Could not remove Switchboard from the login items. Check the system\'s login item settings.',
   READ_TIMEOUT,
   'Disable the existing Claude CLI rotation policy before enabling another pool.',
   'Claude account lock was lost after credential write. Sign in through Claude before retrying.',

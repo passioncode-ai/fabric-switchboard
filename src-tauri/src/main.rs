@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use serde_json::{json, Value};
 use std::sync::Arc;
+mod residency;
+use residency::reveal;
 
 struct SmokeMode(Option<tempfile::TempDir>);
 
@@ -16,6 +18,14 @@ fn frontend_ready(app: tauri::AppHandle, mode: State<'_, SmokeMode>) {
         println!(
             "SWITCHBOARD_WINDOW {}",
             if visible { "visible" } else { "hidden" }
+        );
+        println!(
+            "SWITCHBOARD_TRAY {}",
+            if app.tray_by_id("switchboard").is_some() {
+                "present"
+            } else {
+                "missing"
+            }
         );
         println!("SWITCHBOARD_FRONTEND_READY {}", env!("CARGO_PKG_VERSION"));
         app.exit(0);
@@ -335,15 +345,25 @@ fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
     }
     launch
 }
-/// Shows the window and brings the app forward (it may have started in the background).
-fn reveal(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+/// Whether Switchboard opens at login (SB-28). Unavailable in a development build and the smoke
+/// check.
+#[tauri::command]
+fn login_item(app: tauri::AppHandle, mode: State<'_, SmokeMode>) -> Value {
+    if mode.0.is_some() {
+        return json!({ "available": false, "enabled": false });
     }
+    residency::status(&app)
+}
+#[tauri::command]
+fn set_login_item(
+    app: tauri::AppHandle,
+    mode: State<'_, SmokeMode>,
+    enabled: bool,
+) -> Result<Value, String> {
+    if mode.0.is_some() {
+        return Err("Opening at login is available in the installed app only.".into());
+    }
+    residency::set(&app, &default_root()?, enabled)
 }
 
 fn main() {
@@ -353,9 +373,11 @@ fn main() {
     // instead of starting another owner that would find the store locked. The packaged smoke
     // check runs beside an installed app on purpose, with its own temporary store.
     if !smoke {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            reveal(app);
-        }));
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+                residency::second_launch(app, &args);
+            }))
+            .plugin(residency::plugin());
     }
     if !smoke {
         if let Some(log) = switchboard_runtime::oplog::Log::default_location() {
@@ -405,6 +427,16 @@ fn main() {
                 });
             }
             app.manage(SmokeMode(temporary));
+            // Residency (SB-28): the tray keeps Open and Quit reachable while the window is
+            // hidden; the login item starts Switchboard in the background.
+            if let Err(error) = residency::tray(app.handle()) {
+                eprintln!("Switchboard could not add its menu-bar icon: {error}");
+            }
+            if !smoke {
+                if let Ok(root) = default_root() {
+                    residency::apply_at_start(app.handle(), &root);
+                }
+            }
             // The window is created hidden (tauri.conf.json): shown now on an ordinary start;
             // in the background, left hidden — opening the app again (`reveal`) brings it.
             if !background {
@@ -428,8 +460,17 @@ fn main() {
             });
             Ok(())
         })
+        // Closing the window hides it; only Quit ends Switchboard (SB-28).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                residency::hide(window);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             frontend_ready,
+            login_item,
+            set_login_item,
             snapshot,
             current_accounts,
             capture_current,
@@ -471,7 +512,24 @@ fn main() {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = &mut app;
-    app.run(|handle, event| {
+    app.run(move |handle, event| {
+        // Background start: once launched, the Prohibited policy gives way to Accessory so the
+        // menu-bar icon works; still no Dock icon and no window.
+        #[cfg(target_os = "macos")]
+        if background {
+            if let tauri::RunEvent::Ready = event {
+                let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                return;
+            }
+        }
+        // The last window closing is not a quit (SB-28); Quit, Cmd-Q and a signal carry a code.
+        if let tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } = &event
+        {
+            api.prevent_exit();
+            return;
+        }
         // macOS: opening the app again (Finder, Spotlight, `open -a`) while its window is hidden
         // shows it.
         #[cfg(target_os = "macos")]
@@ -483,7 +541,7 @@ fn main() {
             reveal(handle);
             return;
         }
-        // Every quit path — Quit, Cmd-Q, the last window closing, a signal — ends here: the
+        // Every quit path — the tray's Quit, the app menu's Quit, Cmd-Q, a signal — ends here: the
         // owner stops its timers, finishes or abandons work in flight by the deadline,
         // removes its descriptor and releases the store (lifecycle LC-01).
         if let tauri::RunEvent::Exit = event {

@@ -58,4 +58,8 @@ export interface Adapter {
   backupNow(): Promise<BackupInfo | null>;
   restoreBackup(file: string): Promise<{ added: number; skipped: number; failed: number }>;
   linkCli(): Promise<{ linked_cli: string }>;
+  /** Whether Switchboard opens at login in the background (SB-28); unavailable outside the installed app. */
+  loginItem(): Promise<LoginItem>;
+  setLoginItem(enabled: boolean): Promise<LoginItem>;
 }
+export interface LoginItem { available: boolean; enabled: boolean }

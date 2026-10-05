@@ -6,7 +6,7 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
-import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
+import type { Account, Adapter, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -39,6 +39,8 @@ let openMenu: string | null = null;
 let pendingLogin: { id: string; provider: Provider; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
 const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
+let loginItem: LoginItem | null = null;
+let loginItemError = false;
 let backupError = false;
 let busy = false;
 let loading = true;
@@ -97,6 +99,7 @@ async function reload() {
   loading = false; render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   void loadBackups();
+  void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
   void readContext().then((context) => {
@@ -673,11 +676,24 @@ function renderAbout(main: HTMLElement) {
     ['Native Claude activation', 'An explicit update of the local Claude Code account. CLI reload timing is not a guarantee that a running session has changed account.'],
     ['Automatic rotation', 'Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.'],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
-  section.append(definitions); main.append(section, backupsPanel(), appearancePanel(), productPanel());
+  section.append(definitions); main.append(section, residencyPanel(), backupsPanel(), appearancePanel(), productPanel());
 }
 async function loadBackups() {
   try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
   backgroundRender();
+}
+/** SB-28: closing the window keeps Switchboard working; it opens at login in the background. */
+function residencyPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'residency-heading');
+  const heading = el('h2', '', 'Running in the background'); heading.id = 'residency-heading';
+  panel.append(heading, el('p', '', 'Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'));
+  if (loginItemError) { panel.append(el('p', 'form-note', 'The login setting is unavailable. Refresh to retry.')); return panel; }
+  if (!loginItem) { panel.append(el('p', 'form-note', 'Reading the login setting…')); return panel; }
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = loginItem.enabled; box.disabled = !loginItem.available; box.dataset.focus = 'login-item';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { loginItem = await adapter.setLoginItem(wanted); }, wanted ? 'Switchboard will open at login, in the background.' : 'Switchboard will no longer open at login.', 'login-item'); });
+  option.append(box, el('span', '', 'Open at login, in the background'));
+  panel.append(option, el('p', 'form-note', loginItem.available ? 'Starts without a window; open it from the menu-bar icon.' : 'Available in the installed app.'));
+  return panel;
 }
 function backupsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'backups-heading');
