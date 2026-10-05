@@ -261,3 +261,24 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .reset-display .reset-remaining::before { content: "·"; margin-right: var(--space-2); color: var(--muted); }
 .reset-remaining { font-variant-numeric: tabular-nums; color: var(--ink); }
 .login-option { width: fit-content; margin-top: var(--space-2); }
+/* Projects (0.6). */
+.project-section { margin-bottom: var(--space-6); }
+.section-heading { font-size: var(--t-card); font-weight: 650; margin: var(--space-2) 0 var(--space-2); }
+.section-heading-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.project-folders { list-style: none; margin: var(--space-1) 0; padding: 0; display: grid; gap: 2px; }
+.project-folders li { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-chip); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-accounts { border: 0; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); max-height: 240px; overflow: auto; }
+.project-accounts .login-option { width: auto; margin-top: 0; }
+/* First-run tour (0.6): a card beside the screen it explains, with the control to press outlined. */
+.tour-card { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 40; width: min(380px, calc(100vw - 2 * var(--space-5))); display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); box-shadow: var(--shadow-1); }
+.tour-card h2 { font-size: var(--t-card); font-weight: 650; }
+.tour-card h2:focus { outline: none; }
+.tour-card p { color: var(--muted); font-size: var(--t-label); line-height: 1.45; }
+.tour-card .eyebrow { color: var(--accent-text); }
+.tour-dots { display: flex; gap: 6px; }
+.tour-dots span { width: 6px; height: 6px; border-radius: var(--r-pill); background: var(--border-strong); }
+.tour-dots span.is-on { background: var(--accent-text); width: 18px; }
+.tour-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-1); }
+.tour-actions .text-button { margin-right: auto; }
+.tour-target { outline: 3px solid var(--accent-text) !important; outline-offset: 3px; border-radius: var(--r-control); }
+@media (prefers-reduced-motion: no-preference) { .tour-target { transition: outline-offset 160ms ease-out; } }

@@ -18,9 +18,14 @@ struct Disk {
     snapshot: Snapshot,
 }
 
-/// Version 3 only while project rules exist, so 0.3 builds keep opening rule-free files.
+/// Version 3 only while project rules exist, so 0.3 builds keep opening rule-free files;
+/// version 4 only while projects exist, so 0.5 builds refuse a file whose reservations they
+/// would ignore rather than silently hand a project's accounts to every folder.
 fn schema_version(snapshot: &Snapshot) -> u32 {
-    if snapshot.rules.is_empty() {
+    // A `project` journal entry is unknown to 0.5 readers too: they would fail on it.
+    if !snapshot.projects.is_empty() || snapshot.events.iter().any(|e| e.action == "project") {
+        4
+    } else if snapshot.rules.is_empty() {
         2
     } else {
         3
@@ -108,7 +113,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=3) {
+            if !matches!(disk.schema_version, 1..=4) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -191,7 +196,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=3) {
+        if !matches!(disk.schema_version, 1..=4) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

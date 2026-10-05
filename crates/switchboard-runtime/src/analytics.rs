@@ -408,6 +408,30 @@ impl Analytics {
         self.save(&state);
     }
 
+    /// A project created, changed or removed: how many projects, folders and project accounts,
+    /// never a name or a path.
+    pub fn project(&self, change: &str, snapshot: &Snapshot) {
+        let mut props = Map::new();
+        props.insert("change".into(), json!(change));
+        props.insert("projects".into(), json!(snapshot.projects.len()));
+        props.insert(
+            "folders".into(),
+            json!(snapshot
+                .projects
+                .iter()
+                .map(|p| p.folders.len())
+                .sum::<usize>()),
+        );
+        props.insert(
+            "project_accounts".into(),
+            json!(snapshot
+                .accounts
+                .iter()
+                .filter(|a| snapshot.project_of_pool(&a.pool).is_some())
+                .count()),
+        );
+        self.track("project_changed", props);
+    }
     /// A switch of the account in use or of a pool's managed route.
     pub fn switched(&self, provider: &str, target: &str, cause: &str) {
         let mut props = Map::new();
@@ -477,6 +501,7 @@ fn counts(snapshot: &Snapshot) -> Map<String, Value> {
         json!(snapshot.policies.iter().filter(|p| p.enabled).count()),
     );
     props.insert("project_rules".into(), json!(snapshot.rules.len()));
+    props.insert("projects".into(), json!(snapshot.projects.len()));
     props
 }
 
@@ -562,6 +587,7 @@ mod tests {
             routes: Default::default(),
             events: vec![],
             rules: vec![],
+            projects: vec![],
         }
     }
     fn events(server: &Server) -> Vec<Value> {

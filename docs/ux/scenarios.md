@@ -41,6 +41,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-031 | Move off an account that hit a limit the quota does not show | draft |
 | SCN-032 | Find remaining quota and compare account waits | draft |
 | SCN-033 | Keep Switchboard working with its window closed | draft |
+| SCN-034 | Keep a project on its own accounts | draft |
+| SCN-035 | Learn the product in five steps on first start | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -660,3 +662,47 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `residency::tests` (default on, saved choice, development build never registers), `the_login_item_is_removed_and_a_failure_is_reported_not_fatal`, `scripts/test_smoke_native.py` (tray required), browser demo of the About panel; Windows build checked with `cargo xwin check -p fabric-switchboard`. Live close/reopen/login on the operator's Mac is acceptance (SB-15).
 **Product:** unobserved
 **Traces:** SB-28, LC-09
+
+## SCN-034 — Keep a project on its own accounts
+**Persona:** P-01
+**Goal:** Attach accounts to a project — one or more related repositories — so that only sessions from those folders use them, and agents in other projects never switch to them.
+**Preconditions:** saved accounts; the project's folders exist on this computer.
+**Entry point:** Projects → + New project.
+**Steps:**
+1. + New project → name, folders (one absolute path per line), check the accounts → Create project → “Project “{name}” created. Launch its accounts from its folders.” The accounts move into the project's pool; the Accounts page groups them under “Project · {name}”, and their button is Select, not Switch.
+2. Launch one of them (isolated or managed) from any of its folders or subfolders → the session starts; managed rotation moves only among the project's accounts.
+3. From a folder outside the project → refused: “This account belongs to a project. Launch it from one of the project's folders.”
+4. Inside the project's folders, an account of another pool for a provider the project has → refused: “This folder belongs to a project. Launch one of the project's accounts.”
+5. Edit → change folders or accounts; an account left out goes back to the default pool. Delete → the accounts stay in their pool, no longer reserved.
+**Alt paths:** The account the ordinary Claude Code or Codex is signed in to cannot join (“…Switch the CLI to another account first…”). A folder already in another project is refused. Switching the ordinary Claude Code to a project account, a native rule or native rotation on a project pool are refused: the ordinary Claude Code serves every folder. A provider the project has no account for keeps using the other accounts in its folders.
+**Expected result:** a project's accounts serve only its folders; other projects' sessions, rotation and switches never reach them.
+**UI elements:** Projects section, project dialog, project cards, “Project · {name}” pool heading.
+**States covered:** none, created, edited, deleted, refused (CLI account, overlapping folder, outside folder, foreign account inside).
+**Errors & recovery:** every refusal names what to change; nothing moves on a refusal.
+**Status:** draft
+**Meaning:** operator request 2026-10-05.
+**Coverage:** core `a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out`, `projects_never_share_a_folder_or_an_account_identity`, `a_project_pool_never_drives_the_ordinary_claude_code`; runtime `a_project_account_starts_only_in_its_folders_and_its_folders_use_only_its_accounts`, `a_project_account_never_becomes_the_ordinary_claude_code`, `the_account_the_cli_uses_cannot_join_a_project`; CLI `project_commands_work_offline_from_the_cli`; browser demo 2026-10-05 (create, CLI-account refusal, “Project · Client Alpha” heading, Select on a project account).
+**Product:** unobserved
+**Traces:** CONTRACTS → Projects (0.6)
+
+## SCN-035 — Learn the product in five steps on first start
+**Persona:** P-01
+**Goal:** Understand on first start what Switchboard does and where to press.
+**Preconditions:** first start in this app's window storage (the tour shows until finished or skipped).
+**Entry point:** automatic on first start; About → Tour → Show the tour again.
+**Steps:**
+1. “Welcome to Switchboard” — what it is for.
+2. “Add your accounts” — + Add account is outlined.
+3. “Switch, by hand or automatically” — the automatic switching bar is outlined.
+4. “Give a project its own accounts” — Projects opens, + New project is outlined.
+5. “Agents, and it keeps running” — Agents opens; the menu-bar icon is named. Start using Switchboard ends it.
+**Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never.
+**Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains.
+**UI elements:** tour card (non-modal), outlined target, step dots.
+**States covered:** first start, each step, skipped, finished, shown again.
+**Errors & recovery:** none; storage failure only means the tour shows again.
+**Status:** draft
+**Meaning:** operator request 2026-10-05.
+**Coverage:** browser demo 2026-10-05: five steps, targets `+ Add account`, `.rotation-bar`, `+ New project`; finish stores `switchboard.tour`; About shows it again; Escape closes.
+**Product:** unobserved
+**Traces:** SCN-001

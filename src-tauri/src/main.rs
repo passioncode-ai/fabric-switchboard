@@ -324,6 +324,34 @@ async fn remove_project_rule(
         .execute(Operation::RemoveProjectRule { path, provider })
         .await
 }
+/// A project: its folders and the accounts reserved for them (0.6). `pool` updates one.
+#[tauri::command]
+async fn save_project(
+    pool: Option<String>,
+    name: String,
+    folders: Vec<std::path::PathBuf>,
+    account_ids: Vec<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SaveProject {
+            pool,
+            name,
+            folders,
+            account_ids,
+        })
+        .await
+}
+#[tauri::command]
+async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RemoveProject { pool })
+        .await
+}
 #[tauri::command]
 fn agent_setup() -> Value {
     switchboard_runtime::agents::setup()
@@ -514,6 +542,8 @@ fn main() {
             probe_usage,
             set_project_rule,
             remove_project_rule,
+            save_project,
+            remove_project,
             agent_setup,
             link_cli
         ])

@@ -27,7 +27,10 @@ export interface Event { at: number; action: string; account_id: string | null; 
 export interface ProjectRule { path: string; provider: Provider; account_id: string; target: 'managed' | 'claude_cli'; enabled: boolean; created_at: number; expires_at: number | null }
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string } }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[] }
+/** A project's folders and the pool of accounts reserved for them (0.6). */
+export interface Project { pool: string; name: string; folders: string[]; created_at: number }
+export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[] }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -59,6 +62,9 @@ export interface Adapter {
   restoreBackup(file: string): Promise<{ added: number; skipped: number; failed: number }>;
   linkCli(): Promise<{ linked_cli: string }>;
   /** Whether Switchboard opens at login in the background (SB-28); unavailable outside the installed app. */
+  /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
+  saveProject(input: ProjectInput): Promise<unknown>;
+  removeProject(pool: string): Promise<unknown>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */

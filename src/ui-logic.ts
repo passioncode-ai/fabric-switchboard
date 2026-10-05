@@ -228,17 +228,18 @@ export function canSwitchNative(account: Switchable): boolean {
 }
 export type PrimaryAction = 'switch' | 'in_use' | 'select' | 'selected' | 'sign_in' | 'disabled';
 /** The one button a row shows (PLAN-0.5 D-3); everything else lives in the row menu. */
-export function primaryAction(account: Switchable, state: { current: boolean; selected: boolean; signIn: boolean }): PrimaryAction {
+export function primaryAction(account: Switchable, state: { current: boolean; selected: boolean; signIn: boolean; project?: boolean }): PrimaryAction {
   if (!account.enabled) return 'disabled';
   if (state.signIn) return 'sign_in';
-  if (canSwitchNative(account)) return state.current ? 'in_use' : 'switch';
+  // A project's account never becomes the ordinary Claude Code's (core PROJECT_NOT_NATIVE).
+  if (canSwitchNative(account) && !state.project) return state.current ? 'in_use' : 'switch';
   return state.selected ? 'selected' : 'select';
 }
 /** The pool a one-click "turn on automatic switching" uses, or null when it cannot or need not. */
-export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[], policies: Pick<RotationPolicy, 'provider' | 'target' | 'enabled'>[]): string | null {
+export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[], policies: Pick<RotationPolicy, 'provider' | 'target' | 'enabled'>[], projectPools: string[] = []): string | null {
   if (policies.some((policy) => policy.provider === 'claude' && policy.target === 'claude_cli' && policy.enabled)) return null;
   const counts = new Map<string, number>();
-  for (const account of accounts) if (account.enabled && canSwitchNative(account)) counts.set(account.pool, (counts.get(account.pool) ?? 0) + 1);
+  for (const account of accounts) if (account.enabled && canSwitchNative(account) && !projectPools.includes(account.pool)) counts.set(account.pool, (counts.get(account.pool) ?? 0) + 1);
   let best: string | null = null; let most = 1;
   for (const [pool, count] of counts) if (count > most || (count === most && best !== null && pool === 'default')) { best = pool; most = count; }
   return best;

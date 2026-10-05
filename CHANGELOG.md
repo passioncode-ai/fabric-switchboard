@@ -8,6 +8,19 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Projects
+
+- A project is one or more folders — related repositories — with accounts of its own. Create it
+  under Projects → *New project*: its accounts serve only sessions launched from its folders,
+  automatic switching stays inside them, and no other project — nor the ordinary Claude Code,
+  which every folder shares — switches to them. Inside its folders, sessions use its accounts.
+  Also `switchboard project save|delete`.
+
+### First start
+
+- A five-step tour on first start shows what Switchboard does and where to press; About →
+  *Show the tour again*.
+
 - Windows: the installer now puts `switchboard.exe` beside the desktop app, so the Agents panel
   can show its path and the commands that connect Claude Code and Codex to it.
 

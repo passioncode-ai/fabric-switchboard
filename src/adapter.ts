@@ -31,6 +31,8 @@ export const nativeAdapter: Adapter = {
   backupNow: () => invoke('backup_now'),
   restoreBackup: (file) => invoke('restore_backup', { file }),
   linkCli: () => invoke('link_cli'),
+  saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds }),
+  removeProject: (pool) => invoke('remove_project', { pool }),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
@@ -40,6 +42,16 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.",
+  'Name the project.',
+  'Add between one and sixteen project folders.',
+  'Choose absolute project folders.',
+  'Project not found.',
+  'This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.',
+  "This account belongs to a project. Launch it from one of the project's folders.",
+  "This folder belongs to a project. Launch one of the project's accounts.",
+  'A folder is already part of another project.',
+  'This account is already saved in that pool. Remove the other copy first.',
   'Usage analytics are available in the installed app only.',
   'Could not save the analytics choice.',
   'Opening at login is available in the installed app only.',
@@ -231,7 +243,7 @@ const coreErrors: Record<string, string> = {
   'Usage response interrupted.': 'The usage response was interrupted. Check usage again.',
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
-for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Invalid project metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
 for (const error of ['Unsafe private storage path', 'Unsafe private storage directory', 'Unsafe private storage file', 'Private file permissions are unsafe; rotate its capability before reuse', 'Private file has no parent', 'Invalid private storage path', 'Windows private storage unavailable', 'Unsafe Windows reparse point', 'Private storage belongs to another Windows user', 'Private directory has no parent', 'Unsafe Windows private file', 'Private replacement must stay in one directory', 'Managed file permissions unavailable.']) coreErrors[error] = 'A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.';
 for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.', 'Claude account identity is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
 for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';

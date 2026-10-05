@@ -113,7 +113,10 @@ switchboard --data-dir /path/to/app-data mcp
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
 ```sh
-switchboard project list
+switchboard project list                      # {projects, rules}: projects with folders and accounts, then rules
+switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
+switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
+switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --target claude-cli --paused

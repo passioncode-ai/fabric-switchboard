@@ -68,7 +68,7 @@ enum Command {
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
     Serve,
-    /// Optional project rules: a folder starts its sessions on a chosen account.
+    /// Projects (folders that reserve their own accounts) and optional project rules.
     Project {
         #[command(subcommand)]
         command: Project,
@@ -124,6 +124,25 @@ enum Project {
         path: Option<PathBuf>,
         #[arg(long, value_enum)]
         provider: ProviderArg,
+    },
+    /// Create or update a project: its folders (repositories) and the accounts reserved for
+    /// them. The listed accounts are the project's whole set; one left out goes back to the
+    /// `default` pool.
+    Save {
+        /// Update the project with this pool; without it, a new project is created.
+        #[arg(long)]
+        pool: Option<String>,
+        #[arg(long)]
+        name: String,
+        #[arg(long = "folder", required = true)]
+        folders: Vec<PathBuf>,
+        #[arg(long = "account")]
+        accounts: Vec<String>,
+    },
+    /// Delete a project. Its accounts stay in its pool, no longer reserved.
+    Delete {
+        #[arg(long)]
+        pool: String,
     },
     /// Apply the folder's rule to the session this command runs in.
     Apply {
@@ -496,6 +515,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 enabled: !paused,
                 expires_at: expires_in_hours.map(|h| mcp::now() + i64::from(h) * 3600),
             },
+            Project::Save {
+                pool,
+                name,
+                folders,
+                accounts,
+            } => Operation::SaveProject {
+                pool: pool.clone(),
+                name: name.clone(),
+                folders: folders
+                    .iter()
+                    .map(|f| folder(&Some(f.clone())))
+                    .collect::<Result<Vec<_>, _>>()?,
+                account_ids: accounts.clone(),
+            },
+            Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
             Project::Remove { path, provider } => Operation::RemoveProjectRule {
                 path: folder(path)?,
                 provider: (*provider).into(),
@@ -519,7 +553,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
         Command::Events => Ok(value["events"].clone()),
-        Command::Project { command: Project::List } => Ok(Value::Array(mcp::rule_views(&value, mcp::now()))),
+        Command::Project { command: Project::List } => Ok(json!({"projects": mcp::project_views(&value), "rules": mcp::rule_views(&value, mcp::now())})),
         Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"], "usage_health":account["usage_health"]})).collect())),
         Command::Rotation { command: Rotation::Status } => {
             let monitor = match control::request(&root, &Operation::MonitorStatus).await? {
@@ -682,10 +716,36 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Project {
             command: Project::List,
         } => {
-            let Some(rules) = value.as_array() else {
+            let (Some(projects), Some(rules)) =
+                (value["projects"].as_array(), value["rules"].as_array())
+            else {
                 print_value(value, false);
                 return;
             };
+            if projects.is_empty() {
+                println!("No projects. `switchboard project save` reserves accounts for a project's folders.");
+            }
+            for project in projects {
+                let accounts: Vec<String> = project["accounts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|a| format!("{} ({})", text(&a["label"]), text(&a["provider"])))
+                    .collect();
+                println!(
+                    "{}  pool {}  {}",
+                    text(&project["name"]),
+                    text(&project["pool"]),
+                    if accounts.is_empty() {
+                        "no accounts yet".to_string()
+                    } else {
+                        accounts.join(", ")
+                    }
+                );
+                for folder in project["folders"].as_array().into_iter().flatten() {
+                    println!("    {}", text(folder));
+                }
+            }
             if rules.is_empty() {
                 println!(
                     "No project rules. Switchboard follows your selection and rotation everywhere."
