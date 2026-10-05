@@ -86,8 +86,10 @@ no metadata and no backup, and reads at most one stored credential per pass (nat
 rotation's current account) plus one per source sync —
 `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` counts it on a fake
 clock (before 0.5.4: every account's credential every 10 s, a `security` pair every 30 s and a
-`ps` every 180 s). Targets for the installed app: average CPU < 0.2 %, RSS ≤ 250 MB including the
-WebKit helpers; measured on a release, not by the gate.
+`ps` every 180 s). Recent Claude transcripts (the limit scan) are read only where they grew since the last pass
+(`limits::TranscriptCache`, SB-49): before, every pass re-read up to 64 × 320 KiB, measured at
+66 ms per pass with 22 active sessions; now about 1 ms. Targets for the installed app: average
+CPU < 0.2 %, RSS ≤ 250 MB including the WebKit helpers; measured on a release, not by the gate.
 
 **Residency (SB-28, operator decision 2026-10-05).** Background rotation, renewal and backups
 run while the app or `serve` runs, and the app keeps running with its window closed: it ends only
