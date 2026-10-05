@@ -2043,17 +2043,23 @@ mod tests {
         assert_ne!(account_section(&config("b@example.test")), Some(a));
         assert_eq!(account_section(br#"{"projects":{}}"#), None);
         assert_eq!(account_section(b"not json"), None);
+    }
+    /// The real reader and probe over a real file. Unix only: on Windows the reader requires
+    /// the file's owner to be the current user, and the elevated CI runner's new files belong
+    /// to the Administrators group (OPERATIONS → Windows private filesystem); an ordinary user
+    /// owns their own `~/.claude.json`.
+    #[cfg(unix)]
+    #[test]
+    fn the_native_config_stamp_ignores_unrelated_rewrites() {
+        let a = account_section(&config("a@example.test")).unwrap();
+        let mut other = serde_json::from_slice::<Value>(&config("a@example.test")).unwrap();
+        other["numStartups"] = json!(7);
+        other["tipsHistory"] = json!({"x": 1});
         // The native stamp re-reads only when the file's own stamp changed, and an unrelated
         // rewrite leaves it equal.
         let dir = tempfile::tempdir().unwrap();
-        // The reader refuses a path through a link: macOS's temporary folder is behind one, so
-        // the canonical path is used there; on Windows canonicalisation adds the `\\?\`
-        // prefix, whose ancestors the reader cannot examine, so the plain path is used.
-        let base = if cfg!(windows) {
-            dir.path().to_path_buf()
-        } else {
-            dir.path().canonicalize().unwrap()
-        };
+        // The reader refuses a path through a link, and macOS's temporary folder is behind one.
+        let base = dir.path().canonicalize().unwrap();
         let path = base.join(".claude.json");
         fs::write(&path, config("a@example.test")).unwrap();
         let first = config_stamp(&path);
