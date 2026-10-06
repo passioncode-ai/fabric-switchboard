@@ -1003,6 +1003,43 @@ fn validate(
     project_allows(&store.snapshot()?, &account, &working_directory)?;
     Ok((working_directory, account))
 }
+/// At most this many arguments an in-place launch hands to the agent, each this long (SB-75).
+const MAX_EXTRA_ARGS: usize = 16;
+const MAX_EXTRA_ARG: usize = 1024;
+pub const EXTRA_ARGS_INVALID: &str =
+    "Agent arguments are at most 16 plain values of up to 1024 characters each.";
+pub const IN_PLACE_UNSUPPORTED: &str = "Launching in place runs on macOS and Linux for now.";
+
+/// Prepares the session exactly as `launch` does — the home, its tools, the one-session marker
+/// and the script — but opens no Terminal: the caller runs the returned script in its own
+/// terminal (SB-75: an embedded console such as Fabric Dashboards'). `extra` goes to the agent
+/// after Switchboard's own arguments, each quoted by the script builder.
+pub fn launch_here(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    extra: &[String],
+) -> Result<(bool, PathBuf), String> {
+    if cfg!(windows) {
+        return Err(IN_PLACE_UNSUPPORTED.into());
+    }
+    let (tools, script) = launch_full(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        &NATIVE,
+        None,
+        extra,
+        true,
+    )?;
+    Ok((tools, script.ok_or(IN_PLACE_UNSUPPORTED)?))
+}
 #[allow(clippy::too_many_arguments)]
 fn launch_with(
     root: &Path,
@@ -1014,6 +1051,42 @@ fn launch_with(
     host: &Host,
     continuation: Option<&Continuation>,
 ) -> Result<bool, String> {
+    launch_full(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        host,
+        continuation,
+        &[],
+        false,
+    )
+    .map(|(tools, _)| tools)
+}
+fn extra_valid(extra: &[String]) -> bool {
+    extra.len() <= MAX_EXTRA_ARGS
+        && extra
+            .iter()
+            .all(|a| a.len() <= MAX_EXTRA_ARG && !a.chars().any(char::is_control))
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_full(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    host: &Host,
+    continuation: Option<&Continuation>,
+    extra: &[String],
+    in_place: bool,
+) -> Result<(bool, Option<PathBuf>), String> {
+    if !extra_valid(extra) {
+        return Err(EXTRA_ARGS_INVALID.into());
+    }
     let (working_directory, account) = validate(root, store, id, mode, working_directory)?;
     let program = (host.binary)(account.provider)?;
     let homes = root.join(if mode == "managed" {
@@ -1144,13 +1217,18 @@ fn launch_with(
     if let Some(first) = &first {
         args.push(first.as_str());
     }
-    (host.start_terminal)(&write_launch_script(
+    args.extend(extra.iter().map(String::as_str));
+    let path = write_launch_script(
         &home,
         &script(&home, &program, &args, &env, false, &working_directory),
-    )?)?;
+    )?;
+    // In place the caller runs the script now; the reservation lapses if it never does.
+    if !in_place {
+        (host.start_terminal)(&path)?;
+    }
     reservation.committed = true;
     journal_launch(store, id, mode);
-    Ok(cli.is_some())
+    Ok((cli.is_some(), in_place.then_some(path)))
 }
 /// Terminal is already open: a journal failure must not report the launch as failed.
 fn journal_launch(store: &Store, id: &str, mode: &str) {
@@ -1779,6 +1857,61 @@ mod tests {
         assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 2);
     }
     #[cfg(not(windows))]
+    #[tokio::test]
+    async fn an_in_place_launch_prepares_the_same_session_and_opens_no_terminal() {
+        // SB-75: the host (an embedded console) runs the returned script itself. Terminal must
+        // not open; the agent's extra arguments come after Switchboard's, quoted.
+        fn terminal_must_not_open(_: &Path) -> Result<(), String> {
+            panic!("an in-place launch opened Terminal");
+        }
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            start_terminal: terminal_must_not_open,
+        };
+        let extra = vec!["--resume".to_string(), "it's; rm -rf ~".to_string()];
+        let (_, script) = launch_full(
+            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, None, &extra, true,
+        )
+        .unwrap();
+        let script = script.expect("an in-place launch returns its script");
+        let home = f.root.join("homes").join(&id);
+        assert_eq!(script, home.join("launch.command"));
+        let text = fs::read_to_string(&script).unwrap();
+        assert!(
+            text.contains(".session-pid"),
+            "the one-session marker is written as before"
+        );
+        assert!(
+            text.contains("export SWITCHBOARD_SESSION="),
+            "the same environment"
+        );
+        assert!(
+            text.contains(&format!(
+                " {} {}\n",
+                quote("--resume"),
+                quote("it's; rm -rf ~")
+            )),
+            "extra arguments last, each quoted: {text}"
+        );
+        // Bad arguments are refused before a home is touched.
+        for bad in [
+            vec!["line\nbreak".to_string()],
+            vec!["x".repeat(MAX_EXTRA_ARG + 1)],
+            vec!["a".to_string(); MAX_EXTRA_ARGS + 1],
+        ] {
+            assert_eq!(
+                launch_full(
+                    &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, None, &bad, true
+                )
+                .unwrap_err(),
+                EXTRA_ARGS_INVALID
+            );
+        }
+    }
     #[tokio::test]
     async fn a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt() {
         let f = fixture();

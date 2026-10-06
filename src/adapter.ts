@@ -60,6 +60,11 @@ const safeErrors = new Set([
   'Claude Code runs on a Claude account.',
   'Codex runs on a Codex account.',
   'A chain holds at most 8 agents.',
+  // Launch in place (SB-75).
+  'Launching in place runs on macOS and Linux for now.',
+  'Agent arguments are at most 16 plain values of up to 1024 characters each.',
+  "Select this project's account for the provider first (switchboard accounts select).",
+  'Select an account for this provider first (switchboard accounts select).',
   "This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.",
   'Select an API-key account in this pool first.',
   'Unknown agent. `switchboard agents list` names them.',

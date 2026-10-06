@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-75 built — launch in place for an embedded console (2026-10-06)
+
+Fabric Dashboards (session fabric-dashboards-54) asked for a way to host a Switchboard session in
+its embedded console. Built: `switchboard launch (<id> | --provider claude|codex) --mode …
+--working-directory <dir> --in-place [-- <agent args>]` — the owner prepares the same session and
+returns its script; the CLI `exec`s it in the calling terminal; `--provider` resolves the folder's
+account (project selection → rule → default selection). Tests in launch.rs, projects.rs and the CLI
+suite; docs CLI.md, CONTRACTS → Launch in place, SCN-016, AGENTS lifecycle. Not observed live.
+
+**Exact next task:** ship 0.6.9 (its release run waits for approval), tell fabric-dashboards the
+version, then the live acceptances (in place inside Dashboards; a real limit → Codex takes over).
+
+---
+
 # Release 0.6.8 — fallback chains and the automatic hand-over published (2026-10-06)
 
 v0.6.8 published 2026-10-06T14:45:05Z (run 37478551625; downloaded set verified — release record

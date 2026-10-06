@@ -335,6 +335,47 @@ fn native_matches(store: &Store, account: &Account, native: NativeSources) -> bo
         .is_some_and(|matched| matched.id == account.id)
 }
 
+pub(crate) const NO_PROJECT_SELECTION: &str =
+    "Select this project's account for the provider first (switchboard accounts select).";
+pub(crate) const NO_SELECTION: &str =
+    "Select an account for this provider first (switchboard accounts select).";
+
+/// The account Switchboard would use for a session of `provider` in `folder` (SB-75): the
+/// selected account of the folder's project pool; else the account of the folder's rule in force;
+/// else the selected account of the default pool. Reads metadata only, never a credential.
+pub(crate) fn account_for_folder(
+    store: &Store,
+    provider: Provider,
+    folder: &Path,
+    now: i64,
+) -> Result<String, String> {
+    let snapshot = store.snapshot()?;
+    let route = |pool: &str| {
+        snapshot
+            .routes
+            .get(&format!("{}:{pool}", provider.as_str()))
+            .filter(|id| {
+                snapshot
+                    .accounts
+                    .iter()
+                    .any(|a| &a.id == *id && a.enabled && a.provider == provider)
+            })
+            .cloned()
+    };
+    if let Some(project) = snapshot.project_for(folder) {
+        return route(&project.pool).ok_or_else(|| NO_PROJECT_SELECTION.into());
+    }
+    if let Some(rule) = store
+        .resolve_rules(folder, now)?
+        .into_iter()
+        .find(|r| r.provider == provider)
+        .and_then(|r| r.effective)
+    {
+        return Ok(rule.account_id);
+    }
+    route("default").ok_or_else(|| NO_SELECTION.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,6 +387,63 @@ mod tests {
         let projects = tempfile::tempdir().unwrap();
         let store = Store::open(data.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
         (data, projects, store)
+    }
+    #[test]
+    fn the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection() {
+        // SB-75: `switchboard launch --provider` asks which account a folder's session would use.
+        let (_data, projects, store) = fixture();
+        let now = monitor::now();
+        let plain = projects.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let plain = plain.canonicalize().unwrap();
+        let ruled = projects.path().join("ruled");
+        std::fs::create_dir_all(&ruled).unwrap();
+        let ruled = ruled.canonicalize().unwrap();
+        let web = projects.path().join("web");
+        std::fs::create_dir_all(&web).unwrap();
+        let web = web.canonicalize().unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &plain, now).unwrap_err(),
+            NO_SELECTION
+        );
+        let default = add(&store, "default", "synthetic-default-key");
+        store
+            .select(Provider::Claude, "default", &default.id)
+            .unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &plain, now).unwrap(),
+            default.id
+        );
+        // A folder's rule in force names its account.
+        let other = add(&store, "default", "synthetic-other-key");
+        store
+            .set_rule(&ruled, &other.id, "managed", true, None)
+            .unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &ruled.join("src"), now).unwrap(),
+            other.id
+        );
+        // A project's folder uses the project's selected account, never the default pool's.
+        let project = store
+            .save_project(None, "Web", std::slice::from_ref(&web), &[])
+            .unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &web, now).unwrap_err(),
+            NO_PROJECT_SELECTION
+        );
+        let own = add(&store, &project.pool, "synthetic-project-key");
+        store
+            .select(Provider::Claude, &project.pool, &own.id)
+            .unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &web, now).unwrap(),
+            own.id
+        );
+        // Codex has nothing selected anywhere.
+        assert_eq!(
+            account_for_folder(&store, Provider::Codex, &plain, now).unwrap_err(),
+            NO_SELECTION
+        );
     }
     fn add(store: &Store, pool: &str, secret: &str) -> Account {
         store
