@@ -422,6 +422,23 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
 
+### Release v0.6.5 (2026-10-06) — the native switch no longer sticks on a misfiled sign-in
+
+0.6.5: SB-59 (a switch refused for good when a stored copy held the live token under another
+account; the provider's answer now decides, and a stored copy alone never moves the token),
+SB-60 (`mcp --read-only` never asks the provider), the `usage_check` log event, plus 0.6.4's
+SB-57 and licensing link. `v0.6.3` and `v0.6.4` were tagged and never published; the waiting
+v0.6.4 run 37351269626 was cancelled.
+
+| Step | Result |
+|---|---|
+| Source | `main` `6562548` ([#81](https://github.com/passioncode-ai/fabric-switchboard/pull/81)), tag `v0.6.5`; `release_preflight.py --tag v0.6.5 --publish true --windows-signing false` ok; local gate `./scripts/check.sh` exit 0 (runtime 259 passed) |
+| Release run | [37406556811](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37406556811), started by the tag push: preflight, macos, windows, updater, publish all success; both gates approved by the agent on the operator's instruction (2026-10-06: «выпусти апдейт») |
+| Published | 2026-10-06T03:14:46Z, **not a prerelease**, 11 assets |
+| Downloaded set | `shasum -a 256 -c SHA256SUMS --ignore-missing` OK for the macOS zip (`6c7dde15badd17f7cdf1d8da389401272cd23664161d4e85790cbacb5d013040`), the Windows setup (`8a425b501e306069686efcdd0c6313ea1cdb4d61c1c3c318ce5cbda3e72e3aae`) and `latest.json`; GPG good signature, PassionCode.ai release key; `gh attestation verify -R passioncode-ai/fabric-switchboard --signer-repo passioncode-ai/.github` exit 0 ×2 (without `--signer-repo` it fails on every release — INSTALL.md fixed in [#82](https://github.com/passioncode-ai/fabric-switchboard/pull/82)); `spctl` → `accepted, Notarized Developer ID`, team `KJ35UYYL22`; stapler validate ok; CLI `switchboard 0.6.5` |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.5`, platforms `darwin-aarch64`, `darwin-universal`, `darwin-x86_64`, `windows-x86_64`, each URL under `v0.6.5` |
+| Installed copy | at 03:20Z still 0.6.4 (a local engineering build); its last `update_check` was 02:15:44Z, before the release — the next check is due within six hours. **Not yet observed:** the automatic update to 0.6.5 and Switch working in Accounts |
+
 ### Release v0.6.2 (2026-10-05) — the first automatic update
 
 0.6.2: the limit scan reads recent Claude transcripts only where they grew (SB-49, #74),
