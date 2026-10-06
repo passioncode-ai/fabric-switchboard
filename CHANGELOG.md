@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Sessions in another app's console
+
+- `switchboard launch --in-place` runs a session in the terminal it was started from, instead of
+  opening a Terminal window — the same account, private folder, tools and protections — so an app
+  with its own console (Fabric Dashboards) can host it. `--provider claude|codex` picks the account
+  Switchboard would use for the folder; arguments after `--` reach the agent (for example
+  `-- --resume <id>`).
+
 ## 0.6.8 — 2026-10-06
 
 You choose which agents take over a task when an account runs out, and Switchboard follows that

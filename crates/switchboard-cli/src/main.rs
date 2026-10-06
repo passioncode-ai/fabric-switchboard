@@ -57,13 +57,28 @@ enum Command {
         #[command(subcommand)]
         command: Login,
     },
-    /// Launch an isolated or managed provider CLI in a project directory.
+    /// Launch an isolated or managed provider CLI in a project directory: in a new Terminal
+    /// window, or with --in-place in this terminal (for an embedded console). Requires a running
+    /// desktop app or serve.
     Launch {
-        id: String,
+        /// The account id (`switchboard accounts list`); or give --provider instead.
+        id: Option<String>,
+        /// Use the account Switchboard would use for this folder: its project's selected account,
+        /// else the folder's rule, else the default pool's selected account.
+        #[arg(long, value_enum, conflicts_with = "id")]
+        provider: Option<ProviderArg>,
         #[arg(long, value_enum, default_value = "isolated")]
         mode: Mode,
+        /// The project folder the session starts in.
         #[arg(long)]
         working_directory: PathBuf,
+        /// Run the session in this terminal instead of opening Terminal (needs a terminal on
+        /// stdin and stdout). The same session, home and tools as a Terminal launch.
+        #[arg(long)]
+        in_place: bool,
+        /// Arguments for the agent, after `--` (for example `-- --resume <id>`); with --in-place.
+        #[arg(last = true)]
+        args: Vec<String>,
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account —
     /// of the same provider, or of the other one (Claude Code ↔ Codex) with the same context:
@@ -603,17 +618,23 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Launch {
             id,
+            provider,
             mode,
             working_directory,
-        } => Operation::Launch {
-            id: id.clone(),
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: working_directory.clone(),
-        },
+            in_place,
+            args,
+        } => {
+            return launch(
+                &root,
+                id,
+                *provider,
+                *mode,
+                working_directory,
+                *in_place,
+                args,
+            )
+            .await
+        }
         Command::Continue {
             workflow_id,
             account,
@@ -738,6 +759,76 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         _ => Ok(value),
     }
+}
+/// `switchboard launch` (SB-75 adds the account for a folder and the in-place run): resolves the
+/// account when only a provider is given, asks the owner to prepare the session, and either
+/// leaves it to the Terminal the owner opened or runs the prepared script in this terminal.
+async fn launch(
+    root: &std::path::Path,
+    id: &Option<String>,
+    provider: Option<ProviderArg>,
+    mode: Mode,
+    working_directory: &std::path::Path,
+    in_place: bool,
+    args: &[String],
+) -> Result<Value, String> {
+    use std::io::IsTerminal;
+    if !in_place && !args.is_empty() {
+        return Err("Agent arguments after -- go with --in-place.".into());
+    }
+    if in_place && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Err("Launching in place needs a terminal on stdin and stdout.".into());
+    }
+    let id = match (id, provider) {
+        (Some(id), None) => id.clone(),
+        (None, Some(provider)) => {
+            let found = call(
+                root,
+                Operation::LaunchAccount {
+                    provider: provider.into(),
+                    working_directory: working_directory.to_owned(),
+                },
+            )
+            .await?;
+            found["id"].as_str().ok_or("Account not found.")?.to_owned()
+        }
+        _ => return Err("Give an account id or --provider.".into()),
+    };
+    let value = call(
+        root,
+        Operation::Launch {
+            id,
+            mode: match mode {
+                Mode::Isolated => "isolated",
+                Mode::Managed => "managed",
+            }
+            .into(),
+            working_directory: working_directory.to_owned(),
+            in_place,
+            args: args.to_vec(),
+        },
+    )
+    .await?;
+    if !in_place {
+        return Ok(value);
+    }
+    let script = value["script"]
+        .as_str()
+        .ok_or("The session script is missing.")?;
+    run_in_place(std::path::Path::new(script))
+}
+/// Replaces this process with the prepared session script: the agent runs in this terminal and
+/// its exit status is the command's.
+#[cfg(unix)]
+fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
+    use std::os::unix::process::CommandExt;
+    let error = std::process::Command::new(script).exec();
+    let _ = error;
+    Err("The session could not start in this terminal.".into())
+}
+#[cfg(not(unix))]
+fn run_in_place(_: &std::path::Path) -> Result<Value, String> {
+    Err("Launching in place runs on macOS and Linux for now.".into())
 }
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
     match control::request(root, &operation).await? {

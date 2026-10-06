@@ -98,6 +98,18 @@ pub enum Operation {
         id: String,
         mode: String,
         working_directory: PathBuf,
+        /// Prepare the session and return its script for the caller to run in its own terminal,
+        /// instead of opening Terminal (SB-75).
+        #[serde(default)]
+        in_place: bool,
+        /// Arguments for the agent after Switchboard's own (e.g. `--resume <id>`); in place only.
+        #[serde(default)]
+        args: Vec<String>,
+    },
+    /// The account Switchboard would use for a session of `provider` in a folder (SB-75).
+    LaunchAccount {
+        provider: Provider,
+        working_directory: PathBuf,
     },
     /// Continue an Observatory workflow on this account (SB-52): read, offer, launch.
     Continue {
@@ -360,6 +372,7 @@ impl Runtime {
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
                 | Operation::Chains { .. }
+                | Operation::LaunchAccount { .. }
                 | Operation::Status
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
@@ -1291,12 +1304,25 @@ async fn execute(
                 &working_directory,
             )
         }
+        Operation::LaunchAccount {
+            provider,
+            working_directory,
+        } => {
+            let folder = projects::project_dir(root, &working_directory)?;
+            let id = projects::account_for_folder(&store, provider, &folder, monitor::now())?;
+            Ok(json!({"id": id}))
+        }
         Operation::Launch {
             id,
             mode,
             working_directory,
+            in_place,
+            args,
         } => {
             let runtime = needs_owner()?;
+            if !in_place && !args.is_empty() {
+                return Err(launch::EXTRA_ARGS_INVALID.into());
+            }
             if mode == "isolated" {
                 // An isolated session holds an access token only and is never renewed while it
                 // runs: start it with hours left, not minutes (report §P2-10).
@@ -1310,6 +1336,18 @@ async fn execute(
                     // The account Claude Code is on: its live token is the newest one.
                     adopt_live(&store, native, refresh_state, &id);
                 }
+            }
+            if in_place {
+                let (agent_tools, script) = launch::launch_here(
+                    root,
+                    &store,
+                    &runtime.proxy,
+                    &id,
+                    &mode,
+                    &working_directory,
+                    &args,
+                )?;
+                return Ok(json!({"script": script, "agent_tools": agent_tools}));
             }
             let agent_tools =
                 launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;

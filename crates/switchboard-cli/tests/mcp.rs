@@ -567,3 +567,41 @@ fn fallback_chains_are_set_listed_and_cleared_from_the_cli() {
     .unwrap();
     assert_eq!(after["data"]["effective"]["scope"]["kind"], "machine");
 }
+
+#[test]
+fn an_in_place_launch_is_refused_where_it_cannot_run() {
+    // SB-75: no terminal on stdin/stdout (a test harness, a pipe) refuses before the owner is
+    // asked; agent arguments need --in-place; an account id or --provider is required.
+    let data = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+            .arg("--data-dir")
+            .arg(data.path())
+            .arg(args[0])
+            .arg("--working-directory")
+            .arg(dir.path())
+            .args(&args[1..])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        (
+            output.status.success(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let (ok, error) = run(&["launch", "--provider", "claude", "--in-place"]);
+    assert!(
+        !ok && error.contains("needs a terminal on stdin and stdout"),
+        "{error}"
+    );
+    let (ok, error) = run(&["launch", "some-id", "--", "--resume", "x"]);
+    assert!(!ok && error.contains("go with --in-place"), "{error}");
+    let (ok, error) = run(&["launch"]);
+    assert!(
+        !ok && error.contains("Give an account id or --provider"),
+        "{error}"
+    );
+    let (ok, _) = run(&["launch", "some-id", "--provider", "claude"]);
+    assert!(!ok, "an id and --provider together are refused");
+}

@@ -224,6 +224,8 @@ async fn launch_account(
             id,
             mode,
             working_directory: working_directory.into(),
+            in_place: false,
+            args: Vec::new(),
         })
         .await
 }

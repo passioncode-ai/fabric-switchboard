@@ -326,7 +326,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** CLI or native installer
 **Steps:**
 1. Use login/launch with explicit account and project directory → official provider flow uses a private home and managed launch requires a live owner.
-**Alt paths:** Use --help without opening storage; cancel before secret input without mutation.
+**Alt paths:** Use --help without opening storage; cancel before secret input without mutation. Launch in another app's console (SB-75): `switchboard launch --provider claude|codex --working-directory <dir> --in-place [-- <agent args>]` runs the same session in the calling terminal, on the account Switchboard would use for the folder; refused without a terminal on stdin/stdout (“Launching in place needs a terminal on stdin and stdout.”), agent arguments without `--in-place`, and a folder whose project or pool has no selected account (“Select this project's account for the provider first …” / “Select an account for this provider first …”).
 **Expected result:** One consistent account state; credentials never in output.
 **UI elements:** terminal help, stdout, stderr, exit code, native shell.
 **States covered:** empty, success, error, running

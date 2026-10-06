@@ -235,3 +235,26 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
+
+## Launch in place (SB-75, 2026-10-06)
+
+Asked for by Fabric Dashboards (an embedded console beside each service, operator decision
+2026-10-06). Code: `launch::launch_here`, `launch_full` (`launch_with` is its Terminal form),
+`projects::account_for_folder`, `Operation::{Launch, LaunchAccount}`, CLI `launch`.
+
+- `Operation::Launch` gains `in_place: bool` and `args: Vec<String>` (both `#[serde(default)]`, so
+  older callers — the desktop app — are unchanged). In place, the owner prepares the home, tools,
+  environment and `launch.command` exactly as for Terminal and returns `{script, agent_tools}`
+  instead of opening Terminal; the reservation lapses on its own (10 min) if the script never runs.
+  `args` are appended after Switchboard's own arguments, each quoted by the script builder; at most
+  16 of up to 1024 characters, no control characters (`EXTRA_ARGS_INVALID`), and only in place.
+  Windows refuses in place for now (`IN_PLACE_UNSUPPORTED`).
+- `Operation::LaunchAccount {provider, working_directory}` → `{id}`: the folder's project's selected
+  account (`NO_PROJECT_SELECTION` without one — never another pool's), else the account of the
+  folder's rule in force, else the default pool's selected account (`NO_SELECTION`). Metadata only,
+  no credential read.
+- The CLI refuses `--in-place` without a terminal on stdin and stdout, then `exec`s the script, so
+  the agent replaces the `switchboard` process and its exit status is the command's.
+- Tests: `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`,
+  `the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection`,
+  `an_in_place_launch_is_refused_where_it_cannot_run`. Not observed live with a real agent yet.
