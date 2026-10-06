@@ -10,7 +10,7 @@ Windows. It is Fabric's account tool and works on its own; built by
 
 ![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
 
-**Status: [v0.6.7](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.7)**,
+**Status: [v0.6.8](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.8)**,
 2026-10-06; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
 built natively, not yet Authenticode-signed). Installed copies of 0.6.1 or later update
 themselves; v0.6.3 and v0.6.4 were tagged but never published. Builds are made and signed only by the
@@ -31,7 +31,9 @@ the next request**: a response already streaming keeps the identity it started w
 
 What each version changed is in the [CHANGELOG](CHANGELOG.md): 0.6 adds projects with their
 own accounts, keeps running with its window closed, opens at login and updates itself
-([DISTRIBUTION](docs/DISTRIBUTION.md#automatic-updates-sb-55)); 0.5 renews inactive Claude
+([DISTRIBUTION](docs/DISTRIBUTION.md#automatic-updates-sb-55)); 0.6.7–0.6.8 hand a task from
+Claude Code to Codex with its context and follow your chain of agents when an account runs out
+([CLI](docs/CLI.md#fallback-chains), [XA-01](docs/packets/cross-agent-continuation.md)); 0.5 renews inactive Claude
 accounts and keeps encrypted backups; 0.4 adds MCP for agents, project rules and the plugin;
 0.4.1 ends the repeated Keychain dialogs ([KEYCHAIN.md](docs/KEYCHAIN.md)). Release records:
 [0.5.x–0.6.x](docs/evidence/release-0.5.md), [0.4.1](docs/evidence/release-0.4.1.md),

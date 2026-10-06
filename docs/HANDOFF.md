@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# Release 0.6.8 — fallback chains and the automatic hand-over published (2026-10-06)
+
+v0.6.8 published 2026-10-06T14:45:05Z (run 37478551625; downloaded set verified — release record
+in release-0.5.md): SB-71 chains (core, CLI, MCP) and SB-73 phase 1 (automatic Claude Code ↔ Codex
+hand-over along the chain). Off until the operator sets a chain; neither is observed live. README,
+README.ru, the board, XA-01 and the organization's roadmap/products moved to 0.6.8.
+
+**Exact next task:** the live acceptance — set a chain (`switchboard chain set --preset
+subscriptions-first`), let a real Claude Code workflow hit its limit and watch Codex take it over
+(log `fallback offered`); then SB-72 once project-observatory-dashboard#175 ships in an engine
+release, SB-73 phase 2 (Kimi Code / Hermes recipes), the SB-71 app screen, SB-61, SB-66…SB-69.
+
+---
+
 # SB-73 phase 1 — automatic fallback along the chain; 0.6.7 published (2026-10-06)
 
 - **0.6.7 published** 2026-10-06T14:05:33Z (run 37473394537), downloaded set verified — release
@@ -15,7 +29,7 @@
 - **SB-72** waits on project-observatory-dashboard#175 (OpenRouter door: daily/weekly ceilings, and
   a fix — moving a ceiling turned daily keys monthly), handed to that repository's session.
 
-**Exact next task:** release 0.6.8 with SB-71 and SB-73 phase 1 (operator's go-ahead), then the
+**Exact next task (superseded by the 0.6.8 entry above):** release 0.6.8 — done; then the
 live acceptance (a real limit → Codex takes over); SB-72 once #175 ships in an engine release;
 SB-73 phase 2 (Kimi Code / Hermes recipes); the SB-71 app screen.
 
