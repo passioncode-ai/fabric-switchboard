@@ -915,3 +915,24 @@ fn pending_timestamps_are_written_once_they_are_older_than_the_flush_interval() 
         t + 1
     );
 }
+
+#[test]
+fn an_update_changes_only_what_it_names() {
+    // SB-68: `accounts update --label` or `--enabled` alone keeps the other field.
+    let (_root, _vault, store) = setup();
+    let a = add(&store, "synthetic-secret-alpha");
+    let label = |store: &Store| store.snapshot().unwrap().accounts[0].label.clone();
+    let enabled = |store: &Store| store.snapshot().unwrap().accounts[0].enabled;
+    store
+        .update_fields(&a.id, Some("Renamed".into()), None)
+        .unwrap();
+    assert_eq!((label(&store), enabled(&store)), ("Renamed".into(), true));
+    store.update_fields(&a.id, None, Some(false)).unwrap();
+    assert_eq!((label(&store), enabled(&store)), ("Renamed".into(), false));
+    assert_eq!(
+        store.update_fields(&a.id, None, None).unwrap_err(),
+        switchboard_core::NOTHING_TO_UPDATE
+    );
+    assert!(store.update_fields(&a.id, Some(" ".into()), None).is_err());
+    assert_eq!(label(&store), "Renamed");
+}

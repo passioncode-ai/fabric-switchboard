@@ -39,7 +39,11 @@ enum Command {
         command: Accounts,
     },
     /// Cached usage for all accounts, or refresh a specific account from its provider.
-    Usage { id: Option<String> },
+    Usage {
+        /// An account id (`switchboard accounts list`): ask its provider now. Without it, the
+        /// saved usage of every account.
+        id: Option<String>,
+    },
     /// Recent sanitized activity.
     #[command(alias = "activity")]
     Events,
@@ -67,9 +71,11 @@ enum Command {
         /// else the folder's rule, else the default pool's selected account.
         #[arg(long, value_enum, conflicts_with = "id")]
         provider: Option<ProviderArg>,
+        /// `isolated`: the account's private home, straight to the provider. `managed`: through
+        /// the local proxy, which follows the pool's selected account.
         #[arg(long, value_enum, default_value = "isolated")]
         mode: Mode,
-        /// The project folder the session starts in.
+        /// The project folder the session starts in (absolute).
         #[arg(long)]
         working_directory: PathBuf,
         /// Run the session in this terminal instead of opening Terminal (needs a terminal on
@@ -90,6 +96,7 @@ enum Command {
         /// The account that continues it.
         #[arg(long)]
         account: String,
+        /// `isolated` or `managed`, as for `launch`.
         #[arg(long, value_enum, default_value = "isolated")]
         mode: Mode,
         /// The workflow's checkout to run in.
@@ -152,26 +159,35 @@ enum Project {
     List,
     /// The rule that applies to a folder (default: the current folder).
     Show {
+        /// An absolute folder; default: the current folder.
         #[arg(long)]
         path: Option<PathBuf>,
     },
     /// Save a rule for a folder and its subfolders. Rules never stop rotation.
     Set {
+        /// An absolute folder; default: the current folder.
         #[arg(long)]
         path: Option<PathBuf>,
+        /// The account sessions in this folder start on (`switchboard accounts list`).
         #[arg(long)]
         account: String,
+        /// `managed`: the account managed sessions here use. `claude-cli`: the ordinary Claude
+        /// Code login, changed when the rule is applied with --global.
         #[arg(long, value_enum, default_value = "managed")]
         target: RotationTarget,
         /// Save the rule switched off.
         #[arg(long)]
         paused: bool,
+        /// End the rule after this many hours (1–720); without it, it lasts until paused.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=720))]
         expires_in_hours: Option<u32>,
     },
+    /// Remove a folder's rule for one provider.
     Remove {
+        /// An absolute folder; default: the current folder.
         #[arg(long)]
         path: Option<PathBuf>,
+        /// The provider whose rule goes.
         #[arg(long, value_enum)]
         provider: ProviderArg,
     },
@@ -182,20 +198,25 @@ enum Project {
         /// Update the project with this pool; without it, a new project is created.
         #[arg(long)]
         pool: Option<String>,
+        /// The project's name, as the app shows it.
         #[arg(long)]
         name: String,
+        /// An absolute folder of the project (a repository); repeat for each.
         #[arg(long = "folder", required = true)]
         folders: Vec<PathBuf>,
+        /// An account reserved for the project; repeat for each.
         #[arg(long = "account")]
         accounts: Vec<String>,
     },
     /// Delete a project. Its accounts stay in its pool, no longer reserved.
     Delete {
+        /// The project's pool (`switchboard project list`).
         #[arg(long)]
         pool: String,
     },
     /// Apply the folder's rule to the session this command runs in.
     Apply {
+        /// An absolute folder; default: the current folder.
         #[arg(long)]
         path: Option<PathBuf>,
         /// Allow changing the ordinary Claude Code login for every claude session.
@@ -214,52 +235,73 @@ fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
 }
 #[derive(Subcommand)]
 enum Accounts {
+    /// Saved accounts with their provider, kind, pool, state and usage. No credentials.
     List,
     /// Save the current CLI authorization; no new sign-in is started.
     Capture {
+        /// The CLI whose signed-in account is saved.
         #[arg(long, value_enum)]
         provider: ProviderArg,
+        /// A name for it; default: its e-mail.
         #[arg(long)]
         label: Option<String>,
+        /// The pool it joins.
         #[arg(long, default_value = "default")]
         pool: String,
     },
     /// Import existing Claude Swap backups into the native credential vault.
     ImportClaudeSwap {
+        /// The pool the imported accounts join.
         #[arg(long, default_value = "default")]
         pool: String,
     },
     /// Activate a captured Claude OAuth profile in the ordinary Claude Code CLI.
     Activate {
+        /// The account id (`switchboard accounts list`).
         id: String,
     },
+    /// Save an API key, a Claude setup token or an auth JSON piped on stdin.
     Add {
+        /// The provider the credential belongs to.
         #[arg(long, value_enum)]
         provider: ProviderArg,
+        /// What is piped: `api-key`, `setup-token` or `oauth` (an auth JSON).
         #[arg(long, value_enum)]
         kind: Kind,
+        /// A name for the account.
         #[arg(long)]
         label: String,
+        /// The pool it joins.
         #[arg(long, default_value = "default")]
         pool: String,
         /// Read one token or auth JSON from piped stdin, limited to 64 KiB.
         #[arg(long, required = true)]
         secret_stdin: bool,
     },
+    /// Rename an account, enable or disable it, or both; what is left out stays as it is.
     Update {
+        /// The account id (`switchboard accounts list`).
         id: String,
+        /// The new name.
         #[arg(long)]
-        label: String,
+        label: Option<String>,
+        /// `true` or `false`. A disabled account is never selected or switched to.
         #[arg(long, action = clap::ArgAction::Set)]
-        enabled: bool,
+        enabled: Option<bool>,
     },
+    /// Remove an account and its stored credential. Select another one first if it is selected.
     Remove {
+        /// The account id (`switchboard accounts list`).
         id: String,
     },
+    /// Make an account the one the pool's managed sessions use, from their next request.
     Select {
+        /// The account id (`switchboard accounts list`).
         id: String,
+        /// The account's provider.
         #[arg(long, value_enum)]
         provider: ProviderArg,
+        /// The pool whose managed sessions follow it.
         #[arg(long, default_value = "default")]
         pool: String,
     },
@@ -271,20 +313,28 @@ enum Rotation {
     /// Save a policy; omitted flags keep the saved values (new policy: off, 90, 10, 1800, 300).
     /// Existing responses are never replayed or interrupted.
     Set {
+        /// The provider the policy is for.
         #[arg(long, value_enum)]
         provider: ProviderArg,
+        /// The pool it switches within.
         #[arg(long, default_value = "default")]
         pool: String,
+        /// `managed`: the pool's managed sessions. `claude-cli`: the ordinary Claude Code login.
         #[arg(long, value_enum, default_value = "managed")]
         target: RotationTarget,
+        /// `true` or `false`: switch automatically or not.
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: Option<bool>,
+        /// Percent used (of the busiest quota window) at which it moves on.
         #[arg(long)]
         threshold: Option<f64>,
+        /// Percentage points of headroom the next account must have over the current one.
         #[arg(long)]
         hysteresis: Option<f64>,
+        /// Seconds to wait after a switch before the next one.
         #[arg(long)]
         cooldown: Option<i64>,
+        /// Seconds after which a usage reading is too old to switch on.
         #[arg(long)]
         max_age: Option<i64>,
     },
@@ -359,7 +409,9 @@ enum AgentsCommand {
     List,
     /// How to connect one agent: its MCP registration and, when it can, the proxy settings.
     Connect {
+        /// The agent's catalog id (`switchboard agents list`), for example `hermes`.
         agent: String,
+        /// The pool whose API-key account its proxy requests use.
         #[arg(long, default_value = "default")]
         pool: String,
     },
@@ -367,9 +419,12 @@ enum AgentsCommand {
     Key,
     /// Start an agent configured by environment alone in a folder, on the pool's API-key account.
     Launch {
+        /// The agent's catalog id (`switchboard agents list`).
         agent: String,
+        /// The pool whose API-key account it uses.
         #[arg(long, default_value = "default")]
         pool: String,
+        /// The absolute folder it starts in; default: the current folder.
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -381,27 +436,38 @@ enum Backup {
     /// Write a backup now.
     Now,
     /// Add the accounts of one backup that this store does not hold; never replaces newer ones.
-    Restore { file: String },
+    Restore {
+        /// A backup's file name, as `switchboard backup list` shows it.
+        file: String,
+    },
 }
 #[derive(Subcommand)]
 enum Login {
+    /// Open the provider's official sign-in in Terminal, in a private home; prints a login id.
     Begin {
+        /// The provider to sign in to.
         #[arg(long, value_enum)]
         provider: ProviderArg,
         /// Defaults to the email of the account that signs in.
         #[arg(long, default_value = "")]
         label: String,
+        /// The pool the account joins.
         #[arg(long, default_value = "default")]
         pool: String,
     },
     /// pending, complete (ready to finish) or ended (Terminal exited without signing in).
     Status {
+        /// The id `login begin` printed.
         login_id: String,
     },
+    /// Save the account a completed sign-in produced and clean its staging home.
     Finish {
+        /// The id `login begin` printed.
         login_id: String,
     },
+    /// Drop a sign-in. Close its Terminal session first; nothing else is stopped.
     Cancel {
+        /// The id `login begin` printed.
         login_id: String,
     },
 }
@@ -1238,5 +1304,39 @@ mod in_place_tests {
         std::os::unix::fs::symlink("/etc/hosts", &marker).unwrap();
         super::release_reservation(&home.path().join("launch.command"));
         assert!(std::fs::symlink_metadata(&marker).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod help_tests {
+    use clap::CommandFactory;
+
+    /// SB-68: every command and every argument says what it is in `--help`.
+    #[test]
+    fn every_command_and_argument_has_help() {
+        fn walk(command: &clap::Command, path: &str, missing: &mut Vec<String>) {
+            for arg in command.get_arguments() {
+                let id = arg.get_id().as_str();
+                if matches!(id, "help" | "version") {
+                    continue;
+                }
+                if arg.get_help().is_none() && arg.get_long_help().is_none() {
+                    missing.push(format!("{path} {id}"));
+                }
+            }
+            for sub in command.get_subcommands() {
+                if sub.get_name() == "help" {
+                    continue;
+                }
+                let here = format!("{path} {}", sub.get_name());
+                if sub.get_about().is_none() && sub.get_long_about().is_none() {
+                    missing.push(here.clone());
+                }
+                walk(sub, &here, missing);
+            }
+        }
+        let mut missing = Vec::new();
+        walk(&super::Cli::command(), "switchboard", &mut missing);
+        assert!(missing.is_empty(), "no help text: {missing:#?}");
     }
 }
