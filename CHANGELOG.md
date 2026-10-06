@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.7 — 2026-10-06
+
+An agent task that ran out of its limit in Claude Code can now continue in Codex, and back, from
+the same point. If you run 0.6.1 or later, this version arrives on its own. Signed by the same
+team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Continuing work on another agent
 
 - `switchboard continue` hands a workflow from Claude Code to Codex, or back, with its context:
