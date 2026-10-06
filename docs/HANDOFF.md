@@ -2,6 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-70 built — Claude Code ↔ Codex continuation (2026-10-06)
+
+`switchboard continue <wf> --account <id> --dir <checkout>` now hands a workflow to an account of
+the **other** provider with the same context (XA-01 step 1, N-018 step 2): `PROVIDER_MISMATCH`
+removed; the handoff names the receiving harness (`claude-code` / `codex`); the first prompt says
+the work comes from another agent (its name sanitized) and tells the session to accept naming no
+other provider, so it inherits the offer's (the engine refuses an acceptance naming another).
+Tests: `a_workflow_moves_to_another_provider_with_its_context`,
+`a_workflow_of_an_agent_switchboard_does_not_hold_can_be_taken_over`,
+`the_prompt_of_a_cross_provider_handoff_names_the_previous_agent_safely`. Docs: CLI.md,
+CONTRACTS, SCN-038, CHANGELOG `Unreleased`, packets. **Not yet observed live** (a real limit,
+Claude Code → Codex). The brand agent (POST-010) waits for the release version and these receipts.
+
+**Exact next task:** ship it in 0.6.7 (after 0.6.6 publishes), send the brand agent the version
+and receipts, run the live acceptance; then SB-71 (chains).
+
+---
+
 # SB-62 fixed; every PassionCode product updates itself (2026-10-06)
 
 **SB-62 (P1) fixed for 0.6.6.** A sign-in of an account already saved — from its row, from

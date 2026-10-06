@@ -1796,6 +1796,7 @@ mod tests {
                 command: "/opt/Observatory/bin/python".into(),
                 args: vec!["/opt/Observatory/engine/mcp/server.py".into()],
             },
+            previous_provider: None,
         };
         let before = f.files();
         launch_with(
