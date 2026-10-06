@@ -347,6 +347,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   for (const message of result.missing) problems.push(`unmapped backend message (${message.path}:${message.line}${message.constant ? `, ${message.constant}` : ''}): ${JSON.stringify(message.value)}`);
   for (const key of result.chained) problems.push(`coreErrors maps ${JSON.stringify(key)} to another backend key`);
   for (const value of result.stale) problems.push(`allowlist entry no longer in the backend: ${JSON.stringify(value)}`);
+  // A format! error carries a name; it reaches the person only through a template in
+  // src/formatted-errors.ts (`{}` written as `{name}`), or it falls back to the generic text.
+  const templatesFile = join(ROOT, 'src/formatted-errors.ts');
+  const templates = new Set(existsSync(templatesFile) ? [...readFileSync(templatesFile, 'utf8').matchAll(/^\s*'((?:[^'\\]|\\.)*)',$/gm)].map((m) => m[1].replace(/\\'/g, "'")) : []);
+  for (const format of result.backend.formats) {
+    if (!templates.has(format.value.replaceAll('{}', '{name}'))) problems.push(`formatted backend message without a template in src/formatted-errors.ts (${format.path}:${format.line}): ${JSON.stringify(format.value)}`);
+  }
   if (problems.length) {
     console.error(`${problems.length} error-vocabulary problem(s). Add each message to src/adapter.ts (safeErrors verbatim, or coreErrors with an actionable sentence), or allowlist it here with the reason it never reaches the UI:`);
     for (const problem of problems) console.error(`  - ${problem}`);
@@ -354,5 +361,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   }
   const counts = { verbatim: 0, mapped: 0, allowlisted: 0 };
   for (const message of result.backend.messages) counts[result.handled(message.value)] += 1;
-  console.log(`${result.backend.messages.length} backend error messages in ${result.backend.files} Rust files: ${counts.verbatim} verbatim, ${counts.mapped} mapped, ${counts.allowlisted} allowlisted; ${result.backend.formats.length} formatted messages fall back to the generic text. Extractor self-test: ${receipts} receipts.`);
+  console.log(`${result.backend.messages.length} backend error messages in ${result.backend.files} Rust files: ${counts.verbatim} verbatim, ${counts.mapped} mapped, ${counts.allowlisted} allowlisted; ${result.backend.formats.length} formatted messages shown through their templates. Extractor self-test: ${receipts} receipts.`);
 }

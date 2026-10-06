@@ -22,6 +22,12 @@ const WORKFLOWS_PER_PASS: usize = 4;
 /// A workflow handed over (or tried) is left alone this long: an offer lives about this long, and
 /// a failed attempt is not repeated every pass.
 const RETRY_SECONDS: i64 = 15 * 60;
+/// A scan that found nothing to hand over waits this long before the next one, so a limited
+/// account with no open workflow does not start the engine every minute (LC-08).
+const IDLE_SCAN_SECONDS: i64 = 5 * 60;
+/// The monitor waits this long for one engine read; a person running `switchboard continue`
+/// waits the engine's full minute.
+const MONITOR_ENGINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[derive(Default)]
 pub(crate) struct FallbackState {
@@ -48,7 +54,9 @@ fn used(account: &Account) -> f64 {
 }
 
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
-/// recent limit, or one that needs a new sign-in. A pinned account is used only when it is usable.
+/// recent limit, or one that needs a new sign-in — nor to another saved row of the same identity
+/// as the executor's or a limited account (one login saved twice shares one limit, SB-62). A
+/// pinned account is used only when it is usable.
 pub(crate) fn resolve(
     snapshot: &Snapshot,
     chain: &Chain,
@@ -56,11 +64,21 @@ pub(crate) fn resolve(
     limited: &HashSet<String>,
     sign_in: &HashSet<String>,
 ) -> Vec<Step> {
+    let spent: HashSet<(Provider, &str)> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| Some(a.id.as_str()) == executor_account || limited.contains(&a.id))
+        .filter_map(|a| a.identity.as_deref().map(|i| (a.provider, i)))
+        .collect();
     let usable = |a: &Account| {
         a.enabled
             && Some(a.id.as_str()) != executor_account
             && !limited.contains(&a.id)
             && !sign_in.contains(&a.id)
+            && !a
+                .identity
+                .as_deref()
+                .is_some_and(|i| spent.contains(&(a.provider, i)))
     };
     chain
         .executors
@@ -100,22 +118,26 @@ pub(crate) fn resolve(
         .collect()
 }
 
-/// Whether the workflow's executor has hit its limit: its account, when the engine names one
-/// Switchboard holds; otherwise the account the ordinary CLI of that provider is signed in to.
+/// Whether the workflow's executor has hit its limit. When the engine names the executor's
+/// account, only that account decides (an account Switchboard does not hold decides nothing).
+/// When it names none, the executor is taken to be the ordinary CLI of its provider — but only
+/// while no session Switchboard launched for that provider runs (`launched`), since such a
+/// session could be the executor on a healthy account.
 pub(crate) fn executor_limited(
     executor: &Value,
     snapshot: &Snapshot,
     current: &Value,
     limited: &HashSet<String>,
+    launched: &dyn Fn(Provider) -> bool,
 ) -> Option<(Provider, Option<String>)> {
     let provider =
         continuation::executor_provider(executor.get("provider").and_then(Value::as_str)?)?;
     if let Some(id) = executor.get("accountRef").and_then(Value::as_str) {
-        if snapshot.accounts.iter().any(|a| a.id == id) {
-            return limited
-                .contains(id)
-                .then(|| (provider, Some(id.to_owned())));
-        }
+        return (snapshot.accounts.iter().any(|a| a.id == id) && limited.contains(id))
+            .then(|| (provider, Some(id.to_owned())));
+    }
+    if launched(provider) {
+        return None;
     }
     let key = match provider {
         Provider::Claude => "claude",
@@ -142,6 +164,12 @@ impl FallbackState {
         }
         *next = now + SCAN_SECONDS;
         true
+    }
+    /// Nothing to hand over this pass: wait longer before starting the engine again.
+    fn idle(&self, now: i64) {
+        if let Ok(mut next) = self.next_scan.lock() {
+            *next = now + IDLE_SCAN_SECONDS;
+        }
     }
     fn recently_tried(&self, workflow: &str, now: i64) -> bool {
         self.tried
@@ -197,10 +225,20 @@ where
     if limited.is_empty() || !runtime.fallback.due(now) {
         return;
     }
-    let workflows = match continuation::list_open(bin) {
-        Ok(w) => w,
-        Err(_) => {
+    // The engine is a child process with a deadline: off the async workers, so a slow engine
+    // never holds the monitor's thread.
+    let listed = {
+        let bin = bin.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            continuation::list_open_within(&bin, MONITOR_ENGINE_TIMEOUT)
+        })
+        .await
+    };
+    let workflows = match listed {
+        Ok(Ok(w)) => w,
+        _ => {
             log("engine_unreadable");
+            runtime.fallback.idle(now);
             return;
         }
     };
@@ -210,8 +248,17 @@ where
         .sign_in_required(&runtime.store)
         .into_iter()
         .collect();
+    let launched = |provider: Provider| {
+        let ids: Vec<String> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| a.provider == provider)
+            .map(|a| a.id.clone())
+            .collect();
+        crate::launch::launched_session_running(&runtime.root, provider, &ids)
+    };
     let mut examined = 0;
-    for workflow in workflows {
+    for workflow in &workflows {
         if examined >= WORKFLOWS_PER_PASS {
             break;
         }
@@ -228,7 +275,7 @@ where
             .cloned()
             .unwrap_or(Value::Null);
         let Some((_, executor_account)) =
-            executor_limited(&executor, &snapshot, &current, &limited)
+            executor_limited(&executor, &snapshot, &current, &limited, &launched)
         else {
             continue;
         };
@@ -245,7 +292,14 @@ where
             _ => continue,
         };
         runtime.fallback.mark(id, now);
-        let Ok(shown) = continuation::show(bin, id) else {
+        let shown = {
+            let (bin, id) = (bin.to_path_buf(), id.to_owned());
+            tokio::task::spawn_blocking(move || {
+                continuation::show_within(&bin, &id, MONITOR_ENGINE_TIMEOUT)
+            })
+            .await
+        };
+        let Ok(Ok(shown)) = shown else {
             log("engine_unreadable");
             continue;
         };
@@ -271,6 +325,9 @@ where
                 "failed"
             },
         );
+    }
+    if examined == 0 {
+        runtime.fallback.idle(now);
     }
 }
 
@@ -387,6 +444,53 @@ mod tests {
     }
 
     #[test]
+    fn a_scan_that_finds_nothing_waits_longer() {
+        // LC-08: a limited account with no open workflow must not start the engine every minute.
+        let state = FallbackState::default();
+        assert!(state.due(1_000));
+        assert!(!state.due(1_000 + SCAN_SECONDS - 1));
+        assert!(state.due(1_000 + SCAN_SECONDS));
+        state.idle(2_000);
+        assert!(!state.due(2_000 + SCAN_SECONDS));
+        assert!(state.due(2_000 + IDLE_SCAN_SECONDS));
+    }
+
+    #[test]
+    fn another_row_of_a_spent_login_is_not_a_way_out() {
+        // SB-62 keeps one login saved in two pools as two rows; they share one limit.
+        let with = |id: &str, identity: &str, used: f64| {
+            let mut a = account(id, Provider::Claude, Some(used));
+            a.identity = Some(identity.into());
+            a
+        };
+        let snapshot = Snapshot {
+            accounts: vec![
+                with("exec", "me@example.test", 99.0),
+                with("exec-copy", "me@example.test", 1.0),
+                with("limited", "team@example.test", 99.0),
+                with("limited-copy", "team@example.test", 2.0),
+                with("other", "other@example.test", 50.0),
+            ],
+            ..Default::default()
+        };
+        let limited: HashSet<String> = ["limited".to_string()].into();
+        let steps = resolve(
+            &snapshot,
+            &chain(&[("claude-code", None)]),
+            Some("exec"),
+            &limited,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            steps,
+            vec![Step::Run {
+                agent: "claude-code".into(),
+                account_id: "other".into()
+            }]
+        );
+    }
+
+    #[test]
     fn a_pinned_account_is_used_only_when_usable_and_never_the_executor() {
         let mut disabled = account("codex-off", Provider::Codex, Some(1.0));
         disabled.enabled = false;
@@ -435,13 +539,15 @@ mod tests {
         let limited: HashSet<String> = ["claude-a".to_string()].into();
         let current =
             json!({"claude": {"account_ids": ["claude-a"]}, "codex": {"account_ids": []}});
+        let none = |_: Provider| false;
         // Named account Switchboard holds.
         assert_eq!(
             executor_limited(
                 &json!({"provider": "claude-code", "accountRef": "claude-a"}),
                 &snapshot,
                 &current,
-                &limited
+                &limited,
+                &none
             ),
             Some((Provider::Claude, Some("claude-a".into())))
         );
@@ -450,7 +556,8 @@ mod tests {
                 &json!({"provider": "claude-code", "accountRef": "claude-b"}),
                 &snapshot,
                 &current,
-                &limited
+                &limited,
+                &none
             ),
             None,
             "its own account is not limited"
@@ -461,12 +568,19 @@ mod tests {
                 &json!({"provider": "anthropic"}),
                 &snapshot,
                 &current,
-                &limited
+                &limited,
+                &none
             ),
             Some((Provider::Claude, Some("claude-a".into())))
         );
         assert_eq!(
-            executor_limited(&json!({"provider": "codex"}), &snapshot, &current, &limited),
+            executor_limited(
+                &json!({"provider": "codex"}),
+                &snapshot,
+                &current,
+                &limited,
+                &none
+            ),
             None
         );
         assert_eq!(
@@ -474,12 +588,38 @@ mod tests {
                 &json!({"provider": "hermes"}),
                 &snapshot,
                 &current,
-                &limited
+                &limited,
+                &none
             ),
             None
         );
         assert_eq!(
-            executor_limited(&Value::Null, &snapshot, &current, &limited),
+            executor_limited(&Value::Null, &snapshot, &current, &limited, &none),
+            None
+        );
+        // An account the engine names but Switchboard does not hold decides nothing: the
+        // ordinary CLI's limit is not blamed on another manager's session.
+        assert_eq!(
+            executor_limited(
+                &json!({"provider": "claude-code", "accountRef": "elsewhere"}),
+                &snapshot,
+                &current,
+                &limited,
+                &none
+            ),
+            None
+        );
+        // No account named while a Switchboard-launched Claude session runs: it could be the
+        // executor on a healthy account, so nothing is handed over.
+        let running = |p: Provider| p == Provider::Claude;
+        assert_eq!(
+            executor_limited(
+                &json!({"provider": "anthropic"}),
+                &snapshot,
+                &current,
+                &limited,
+                &running
+            ),
             None
         );
     }
@@ -505,6 +645,7 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
+    #[cfg(unix)]
     const WF: &str = "wf_0123456789abcdef";
 
     #[cfg(unix)]

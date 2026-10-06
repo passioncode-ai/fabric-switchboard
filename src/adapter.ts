@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Adapter } from './types';
 import { readWithDeadline, READ_TIMEOUT } from './read-deadline';
+import { matchFormatted } from './formatted-errors';
 export const reportFrontendReady = () => invoke('frontend_ready');
 /** The interface language, for the native menu-bar / notification-area menu (L10N-01). */
 export const reportLanguage = (locale: string) => invoke('set_language', { locale });
@@ -93,6 +94,7 @@ const safeErrors = new Set([
   'The downloaded update did not pass its signature check and was discarded. Switchboard tries again within the hour.',
   'The update needs an administrator password to replace Switchboard in this folder. It was not installed.',
   'Could not install the update. Switchboard tries again within the hour.',
+  'Installing the update did not finish. Quit and reopen Switchboard to try again.',
   'Could not save the choice in Switchboard\'s data folder.',
   'Could not add Switchboard to the login items. Check the system\'s login item settings.',
   'Could not remove Switchboard from the login items. Check the system\'s login item settings.',
@@ -292,5 +294,5 @@ for (const error of ['Sign-in state unavailable.', 'Backup state unavailable.', 
 for (const error of ['Usage reset unsupported.', 'Usage response unsupported.', 'Usage observation time invalid.', 'Usage response too large.']) coreErrors[error] = 'The provider reported usage in a form Switchboard does not read. The last observation is unchanged.';
 export function safeError(error: unknown): string {
   const candidate = typeof error === 'string' ? error : error instanceof Error ? error.message : '';
-  return safeErrors.has(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and native credential storage access, then retry.';
+  return safeErrors.has(candidate) || matchFormatted(candidate) ? candidate : Object.hasOwn(coreErrors, candidate) ? coreErrors[candidate] : 'The operation could not be completed. Check your input and native credential storage access, then retry.';
 }

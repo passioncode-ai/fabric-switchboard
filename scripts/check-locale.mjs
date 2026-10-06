@@ -22,6 +22,7 @@ const LIST = process.argv.includes('--list');
 const MISSING = process.argv.includes('--missing');
 
 const keys = new Map(); // key -> { plural: bool, where: string }
+const problemsAtScan = [];
 const add = (key, where, plural = false) => {
   if (!keys.has(key)) keys.set(key, { plural, where });
   else if (plural) keys.get(key).plural = true;
@@ -29,6 +30,19 @@ const add = (key, where, plural = false) => {
 const literal = (node) => (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? node.text : null);
 
 const sources = readdirSync(join(ROOT, 'src')).filter((f) => f.endsWith('.ts') && !f.endsWith('.d.ts') && f !== 'demo.ts');
+// String constants exported anywhere in src/ (READ_TIMEOUT…), so a safeErrors entry that names one
+// is collected as the sentence it is.
+const constants = new Map();
+for (const file of sources) {
+  const sf = ts.createSourceFile(file, readFileSync(join(ROOT, 'src', file), 'utf8'), ts.ScriptTarget.ES2022, true);
+  sf.forEachChild((node) => {
+    if (!ts.isVariableStatement(node)) return;
+    for (const decl of node.declarationList.declarations) {
+      const text = decl.initializer && literal(decl.initializer);
+      if (text !== null && text !== undefined && ts.isIdentifier(decl.name)) constants.set(decl.name.text, text);
+    }
+  });
+}
 for (const file of sources) {
   const path = join(ROOT, 'src', file);
   const sf = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.ES2022, true);
@@ -49,11 +63,19 @@ for (const file of sources) {
         }
       }
     }
+    // Backend sentences with a name in them: their templates (src/formatted-errors.ts).
+    if (file === 'formatted-errors.ts' && ts.isVariableDeclaration(node) && node.name.getText(sf) === 'FORMATTED_ERRORS' && node.initializer && ts.isArrayLiteralExpression(node.initializer)) {
+      for (const el of node.initializer.elements) { const text = literal(el); if (text) add(text, 'src/formatted-errors.ts'); }
+    }
     // adapter.ts: the verbatim set and the mapped sentences.
     if (file === 'adapter.ts') {
       if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'safeErrors' && node.initializer && ts.isNewExpression(node.initializer)) {
         const arr = node.initializer.arguments?.[0];
-        if (arr && ts.isArrayLiteralExpression(arr)) for (const el of arr.elements) { const text = literal(el); if (text) add(text, 'src/adapter.ts safeErrors'); }
+        if (arr && ts.isArrayLiteralExpression(arr)) for (const el of arr.elements) {
+          const text = literal(el) ?? (ts.isIdentifier(el) ? constants.get(el.text) ?? null : null);
+          if (text) add(text, 'src/adapter.ts safeErrors');
+          else if (ts.isIdentifier(el)) problemsAtScan.push(`safeErrors names ${el.text}, which is not a string constant in src/`);
+        }
       }
       if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'coreErrors' && node.initializer && ts.isObjectLiteralExpression(node.initializer)) {
         for (const prop of node.initializer.properties) if (ts.isPropertyAssignment(prop)) { const text = literal(prop.initializer); if (text) add(text, 'src/adapter.ts coreErrors'); }
@@ -82,7 +104,7 @@ for (const word of ['primary', 'secondary']) add(word, 'src/ui-logic.ts featureW
 const { RU } = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(readFileSync(join(ROOT, 'src/locales/ru.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText).toString('base64')}`);
 
 const placeholders = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
-const problems = [];
+const problems = [...problemsAtScan];
 const missing = [];
 for (const [key, { plural, where }] of keys) {
   const entry = RU[key];

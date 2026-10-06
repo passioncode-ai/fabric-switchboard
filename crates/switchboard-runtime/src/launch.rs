@@ -764,6 +764,31 @@ fn ensure_idle(home: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// Whether a session Switchboard launched for `provider` may be running: an isolated home of one
+/// of `account_ids`, or a managed home of the provider, that is not idle. A state that cannot be
+/// read counts as running. The automatic fallback uses it: a workflow executor that names no
+/// account could be such a session, so the ordinary CLI's limit is not blamed on it (SB-73).
+pub(crate) fn launched_session_running(
+    root: &Path,
+    provider: Provider,
+    account_ids: &[String],
+) -> bool {
+    let busy = |home: &Path| home.is_dir() && ensure_idle(home).is_err();
+    if account_ids
+        .iter()
+        .any(|id| busy(&root.join("homes").join(id)))
+    {
+        return true;
+    }
+    let prefix = format!("{}-", provider.as_str());
+    fs::read_dir(root.join("runtimes"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry.file_name().to_string_lossy().starts_with(&prefix) && busy(&entry.path())
+        })
+}
 pub fn clean_account(root: &Path, id: &str) -> Result<(), String> {
     Uuid::parse_str(id).map_err(|_| "Invalid account.")?;
     let home = root.join("homes").join(id);
@@ -1912,6 +1937,7 @@ mod tests {
             );
         }
     }
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt() {
         let f = fixture();

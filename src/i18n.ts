@@ -10,6 +10,7 @@
  * uses has no Russian entry.
  */
 import { RU } from './locales/ru';
+import { matchFormatted } from './formatted-errors';
 
 export type Locale = 'en' | 'ru';
 export type LocaleChoice = 'system' | Locale;
@@ -56,7 +57,13 @@ const fill = (text: string, params?: Record<string, string | number>) =>
 
 /** The interface text for an English source string, in the current language. */
 export function t(source: string, params?: Record<string, string | number>): string {
-  return fill(current === 'ru' ? RU[source] ?? source : source, params);
+  if (current !== 'ru') return fill(source, params);
+  const entry = RU[source];
+  if (entry !== undefined) return fill(entry, params);
+  // A backend sentence with a name in it: translate its template, keep the name (L10N-04).
+  const formatted = matchFormatted(source);
+  if (formatted && RU[formatted.template]) return fill(RU[formatted.template], { name: formatted.name });
+  return fill(source, params);
 }
 
 /**

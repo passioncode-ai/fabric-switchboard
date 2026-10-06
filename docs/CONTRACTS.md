@@ -218,13 +218,21 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
 
 - **Trigger:** a chain applies (SB-71: the workflow's, else its executor account's project pool,
   else the machine's — none set, nothing happens), and the executor of an open workflow without a
-  waiting handoff has a recent limit (`LimitState::limited_ids`): its `accountRef` when Switchboard
-  holds that account, else the account the ordinary CLI of that provider is signed in to.
+  waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
+  executor's `accountRef`, only that account decides (one Switchboard does not hold decides
+  nothing). When it names none, the executor is taken to be the ordinary CLI of its provider — but
+  only while no session Switchboard launched for that provider is running
+  (`launch::launched_session_running`: an isolated home of one of its accounts or a managed home
+  that is not idle), since such a session could be the executor on a healthy account (2026-10-07).
 - **Cadence:** at most one `project-observatory full workflow list --status open --json` a minute,
-  only while a chain exists and some account is limited; at most 4 workflows a pass; a workflow
-  handed over or tried is left alone 15 minutes.
+  only while a chain exists and some account is limited; a scan that finds nothing to hand over
+  (or cannot read the engine) waits 5 minutes (LC-08); at most 4 workflows a pass; a workflow
+  handed over or tried is left alone 15 minutes. Each engine read runs off the async workers
+  (`spawn_blocking`) with a 15-second deadline (a person's `switchboard continue` waits a minute);
+  at the deadline the engine's whole process group is killed (LC-02).
 - **Hand-over:** the chain in order; each step resolves to a usable account (enabled, not the
-  executor's, not limited, not needing a new sign-in; a pinned one only if usable; else the
+  executor's, not limited, not needing a new sign-in, not another saved row of the executor's or
+  a limited account's login (SB-62 rows share one limit); a pinned one only if usable; else the
   provider's least-used); the hand-over is `Operation::Continue` in `isolated` mode in the first of
   the workflow's checkouts that exists here — every refusal of `switchboard continue` applies, and
   the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the

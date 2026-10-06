@@ -51,6 +51,10 @@ pub const DOWNLOAD_FAILED: &str =
 pub const SIGNATURE_FAILED: &str = "The downloaded update did not pass its signature check and was discarded. Switchboard tries again within the hour.";
 pub const INSTALL_FAILED: &str =
     "Could not install the update. Switchboard tries again within the hour.";
+/// The bundle swap outlived its deadline. Its thread may still be writing, so nothing is retried
+/// until the app restarts — the text says so instead of promising a retry within the hour.
+pub const INSTALL_STALLED: &str =
+    "Installing the update did not finish. Quit and reopen Switchboard to try again.";
 pub const NOT_READY: &str = "No update is ready to install yet.";
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const PERMISSION_REFUSED: &str = "The update needs an administrator password to replace Switchboard in this folder. It was not installed.";
@@ -132,6 +136,12 @@ impl Phase {
 struct Ready {
     update: Update,
     bytes: Option<Vec<u8>>,
+}
+
+impl Ready {
+    fn waits_for_quit(&self) -> bool {
+        self.bytes.is_some()
+    }
 }
 
 /// "Restart to update" was pressed: the exit path installs (Windows) and relaunches.
@@ -234,8 +244,30 @@ impl Updates {
         );
         if enabled {
             self.wake.notify_one();
+        } else {
+            self.drop_pending_install();
         }
         Ok(self.status())
+    }
+
+    /// Switched off (LC-16): a downloaded Windows installer waiting for the quit is discarded, so
+    /// turning updates off also stops the install. On macOS the verified version is already in
+    /// the bundle and starts at the next launch, as it would have.
+    fn drop_pending_install(&self) {
+        let mut inner = self.lock();
+        if inner.ready.as_ref().is_some_and(Ready::waits_for_quit) {
+            inner.ready = None;
+            inner.version = None;
+            inner.phase = Phase::Idle;
+        }
+    }
+
+    /// A downloaded installer waits for the quit (Windows).
+    pub fn has_pending_install(&self) -> bool {
+        self.lock()
+            .ready
+            .as_ref()
+            .is_some_and(Ready::waits_for_quit)
     }
 
     pub fn note_signal(&self) {
@@ -316,7 +348,7 @@ async fn check_once(app: &AppHandle) -> Phase {
             match message {
                 SIGNATURE_FAILED => "signature_failed",
                 DOWNLOAD_FAILED => "download_failed",
-                INSTALL_FAILED => "install_failed",
+                INSTALL_FAILED | INSTALL_STALLED => "install_failed",
                 _ => "check_failed",
             }
         }
@@ -384,8 +416,10 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
                 }
             };
             event("update_install", &[("outcome", Field::Code(outcome))]);
-            if outcome != "installed" {
-                return Err(INSTALL_FAILED);
+            match outcome {
+                "installed" => {}
+                "timeout" => return Err(INSTALL_STALLED),
+                _ => return Err(INSTALL_FAILED),
             }
             return Ok(Some(Ready {
                 update,
@@ -530,6 +564,8 @@ pub fn finish(app: &AppHandle) {
             }) => again,
             Some(Restart { .. }) => update.restart_after_install(true),
             None if signal => return,
+            // An ordinary quit installs only while updates are on (LC-16).
+            None if !state.is_enabled() => return,
             None => update.restart_after_install(false),
         };
         event("update_install", &[("outcome", Field::Code("started"))]);
