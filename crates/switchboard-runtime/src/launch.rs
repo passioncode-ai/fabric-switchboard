@@ -22,6 +22,8 @@ pub struct Login {
     pub label: String,
     pub pool: String,
     pub saved: Option<switchboard_core::Account>,
+    /// The signed-in identity was already saved: the sign-in updated it in place (SB-62).
+    pub signed_in_again: bool,
     home: PathBuf,
 }
 const CONFLICTS: &[&str] = &[
@@ -511,6 +513,7 @@ pub fn begin_login(
         label,
         pool,
         saved: None,
+        signed_in_again: false,
         home,
     })
 }
@@ -522,6 +525,7 @@ pub(crate) fn fixture_login(home: PathBuf, saved: switchboard_core::Account) -> 
         label: saved.label.clone(),
         pool: saved.pool.clone(),
         saved: Some(saved),
+        signed_in_again: false,
         home,
     }
 }
@@ -1400,6 +1404,7 @@ mod tests {
             label: "Synthetic account".into(),
             pool: "default".into(),
             saved: None,
+            signed_in_again: false,
             home,
         };
         clean_login(&login).unwrap();
@@ -1568,6 +1573,7 @@ mod tests {
             label: "Synthetic".into(),
             pool: "default".into(),
             saved: None,
+            signed_in_again: false,
             home: home.clone(),
         };
         assert!(cancel_login(&login).is_err());
