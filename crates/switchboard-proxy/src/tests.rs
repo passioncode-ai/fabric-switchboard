@@ -977,6 +977,16 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
             get(|| async { StatusCode::UNAUTHORIZED }),
         )
         .route(
+            "/broken/api/oauth/usage",
+            get(|| async {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    "upstream detail that must not leak",
+                )
+            }),
+        )
+        .route("/garbage/api/oauth/usage", get(|| async { "not json" }))
+        .route(
             "/ok/api/oauth/usage",
             get(|| async {
                 axum::Json(serde_json::json!({"five_hour":{"utilization":42.0,"resets_at":null}}))
@@ -1018,6 +1028,21 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
     assert_eq!(rejected.message, REJECTED);
     assert_eq!(rejected.rate_limited, None);
     assert_eq!(probe("ok").await.unwrap().used_percent, 42.0);
+    // The operations log's code for each way a check fails (LC-12): fixed, never the body.
+    assert_eq!(probe("limited").await.unwrap_err().kind(), "rate_limited");
+    assert_eq!(rejected.kind(), "rejected");
+    assert_eq!(probe("broken").await.unwrap_err().kind(), "http_error");
+    assert_eq!(probe("garbage").await.unwrap_err().kind(), "unsupported");
+    let unreachable = probe_usage_from(
+        store.clone(),
+        a.id.clone(),
+        ("http://127.0.0.1:9", "http://127.0.0.1:9"),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(unreachable.kind(), "unreachable");
+    assert_eq!(ProbeFailure::from("Account not found.").kind(), "other");
 }
 
 /// RFC 9110 §10.2.3 and §5.6.7: delay-seconds and the three HTTP-date forms, measured against

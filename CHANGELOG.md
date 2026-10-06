@@ -8,6 +8,46 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.5 — 2026-10-06
+
+The tag `v0.6.4` was never published; 0.6.5 carries its changes (below) and this fix. If you run
+0.6.1 or 0.6.2, this version arrives on its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
+### Switching accounts
+
+- **Switch works again when Claude Code's sign-in and settings disagree.** After an interrupted
+  switch or a half-finished `/login`, Claude Code's settings can name one account while it is
+  signed in to another one you saved in Switchboard. Every switch then stopped with *The Claude
+  Code sign-in does not match the account named in its settings*. Now Switchboard asks Anthropic
+  whose sign-in it is, keeps it under that account and switches.
+- Switchboard trusts Anthropic's answer over its own saved copies. A copy saved under the wrong
+  account no longer blocks a switch, and it can no longer overwrite another account's sign-in:
+  when Anthropic cannot be asked, the switch stops with *Switchboard could not confirm which
+  account Claude Code is signed in to* and changes nothing.
+
+### Agents and MCP
+
+- `switchboard mcp --read-only` no longer asks the provider when an agent sets `refresh: true`
+  on `switchboard_usage`: it answers with the stored observation and says so. Before, a
+  read-only server could still run a quota check, store its answer and renew a sign-in.
+- The plugin's tool reference now gives the real freshness limit without a rotation policy:
+  900 seconds, not 300.
+
+### Diagnostics
+
+- The log (`~/Library/Logs/Fabric Switchboard/switchboard.log`) records why a background quota
+  check failed, as a short code such as `unreachable` or `rejected`. It never records the
+  provider's reply or a token.
+
+### Agent catalog
+
+- Catalog notes for ZCode, Kimi Code, Hermes and OpenClaw were checked against their sources:
+  ZCode gained a ready config snippet, and OpenClaw can read the key from an environment
+  variable.
+
 ## 0.6.4 — 2026-10-05
 
 The tag `v0.6.3` was never published: a test of this change failed on Windows before the

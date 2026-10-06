@@ -137,7 +137,7 @@ async fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Owner, Vec<String>)
 
 #[tokio::test(flavor = "multi_thread")]
 async fn handshake_lists_tools_and_rejects_malformed_messages() {
-    let (data, projects, _owner, _) = fixture().await;
+    let (data, projects, _owner, ids) = fixture().await;
     let mut agent = Agent::start(data.path(), projects.path(), &[], false);
     let init = agent.request("initialize", json!({"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"fixture","version":"0"}}));
     assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
@@ -201,6 +201,18 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         )["error"]["code"],
         -32602
     );
+    // A read-only server never asks the provider: `refresh` shows the stored observation and
+    // says why, so no quota request, renewal or write happens on its behalf.
+    let (error, usage) = reader.tool(
+        "switchboard_usage",
+        json!({"account_id": ids[0], "refresh": true}),
+    );
+    assert!(!error, "{usage}");
+    assert!(
+        usage["note"].as_str().unwrap().contains("read-only"),
+        "{usage}"
+    );
+    assert_eq!(usage["accounts"][0]["known"], false);
 }
 
 #[tokio::test(flavor = "multi_thread")]

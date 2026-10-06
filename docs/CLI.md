@@ -108,7 +108,7 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the four read tools
+switchboard mcp --read-only   # only the four read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 

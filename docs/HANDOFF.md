@@ -1,3 +1,86 @@
+# Release 0.6.5 — the native switch no longer sticks on a misfiled sign-in (2026-10-06)
+
+**What this is.** The night sessions of 2026-10-05/06 left an uncommitted attribution rework
+for the bug the operator hit in Accounts (*The Claude Code sign-in does not match the account
+named in its settings* on every switch). This run reviewed it, fixed what it found, and
+released it as 0.6.5 (SB-59). `v0.6.4` was tagged but never published (its macOS job waited on
+the Actions budget); its run 37351269626 was cancelled and 0.6.5 carries its changes.
+
+**The bug.** A stored copy holding the live token under another account (an interrupted switch
+or import) outranked the provider's answer, and `learn_live_owner` never asked the provider
+once a copy said "foreign" — so the switch was refused for good. Now: the cached
+`/api/oauth/profile` answer decides first (`refresh::attribution`), the provider is asked in that
+case too, one token held by copies of two different accounts names nobody, and a token the
+provider names as another **saved** account's is filed under that account while the switch goes
+on (`refresh::owner_to_file`, `replace_native`; rows keep their own identity, `Some(owner)`).
+
+**Found and fixed in review (this run).**
+- *Data loss in the rework as left:* with the provider unreachable, a single stored copy was
+  enough to move the live token into another account — and that copy may be the misfiled one,
+  so the other account's real sign-in in its other pools was overwritten. Rerouting now needs
+  the provider's word; otherwise `UNCONFIRMED_LIVE` and nothing is written
+  (`a_stored_copy_alone_never_moves_the_live_token_to_another_account`, proven red without the
+  guard). Attribution is computed once per switch instead of three times.
+- *`usage_check` log event:* it classified failures by copies of the proxy's message strings
+  and logged the commonest failure (a non-2xx answer) as `other`. The messages are constants in
+  `switchboard-proxy` now and `ProbeFailure::kind()` owns the codes (adds `http_error`);
+  `usage_checks_report_the_providers_wait_and_never_its_body` asserts them. OPERATIONS lists it.
+- *SB-60:* `switchboard mcp --read-only` ran a provider check for `switchboard_usage` with
+  `refresh: true`; it now answers with the stored observation and a note.
+- The plugin's tool reference said 300 s for the default freshness limit; the code is 900 s
+  (`UNPOLICED_MAX_AGE_SECONDS`).
+- Docs moved with the code: ACCOUNTS-AND-ROTATION, CONTRACTS, OPERATIONS, SCN alt paths, CLI.md,
+  the plugin's tools.md, CHANGELOG 0.6.5. The audits' other findings, of which only summaries
+  survived the night session, are now board rows SB-61 (`--data-dir` backups), SB-62 (banner
+  re-sign-in renames/duplicates), SB-63 (docs drift).
+
+**Install note (from the night session).** A plain `npm run app:build` without
+`SWITCHBOARD_SIGNING_TEAM` compiles `Build::Development` and reads the `…development` Keychain
+namespace, so every quota check fails on a release vault (docs/KEYCHAIN.md decision 2). The
+operator's machine runs such a local engineering build of this tree **with** the team
+compiled in, reporting 0.6.4; auto-update replaces it with 0.6.5.
+
+**Checks run:** `./scripts/check.sh` exit 0; `release_preflight.py --tag v0.6.5 --publish true
+--windows-signing false` ok. Release run and publication: see the release record entry below
+once it lands (`gh release view v0.6.5`).
+
+**Exact next task:** confirm the installed app updated itself to 0.6.5 (log `update_install
+installed`) and that Switch works in Accounts on the operator's machine; then SB-62, SB-61,
+SB-07, SB-16, SB-52 desktop entry and the `switchboard_continue` MCP tool. **Operator:** SB-15,
+SB-02, SB-03, uninstall acceptance, the live third-party agent run (API-key account) — it also
+confirms the Kimi `/login` answer and the ZCode snippet from the agents audit below.
+
+---
+
+# Agents audit — Kimi Code, ZCode, Hermes, OpenClaw gaps closed from sources (2026-10-06)
+
+Asked whether Switchboard is adapted for Kimi Code CLI (against the live
+[kimi.com/code/docs](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html)),
+ZCode, Hermes, OpenClaw and the rest. Answer: yes — all four ship in the 30-agent catalog since
+0.6.1 (SB-56), at the proxy level with `agents connect`/`launch`, the MCP tools and the Agents
+panel; the Kimi entry was re-checked against the live docs today (install script, `kimi` binary,
+`-p`, `~/.kimi-code/`, `mcp.json` all still match). Four research gaps are now closed from the
+pinned sources, in `catalog/agents.json` + [research](research/agents-2026-10-05.md) +
+AGENT-SUPPORT.md (regenerated): **ZCode** gained its `config_snippet` — the personal-rules shape
+`{providerRules: [{providerId, config{group standard-personal, access{api-key},
+api{anthropic-messages, baseUrl}, personalModelIds}}]}` per `personalProviderConfigRulesSchema`
+(rule-data-schema.ts added to sources); **Kimi Code** — `/login` manages only the OAuth managed
+account, a config.toml provider is an independent API source (providers.md#L20-L42), so no
+`/login` is needed with the snippet, live confirmation pending; **Hermes** — the pinned adapter
+never reads `ANTHROPIC_BASE_URL` (config only); **OpenClaw** — `apiKey` accepts an env-var name
+as a SecretRef env marker, so the key can stay out of the file. Live acceptance with real agents
+still needs an operator API-key account (below). Gate: `agent_catalog` tests, clippy and every
+docs/artifacts check green; the full `check.sh` was then red only on
+`owner_tests::a_foreign_lineage_under_this_name…`, from the attribution rework in the same
+working tree — finished and released in 0.6.5 (above).
+
+**Exact next task:** unchanged from 0.6.2 — release 0.6.3+ follow-ups (SB-07, SB-16, SB-52
+desktop entry and MCP tool); the attribution rework owns its red test. **Operator:** the live
+third-party agent run (API-key account) can now also confirm the Kimi `/login` answer and the
+ZCode snippet on disk; SB-15, SB-02, SB-03, uninstall acceptance as before.
+
+---
+
 # Released — Switchboard v0.6.2, the first automatic update (2026-10-05)
 
 [Release record](evidence/release-0.5.md#release-v062-2026-10-05--the-first-automatic-update).

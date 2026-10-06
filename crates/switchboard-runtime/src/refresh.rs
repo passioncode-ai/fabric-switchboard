@@ -116,7 +116,27 @@ impl RefreshState {
                     .ok()
                     .and_then(|c| c.refresh_token)
                 {
+                    // One token held by copies of two different accounts names nobody: an
+                    // interrupted switch filed it under the wrong one, and the first copy read
+                    // must not decide whose it is.
+                    let who = account
+                        .external_identity
+                        .as_ref()
+                        .and_then(|i| i.account_id.clone());
                     map.entry(fingerprint(&held))
+                        .and_modify(|seen: &mut Option<String>| {
+                            let other = seen.as_ref().and_then(|id| {
+                                snapshot
+                                    .accounts
+                                    .iter()
+                                    .find(|a| &a.id == id)
+                                    .and_then(|a| a.external_identity.as_ref())
+                                    .and_then(|i| i.account_id.clone())
+                            });
+                            if other != who {
+                                *seen = None;
+                            }
+                        })
                         .or_insert_with(|| Some(account.id.clone()));
                 }
             }
@@ -254,6 +274,13 @@ impl RefreshState {
             .lock()
             .ok()
             .and_then(|o| o.get(&fingerprint(token)).cloned())
+    }
+    /// What `/api/oauth/profile` would have answered for `token`, for tests that never reach it.
+    #[cfg(test)]
+    pub(crate) fn learn_owner(&self, token: &str, owner: ExternalIdentity) {
+        if let Ok(mut owners) = self.owners.lock() {
+            owners.insert(fingerprint(token), owner);
+        }
     }
     /// Records the identity the ordinary Claude Code uses now (from any observation).
     pub(crate) fn note_active(&self, identity: &ExternalIdentity) {
@@ -1020,46 +1047,75 @@ pub(crate) enum Lineage {
 }
 pub(crate) const FOREIGN_LIVE: &str = "The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.";
 
-/// Decides from stored copies and the cached provider answer; never touches the network.
+/// Whose the live token is, as far as Switchboard can tell without the network.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Attribution {
+    /// The identity named in Claude Code's settings.
+    Own,
+    /// Another account: the provider named it, or a stored copy of it holds the token. None when
+    /// the holder's identity is not recorded.
+    Other(Option<ExternalIdentity>),
+    /// Nothing known yet; the provider could not be asked.
+    Unresolved,
+}
+/// The provider's answer (`/api/oauth/profile`, asked by `learn_live_owner`) decides first: it
+/// is about this very token, while a stored copy may hold a token an interrupted switch filed
+/// under the wrong account. A stored copy decides only when the provider has not answered.
+/// Never touches the network.
+pub(crate) fn attribution(
+    store: &Store,
+    state: &RefreshState,
+    identity: &ExternalIdentity,
+    credential: &Credential,
+) -> Attribution {
+    let Some(token) = credential.refresh_token.as_deref() else {
+        return Attribution::Unresolved;
+    };
+    if let Some(owner) = state.owner(token) {
+        // The same login in another organization is another account.
+        return if owner.account_id == identity.account_id
+            && (owner.organization_id.is_none()
+                || identity.organization_id.is_none()
+                || owner.organization_id == identity.organization_id)
+        {
+            Attribution::Own
+        } else {
+            Attribution::Other(Some(owner))
+        };
+    }
+    let Ok(snapshot) = store.snapshot() else {
+        return Attribution::Unresolved;
+    };
+    let Some(holder) = state.holder(store, &snapshot, token) else {
+        return Attribution::Unresolved;
+    };
+    let held_by = snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == holder)
+        .and_then(|a| a.external_identity.clone());
+    let same = held_by.as_ref().is_some_and(|o| {
+        o.account_id.is_some()
+            && o.account_id == identity.account_id
+            && o.organization_id == identity.organization_id
+    });
+    if same {
+        Attribution::Own
+    } else {
+        Attribution::Other(held_by)
+    }
+}
+/// Decides from the cached provider answer and stored copies; never touches the network.
 pub(crate) fn lineage(
     store: &Store,
     state: &RefreshState,
     identity: &ExternalIdentity,
     credential: &Credential,
 ) -> Lineage {
-    let Some(token) = credential.refresh_token.as_deref() else {
-        return Lineage::Unresolved;
-    };
-    let Ok(snapshot) = store.snapshot() else {
-        return Lineage::Unresolved;
-    };
-    let same = |other: Option<&ExternalIdentity>| {
-        other.is_some_and(|o| {
-            o.account_id.is_some()
-                && o.account_id == identity.account_id
-                && o.organization_id == identity.organization_id
-        })
-    };
-    if let Some(holder) = state.holder(store, &snapshot, token) {
-        let account = snapshot.accounts.iter().find(|a| a.id == holder);
-        return if same(account.and_then(|a| a.external_identity.as_ref())) {
-            Lineage::Own
-        } else {
-            Lineage::Foreign
-        };
-    }
-    match state.owner(token) {
-        // The same login in another organization is another account.
-        Some(owner)
-            if owner.account_id == identity.account_id
-                && (owner.organization_id.is_none()
-                    || identity.organization_id.is_none()
-                    || owner.organization_id == identity.organization_id) =>
-        {
-            Lineage::Own
-        }
-        Some(_) => Lineage::Foreign,
-        None => Lineage::Unresolved,
+    match attribution(store, state, identity, credential) {
+        Attribution::Own => Lineage::Own,
+        Attribution::Other(_) => Lineage::Foreign,
+        Attribution::Unresolved => Lineage::Unresolved,
     }
 }
 /// After `invalid_client` no grant is tried for an hour; one grant then tests the client again.
@@ -1082,6 +1138,45 @@ pub(crate) fn filable(
     }
 }
 
+/// The identity under which a switch files the live Claude Code token before replacing it: the
+/// one Claude Code's settings name when the token is its own, the saved account it belongs to
+/// otherwise. Refused when nothing attributes it, or when it belongs to an account Switchboard
+/// does not hold (writing over it would lose that sign-in for good). Filing it under another
+/// account than the settings name needs the provider's word: a stored copy alone may be the
+/// misfiled one, and trusting it would overwrite that account's real sign-in in its other pools.
+pub(crate) fn owner_to_file(
+    store: &Store,
+    state: &RefreshState,
+    identity: &ExternalIdentity,
+    credential: &Credential,
+) -> Result<ExternalIdentity, String> {
+    let confirmed = credential
+        .refresh_token
+        .as_deref()
+        .is_some_and(|token| state.owner(token).is_some());
+    match attribution(store, state, identity, credential) {
+        Attribution::Own => Ok(identity.clone()),
+        Attribution::Other(Some(_)) if !confirmed => Err(UNCONFIRMED_LIVE.into()),
+        // The saved copy's own identity, so its organization is the recorded one.
+        Attribution::Other(Some(other)) if other.account_id.is_some() => store
+            .snapshot()
+            .ok()
+            .and_then(|s| {
+                s.accounts
+                    .into_iter()
+                    .filter(|a| a.provider == Provider::Claude)
+                    .filter_map(|a| a.external_identity)
+                    .find(|i| {
+                        i.account_id == other.account_id
+                            && (i.organization_id == other.organization_id
+                                || other.organization_id.is_none())
+                    })
+            })
+            .ok_or_else(|| FOREIGN_LIVE.into()),
+        Attribution::Other(_) => Err(FOREIGN_LIVE.into()),
+        Attribution::Unresolved => Err(UNCONFIRMED_LIVE.into()),
+    }
+}
 /// Asks `/api/oauth/profile` once per unknown lineage of the live Claude Code sign-in, outside
 /// every lock (5-second timeout). Silent on failure: the answer stays Unresolved.
 pub(crate) async fn learn_live_owner(store: &Store, native: NativeSources, state: &RefreshState) {
@@ -1091,7 +1186,11 @@ pub(crate) async fn learn_live_owner(store: &Store, native: NativeSources, state
     let Some(token) = live.credential.refresh_token.clone() else {
         return;
     };
-    if lineage(store, state, &live.identity, &live.credential) != Lineage::Unresolved {
+    // A stored copy calling the token another account's may be a misfiled copy: the provider
+    // is asked then too, and its answer decides (`attribution`).
+    if state.owner(&token).is_some()
+        || lineage(store, state, &live.identity, &live.credential) == Lineage::Own
+    {
         return;
     }
     let print = fingerprint(&token);
