@@ -121,7 +121,6 @@ export const RU: Record<string, string> = {
   "This backup is damaged and cannot be restored.": "Эта резервная копия повреждена, её нельзя восстановить.",
   "Backups are written by the desktop app or switchboard serve.": "Резервные копии создаёт приложение или switchboard serve.",
   "Backups are restored by the desktop app or switchboard serve.": "Резервные копии восстанавливает приложение или switchboard serve.",
-  "The backup folder is unavailable.": "Папка резервных копий недоступна.",
   "Backups are not available on this platform.": "Резервные копии недоступны на этой платформе.",
   "Backup storage unavailable. Check the backup folder and Keychain access.": "Хранилище резервных копий недоступно. Проверьте папку резервных копий и доступ к Связке ключей.",
   "This account was saved by an earlier Switchboard. Open the Fabric Switchboard app once so it can move the account to shared storage, then retry.": "Этот аккаунт сохранён более ранней версией Switchboard. Один раз откройте приложение Fabric Switchboard, чтобы оно перенесло аккаунт в общее хранилище, затем повторите.",
@@ -776,4 +775,5 @@ export const RU: Record<string, string> = {
   "Update check finished.": "Проверка обновлений завершена.",
   "Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.": "Версия {version} готова. Она запустится сама, когда Switchboard простаивает в фоне или откроется снова, — или перезапустите сейчас.",
   "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.": "Перед установкой этой версии человеку нужно выполнить шаг — что сделать, написано в примечаниях к выпуску. Switchboard остаётся на текущей версии.",
+  "Backups belong to the default data folder; this data folder has none.": "Резервные копии относятся к папке данных по умолчанию; у этой папки данных их нет.",
 };

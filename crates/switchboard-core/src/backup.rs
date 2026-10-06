@@ -916,7 +916,10 @@ mod tests {
             restore(&fresh, &backups, &info.file, &keys).unwrap_err(),
             FOREIGN
         );
-        assert!(restore(&fresh, &backups, "../escape.json", &keys).is_err());
+        assert_eq!(
+            restore(&fresh, &backups, "../accounts.json", &keys).unwrap_err(),
+            "Choose a backup from the backup folder."
+        );
     }
     #[test]
     fn only_the_newest_ten_are_kept_and_an_empty_store_writes_nothing() {
