@@ -209,3 +209,29 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
 - A chain only records the operator's order: nothing reads it to act yet. The automatic fallback that
   walks it is SB-73; spending ceilings for paid keys are SB-72.
+
+## Automatic fallback, phase 1 (SB-73, 2026-10-06)
+
+Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: automatic). Code:
+`crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
+`continuation::{list_open, checkouts}`, called by the monitor after rotation.
+
+- **Trigger:** a chain applies (SB-71: the workflow's, else its executor account's project pool,
+  else the machine's — none set, nothing happens), and the executor of an open workflow without a
+  waiting handoff has a recent limit (`LimitState::limited_ids`): its `accountRef` when Switchboard
+  holds that account, else the account the ordinary CLI of that provider is signed in to.
+- **Cadence:** at most one `project-observatory full workflow list --status open --json` a minute,
+  only while a chain exists and some account is limited; at most 4 workflows a pass; a workflow
+  handed over or tried is left alone 15 minutes.
+- **Hand-over:** the chain in order; each step resolves to a usable account (enabled, not the
+  executor's, not limited, not needing a new sign-in; a pinned one only if usable; else the
+  provider's least-used); the hand-over is `Operation::Continue` in `isolated` mode in the first of
+  the workflow's checkouts that exists here — every refusal of `switchboard continue` applies, and
+  the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
+  chain; a failed launch after an offer stops (the offer lapses).
+- **Phase 1** runs Claude Code and Codex. Other agents are skipped (`agent_not_automatic_yet`)
+  until their launch recipes and paid-key ceilings exist (SB-72, SB-73 phase 2).
+- **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
+  `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
+  `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
+  pack or the prompt.

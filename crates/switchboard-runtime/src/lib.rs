@@ -8,6 +8,7 @@ pub mod control;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
+mod fallback;
 pub mod launch;
 mod limits;
 mod monitor;
@@ -271,6 +272,8 @@ pub struct Runtime {
     native: NativeSources,
     refresh: refresh::RefreshState,
     limits: limits::LimitState,
+    /// Automatic fallback along the operator's chains (SB-73).
+    fallback: fallback::FallbackState,
     /// Provider not-before per account, and one quota request per account at a time (SB-39).
     usage_gate: usage_gate::UsageGate,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
@@ -336,6 +339,7 @@ impl Runtime {
             native,
             refresh,
             limits,
+            fallback: fallback::FallbackState::default(),
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -708,7 +712,7 @@ impl Runtime {
             cache.entry = None;
         }
     }
-    fn current_accounts(&self) -> Result<Value, String> {
+    pub(crate) fn current_accounts(&self) -> Result<Value, String> {
         let now = monitor::now();
         let generation = {
             let cache = self

@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-73 phase 1 — automatic fallback along the chain; 0.6.7 published (2026-10-06)
+
+- **0.6.7 published** 2026-10-06T14:05:33Z (run 37473394537), downloaded set verified — release
+  record in release-0.5.md; README 0.6.7; the brand agent has the version and SB-70 receipts. The
+  site's download route follows within its 15-minute cron.
+- **SB-73 phase 1** (branch `feat/sb-73-automatic-fallback`, see its PR): when an open workflow's
+  executor hits its limit and a chain applies, the monitor hands it to the next usable Claude Code
+  or Codex account through `Operation::Continue` (isolated, in the workflow's checkout). Once a
+  minute at most, only while a chain is set and something is limited; 15-minute retry window.
+  Tests with a stand-in engine and a real limit marker. Not observed live.
+- **SB-72** waits on project-observatory-dashboard#175 (OpenRouter door: daily/weekly ceilings, and
+  a fix — moving a ceiling turned daily keys monthly), handed to that repository's session.
+
+**Exact next task:** release 0.6.8 with SB-71 and SB-73 phase 1 (operator's go-ahead), then the
+live acceptance (a real limit → Codex takes over); SB-72 once #175 ships in an engine release;
+SB-73 phase 2 (Kimi Code / Hermes recipes); the SB-71 app screen.
+
+---
+
 # Release 0.6.7; Inbox and Dashboards updated; SB-71 chains built (2026-10-06)
 
 - **0.6.7** (SB-70, Claude Code ↔ Codex continuation) tagged from `7ce4cf1` (#90); release run

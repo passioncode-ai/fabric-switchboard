@@ -15,8 +15,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   or a single task; the narrowest one applies, and none applies until you set one. A ready-made
   order: Claude Code → Codex → Kimi Code → Hermes. An agent can be pinned to an account or to a
   paid key named in Project Observatory's vault; other agents never get a Claude or ChatGPT
-  subscription. The chain is recorded only for now: the automatic switch that follows it comes
-  next.
+  subscription.
+- **When an agent's account runs out and a chain is set, its work moves on by itself.** For a task
+  recorded as a Project Observatory workflow, Switchboard hands it to the next agent of the chain
+  that has an account with quota — Claude Code or Codex for now — and opens that session in the
+  task's folder, starting from the last checkpoint. Without a chain nothing happens. Kimi Code and
+  Hermes in a chain are skipped until paid-key ceilings are in place.
 
 ## 0.6.7 — 2026-10-06
 

@@ -792,3 +792,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `chains::tests` (5, switchboard-core), `owner_tests::fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve`, `fallback_chains_are_set_listed_and_cleared_from_the_cli`, `handshake_lists_tools_and_rejects_malformed_messages` (MCP chain tools).
 **Product:** unobserved
 **Traces:** SB-71, CONTRACTS → Fallback chains, [XA-01](../packets/cross-agent-continuation.md)
+
+## SCN-040 — Work moves on by itself when an agent's accounts run out
+
+**Persona:** P-01
+**Goal:** A long task keeps going when its agent hits its limit and no other account of that provider is ready — the next agent of the operator's chain takes it over from the last checkpoint without the person doing anything.
+**Preconditions:** a fallback chain set (SCN-039); the task recorded as an open Project Observatory workflow with its checkout on this machine; the desktop app or `switchboard serve` running; every key the workflow declares in the Observatory vault.
+**Entry point:** none — the background monitor (SB-73). The person sees a Terminal window open with the new session.
+**Steps:**
+1. The executor hits its limit (Claude Code writes a limit marker, or a managed request is refused) → within a minute Switchboard reads the open workflows and finds it.
+2. Switchboard walks the chain: the first agent with a usable account (not the executor's, not limited, not needing a new sign-in) gets the workflow, offered with reason `limit` once the executor has been silent for two minutes.
+3. Terminal opens that agent's session in the workflow's checkout → it accepts the handoff and continues from the checkpoint (SCN-038).
+**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code or Hermes in the chain → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes.
+**Expected result:** the task continues on another agent from where it stopped; the old session is left alone and, if it writes again, Observatory refuses it (`LeaseLost`).
+**UI elements:** the launched Terminal session; log event `fallback` and the store event `fallback` (Activity).
+**States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account).
+**Errors & recovery:** every outcome is logged with a fixed code; a lapsed offer is retried after the window or by hand with `switchboard continue`.
+**Status:** draft
+**Meaning:** XA-01 decision D-1 (automatic), operator 2026-10-06.
+**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`).
+**Product:** unobserved
+**Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md)
