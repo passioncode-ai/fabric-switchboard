@@ -422,6 +422,20 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
 
+### Release v0.6.7 (2026-10-06) — continuing a workflow across providers
+
+0.6.7: SB-70 — `switchboard continue` hands an Observatory workflow from Claude Code to Codex, or
+back, with its checkpoint and constraints (XA-01 step 1, N-018 step 2). Not observed live yet.
+
+| Step | Result |
+|---|---|
+| Source | `main` `7ce4cf1` ([#90](https://github.com/passioncode-ai/fabric-switchboard/pull/90), feature [#89](https://github.com/passioncode-ai/fabric-switchboard/pull/89)), tag `v0.6.7`; `release_preflight.py --tag v0.6.7 --publish true --windows-signing false` ok; local gate exit 0 (runtime 266 passed) |
+| Release run | [37473394537](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37473394537): preflight, macos, windows, updater, publish all success; both gates approved by the agent on the operator's instruction (2026-10-06: «давай выпускай») |
+| Published | 2026-10-06T14:05:33Z, **not a prerelease**, 11 assets |
+| Downloaded set | `shasum -a 256 -c SHA256SUMS --ignore-missing` OK for the macOS zip (`b4e94161804791779704c3d2b4e667362bcce60e95525dc24b71fee829159252`), the Windows setup (`e7282b6d22f14145d0313b64f76873c42105ca63f73c619a2582a27aa40bcc53`) and `latest.json`; GPG good signature, PassionCode.ai release key; `gh attestation verify --signer-repo passioncode-ai/.github` exit 0 ×2; `spctl` → `accepted, Notarized Developer ID`; stapler validate ok; CLI `switchboard 0.6.7` |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.7`, all four platforms |
+| Site | `passioncode.ai/switchboard/download/macos` still answered `v0.6.6` right after publication (edge cache) |
+
 ### Release v0.6.6 (2026-10-06) — a repeated sign-in updates the saved account in place
 
 0.6.6: SB-62 (Try again in the sign-in banner renamed an account to its email or copied it into

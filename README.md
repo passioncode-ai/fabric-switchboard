@@ -10,7 +10,7 @@ Windows. It is Fabric's account tool and works on its own; built by
 
 ![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
 
-**Status: [v0.6.6](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.6)**,
+**Status: [v0.6.7](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.7)**,
 2026-10-06; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
 built natively, not yet Authenticode-signed). Installed copies of 0.6.1 or later update
 themselves; v0.6.3 and v0.6.4 were tagged but never published. Builds are made and signed only by the
