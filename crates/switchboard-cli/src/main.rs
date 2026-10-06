@@ -65,9 +65,10 @@ enum Command {
         #[arg(long)]
         working_directory: PathBuf,
     },
-    /// Continue an Observatory workflow whose executor ran out of its limit on another account of
-    /// the same provider: reads the workflow, offers it (reason `limit`) and launches the account's
-    /// session, which accepts the handoff itself. Requires a running desktop app or serve.
+    /// Continue an Observatory workflow whose executor ran out of its limit on another account —
+    /// of the same provider, or of the other one (Claude Code ↔ Codex) with the same context:
+    /// reads the workflow, offers it (reason `limit`) and launches the account's session, which
+    /// accepts the handoff itself. Requires a running desktop app or serve.
     Continue {
         /// The workflow id, `wf_` and 16 hex digits (`project-observatory full workflow list`).
         workflow_id: String,

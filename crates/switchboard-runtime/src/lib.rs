@@ -1294,6 +1294,7 @@ async fn execute(
                 workflow_id: workflow_id.clone(),
                 handoff_id: offer.handoff_id.clone(),
                 observatory,
+                previous_provider: plan.from_provider.clone(),
             };
             let agent_tools = launch::launch_continuation(
                 root,

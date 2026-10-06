@@ -25,7 +25,7 @@ tool `switchboard_continue` later):
 1. **Read** `project-observatory full workflow show <wf> --json`
    (`checkpoint_latest`): refuse unless the workflow is open, every declared key is `vault`
    (`unknown` and `missing` block, named), no handoff is already waiting, and the executor's
-   provider equals the account's (the same-provider skeleton; cross-provider is N-018 step 2).
+   provider equals the account's (the same-provider skeleton; cross-provider is N-018 step 2 — **built in 0.6.7 as SB-70**, [XA-01](cross-agent-continuation.md)).
    The project directory must be the workflow's git artifact checkout, or the user names it.
 2. **Offer** `project-observatory full workflow handoff <wf> --to-provider <p> --to-account
    <switchboard account id> --reason limit` — the agents' rule, no `--force`, no terminal. A

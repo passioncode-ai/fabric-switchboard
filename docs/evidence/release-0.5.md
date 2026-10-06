@@ -422,6 +422,21 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
 
+### Release v0.6.6 (2026-10-06) — a repeated sign-in updates the saved account in place
+
+0.6.6: SB-62 (Try again in the sign-in banner renamed an account to its email or copied it into
+`default`; a sign-in of a saved identity now updates every copy where it is), the constant-time
+agent key check recovered from `agent/agents-support`, corrected MCP tool descriptions.
+
+| Step | Result |
+|---|---|
+| Source | `main` `0eadf12` ([#88](https://github.com/passioncode-ai/fabric-switchboard/pull/88), fix [#87](https://github.com/passioncode-ai/fabric-switchboard/pull/87)), tag `v0.6.6`; `release_preflight.py --tag v0.6.6 --publish true --windows-signing false` ok; local gate exit 0 (runtime 263 passed) |
+| Release run | [37455297248](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37455297248): preflight, macos, windows, updater, publish all success; both gates approved by the agent on the operator's instruction (2026-10-06: «делай да») |
+| Published | 2026-10-06T11:37:21Z, **not a prerelease**, 11 assets |
+| Downloaded set | `shasum -a 256 -c SHA256SUMS --ignore-missing` OK for the macOS zip (`c98e6516fe8b711fa7beaaa67456ca8e3ea34fd27c14c7946c1303061dfc579e`), the Windows setup (`81f05630f1e026d4107da1e15367cde726aa1bf1d4d16021ebb74f7a52fbecc8`) and `latest.json`; GPG good signature, PassionCode.ai release key; `gh attestation verify -R passioncode-ai/fabric-switchboard --signer-repo passioncode-ai/.github` exit 0 ×2; `spctl` → `accepted, Notarized Developer ID`; stapler validate ok; CLI `switchboard 0.6.6` |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.6`, platforms `darwin-aarch64`, `darwin-universal`, `darwin-x86_64`, `windows-x86_64` |
+| Installed copy | not yet observed (its next six-hourly check, or *Restart to update*) |
+
 ### Release v0.6.5 (2026-10-06) — the native switch no longer sticks on a misfiled sign-in
 
 0.6.5: SB-59 (a switch refused for good when a stored copy held the live token under another

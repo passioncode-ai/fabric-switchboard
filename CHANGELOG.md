@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Continuing work on another agent
+
+- `switchboard continue` hands a workflow from Claude Code to Codex, or back, with its context:
+  the new session starts from the same checkpoint and constraints, told that the work comes from
+  another agent. Before, it accepted only an account of the same provider. A workflow left by an
+  agent Switchboard does not run itself (Hermes, Kimi Code) can be taken over the same way.
+
 ## 0.6.6 — 2026-10-06
 
 Signing in again to an account you already saved no longer renames it or copies it into another
