@@ -824,7 +824,18 @@ fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
     use std::os::unix::process::CommandExt;
     let error = std::process::Command::new(script).exec();
     let _ = error;
+    release_reservation(script);
     Err("The session could not start in this terminal.".into())
+}
+/// The script never ran, so its home's reservation would block the account for ten minutes:
+/// release it now. The script sits in the home it reserved; only a regular file is removed.
+#[cfg(unix)]
+fn release_reservation(script: &std::path::Path) {
+    if let Some(marker) = script.parent().map(|home| home.join(".launch-pending")) {
+        if std::fs::symlink_metadata(&marker).is_ok_and(|m| m.file_type().is_file()) {
+            let _ = std::fs::remove_file(marker);
+        }
+    }
 }
 #[cfg(not(unix))]
 fn run_in_place(_: &std::path::Path) -> Result<Value, String> {
@@ -1211,5 +1222,21 @@ async fn main() -> ExitCode {
             }
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod in_place_tests {
+    #[test]
+    fn a_session_that_could_not_start_releases_its_home() {
+        let home = tempfile::tempdir().unwrap();
+        let marker = home.path().join(".launch-pending");
+        std::fs::write(&marker, b"").unwrap();
+        super::release_reservation(&home.path().join("launch.command"));
+        assert!(!marker.exists());
+        // A link in its place is left alone.
+        std::os::unix::fs::symlink("/etc/hosts", &marker).unwrap();
+        super::release_reservation(&home.path().join("launch.command"));
+        assert!(std::fs::symlink_metadata(&marker).is_ok());
     }
 }

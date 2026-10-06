@@ -28,6 +28,23 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   left its staging folder behind; the error is shown instead (SB-67).
 - On Windows the app no longer says “Mac”, “menu-bar icon” or “Keychain”: it names the
   notification area and Windows' own key protection (SB-66).
+- The Windows build compiles its tests again: a test added in 0.6.9 lost its macOS-only mark,
+  which stopped the 0.6.9 Windows release job.
+- The automatic hand-over (SB-73) no longer hands work to another saved copy of the same spent
+  login, never blames the ordinary CLI's limit on a workflow whose executor is an account
+  Switchboard does not hold or may be a session Switchboard launched, waits five minutes after a
+  scan that found nothing instead of starting Project Observatory every minute, gives the engine
+  15 seconds off the monitor's thread, and kills everything the engine started when it hangs.
+- Windows: turning automatic updates off discards an installer already waiting for the quit, and
+  an ordinary quit installs nothing while updates are off.
+- An agent that is not installed ("Aider is not installed. Install it first…") is named in the
+  error instead of a generic message, in both languages.
+- A session that could not start in place releases its account at once instead of blocking it for
+  ten minutes.
+- A macOS update install that stalls says to reopen Switchboard instead of promising a retry that
+  would not come.
+- Russian: reset times, the paused countdown, the native app's start-up timeout and the estimate
+  check read correctly in Russian.
 - Interface copy matches the brand pack: “Automatic switching” everywhere (no “rotation”), “Switch”
   instead of “Native Claude activation”, “Terminal launch requested” rather than “launched”,
   “PassionCode.ai”, and the tour's first two steps describe what the buttons do (SB-66).

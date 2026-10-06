@@ -228,6 +228,16 @@ pub fn show_update(app: &AppHandle, version: &str) {
     }
 }
 
+/// Removes "Restart to update" again: the update it offered was discarded.
+pub fn hide_update(app: &AppHandle) {
+    if let Ok(mut ready) = READY.lock() {
+        *ready = None;
+    }
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, None)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 /// The window's language choice reaches the tray (L10N-01): it rebuilds the menu, keeping a
 /// ready update's item.
 pub fn set_language(app: &AppHandle, ru: bool) {

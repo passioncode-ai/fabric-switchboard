@@ -352,6 +352,18 @@ check(() => {
   assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в Work снова выполнен \(Claude Code · work\)\.$/);
   i18n.setLocale('en');
 });
+// A backend sentence with a name in it is shown, and translated by its template (L10N-04).
+const formatted = await load('../src/formatted-errors.ts');
+check(() => {
+  const text = 'Aider is not installed. Install it first, then launch it again.';
+  assert.deepEqual(formatted.matchFormatted(text), { template: '{name} is not installed. Install it first, then launch it again.', name: 'Aider' });
+  assert.equal(formatted.matchFormatted('a; rm -rf ~ is not installed. Install it first, then launch it again.'), null, 'only a plain name matches');
+  assert.equal(formatted.matchFormatted('Something else.'), null);
+  i18n.setLocale('ru');
+  assert.equal(i18n.t(text), 'Aider не установлен. Сначала установите его, затем запустите снова.');
+  i18n.setLocale('en');
+  assert.equal(i18n.t(text), text);
+});
 // The journal names the core's fixed event vocabulary in the interface language; anything else shows as recorded.
 check(() => {
   i18n.setLocale('en');

@@ -457,10 +457,11 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !countdownPaused) root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => { node.textContent = countdownText(node, Date.now() / 1000); });
   syncCountdown();
 });
-function resetDisplay(until: number, label = t('Resets')) {
-  if (resetCountdown(until, Date.now() / 1000) === 'Time unavailable') return el('span', 'usage-unknown', t('Time unavailable'));
+/** `text` words the time as one sentence per language (L10N-02), never a label joined to a date. */
+function resetDisplay(until: number, text = (when: string) => t('Resets {date}', { date: when })) {
+  if (resetCountdown(until, Date.now() / 1000) === t('Time unavailable')) return el('span', 'usage-unknown', t('Time unavailable'));
   const wrapper = el('span', 'reset-display');
-  const time = el('time', '', `${label} ${date(until)}`); time.dateTime = new Date(until * 1000).toISOString();
+  const time = el('time', '', text(date(until))); time.dateTime = new Date(until * 1000).toISOString();
   time.title = new Date(until * 1000).toLocaleString(dateLocale(), { timeZoneName: 'short' });
   const remaining = el('span', 'reset-remaining', countdownPaused ? pausedCountdowns.get(`${until}|long`) ?? t('Countdown paused') : resetCountdown(until, Date.now() / 1000));
   remaining.dataset.countdown = String(until);
@@ -673,7 +674,7 @@ const CARD_STATE: Record<CardState, string> = { available: t('Available'), low: 
 /** "{lead} 2h 5m · 5 Oct, 21:03": a compact wait that the minute timer keeps current. */
 function compactWait(lead: string, until: number, estimated = false) {
   const wrapper = el('span', 'usage-wait');
-  const remaining = el('span', 'usage-countdown', countdownPaused ? pausedCountdowns.get(`${until}|compact`) ?? 'paused' : compactCountdown(until, Date.now() / 1000));
+  const remaining = el('span', 'usage-countdown', countdownPaused ? pausedCountdowns.get(`${until}|compact`) ?? t('paused') : compactCountdown(until, Date.now() / 1000));
   remaining.dataset.countdown = String(until); remaining.dataset.format = 'compact'; remaining.setAttribute('aria-live', 'off');
   const time = el('time', '', date(until)); time.dateTime = new Date(until * 1000).toISOString();
   time.title = new Date(until * 1000).toLocaleString(dateLocale(), { timeZoneName: 'short' });
@@ -701,7 +702,7 @@ function usageCell(account: Account) {
   const sub = el('span', `usage-sub is-${state}`);
   const order = quotaOrder(account, context);
   if (state === 'blocked') {
-    const estimated = !!limit && order.until === limit.until && limitLabel(limit) !== 'Limit resets';
+    const estimated = !!limit && order.until === limit.until && limitLabel(limit) !== t('Limit resets');
     if (order.until) sub.append(compactWait(estimated ? t('Retry in') : t('Back in'), order.until, estimated)); else sub.append(t('Reset time unavailable'));
     if (limit) sub.title = limit.source === 'managed' ? t('A managed request was refused with a rate limit.') : t('Claude Code reported a usage or spend limit. The retry hold may be estimated.');
   } else if (state === 'failed') {
@@ -732,7 +733,7 @@ function quotaDetails(account: Account) {
   const limit = accountLimit(account);
   if (limit) {
     // The hold is not a quota reset; the windows below keep their own reset times.
-    const row = el('div', 'quota-window'); row.append(el('strong', '', limit.source === 'managed' ? t('Limit reached · a managed request was refused') : t('Limit reached · reported by Claude Code')), resetDisplay(limit.until, limitLabel(limit)));
+    const row = el('div', 'quota-window'); row.append(el('strong', '', limit.source === 'managed' ? t('Limit reached · a managed request was refused') : t('Limit reached · reported by Claude Code')), resetDisplay(limit.until, (when) => (limitLabel(limit) === t('Limit resets') ? t('Limit resets {date}', { date: when }) : t('Retry hold until {date}', { date: when }))));
     details.append(row);
   }
   for (const window of windows) {

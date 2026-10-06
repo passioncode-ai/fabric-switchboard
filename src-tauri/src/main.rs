@@ -454,8 +454,19 @@ fn update_status(updates: State<'_, updates::Updates>) -> Value {
     updates.status()
 }
 #[tauri::command]
-fn set_auto_update(updates: State<'_, updates::Updates>, enabled: bool) -> Result<Value, String> {
-    updates.set(enabled)
+fn set_auto_update(
+    app: tauri::AppHandle,
+    updates: State<'_, updates::Updates>,
+    enabled: bool,
+) -> Result<Value, String> {
+    let pending = updates.has_pending_install();
+    let status = updates.set(enabled)?;
+    // Switched off with an installer waiting (Windows): it was discarded, so the tray's
+    // "Restart to update" goes too.
+    if pending && !updates.has_pending_install() {
+        residency::hide_update(&app);
+    }
+    Ok(status)
 }
 #[tauri::command]
 async fn restart_to_update(app: tauri::AppHandle) -> Result<Value, String> {

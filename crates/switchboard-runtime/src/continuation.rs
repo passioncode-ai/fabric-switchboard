@@ -141,16 +141,22 @@ struct Output {
     stderr: String,
 }
 
-/// One bounded engine call: both pipes read on their own threads and capped, the child killed
-/// and reaped at the deadline.
 fn run(bin: &Path, args: &[&str]) -> Result<Output, String> {
-    let mut child = Command::new(bin)
+    run_within(bin, args, ENGINE_TIMEOUT)
+}
+
+/// One bounded engine call: both pipes read on their own threads and capped; at the deadline the
+/// child and everything it started are killed (its own process group, LC-02) and reaped.
+fn run_within(bin: &Path, args: &[&str], timeout: Duration) -> Result<Output, String> {
+    let mut command = Command::new(bin);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| NOT_INSTALLED)?;
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().map_err(|_| NOT_INSTALLED)?;
     let pipe = |reader: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -174,12 +180,21 @@ fn run(bin: &Path, args: &[&str]) -> Result<Output, String> {
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
     );
-    let deadline = Instant::now() + ENGINE_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
+                // The group's id is the child's pid (`process_group(0)`): a grandchild holding
+                // the pipes dies with it, so the reader threads end too.
+                #[cfg(unix)]
+                if let Ok(group) = libc::pid_t::try_from(child.id()) {
+                    // SAFETY: killpg only sends a signal to the group this call created.
+                    unsafe {
+                        libc::killpg(group, libc::SIGKILL);
+                    }
+                }
                 let _ = child.kill();
                 let _ = child.wait();
                 break None;
@@ -215,10 +230,22 @@ fn refusal(prefix: &str, stderr: &str) -> String {
 /// `full workflow show <wf> --json`: the workflow, its latest checkpoint, the executor holding
 /// it (never the token), a waiting handoff and each declared key's state.
 pub fn show(bin: &Path, workflow_id: &str) -> Result<Value, String> {
+    show_within(bin, workflow_id, ENGINE_TIMEOUT)
+}
+/// `show` with the caller's deadline (the background monitor waits less than a person does).
+pub(crate) fn show_within(
+    bin: &Path,
+    workflow_id: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     if !valid_workflow_id(workflow_id) {
         return Err(BAD_WORKFLOW_ID.into());
     }
-    let output = run(bin, &["full", "workflow", "show", workflow_id, "--json"])?;
+    let output = run_within(
+        bin,
+        &["full", "workflow", "show", workflow_id, "--json"],
+        timeout,
+    )?;
     if !output.success {
         return Err(refusal(
             "Project Observatory refused the read:",
@@ -239,9 +266,14 @@ fn provider_of(name: &str) -> Option<Provider> {
 /// `full workflow list --status open --json`: the open workflows with their executor (never a
 /// token), a waiting handoff and how long the executor has been silent.
 pub fn list_open(bin: &Path) -> Result<Vec<Value>, String> {
-    let output = run(
+    list_open_within(bin, ENGINE_TIMEOUT)
+}
+/// `list_open` with the caller's deadline.
+pub(crate) fn list_open_within(bin: &Path, timeout: Duration) -> Result<Vec<Value>, String> {
+    let output = run_within(
         bin,
         &["full", "workflow", "list", "--status", "open", "--json"],
+        timeout,
     )?;
     if !output.success {
         return Err(refusal(
@@ -524,6 +556,26 @@ pub fn launch_failed(offer: &Offer, error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_engine_dies_with_everything_it_started() {
+        // LC-02: a grandchild that keeps the pipes open must not outlive the deadline, or the
+        // reader threads (and the monitor pass waiting on them) hang until it exits.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("engine");
+        std::fs::write(&bin, "#!/bin/sh\nsleep 30 &\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        let result = run_within(&bin, &[], Duration::from_millis(300));
+        assert_eq!(result.err().as_deref(), Some(ENGINE_TIMED_OUT));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
     use serde_json::json;
     use switchboard_core::AuthKind;
 

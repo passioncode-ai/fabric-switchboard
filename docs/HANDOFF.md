@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# Audit fixes 2026-10-07 (SB-78) — 0.6.9's Windows job failure found and fixed
+
+The fabric-workspace audit of origin/main 4b4b77b found the 0.6.9 release run 37518902023 failing
+on Windows (a continuation test lost `#[cfg(not(windows))]`); v0.6.9 cannot publish from that tag,
+so the fixes ship as the next version. Branch `fix/audit-2026-10-07` fixes it and the fallback,
+Windows-update, formatted-error, in-place and Russian findings (board SB-78, CONTRACTS → Automatic
+fallback, CHANGELOG Unreleased). Checks run: `./scripts/check.sh` green on macOS;
+`cargo xwin check --tests --target x86_64-pc-windows-msvc` for the crates and `src-tauri` (a
+placeholder `switchboard.exe` resource for the check only) — no errors, no warnings.
+
+**Exact next task:** release the next version with the Russian interface and these fixes (the
+0.6.9 run stays failed; the operator approves the new run), then SB-77 (LC-16 parity) and the
+open part of SB-78.
+
+---
+
 # SB-76 built — Switchboard in Russian; SB-67 fixed, SB-66 mostly (2026-10-07)
 
 Operator request 2026-10-07: a Russian interface for every PassionCode.ai product (this repository
