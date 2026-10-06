@@ -1,5 +1,5 @@
 # Fabric Switchboard — product and engineering specification
-Version 0.3, 2026-09-26. Design decisions under the operator's instruction to proceed; outcome validation remains unobserved. This document describes the intended product. The [0.3 account and rotation contract](ACCOUNTS-AND-ROTATION.md) supersedes the original manual-only scope. [0.2 release evidence](evidence/release-0.2.md), [historical 0.1 verification](evidence/verification.md) and [handoff](HANDOFF.md) distinguish built, tested, and deferred functionality.
+Version 0.3, 2026-09-26; §2 brought up to 0.6.5 on 2026-10-06 (the later sections keep the 0.3 design and say where it changed). Design decisions under the operator's instruction to proceed; outcome validation remains unobserved. This document describes the intended product. The [0.3 account and rotation contract](ACCOUNTS-AND-ROTATION.md) supersedes the original manual-only scope. [0.2 release evidence](evidence/release-0.2.md), [historical 0.1 verification](evidence/verification.md) and [handoff](HANDOFF.md) distinguish built, tested, and deferred functionality.
 
 ## 1. Product contract
 A local account workbench for developers who own multiple authorized Claude Code and Codex identities. They add an account, see its health and quota, choose its routing pool, and launch an isolated or managed session. The app explains exactly when a selection takes effect. No Fabric cloud dependency is required to run it. “Fabric” here is project ownership; Fabric execution-contract integration is a future adapter, not an invented compatible-agent claim.
@@ -7,12 +7,12 @@ A local account workbench for developers who own multiple authorized Claude Code
 Core outcomes: canonical account secrets stay in the OS vault (isolated CLI mode needs a private access-token working copy, §8); no incidental mutation of the user's global client configuration; explicit pool boundaries between work and personal accounts; visible distinction between a configured route and an account observed serving a request; no lost stream or duplicated tool execution caused by the switcher.
 
 ## 2. Axes and capability matrix
-| Axis | v0.3 implementation | Extension / limitation |
+| Axis | Implementation as of 0.6.5 | Extension / limitation |
 |---|---|---|
 | Provider | Claude Code, Codex CLI | provider adapters; Claude Desktop excluded |
-| Credential | API key, Claude setup token, imported OAuth JSON | OAuth renewal delegated to official login; no fabricated OAuth app registration |
-| Surface | Tauri desktop window, native `switchboard` CLI, managed child launch | menu bar/tray convenience after core acceptance |
-| Scope | account + provider + pool | project bindings later; no cross-pool auto fallback |
+| Credential | API key, Claude setup token, imported OAuth JSON | inactive Claude OAuth accounts renewed by Switchboard since 0.5 (PLAN-0.5 D-2); the account Claude Code uses is renewed by Claude Code; no fabricated OAuth app registration |
+| Surface | Tauri desktop window, native `switchboard` CLI, managed child launch | menu-bar / notification-area icon and residency with the window closed since 0.5.5 (SB-28); MCP server for agents since 0.4 |
+| Scope | account + provider + pool | project rules since 0.4, projects with reserved accounts since 0.6.0 (SB-53); no cross-pool auto fallback |
 | Isolation | managed home per account | no automatic MCP/settings/history sharing |
 | Switch | next launch (isolated); next request (proxy) | current stream retains captured identity |
 | Existing external CLI | current authorization capture; explicit native Claude activation | client cache reload timing requires live acceptance |
@@ -20,8 +20,8 @@ Core outcomes: canonical account secrets stay in the OS vault (isolated CLI mode
 | Routing | manual choice and opt-in quota rotation | same provider/pool; managed or native Claude target |
 | Quota | scheduled observations with separate quota/reset windows | unknown/stale/error remain distinct from zero |
 | Storage | macOS Keychain; Windows DPAPI CurrentUser + user-only DACL | private metadata; no plaintext vault fallback |
-| Distribution | macOS universal app + CLI; Windows NSIS + CLI build workflow | signature, notary and actual artifact states in release evidence |
-| Privacy | local metadata, no analytics, no prompt logging | diagnostics export metadata only, later |
+| Distribution | macOS universal app + CLI; Windows NSIS + CLI build workflow | built and signed only by the release workflow; automatic, signature-verified updates since 0.6.1 (SB-55); artifact states in release evidence |
+| Privacy | local metadata, no prompt logging; anonymous usage counts since 0.5.5, opt-out ([ANALYTICS](ANALYTICS.md), SB-50) | diagnostics export metadata only, later |
 | Windows | native vault, filesystem and PowerShell launcher | native fixture success does not prove real-provider or UI acceptance |
 
 No promise that an HTTP proxy can change credentials inside an already-established WebSocket. v0.1 managed transport is HTTP/SSE only. Unsupported endpoints return an explicit error. Proxy use is a compatibility feature relying on provider client behavior, not a provider-endorsed integration claim.

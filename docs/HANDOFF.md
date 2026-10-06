@@ -1,3 +1,58 @@
+> **How to read this file.** Newest entry first; only the top entry's *Exact next task* is
+> current — the next tasks of older entries are history. Open work lives on the
+> [board](evidence/backlog.md).
+
+# Cleanup and docs pass — repository in its final state for 0.6.5 (2026-10-06)
+
+**Objective (operator):** clean up after the 0.6.5 work, bring every document and plan in line
+with the code, delete branches nobody needs, and put every bug found on the board.
+
+**Done.**
+- **Two lost commits recovered.** `agent/agents-support` held two commits made after PR #69 was
+  merged and never landed: the proxy's agent-capability check now runs every constant-time
+  comparison whatever matched, so timing cannot tell which header or token was right
+  (`crates/switchboard-proxy/src/lib.rs`), and AGENT-SUPPORT says unverified loopback agents are
+  unverified, not supported. Cherry-picked here (gate green).
+- **Branches:** every local branch was checked against its merged pull request (#61, #69,
+  #81–#84) and deleted; `origin` holds `main` only; no worktrees, stashes, drafts or unfinished
+  runs. Release tags stay (v0.6.3 and v0.6.4 are history the CHANGELOG cites).
+- **Local leftovers:** 26 untracked files in the git-ignored `artifacts/` that no document cites
+  (0.2–0.5 build and debug logs, old receipts) and the pasted session transcript from the repo
+  root moved to `~/DATA/_archive/fabric-switchboard-cleanup-2026-10-06/`; files the evidence
+  cites and the `xwin` SDK cache stay. `target/` is 6.9 GB, under the 10 GB cap (LC-15).
+- **Docs against code** (three read-only audits: user docs, plans/board/handoff, scenarios and
+  brand vs UI): README and README.ru status (they said v0.6.0 and v0.5.3-beta.1) and history,
+  INSTALL and CLI (SB-05 since 0.6.0, Windows no longer "beta"), CLI.md (header, a new
+  `switchboard agents` section, backup file name, `accounts update`), OPERATIONS (boundaries,
+  managed-home token, backups, the full log event list), DISTRIBUTION, KEYCHAIN, AGENTS window
+  timers, CONTRIBUTING, PLAN-0.4 (MCP table marked historical, REQ rows), PLAN-0.5 (REQ-20
+  superseded by SB-59, REQ-63's removed test), SPEC §2 to 0.6.5, packet states, scenario texts
+  that described another UI (cancel, second sign-in, Import, badges, Stop), plugin README and
+  tools.md (`project_context` returns `project`). In code: the `switchboard_usage` and
+  `switchboard_project_apply` MCP descriptions and the `project list` help said what the code
+  does not do.
+- **Board:** statuses corrected (SB-09, SB-29, SB-39, SB-40, SB-41, SB-44, SB-46 merged and
+  released; SB-49 reopened — 0.33 % measured against < 0.2 %; SB-57 released in 0.6.5). Bugs
+  found: **SB-62 reproduces** (Try again in the sign-in banner renames the account to its email
+  or duplicates it in `default`, which can expose a project's account to native switching),
+  **SB-61 cause located** (`--data-dir` backup list/restore reach the real backups). New rows
+  SB-64 (SB-52 desktop entry and MCP tool), SB-65 (SS-01), SB-66 (UI copy vs brand pack),
+  SB-67 (small UI defects), SB-68 (empty CLI help), SB-69 (states no scenario covers).
+
+**Not done, and why:** GitHub Actions artifacts (~0.9 GB, retained to January, billed to the
+Actions budget) were left alone — deleting them is irreversible and some are cited as evidence;
+the operator decides. The installed app runs 0.6.4 code until restarted (its bundle is 0.6.5;
+the broker may not restart a person's app).
+
+**Checks run:** `./scripts/check.sh` exit 0 on this branch (see the PR); `scripts/check_docs.py`.
+
+**Exact next task:** SB-62 (P1) — keep label and pool on the pending sign-in and refuse or
+update an identity saved in another pool in `finish_login`, with tests; then SB-61, SB-66.
+**Operator:** restart Switchboard (tray → *Restart to update*) and press Switch once in
+Accounts; decide on the Actions artifacts; SB-15, SB-02, SB-03, uninstall acceptance.
+
+---
+
 # Release 0.6.5 — the native switch no longer sticks on a misfiled sign-in (2026-10-06)
 
 **What this is.** The night sessions of 2026-10-05/06 left an uncommitted attribution rework
@@ -46,8 +101,8 @@ compiled in, reporting 0.6.4; auto-update replaces it with 0.6.5.
 [release record](evidence/release-0.5.md#release-v065-2026-10-06--the-native-switch-no-longer-sticks-on-a-misfiled-sign-in).
 INSTALL.md's attestation command fixed (#82); org roadmap row updated (fabric-workspace #46).
 
-**Exact next task:** confirm the installed app updated itself to 0.6.5 (log `update_install
-installed`) and that Switch works in Accounts on the operator's machine; then SB-62, SB-61,
+**Exact next task (superseded by the cleanup entry above):** the update to 0.6.5 was confirmed
+(#84); Switch in Accounts still needs the person's restart; then SB-62, SB-61,
 SB-07, SB-16, SB-52 desktop entry and the `switchboard_continue` MCP tool. **Operator:** SB-15,
 SB-02, SB-03, uninstall acceptance, the live third-party agent run (API-key account) — it also
 confirms the Kimi `/login` answer and the ZCode snippet from the agents audit below.
@@ -461,7 +516,7 @@ Switchboard is now source-available: `PolyForm-Noncommercial-1.0.0 OR LicenseRef
 
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) is generated by `python3 scripts/third_party_notices.py` from `cargo metadata --locked` for the three release targets plus the non-dev npm packages; `./scripts/check.sh` runs it with `--check`. A dependency change regenerates it in the same commit. `build_macos.py`, `build_windows_cross.py` and the Windows workflow copy `LICENSE` and the notices into every archive; the published 0.3.1 archives predate this and do not carry them. The drafts `v0.2.0-beta.1` and `v0.3.0-beta.1` (no tags) were deleted. The English README is primary; the Russian one is [README.ru.md](../README.ru.md).
 
-# Active repair — 0.3.2
+# Historical — 0.3.2 repair (superseded; the current state is the top entry)
 
 Operator: repair installed launch, detect existing Claude login, expose Claude Swap import, update GitHub/site and install locally. [Plan](LAUNCH-REPAIR-0.3.2.md), [evidence](evidence/release-0.3.2.md). Work branch `main` (the only branch; see [Repository layout](#repository-layout)). Current CLI detection fixed via bounded Apple security executable; real current profile captured and six Swap profiles imported without failed rows. Signing/notarization and final artifact receipts are separate remaining gates. Keep existing real provider sessions and auth untouched.
 
@@ -469,7 +524,7 @@ Exact next task: build/verify signed app and CLI from clean source, inspect actu
 
 ---
 
-# Fabric Switchboard — start here
+# Historical — the 0.3.1 start page (superseded; the current state is the top entry)
 
 **Objective:** a Fabric account workbench for Claude Code/Codex, CLI and macOS/Windows builds. Current extension: capture existing CLI authorization, official console login for additional accounts, Claude Swap import, actual active identity, detailed quota and opt-in rotation.
 **Owner:** `passioncode-ai/fabric-switchboard`; 0.3.1 source is tag `v0.3.1-beta.1` (`9e20a49`). The repository is public with default branch `main`; [0.3.1-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.3.1-beta.1) is published. See [anonymous verification](evidence/publication-0.3.1.json). Observatory and other projects are unchanged.
@@ -524,4 +579,4 @@ Keep dependencies, target/dist/artifacts, research clones, app data, Keychain an
 
 ## Repository layout
 
-Consolidated 2026-09-27: `main` is the only branch, locally and on `origin`. Every other branch was an ancestor of it or carried patches already integrated (`git cherry` / `git range-diff` showed equal patches; the one `codex/cli` difference was the 0.2.0 version bump that `main` already contains). Removed: remote `codex/bootstrap`, `codex/passioncode-design-v031`; local `codex/{cli,core,research,ui,v03-core,v03-imports,v03-ui,windows,windows-ui,launch-release-032}` and their sibling worktrees. Releases point at commit SHAs or tags, not branches, so none moved. Build outputs for 0.2.0, 0.3.0 and 0.3.1 were deleted locally after their SHA-256 matched the GitHub release assets; 0.3.2 outputs, receipts and logs remain under ignored `artifacts/`. The Windows SDK cache `artifacts/xwin` is re-downloaded by `scripts/build_windows_cross.py` on the next cross-build.
+Consolidated 2026-09-27 (historical: since 0.4 every change lands through a pull request from its own branch): `main` was the only branch, locally and on `origin`. Every other branch was an ancestor of it or carried patches already integrated (`git cherry` / `git range-diff` showed equal patches; the one `codex/cli` difference was the 0.2.0 version bump that `main` already contains). Removed: remote `codex/bootstrap`, `codex/passioncode-design-v031`; local `codex/{cli,core,research,ui,v03-core,v03-imports,v03-ui,windows,windows-ui,launch-release-032}` and their sibling worktrees. Releases point at commit SHAs or tags, not branches, so none moved. Build outputs for 0.2.0, 0.3.0 and 0.3.1 were deleted locally after their SHA-256 matched the GitHub release assets; 0.3.2 outputs, receipts and logs remain under ignored `artifacts/`. The Windows SDK cache `artifacts/xwin` is re-downloaded by `scripts/build_windows_cross.py` on the next cross-build.

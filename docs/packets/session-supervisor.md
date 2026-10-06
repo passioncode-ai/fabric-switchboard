@@ -1,6 +1,6 @@
 # Packet SS-01 — recovery and owned sessions
 
-**State:** planned. Highest priority after live-provider acceptance. **Owns:** launcher, persistent pending-login metadata, Sessions UI and corresponding scenario additions.
+**State:** planned, board row SB-65 (P2). Not started; parts shipped elsewhere: a pending sign-in survives in the banner and is cleaned up (SB-42), continuation on another account (SB-52). **Owns:** launcher, persistent pending-login metadata, Sessions UI and corresponding scenario additions.
 **Shared:** [contracts](../CONTRACTS.md), [spec §§4,8,15](../SPEC.md), [operations](../OPERATIONS.md).
 
 Persist a nonsecret pending-login journal before spawning: UUID, provider, label/pool, phase, owned home, process birth identity, saved-account UUID if present. Startup reconciles each entry without reading unrelated homes. Provide Resume, Finish, and Cancel with explicit process state. Crash between vault save and metadata cleanup must not duplicate accounts. Deletion must remain idempotent and owned-path-only.

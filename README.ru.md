@@ -4,7 +4,7 @@
 
 Fabric Switchboard — локальный менеджер аккаунтов Claude Code и Codex CLI с desktop-интерфейсом и командой `switchboard`: инструмент Fabric, который работает и сам по себе. Постоянные секреты защищены macOS Keychain или Windows DPAPI; рабочие и личные аккаунты разделены пулами. В управляемой сессии выбранный аккаунт меняется **со следующего запроса**: текущий поток ответа продолжает использовать прежний.
 
-**Статус: beta.** Опубликован [v0.5.3-beta.1](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.5.3-beta.1) (prerelease): macOS universal подписан Developer ID, **нотаризован Apple** и со stapled-тикетом; Windows x64 не подписан и собран кросс-компиляцией. Со следующего релиза сборки собирает и подписывает только [release workflow](docs/DISTRIBUTION.md#how-a-release-happens) в GitHub Actions. 0.4.1 убирает повторяющиеся запросы связки ключей macOS: сохранённые аккаунты один раз переносятся приложением в `ai.passioncode.fabric-switchboard.shared` со списком доступа, которому доверяют приложение и встроенный CLI, а CLI и MCP-сервер никогда не показывают диалог Keychain; при переносе macOS может спросить не больше одного раза на аккаунт ([KEYCHAIN.md](docs/KEYCHAIN.md), [протокол релиза 0.4.1](docs/evidence/release-0.4.1.md)). Это первый релиз под AGPL. В 0.4 агенты через MCP (`switchboard mcp`, 8 инструментов) видят остаток лимитов и переключают аккаунт своей управляемой сессии; обычный логин Claude Code меняется только с явным `global: true`. Добавлены необязательные правила проектов, экраны Projects и Agents и плагин `switchboard` для Claude Code. Сохранены захват текущей авторизации CLI, импорт Claude Swap, окна лимитов и автопереключение. [Протокол релиза 0.4.0](docs/evidence/release-0.4.md), [план 0.4](docs/PLAN-0.4.md), [контракт 0.3](docs/ACCOUNTS-AND-ROTATION.md). Вход и запросы через реальные аккаунты провайдеров ещё не проверены. Подключить агента: положите `switchboard` из архива в `PATH` и выполните `claude mcp add --scope user switchboard -- switchboard mcp`.
+**Статус: стабильный, [v0.6.5](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.5) (2026-10-06).** Стабильная ветка начинается с v0.6.0; v0.6.3 и v0.6.4 были помечены тегами, но не опубликованы. macOS universal подписан Developer ID, **нотаризован Apple** и со stapled-тикетом; Windows x64 собирается нативно в [release workflow](docs/DISTRIBUTION.md#how-a-release-happens), Authenticode-подписи пока нет. Установленные копии начиная с 0.6.1 обновляются сами. Что менялось от версии к версии — в [CHANGELOG](CHANGELOG.md): в 0.6 проекты со своими аккаунтами, работа с закрытым окном, запуск при входе в систему и автообновление; в 0.5 продление неактивных аккаунтов Claude и шифрованные резервные копии; в 0.4 MCP для агентов (`switchboard mcp`, 8 инструментов), правила проектов и плагин; 0.4.1 убрал повторяющиеся диалоги Keychain ([KEYCHAIN.md](docs/KEYCHAIN.md)). Вход и запросы через реальные аккаунты провайдеров на каждой платформе отслеживаются на [доске](docs/evidence/backlog.md) (SB-01, SB-02, SB-15). Подключить агента: сделайте ссылку на CLI внутри приложения, чтобы он обновлялся вместе с ним (`ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" ~/.local/bin/switchboard`, или Agents → *Link switchboard into ~/.local/bin*), и выполните `claude mcp add --scope user switchboard -- switchboard mcp`.
 
 - [Сайт](https://passioncode.ai/switchboard/) · скачать для [macOS](https://passioncode.ai/switchboard/download/macos) / [Windows](https://passioncode.ai/switchboard/download/windows) · [релизы](https://github.com/passioncode-ai/fabric-switchboard/releases) · [установка готовых архивов](docs/INSTALL.md).
 - [Исследование четырёх решений](docs/research/README.md): исходники, архитектура, хранение и механика переключения; 69 ссылок на фиксированные коммиты.
@@ -47,12 +47,12 @@ cargo build --release --locked -p switchboard-cli
 
 ## Как пользоваться
 
-1. **Add account** — официальный вход в отдельном профиле, API key, Claude setup token или явно импортированный OAuth JSON. Приложение не читает текущую глобальную авторизацию автоматически.
+1. **Add account** — официальный вход в отдельном профиле, API key, Claude setup token или явно импортированный OAuth JSON. Switchboard читает текущий вход Claude Code и Codex, чтобы показать, какой сохранённый аккаунт сейчас используется, но без вас его не сохраняет и не переключает.
 2. Задайте label и pool, например `work` либо `personal`. Пул определяет границу маршрутизации; аккаунты разных провайдеров не взаимозаменяемы.
 3. **Select** — выбрать аккаунт для следующих управляемых запросов.
 4. **Launch managed** — выбрать каталог проекта и открыть CLI через локальный прокси. Приложение или `switchboard serve` должно оставаться открытым. На один provider/pool допускается один запущенный управляемый home.
 5. **Launch isolated** — отдельный home выбранного аккаунта и прямое соединение CLI с провайдером. Последующие Select на него не действуют.
-6. **Check usage** — явная проверка квоты OAuth. API key не выдаёт достоверную квоту подписки; неизвестная квота не превращается в ноль.
+6. **Check usage** — квота проверяется в фоне (каждые 3 минуты для аккаунтов в работе или в пуле с автопереключением, каждые 10 минут для остальных); **Check usage** проверяет сразу. API key не выдаёт достоверную квоту подписки; неизвестная квота не превращается в ноль.
 
 Постоянный credential находится в OS vault, но isolated-режим создаёт необходимую официальному CLI рабочую копию access token в приватном файле (0600 на macOS, user-only DACL на Windows). Refresh token туда не передаётся; по истечении срока нужен повторный вход. Подробности, восстановление после сбоя и удаление: [операционная инструкция](docs/OPERATIONS.md).
 
@@ -74,7 +74,7 @@ cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned
 | `src` | TypeScript-интерфейс и явно обозначенный demo |
 | `docs` | research, спецификация, сценарии, договорённости и evidence |
 
-Полная hosted CI настроена на ночной запуск. Отдельная Windows-сборка запускается вручную для точного commit SHA; push/PR не запускают полный suite. Наличие workflow не означает успешное выполнение. Чужие исходники исследованы, но не включены как зависимости.
+Полная hosted CI (macOS и нативные Windows-фикстуры) запускается ночью; push/PR не запускают полный suite. Windows-сборка релиза делается в release workflow. Наличие workflow не означает успешное выполнение. Чужие исходники исследованы, но не включены как зависимости.
 
 ## Лицензия
 

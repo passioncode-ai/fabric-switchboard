@@ -19,8 +19,10 @@ commercial license too. There is no checkbox to tick.
 ## Before you open a pull request
 
 1. Run `npm ci` once after checkout, then `./scripts/check.sh`. It runs the brand check,
-   the UI build, `cargo fmt`, `cargo test`, `cargo clippy`, the documentation link check,
-   the third-party notices check and `git diff --check`.
+   the UI build and UI-logic checks, the error-vocabulary check, `cargo fmt`, `cargo test`,
+   `cargo clippy`, the documentation link check, the plugin check, the agent-catalog check, the
+   script unit tests, the third-party notices check and `git diff --check` (the list is
+   `scripts/check.sh` itself).
 2. A change to dependencies (`Cargo.lock`, `package-lock.json`) regenerates the notices:
    `python3 scripts/third_party_notices.py`, and commits `THIRD_PARTY_NOTICES.md` with it.
 3. Follow [AGENTS.md](AGENTS.md): tests use synthetic Vault and upstream fixtures only; never

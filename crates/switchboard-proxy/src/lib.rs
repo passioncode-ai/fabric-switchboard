@@ -339,10 +339,11 @@ async fn relay(
         .get("x-api-key")
         .map(|x| x.as_bytes().to_vec())
         .unwrap_or_default();
-    let official = bool::from(bearer.ct_eq(g.token.as_bytes()));
-    let agent = !official
-        && (bool::from(bearer.ct_eq(g.agent_token.as_bytes()))
-            || bool::from(key.ct_eq(g.agent_token.as_bytes())));
+    // Every comparison runs, whatever matched: no timing tells which header or token was right.
+    let official = bearer.ct_eq(g.token.as_bytes());
+    let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
+    let agent = bool::from(!official & as_agent);
+    let official = bool::from(official);
     if !official && !agent {
         return error(StatusCode::UNAUTHORIZED, "Local capability required.");
     }

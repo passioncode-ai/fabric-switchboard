@@ -1,6 +1,6 @@
 # Packet DIST-01 — signed delivery
 
-**State:** 0.2 packaging/signing tools implemented; [execution receipt](../evidence/release-0.2.md) names actual builds and signature state. Notarization, clean-machine Gatekeeper acceptance and signed self-updates are separate gates.
+**State:** 0.2 packaging/signing tools implemented; [execution receipt](../evidence/release-0.2.md) names actual builds and signature state. Since then: notarized and stapled macOS builds (0.4.0), builds made only by the [release workflow](../DISTRIBUTION.md#how-a-release-happens) (0.5.4), signature-verified automatic updates (0.6.1, SB-55). Open gates: Windows Authenticode (SB-03) and clean-machine Windows acceptance (SB-02).
 **Owns:** release packaging/signing/update metadata; never committed certificates or signing secrets.
 **Shared:** [spec §§10,12,13](../SPEC.md), [verification](../evidence/verification.md).
 

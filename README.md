@@ -10,9 +10,10 @@ Windows. It is Fabric's account tool and works on its own; built by
 
 ![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
 
-**Status: [v0.6.0](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.0)**,
-the first stable release (macOS universal, notarized by Apple and stapled; Windows x64 built
-natively, not yet Authenticode-signed). Builds are made and signed only by the
+**Status: [v0.6.5](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.5)**,
+2026-10-06; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
+built natively, not yet Authenticode-signed). Installed copies of 0.6.1 or later update
+themselves; v0.6.3 and v0.6.4 were tagged but never published. Builds are made and signed only by the
 [release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Live provider acceptance on
 each platform is tracked on the [board](docs/evidence/backlog.md) (SB-01, SB-02, SB-15).
 
@@ -28,19 +29,14 @@ Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and per
 accounts live in separate pools. In a managed session the selected account changes **from
 the next request**: a response already streaming keeps the identity it started with.
 
-Version 0.4.1 stops the repeated macOS Keychain dialogs: saved accounts move once, in the
-app, to `ai.passioncode.fabric-switchboard.shared` with an access list that trusts the app and
-its bundled CLI, and the CLI and MCP server never show a Keychain dialog
-([KEYCHAIN.md](docs/KEYCHAIN.md), [0.4.1 release record](docs/evidence/release-0.4.1.md)). It is
-the first release under the AGPL. Version 0.4.0 lets coding agents read remaining usage and switch the account of their
-managed session over MCP (`switchboard mcp`, 8 tools; the ordinary Claude Code login changes
-only with an explicit `global: true`), adds optional project rules and the Projects and Agents
-screens, ships the `switchboard` Claude Code plugin, and is the first notarized macOS build.
-It keeps 0.3's current-account capture, Claude Swap import, quota windows and opt-in rotation.
-See the [0.4 plan and decisions](docs/PLAN-0.4.md), the [0.4.0 release record](docs/evidence/release-0.4.md)
-and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
-[0.3.1](docs/evidence/release-0.3.1.md), [0.2](docs/evidence/release-0.2.md) and the
-[historical 0.1 verification](docs/evidence/verification.md).
+What each version changed is in the [CHANGELOG](CHANGELOG.md): 0.6 adds projects with their
+own accounts, keeps running with its window closed, opens at login and updates itself
+([DISTRIBUTION](docs/DISTRIBUTION.md#automatic-updates-sb-55)); 0.5 renews inactive Claude
+accounts and keeps encrypted backups; 0.4 adds MCP for agents, project rules and the plugin;
+0.4.1 ends the repeated Keychain dialogs ([KEYCHAIN.md](docs/KEYCHAIN.md)). Release records:
+[0.5.x–0.6.x](docs/evidence/release-0.5.md), [0.4.1](docs/evidence/release-0.4.1.md),
+[0.4.0](docs/evidence/release-0.4.md), [0.3.1](docs/evidence/release-0.3.1.md),
+[0.2](docs/evidence/release-0.2.md), the [historical 0.1 verification](docs/evidence/verification.md).
 
 ## Quick start for a new teammate
 
@@ -56,8 +52,10 @@ and the [0.3 contract](docs/ACCOUNTS-AND-ROTATION.md). Earlier records:
    `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
    sign-in and go to the OS vault, never into an environment variable or an argument.
    `--data-dir <absolute dir>` points the CLI at a separate, disposable app-data directory.
-3. **MCP:** put the `switchboard` CLI from the archive on `PATH` (for example copy it to
-   `~/.local/bin`), then either `claude plugin marketplace add passioncode-ai/fabric-switchboard`
+3. **MCP:** put the `switchboard` CLI on `PATH` by linking the one inside the app, so it updates
+   with the app: `ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard"
+   ~/.local/bin/switchboard` (or Agents → *Link switchboard into ~/.local/bin*;
+   [INSTALL.md](docs/INSTALL.md)), then either `claude plugin marketplace add passioncode-ai/fabric-switchboard`
    and `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
    skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
    then shows `switchboard … ✔ Connected`; a first call is the read-only
@@ -143,8 +141,8 @@ demo has no real accounts, no CLI launch and no network calls to providers.
 ## Using it
 
 1. **Add account** — official sign-in in a separate profile, an API key, a Claude setup
-   token, or explicitly imported OAuth JSON. The app does not read the current global
-   authorization on its own.
+   token, or explicitly imported OAuth JSON. Switchboard reads the current Claude Code and Codex
+   sign-in to show which saved account is in use, but never saves or switches it without you.
 2. Set a label and a pool, for example `work` or `personal`. The pool is the routing
    boundary; accounts of different providers are not interchangeable.
 3. **Select** — choose the account for the next managed requests.
@@ -153,8 +151,9 @@ demo has no real accounts, no CLI launch and no network calls to providers.
    provider/pool.
 5. **Launch isolated** — a separate home for the selected account and a direct CLI
    connection to the provider. Later **Select** actions do not affect it.
-6. **Check usage** — an explicit OAuth quota check. An API key does not report a reliable
-   subscription quota; an unknown quota is never shown as zero.
+6. **Check usage** — quota is checked in the background (every 3 minutes for accounts in use or
+   in a rotation pool, every 10 minutes otherwise); **Check usage** asks at once. An API key does
+   not report a reliable subscription quota; an unknown quota is never shown as zero.
 
 The persistent credential stays in the OS vault, but isolated mode writes the working copy
 of the access token that the official CLI needs into a private file (0600 on macOS, a
