@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.8 — 2026-10-06
+
+You choose which agents take over a task when an account runs out, and Switchboard follows that
+order on its own. Nothing changes until you set a chain. If you run 0.6.1 or later, this version
+arrives on its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Fallback chains
 
 - `switchboard chain` and the MCP tools `switchboard_chain_get` / `switchboard_chain_set` keep your
