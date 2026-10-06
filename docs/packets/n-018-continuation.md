@@ -1,6 +1,6 @@
 # Packet SB-52 / N-018 — continuation walking skeleton (owner materialization)
 
-**State:** built 2026-10-05 on branch `agent/sb-52-continuation` (run record at the end); live acceptance open. **Board:** SB-52. **Program packet:** org-index
+**State:** built 2026-10-05 (run record at the end), merged in #73 and released in v0.6.2; live acceptance open; the desktop entry and the `switchboard_continue` MCP tool are SB-64. **Board:** SB-52. **Program packet:** org-index
 `docs/observatory/programs/2026-10-04-agent-memory/packets/N-018.md` (rev 1, PB-137/M9).
 **Engine contract:** memory/0.1, `passioncode-ai/project-observatory-dashboard` `5c31318`
 ([#159](https://github.com/passioncode-ai/project-observatory-dashboard/pull/159), N-016 + N-025);

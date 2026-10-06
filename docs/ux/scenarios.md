@@ -53,7 +53,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Open the app → An empty account list explains how to add an account.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** An empty account list explains how to add an account.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -71,7 +71,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose provider and kind, enter label, pool and secret; submit → One account appears; secret field is cleared.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** One account appears; secret field is cleared.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -90,7 +90,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Choose + Add account → Sign in to another Claude (or Codex) account → Terminal opens the official CLI in an isolated home and a banner says to finish there; no form opens (0.5).
 2. Finish the provider's sign-in → Switchboard notices completion on its own and adds the account, named by its email, in the default pool; no Finish click (0.5).
-**Alt paths:** Cancel in the banner → the staged sign-in is cleaned once its Terminal process has exited. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in again on a row reuses its label and pool, so the same identity updates in place. CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “Finish an existing sign-in before starting another.” The account was saved but its temporary folder could not be removed yet → the banner closes with “Account added to Claude. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.” The owner restarted and no longer knows the sign-in → the banner reads ended, and Cancel closes it with “Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.” (0.5.1, `loginOutcome`). A sign-in reservation whose Terminal never ran expires after ten minutes. The account is saved but its temporary sign-in folder cannot be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.”; finishing again returns the same account (SB-42).
+**Alt paths:** Cancel in the banner while Terminal is still open → “Finish or close sign-in in Terminal before cancelling.”; after Terminal closed → the staged sign-in is cleaned. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in on a row that needs a new sign-in reuses its label and pool, so the same identity updates in place (Try again in the banner does not yet: it starts a new sign-in in the default pool — SB-62). CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “A sign-in is already in progress. Finish it in Terminal or cancel it first.” The account was saved but its temporary folder could not be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.” The owner restarted and no longer knows the sign-in → the banner reads ended, and Cancel closes it with “Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.” (0.5.1, `loginOutcome`). A sign-in reservation whose Terminal never ran expires after ten minutes. The account is saved but its temporary sign-in folder cannot be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.”; finishing again returns the same account (SB-42).
 **Expected result:** Provider login is captured only from the new home.
 **UI elements:** Add account menu, sign-in banner (pending, adding, ended, error), account list, notice.
 **States covered:** loading, pending, ended, error, success
@@ -108,7 +108,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Select an enabled account → Route shows selected for the next request in its provider and pool.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Route shows selected for the next request in its provider and pool.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -126,7 +126,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose an account, Launch isolated, and an existing absolute Project directory → Terminal starts the provider with its private home; selection affects new launches.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Terminal starts the provider with its private home; selection affects new launches.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -144,7 +144,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Select an account, Launch managed, and an existing absolute Project directory → Terminal starts against the local proxy; UI explains next-request effect.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Terminal starts against the local proxy; UI explains next-request effect.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -162,7 +162,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. While one managed response is streaming, select another same-pool account → First stream keeps its identity; next request uses selected account.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** First stream keeps its identity; next request uses selected account.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -180,7 +180,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose Check usage → Timestamped provider usage appears with its source.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Timestamped provider usage appears with its source.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -198,7 +198,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Edit label or disable account → Label updates; disabled account stays visible and is removed from active route.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Label updates; disabled account stays visible and is removed from active route.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -216,7 +216,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose Remove, inspect confirmation, confirm → Unselected account and its vault entry are removed.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Unselected account and its vault entry are removed.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -234,7 +234,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Open Activity → Bounded journal shows account IDs and operation outcomes without tokens or prompts.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
 **Expected result:** Bounded journal shows account IDs and operation outcomes without tokens or prompts.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -252,7 +252,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Reopen the app → Persisted accounts and routes load; proxy gets new capability.
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. Opening Switchboard again while it runs focuses the open window (0.5.3). Started in the background by the local lifecycle broker (`--background`), it shows no window and takes no focus; opening it again shows the window, with fresh metadata (SB-30; background smoke measured, the live reveal path is operator acceptance). The store is held by `switchboard serve`, a running command or a window opened with `open -n` → the window opens and reads “Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.”; Retry starts it once the store is free — the app no longer quits unexpectedly (0.5.3).
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile. Opening Switchboard again while it runs focuses the open window (0.5.3). Started in the background by the local lifecycle broker (`--background`), it shows no window and takes no focus; opening it again shows the window, with fresh metadata (SB-30; background smoke measured, the live reveal path is operator acceptance). The store is held by `switchboard serve`, a running command or a window opened with `open -n` → the window opens and reads “Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.”; Retry starts it once the store is free — the app no longer quits unexpectedly (0.5.3).
 **Expected result:** Persisted accounts and routes load; proxy gets new capability.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -270,9 +270,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Navigate with keyboard, open/cancel dialog; resize window → Focus visible and restored; actions remain available.
-2. Leave focus anywhere (navigation, heading, Retry, Stop rotation, a quota disclosure) while the 60-second background refresh runs → focus stays on the same control; when nothing changed the page is not re-rendered at all (0.4, B-15).
-3. From Add account choose Import Claude Swap, then close Import → focus returns to the control that opened Add account; each open dialog has its own title and description ids (0.4, B-16).
-**Alt paths:** Cancel a local edit → return without mutation. Official login cancellation waits for its Terminal process to exit, then cleans the staged profile. A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
+2. Leave focus anywhere (navigation, heading, Retry, Stop, a quota disclosure) while the 60-second background refresh runs → focus stays on the same control; when nothing changed the page is not re-rendered at all (0.4, B-15).
+3. From + Add account choose Import from Claude Swap → it runs with no dialog (since 0.5) and focus returns to + Add account; each dialog that does open has its own title and description ids (0.4, B-16).
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile. A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
 **Expected result:** Focus visible and restored; actions remain available; the shown selection is the latest one the user made.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -435,7 +435,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. With two or more switchable Claude accounts and no native policy on, the Automatic switching bar offers Turn on for Claude Code → one click enables the `claude_cli` policy for the pool holding most of them with the defaults below, and the bar reads “Automatic switching is on” with the latest decision (0.5). Stop turns it off in one click.
 2. For other boundaries, the ⚙ menu → New policy… or Edit … → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
-**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop rotation → the saved policy is disabled in one action. Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and native rotation holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
+**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop (Stop {pool} when several pools switch) → the saved policy is disabled in one action. Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and native rotation holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
 **Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
 **UI elements:** Automatic switching bar, Turn on / Stop, ⚙ settings menu, policy dialog with numeric fields, enabled checkbox and target selector, latest decision.
 **States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
@@ -453,7 +453,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** App launcher → SCR-01 Accounts; SCR-02 Activity; About.
 **Steps:**
 1. Open Switchboard → Yellow S on the dark app icon matches the sidebar; Switchboard and PassionCode are named.
-2. Read account states → Gold selection names the next managed request; blue “Current CLI account” names the separate local identity.
+2. Read account states → Gold selection names the next managed request; the blue “In Claude Code” / “In Codex CLI” badge names the separate local identity.
 3. Open a dialog, change navigation, or use a narrow window → Shared roles and visible keyboard focus persist in the active theme.
 4. Open About → Appearance offers System (default; follows the operating system's light/dark setting live), Dark and Light; the choice applies at once and is saved on this machine. If it cannot be saved, it applies until restart and About says so.
 5. Read About → Version and license: the app version, “Open source under the GNU AGPL-3.0; a commercial license is available at passioncode.ai/business.” with the address https://passioncode.ai/business/, the LICENSE and third-party notice addresses, and “Part of the PassionCode.ai toolkit” with https://passioncode.ai/switchboard/. In the native app the addresses are selectable text (no in-app browser opener exists); in the browser demo they are links opening a new tab.
@@ -573,7 +573,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Leave Switchboard running → inactive Claude accounts keep fresh quota and stay eligible; when the account in use reaches the threshold, rotation switches to one of them (0.5).
 2. Switch to an account whose access token has expired → it is renewed first and Claude Code starts on it.
-**Alt paths:** The provider rejects an account's sign-in → its row shows Sign in again as the primary action and a red badge; signing in updates the same row. The account signed in to the ordinary Claude Code is renewed by Claude Code; only when Claude Code has left it expired for more than five minutes does Switchboard renew it under Claude Code's locks, keeping Claude Code signed in (0.5.1). While Claude Swap runs, the accounts it manages are renewed by it and Switchboard follows (0.5.1). Claude refuses the renewal client itself (`invalid_client`) → the Automatic switching bar reads “Claude is refusing sign-in renewals for every account right now. …”, no row turns to Sign in again, and renewals resume on their own within the hour (0.5.2).
+**Alt paths:** The provider rejects an account's sign-in → its row shows Sign in as the primary action and a red “Sign in again” badge; signing in updates the same row. The account signed in to the ordinary Claude Code is renewed by Claude Code; only when Claude Code has left it expired for more than five minutes does Switchboard renew it under Claude Code's locks, keeping Claude Code signed in (0.5.1). While Claude Swap runs, the accounts it manages are renewed by it and Switchboard follows (0.5.1). Claude refuses the renewal client itself (`invalid_client`) → the Automatic switching bar reads “Claude is refusing sign-in renewals for every account right now. …”, no row turns to Sign in again, and renewals resume on their own within the hour (0.5.2).
 **Expected result:** Rotation no longer stalls on `no_eligible_account` because saved tokens aged out.
 **UI elements:** quota cell, Sign in again badge and action, Automatic switching bar decision text.
 **States covered:** fresh, renewing, transient failure, sign-in required.

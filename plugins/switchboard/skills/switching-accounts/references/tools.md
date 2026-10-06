@@ -74,7 +74,8 @@ The server works out which session asks from its own environment, first match wi
 
 ### `switchboard_project_context` — `path?` (absolute folder)
 
-`{path, rules[]}` with one entry per provider: `effective` (the rule in force, or null),
+`{path, project, rules[]}`: `project` is the project the folder belongs to (`name`, `pool`,
+`folders`, reserved `accounts`), or null; `rules` has one entry per provider: `effective` (the rule in force, or null),
 `nearest` (the nearest rule in any state, including paused or expired) and
 `managed_route_in_effect` (whether the rule's account is already selected in its pool).
 A rule view carries `path`, `provider`, `target` (`managed` or `claude_cli`), `enabled`,

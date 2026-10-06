@@ -125,7 +125,8 @@ enum Command {
 }
 #[derive(Subcommand)]
 enum Project {
-    /// Every saved rule with its state: active, paused or expired.
+    /// Projects (folders and reserved accounts), then every saved rule with its state: active,
+    /// paused or expired.
     List,
     /// The rule that applies to a folder (default: the current folder).
     Show {

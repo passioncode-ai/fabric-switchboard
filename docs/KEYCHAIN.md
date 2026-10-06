@@ -20,7 +20,7 @@ the list of trusted apps contains only the calling app."
 
 Keychain recognises an executable by its designated requirement. The app and the CLI it carries
 have different ones: the app is `identifier "ai.passioncode.fabric-switchboard"`, the bundled CLI
-`identifier switchboard` (`scripts/build_macos.py:167` signs it without `--identifier`), and a
+`identifier switchboard` (`scripts/build_macos.py` signs it without `--identifier`, the `codesign --force --options runtime` call for the CLI), and a
 development build's requirement is its `cdhash`, which changes on every build. So each item could
 be read silently only by the executable that wrote it. Every other one — the CLI that agents start
 for `switchboard mcp`, a rebuilt development app, the app after the CLI wrote an item — asked, once

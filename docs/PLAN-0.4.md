@@ -52,6 +52,8 @@ active rules; a rule never disables rotation — rotation still moves off an exh
 
 ## MCP tool contract (`switchboard mcp`, server name `switchboard`)
 
+> **Historical (0.4 design).** The tools have grown since: `switchboard_switch` gained `target: "route"`, `switchboard_project_apply` reports `other_session`, `needs_global` and `failed`, `switchboard_status` returns `current_cli_accounts` and `limited`, `switchboard_project_context` returns the folder's `project`, and `switchboard_usage` honours the provider's 429 wait and the read-only server. The current contract is the plugin's [tool reference](../plugins/switchboard/skills/switching-accounts/references/tools.md) and [`mcp.rs`](../crates/switchboard-cli/src/mcp.rs) `fn tools()`.
+
 Transport: stdio, newline-delimited JSON-RPC 2.0. Protocol versions accepted: `2025-06-18`
 (preferred), `2025-03-26`, `2024-11-05`; the server answers with the client's version when it
 supports it. Methods: `initialize`, `notifications/initialized`, `ping`, `tools/list`,
@@ -144,11 +146,11 @@ The run was parked by the operator before release; see the [handoff](handoffs/20
 | REQ-2 | done | runtime `projects::tests`, CLI `project_commands_work_offline_from_the_cli` |
 | REQ-3 | done; SB-07 flake open | `crates/switchboard-cli/tests/mcp.rs` |
 | REQ-4 | done | `sessions_are_detected_from_launch_labels_the_live_proxy_and_codex_homes` |
-| REQ-5 | done in code; macOS embedding not yet built; Windows installer has no CLI (SB-05) | `launched_sessions_get_switchboard_tools_with_exact_quoting` |
+| REQ-5 | done in code; the Windows installer carries the CLI since v0.6.0 (SB-05 done) | `launched_sessions_get_switchboard_tools_with_exact_quoting` |
 | REQ-6 | done in the browser demo; native webview not observed | `docs/evidence/design-0.4/{projects-light,agents}-1280.png`, SCN-025/026 |
-| REQ-7 | 19 of 20 fixed; B-19 stale-lock part parked (SB-04) | backend: `clock_set_back_after_observation_keeps_store_open_and_writable`, `failed_login_cleanup_releases_the_slot_after_the_account_is_saved`, `current_accounts_do_not_wait_behind_a_mutation`, `header_usage_merges_into_stored_windows_and_is_not_journaled`, `rotation_set_changes_only_the_given_flags`, `automatic_managed_switch_is_journaled_as_rotation`, `failed_managed_switch_is_not_reported_as_native_activation`, `activation_after_claude_logout_proceeds_and_is_journaled`, `current_account_matches_across_pools`, `each_request_journals_one_outcome_and_keeps_account_history`, `human_usage_and_events_print_utc_times_and_health`, `unwritable_lock_directory_is_not_reported_as_claude_updating`, `journal_failure_after_terminal_opened_is_not_a_launch_failure`; desktop: `scripts/test-ui-logic.mjs`, [design-0.4](evidence/design-0.4.md) |
+| REQ-7 | 19 of 20 fixed; B-19 stale-lock part parked (SB-04) | backend: `clock_set_back_after_observation_keeps_store_open_and_writable`, `failed_login_cleanup_releases_the_slot_after_the_account_is_saved`, `current_accounts_do_not_wait_behind_a_mutation`, `header_usage_merges_into_stored_windows_and_is_not_journaled`, `rotation_set_changes_only_the_given_flags`, `automatic_managed_switch_is_journaled_as_rotation`, `failed_managed_switch_is_not_reported_as_native_activation`, `activation_after_claude_logout_proceeds_and_is_journaled`, `current_account_matches_across_pools`, `only_unsuccessful_requests_are_journaled_and_usage_is_kept` (renamed in d09b652), `human_usage_and_events_print_utc_times_and_health`, `unwritable_lock_directory_is_not_reported_as_claude_updating`, `journal_failure_after_terminal_opened_is_not_a_launch_failure`; desktop: `scripts/test-ui-logic.mjs`, [design-0.4](evidence/design-0.4.md) |
 | REQ-8 | done | `node scripts/check-brand.mjs`, [design-0.4](evidence/design-0.4.md) |
-| REQ-9 | plugin and skill done; launcher member open (needs the tag) | `python3 scripts/check_plugin.py`, `claude plugin validate ./plugins/switchboard --strict` |
+| REQ-9 | plugin and skill done; the launcher member moved to passioncode:PC-02 (SB-10) | `python3 scripts/check_plugin.py`, `claude plugin validate ./plugins/switchboard --strict` |
 | REQ-10 | done 2026-09-30: site `c8a3a65` on its `main`, Worker version `2cd961df-0de6-4422-9193-f4c726eed857` | [release-0.4.md — Website](evidence/release-0.4.md#website) |
 | REQ-11 | done 2026-09-30: v0.4.0-beta.1 published, notarized, site selects it, installed locally | [release-0.4.md](evidence/release-0.4.md) |
 | REQ-12 | CONTRACTS, OPERATIONS, CLI, scenarios, board done; SPEC, release evidence and wiki open | `python3 scripts/check_docs.py` |

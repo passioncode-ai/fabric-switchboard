@@ -1,6 +1,6 @@
 # switchboard CLI
 
-Version 0.3 extends a native CLI with current-account capture, Claude Swap import and quota rotation over the same account store, vault, request proxy and launcher used by the desktop. [CLI release plan](CLI-RELEASE-PLAN.md) fixes the behavior; [release evidence](evidence/release-0.2.md) records which hosts actually passed. This file is an operational contract, not a claim of real-provider acceptance.
+Reference for the `switchboard` CLI as of 0.6.5: the same account store, vault, request proxy and launcher the desktop app uses. The original [CLI release plan](CLI-RELEASE-PLAN.md) fixed the 0.2 behaviour; release records: [0.5.x–0.6.x](evidence/release-0.5.md), [0.2](evidence/release-0.2.md). This file is an operational contract, not a claim of real-provider acceptance.
 
 ## Install and first use
 
@@ -20,7 +20,7 @@ Help/version do not open account storage. Default data root is shared with GUI: 
 switchboard accounts list
 switchboard accounts add --provider claude --kind api-key --label Work --pool work --secret-stdin < /private/path/to/credential
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
-switchboard accounts update ACCOUNT_UUID --label Work --enabled false
+switchboard accounts update ACCOUNT_UUID --label Work --enabled false   # both flags, always
 switchboard accounts remove ACCOUNT_UUID
 switchboard --json events
 ```
@@ -43,7 +43,7 @@ Then use another terminal:
 switchboard status
 switchboard backup list
 switchboard backup now
-switchboard backup restore switchboard-backup-1790000000.json
+switchboard backup restore switchboard-backup-1790000000-<id>.json   # a name from backup list
 switchboard login begin --provider codex --label Work --pool work
 switchboard login status LOGIN_UUID
 switchboard login finish LOGIN_UUID
@@ -104,7 +104,7 @@ Rotation targets are `managed` and `claude-cli` (serialized `claude_cli`). `rota
 
 ## For agents
 
-Version 0.4 serves Switchboard to coding agents over the Model Context Protocol and adds optional project rules. The [MCP tool contract](PLAN-0.4.md#mcp-tool-contract-switchboard-mcp-server-name-switchboard) and the [server source](../crates/switchboard-cli/src/mcp.rs) define the tools; the [plugin](../plugins/switchboard/README.md) and its [skill](../plugins/switchboard/skills/switching-accounts/SKILL.md) tell an agent how to use them.
+Version 0.4 serves Switchboard to coding agents over the Model Context Protocol and adds optional project rules. The [tool reference](../plugins/switchboard/skills/switching-accounts/references/tools.md) and the [server source](../crates/switchboard-cli/src/mcp.rs) define the tools (PLAN-0.4's table is the 0.4 design, kept for history); the [plugin](../plugins/switchboard/README.md) and its [skill](../plugins/switchboard/skills/switching-accounts/SKILL.md) tell an agent how to use them.
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
@@ -131,7 +131,7 @@ switchboard project apply --path /path/to/project --global
 
 `--path` defaults to the current folder and must be absolute. `--target` is `managed` (default) or `claude-cli`; `--expires-in-hours` accepts 1 to 720; `--paused` saves the rule switched off. `apply` detects the calling session (managed, isolated or native) and reports one action per provider: `selected`, `activated`, `already_in_effect`, `no_rule`, `rule_paused`, `rule_expired`, `other_pool`, `other_session`, `needs_global` or `failed`. A `claude_cli` rule changes the ordinary Claude Code login only with `--global`.
 
-Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS the desktop app's Agents panel links the bundled CLI to `~/.local/bin/switchboard`, and on Windows the installer puts `switchboard.exe` beside the desktop app (since 0.5.5, SB-05), where the Agents panel finds it and prints the registration commands with its full path; to type `switchboard` in a shell, add that folder to `PATH`.
+Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS the desktop app's Agents panel links the bundled CLI to `~/.local/bin/switchboard`, and on Windows the installer puts `switchboard.exe` beside the desktop app (since 0.6.0, SB-05), where the Agents panel finds it and prints the registration commands with its full path; to type `switchboard` in a shell, add that folder to `PATH`.
 
 | Agent | Command |
 |---|---|
@@ -141,3 +141,20 @@ Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS th
 | Codex | `codex mcp add switchboard -- switchboard mcp` |
 
 Restart the agent after installing; it loads servers and skills at session start. The plugin is validated by `python3 scripts/check_plugin.py`, `python3 -m unittest scripts/test_check_plugin.py` and `claude plugin validate ./plugins/switchboard --strict` plus `claude plugin validate . --strict`.
+
+### Other coding agents
+
+Switchboard's catalog of 30 coding agents ([AGENT-SUPPORT.md](AGENT-SUPPORT.md)) says what each
+can use: its MCP tools (`mcp`), the local proxy with an API-key account (`proxy`), or a launch
+configured by environment alone (`launch`).
+
+```sh
+switchboard agents list                                # id, level (mcp|proxy|launch), name
+switchboard agents connect hermes --pool work          # MCP registration and, when it can, proxy settings
+switchboard agents key                                 # the agents' proxy key, for an agent's key command
+switchboard agents launch goose --pool work --dir /abs/folder
+```
+
+The agent id comes from `agents list`. `agents key` prints a local proxy key, not a provider
+credential: the proxy accepts it only for the pool's API-key account, never for a Claude
+subscription. Keep it out of shared configuration files.
