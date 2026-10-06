@@ -350,6 +350,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
         "project" => matches!(detail, "created" | "updated" | "removed"),
         "fallback_chain" => matches!(detail, "set" | "cleared"),
+        "fallback" => matches!(detail, "offered" | "failed"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(

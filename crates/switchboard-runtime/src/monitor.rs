@@ -159,6 +159,9 @@ impl Pass {
             let _mutation = runtime.mutations.lock().await;
             let _ = rotate(runtime, native_sources);
         }
+        // A workflow whose executor hit its limit goes to the next agent of its chain (SB-73);
+        // nothing happens without a chain. Outside the lock: the hand-over takes it itself.
+        crate::fallback::pass(runtime, time).await;
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

@@ -1,6 +1,6 @@
 # Packet XA-01 — cross-agent continuation and fallback chains
 
-**State:** designed 2026-10-06 (operator request and decisions below); SB-70 built for 0.6.7, SB-71…SB-74 open. **Board:**
+**State:** designed 2026-10-06 (operator request and decisions below); SB-70 released in 0.6.7; SB-71 (core, CLI, MCP) and SB-73 phase 1 (Claude Code ↔ Codex) built on `main`; SB-72 waits on the OpenRouter door's daily reset (project-observatory-dashboard#175); SB-74 on Fabric's ADR. **Board:**
 SB-70 … SB-74. **Org track:** fabric-workspace roadmap RM-19 (the pipeline part also under
 RM-06). **Program link:** org-index agent-memory N-018 step 2 (cross-provider pack), N-021,
 N-022. **Shared:** [contracts](../CONTRACTS.md), [continuation skeleton](n-018-continuation.md),

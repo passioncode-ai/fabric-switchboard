@@ -236,6 +236,46 @@ fn provider_of(name: &str) -> Option<Provider> {
     }
 }
 
+/// `full workflow list --status open --json`: the open workflows with their executor (never a
+/// token), a waiting handoff and how long the executor has been silent.
+pub fn list_open(bin: &Path) -> Result<Vec<Value>, String> {
+    let output = run(
+        bin,
+        &["full", "workflow", "list", "--status", "open", "--json"],
+    )?;
+    if !output.success {
+        return Err(refusal(
+            "Project Observatory refused the read:",
+            &output.stderr,
+        ));
+    }
+    let value: Value = serde_json::from_str(&output.stdout).map_err(|_| ENGINE_UNREADABLE)?;
+    value
+        .get("workflows")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| ENGINE_UNREADABLE.into())
+}
+
+/// The workflow's checkouts that exist on this machine (its checkpoint's `git` artifacts).
+pub fn checkouts(show: &Value) -> Vec<PathBuf> {
+    show.pointer("/checkpoint/body/artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|a| a.get("kind").and_then(Value::as_str) == Some("git"))
+        .filter_map(|a| a.get("path").and_then(Value::as_str))
+        .filter(|p| !p.contains(REDACTED))
+        .filter_map(|p| PathBuf::from(p).canonicalize().ok())
+        .filter(|p| p.is_dir())
+        .collect()
+}
+
+/// The Switchboard provider a workflow's executor name stands for, if any.
+pub fn executor_provider(name: &str) -> Option<Provider> {
+    provider_of(name)
+}
+
 /// Decides from the read alone whether `account` may continue the workflow in `dir`. Nothing is
 /// offered or launched yet, so every refusal here leaves the workflow as it was.
 pub fn plan(
