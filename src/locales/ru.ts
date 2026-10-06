@@ -776,4 +776,5 @@ export const RU: Record<string, string> = {
   "Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.": "Версия {version} готова. Она запустится сама, когда Switchboard простаивает в фоне или откроется снова, — или перезапустите сейчас.",
   "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.": "Перед установкой этой версии человеку нужно выполнить шаг — что сделать, написано в примечаниях к выпуску. Switchboard остаётся на текущей версии.",
   "Backups belong to the default data folder; this data folder has none.": "Резервные копии относятся к папке данных по умолчанию; у этой папки данных их нет.",
+  "Give a new label, an enabled state, or both.": "Укажите новое имя, состояние «включён» или и то и другое.",
 };

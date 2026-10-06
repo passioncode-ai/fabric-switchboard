@@ -182,7 +182,11 @@ async fn update_account(
     state
         .runtime()
         .await?
-        .execute(Operation::Update { id, label, enabled })
+        .execute(Operation::Update {
+            id,
+            label: Some(label),
+            enabled: Some(enabled),
+        })
         .await
 }
 #[tauri::command]

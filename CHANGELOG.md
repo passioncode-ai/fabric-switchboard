@@ -13,6 +13,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - `switchboard --data-dir <folder> backup list` no longer lists the real backups, and
   `backup restore` there refuses instead of loading the real accounts into the scratch store
   (SB-61).
+- Every `switchboard` command and argument explains itself in `--help`, and
+  `switchboard accounts update` takes `--label` or `--enabled` alone; the other keeps its value
+  (SB-68).
 
 ## 0.6.10 — 2026-10-07
 

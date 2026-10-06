@@ -78,10 +78,14 @@ pub enum Operation {
         pool: String,
         secret: String,
     },
+    /// A field left out keeps its saved value. Both present serializes as before, so an owner
+    /// of an earlier version still understands the full form.
     Update {
         id: String,
-        label: String,
-        enabled: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
     },
     Remove {
         id: String,
@@ -1210,7 +1214,7 @@ async fn execute(
             Ok(json!(store.add(label, provider, kind, pool, credential)?))
         }
         Operation::Update { id, label, enabled } => {
-            store.update(&id, label, enabled)?;
+            store.update_fields(&id, label, enabled)?;
             Ok(Value::Null)
         }
         Operation::Remove { id } => {
@@ -3717,8 +3721,8 @@ mod usage_gate_tests {
             std::time::Duration::from_secs(2),
             runtime.execute(Operation::Update {
                 id: a.id.clone(),
-                label: "renamed".into(),
-                enabled: true,
+                label: Some("renamed".into()),
+                enabled: Some(true),
             }),
         )
         .await

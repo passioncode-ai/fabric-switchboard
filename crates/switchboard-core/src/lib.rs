@@ -323,6 +323,8 @@ fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
     usage_valid(&merged).then_some(merged)
 }
 
+/// An account update that names neither a label nor an enabled state.
+pub const NOTHING_TO_UPDATE: &str = "Give a new label, an enabled state, or both.";
 /// Fixed vocabulary prevents callers from accidentally persisting upstream error bodies.
 pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
     match action {
@@ -991,7 +993,20 @@ impl Store {
         self.publish(&mut state, candidate)
     }
     pub fn update(&self, id: &str, label: String, enabled: bool) -> Result<(), String> {
-        if !label_valid(&label) {
+        self.update_fields(id, Some(label), Some(enabled))
+    }
+    /// Changes the label, the enabled state or both, under one lock: a field left out keeps its
+    /// saved value (the CLI's `accounts update --label` or `--enabled` alone, SB-68).
+    pub fn update_fields(
+        &self,
+        id: &str,
+        label: Option<String>,
+        enabled: Option<bool>,
+    ) -> Result<(), String> {
+        if label.is_none() && enabled.is_none() {
+            return Err(NOTHING_TO_UPDATE.into());
+        }
+        if label.as_deref().is_some_and(|l| !label_valid(l)) {
             return Err("Label is invalid".into());
         }
         let mut state = self.lock()?;
@@ -1001,7 +1016,10 @@ impl Store {
             .iter_mut()
             .find(|a| a.id == id)
             .ok_or("Account not found")?;
-        a.label = label.trim().into();
+        if let Some(label) = label {
+            a.label = label.trim().into();
+        }
+        let enabled = enabled.unwrap_or(a.enabled);
         a.enabled = enabled;
         if !enabled {
             candidate.routes.retain(|_, value| value != id);
