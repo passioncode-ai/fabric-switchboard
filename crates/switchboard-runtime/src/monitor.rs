@@ -320,6 +320,10 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
             // Unreadable vault rows must also move out of the due queue;
             // otherwise the first two broken rows starve every later account.
             store.usage_health(id, "failed", started, started + INTERVAL_SECONDS)?;
+            crate::oplog::event(
+                "usage_check",
+                &[("outcome", crate::oplog::Field::Code("vault"))],
+            );
             return Err(
                 "Usage unavailable. Check sign-in or try again after the next scheduled check."
                     .into(),
@@ -350,6 +354,11 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
                     checked + crate::usage_gate::not_before_delay(wait),
                 );
             }
+            // Diagnosis only: a fixed code, never the provider's body or a token.
+            crate::oplog::event(
+                "usage_check",
+                &[("outcome", crate::oplog::Field::Code(failure.kind()))],
+            );
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
             Err(
                 if failure.message == switchboard_proxy::REJECTED

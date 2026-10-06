@@ -45,7 +45,7 @@ fn tools() -> Vec<(bool, Value)> {
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed pool, isolated, or native), the signed-in CLI accounts, selected accounts per pool, active project rules and automatic rotation. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, and the lowest remaining quota.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account and is refused within 60 seconds of its last check, and until the time the provider asked for after answering a check with 429; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account and is refused within 60 seconds of its last check, and until the time the provider asked for after answering a check with 429; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own pool for any managed session; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
@@ -223,7 +223,10 @@ impl Server {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         let mut note = Value::Null;
-        if refresh {
+        if refresh && self.read_only {
+            // A check is a provider request that writes its answer and may renew a sign-in.
+            note = json!("This server is read-only: showing the stored observation without asking the provider.");
+        } else if refresh {
             let id = id.ok_or("Name one account_id to refresh.")?;
             let snapshot = self.call(Operation::Snapshot).await?;
             let account = find(&snapshot, id)?;
@@ -512,7 +515,7 @@ fn find<'a>(snapshot: &'a Value, id: &str) -> Result<&'a Value, String> {
 }
 
 /// Remaining = 100 − used for each reported window. Stale when older than the pool's
-/// freshest enabled policy allows (300 s without one), or once a window's reset has passed.
+/// freshest enabled policy allows (`UNPOLICED_MAX_AGE_SECONDS`, 900 s, without one), or once a window's reset has passed.
 fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
     let health = &account["usage_health"];
     let base = json!({"health": health["status"], "checked_at": health["checked_at"].as_i64().map(rfc3339), "next_check_at": health["next_check_at"].as_i64().map(rfc3339)});

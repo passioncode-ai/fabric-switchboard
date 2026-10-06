@@ -585,9 +585,9 @@ fn parse_reset(value: &serde_json::Value, observed_at: i64) -> Result<i64, Strin
                 })
             })
         })
-        .ok_or("Usage reset unsupported.")?;
+        .ok_or(USAGE_RESET_UNSUPPORTED)?;
     if parsed < observed_at || parsed > 253_402_300_799 {
-        return Err("Usage reset unsupported.".into());
+        return Err(USAGE_RESET_UNSUPPORTED.into());
     }
     Ok(parsed)
 }
@@ -619,6 +619,30 @@ impl From<&str> for ProbeFailure {
 }
 pub const USAGE_RATE_LIMITED: &str =
     "Usage checks are rate limited by the provider. Switchboard waits before the next one.";
+const USAGE_UNAVAILABLE: &str = "Usage check unavailable.";
+const USAGE_UNREACHABLE: &str = "Usage check could not reach provider.";
+const USAGE_HTTP: &str = "Usage unavailable. Check the account and retry later.";
+const USAGE_INTERRUPTED: &str = "Usage response interrupted.";
+const USAGE_TOO_LARGE: &str = "Usage response too large.";
+const USAGE_UNSUPPORTED: &str = "Usage response unsupported.";
+const USAGE_RESET_UNSUPPORTED: &str = "Usage reset unsupported.";
+impl ProbeFailure {
+    /// A fixed code for the operations log (LC-12): which way the check failed, never the
+    /// provider's text or a token. A message this crate does not produce is `other`.
+    pub fn kind(&self) -> &'static str {
+        match self.message.as_str() {
+            REJECTED => "rejected",
+            USAGE_RATE_LIMITED => "rate_limited",
+            USAGE_UNREACHABLE => "unreachable",
+            USAGE_HTTP => "http_error",
+            USAGE_INTERRUPTED => "interrupted",
+            USAGE_TOO_LARGE => "too_large",
+            USAGE_UNSUPPORTED | USAGE_RESET_UNSUPPORTED => "unsupported",
+            USAGE_UNAVAILABLE => "unavailable",
+            _ => "other",
+        }
+    }
+}
 const USAGE_ORIGINS: (&str, &str) = ("https://api.anthropic.com", "https://chatgpt.com");
 
 /// Manual quota check. Fixed destinations only, redirects disabled, no raw error text.
@@ -711,7 +735,7 @@ async fn probe_usage_from(
         .no_proxy()
         .timeout(Duration::from_secs(15))
         .build()
-        .map_err(|_| "Usage check unavailable.")?;
+        .map_err(|_| USAGE_UNAVAILABLE)?;
     let url = match account.provider {
         Provider::Claude => format!("{}/api/oauth/usage", origins.0),
         Provider::Codex => format!("{}/backend-api/wham/usage", origins.1),
@@ -725,10 +749,7 @@ async fn probe_usage_from(
             request = request.header("chatgpt-account-id", account_id);
         }
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|_| "Usage check could not reach provider.")?;
+    let response = request.send().await.map_err(|_| USAGE_UNREACHABLE)?;
     // Only 401 speaks about the token itself; a 403 can be a plan or region refusal.
     if response.status().as_u16() == 401 {
         return Err(REJECTED.into());
@@ -740,19 +761,18 @@ async fn probe_usage_from(
         });
     }
     if !response.status().is_success() {
-        return Err("Usage unavailable. Check the account and retry later.".into());
+        return Err(USAGE_HTTP.into());
     }
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "Usage response interrupted.")?;
+        let chunk = chunk.map_err(|_| USAGE_INTERRUPTED)?;
         if bytes.len() + chunk.len() > 1024 * 1024 {
-            return Err("Usage response too large.".into());
+            return Err(USAGE_TOO_LARGE.into());
         }
         bytes.extend_from_slice(&chunk);
     }
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|_| "Usage response unsupported.")?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| USAGE_UNSUPPORTED)?;
     let usage = parse_usage(account.provider, &value)?;
     store.observe_credential(&id, &credential, usage.clone())?;
     Ok(usage)
@@ -767,9 +787,9 @@ fn parse_window(
     let used_percent = window
         .get(key)
         .and_then(serde_json::Value::as_f64)
-        .ok_or("Usage response unsupported.")?;
+        .ok_or(USAGE_UNSUPPORTED)?;
     if !used_percent.is_finite() || !(0. ..=100.).contains(&used_percent) {
-        return Err("Usage response unsupported.".into());
+        return Err(USAGE_UNSUPPORTED.into());
     }
     let reset_key = if provider == Provider::Claude {
         "resets_at"
@@ -784,12 +804,12 @@ fn parse_window(
                 let seconds = reset
                     .as_i64()
                     .filter(|n| *n >= 0)
-                    .ok_or("Usage reset unsupported.")?;
+                    .ok_or(USAGE_RESET_UNSUPPORTED)?;
                 Some(
                     observed_at
                         .checked_add(seconds)
                         .filter(|t| *t <= 253_402_300_799)
-                        .ok_or("Usage reset unsupported.")?,
+                        .ok_or(USAGE_RESET_UNSUPPORTED)?,
                 )
             }
             None => None,

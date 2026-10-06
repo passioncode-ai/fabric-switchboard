@@ -1667,7 +1667,7 @@ fn replace_native(
     }
     // An expired access token is fine while a refresh token remains: Claude Code renews it
     // on first use, exactly as after its own idle expiry (PLAN-0.5 C-5).
-    let credential = store.stored_credential(&account.id)?;
+    let mut credential = store.stored_credential(&account.id)?;
     if credential.refresh_token.is_none()
         && credential.expires_at.is_some_and(|t| t <= monitor::now())
     {
@@ -1692,24 +1692,48 @@ fn replace_native(
     let offline_state = refresh::RefreshState::default();
     let state = refresh.unwrap_or(&offline_state);
     let mut copies = Vec::new();
+    let mut owner = identity.clone();
     if let Some(current) = &current {
         // The account being switched away from stays "recently active" for renewal purposes.
         state.note_active(&current.identity);
+        let attributed = refresh::attribution(store, state, &current.identity, &current.credential);
         // Already the account in use: writing its stored copy would replace Claude Code's
-        // newer live generation with an older one. Nothing to do.
+        // newer live generation with an older one. Nothing to do — unless the token is known
+        // to be another account's, when the settings name this account but Claude Code runs on
+        // someone else's sign-in and the switch must really happen.
         if current.identity.account_id.is_some()
             && current.identity.account_id == identity.account_id
             && current.identity.organization_id == identity.organization_id
+            && !matches!(attributed, refresh::Attribution::Other(_))
         {
             return Ok(());
         }
-        copies = matching_accounts(store, Provider::Claude, &current.identity)?;
+        // The live token is filed under the account it belongs to. Usually that is the one
+        // Claude Code's settings name; after an interrupted switch or a half-finished `/login`
+        // it can be another saved account's, and once the provider confirms whose, it goes to
+        // that account and the switch goes on — refusing left the person unable to switch at
+        // all. A token nobody can attribute, one only a stored copy calls another account's,
+        // or one of an account Switchboard does not hold, is never written over.
+        // An account in use that nothing saved is refused as such first (the token cannot be
+        // anyone's we hold), before any question of attribution.
+        if !matches!(attributed, refresh::Attribution::Other(Some(_)))
+            && matching_accounts(store, Provider::Claude, &current.identity)?.is_empty()
+        {
+            return Err(UNSAVED_CURRENT.into());
+        }
+        owner = refresh::owner_to_file(store, state, &current.identity, &current.credential)?;
+        copies = matching_accounts(store, Provider::Claude, &owner)?;
         if copies.is_empty() {
             return Err(UNSAVED_CURRENT.into());
         }
-        // Another account's lineage under this account's name is never filed here, and one
-        // nobody can attribute is not filed either (the caller asked the provider first).
-        refresh::filable(store, state, &current.identity, &current.credential)?;
+        // The live token is the target's own newest generation: Claude Code gets that one.
+        if owner.account_id == identity.account_id
+            && owner.organization_id == identity.organization_id
+            && current.credential.refresh_token.is_some()
+            && current.credential.expires_at.unwrap_or(0) >= credential.expires_at.unwrap_or(0)
+        {
+            credential = current.credential.clone();
+        }
     }
     let mut preserve = |outgoing: &external::Outgoing<'_>| -> Result<(), String> {
         let live = external::profile_of(outgoing)?;
@@ -1717,8 +1741,10 @@ fn replace_native(
             return Err("Current Claude account changed during activation. Try again.".into());
         }
         // The bytes read under the locks are the newest generation; Claude Code may have
-        // refreshed since the check above, and a different lineage now is not this account's.
-        refresh::filable(store, state, &live.identity, &live.credential)?;
+        // refreshed since the check above, and must still be the same owner's lineage.
+        if refresh::owner_to_file(store, state, &live.identity, &live.credential)? != owner {
+            return Err("Current Claude account changed during activation. Try again.".into());
+        }
         // Every stored copy of that identity, in every pool (PLAN-0.5 C-6) — except one that
         // already holds a newer generation than Claude Code's (a renewal Switchboard stored
         // while writing it back to Claude Code failed): the live token is the spent one then.
@@ -1735,7 +1761,7 @@ fn replace_native(
                 copy.kind,
                 copy.pool.clone(),
                 live.credential.clone(),
-                Some(live.identity.clone()),
+                Some(owner.clone()),
             )?;
         }
         Ok(())
@@ -1759,6 +1785,7 @@ pub(crate) mod fixtures {
     use super::*;
     use switchboard_core::MemoryVault;
     const EXPIRES: i64 = 4_000_000_000;
+    pub(crate) const EXPIRES_MS: i64 = EXPIRES * 1000;
     pub(crate) fn identity(account: &str) -> ExternalIdentity {
         ExternalIdentity {
             account_id: Some(account.into()),
@@ -2481,34 +2508,132 @@ mod owner_tests {
             label: "synthetic-a".into(),
         })
     }
+    /// Paired with `a_named_b_held`: what the real adapter reads back from Claude Code's own
+    /// files during activation — B's token in the auth, A's name in the settings.
+    fn activates_a_named_b_held(
+        _: &Credential,
+        _: &ExternalIdentity,
+        expected: Option<&ExternalIdentity>,
+        preserve: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if expected.is_some() {
+            let auth = json!({"claudeAiOauth":{"accessToken":"synthetic-b-token","refreshToken":"synthetic-b-refresh","expiresAt":EXPIRES_MS}}).to_string();
+            let config = json!({"oauthAccount":{"accountUuid":"synthetic-a","organizationUuid":"synthetic-org","emailAddress":"synthetic-a@example.invalid"}}).to_string();
+            preserve(&external::Outgoing {
+                auth: auth.as_bytes(),
+                config: config.as_bytes(),
+            })?;
+        }
+        Ok(())
+    }
     #[tokio::test]
-    async fn a_foreign_lineage_under_this_name_is_never_filed_or_switched_from() {
+    async fn a_foreign_lineage_under_this_name_is_filed_under_its_owner_and_the_switch_goes_on() {
+        // Claude Code's settings name A, its token is B's (the provider says so): the switch to
+        // C files the live token under B, leaves A's own lineage alone and goes on.
         let root = tempfile::tempdir().unwrap();
-        let runtime = fixtures::runtime(root.path(), a_named_b_held, activates).await;
+        let runtime =
+            fixtures::runtime(root.path(), a_named_b_held, activates_a_named_b_held).await;
         let a = save(&runtime.store, "synthetic-a", "default");
         let b = save(&runtime.store, "synthetic-b", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        runtime
+            .refresh
+            .learn_owner("synthetic-b-refresh", identity("synthetic-b"));
+        runtime
+            .execute(Operation::ActivateNative { id: c.id.clone() })
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime.store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-token",
+            "A keeps its own lineage"
+        );
+        let b_now = runtime.store.stored_credential(&b.id).unwrap();
+        assert_eq!(b_now.refresh_token.as_deref(), Some("synthetic-b-refresh"));
+        let b_row = runtime
+            .store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .into_iter()
+            .find(|x| x.id == b.id)
+            .unwrap();
+        assert_eq!(
+            b_row.external_identity.unwrap().account_id.as_deref(),
+            Some("synthetic-b"),
+            "B's row keeps B's identity"
+        );
+        let events = runtime.store.snapshot().unwrap().events;
+        assert!(events
+            .iter()
+            .any(|e| e.action == "activation" && e.detail == "completed"));
+    }
+    #[tokio::test]
+    async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {
+        // Only a stored copy of B calls the live token B's, and the provider cannot be asked:
+        // that copy may be the misfiled one, so nothing is filed under B — B's sign-in in its
+        // other pool is not overwritten — and the switch is refused as unconfirmed.
+        let root = tempfile::tempdir().unwrap();
+        let runtime =
+            fixtures::runtime(root.path(), a_named_b_held, activates_a_named_b_held).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        save(&runtime.store, "synthetic-b", "default");
+        let b_elsewhere = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                credential("synthetic-b-own"),
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
         let c = save(&runtime.store, "synthetic-c", "default");
         assert_eq!(
             runtime
                 .execute(Operation::ActivateNative { id: c.id.clone() })
                 .await
                 .unwrap_err(),
-            refresh::FOREIGN_LIVE
+            refresh::UNCONFIRMED_LIVE
         );
-        // A's copy keeps its own lineage; B's is untouched.
+        assert_eq!(
+            runtime
+                .store
+                .stored_credential(&b_elsewhere.id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-b-own-refresh"),
+            "B's real sign-in in its other pool is untouched"
+        );
         assert_eq!(
             runtime.store.stored_credential(&a.id).unwrap().access_token,
             "synthetic-a-token"
         );
+    }
+    #[tokio::test]
+    async fn a_live_token_of_an_account_switchboard_does_not_hold_is_never_written_over() {
+        // The token is held by no saved copy and the provider is unreachable: nothing attributes
+        // it, so the switch is refused rather than losing that sign-in.
+        let root = tempfile::tempdir().unwrap();
+        let runtime =
+            fixtures::runtime(root.path(), a_named_b_held, activates_a_named_b_held).await;
+        save(&runtime.store, "synthetic-a", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
         assert_eq!(
-            runtime.store.stored_credential(&b.id).unwrap().access_token,
-            "synthetic-b-token"
+            runtime
+                .execute(Operation::ActivateNative { id: c.id.clone() })
+                .await
+                .unwrap_err(),
+            refresh::UNCONFIRMED_LIVE
         );
     }
     #[tokio::test]
     async fn capturing_another_accounts_lineage_under_this_name_is_refused() {
         let root = tempfile::tempdir().unwrap();
-        let runtime = fixtures::runtime(root.path(), a_named_b_held, activates).await;
+        let runtime =
+            fixtures::runtime(root.path(), a_named_b_held, activates_a_named_b_held).await;
         let a = save(&runtime.store, "synthetic-a", "default");
         save(&runtime.store, "synthetic-b", "default");
         assert_eq!(

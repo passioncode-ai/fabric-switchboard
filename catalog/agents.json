@@ -41,7 +41,7 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": "Adopts external logins by default (reads Claude Code's credential files): set auth.adopt_external_logins: false. Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
-      "notes": "A trailing /v1 is stripped and /v1/messages appended; key sent as x-api-key. Key fields: key_env / api_key / key_cmd. An ANTHROPIC_BASE_URL env var is unverified.",
+      "notes": "A trailing /v1 is stripped and /v1/messages appended; a third-party endpoint gets the key as x-api-key (the pinned adapter's api_key style). Key fields: key_env / api_key / key_cmd. The base URL comes from provider config; the pinned adapter does not read ANTHROPIC_BASE_URL itself (an SDK-level env fallback with no configured base is possible but unverified).",
       "sources": [
         "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/website/docs/integrations/providers.md#L1338-L1354",
         "https://github.com/NousResearch/hermes-agent/blob/7157422022ff06f3e632d1dd394ee1253b17ad37/agent/anthropic_adapter.py#L374-L386",
@@ -521,7 +521,7 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
-      "notes": "A personal-assistant gateway with a coding headless mode (agent exec, coding tool profile). ANTHROPIC_BASE_URL is a fallback to models.providers.<id>; the key env var name is not given in the research. /v1/messages is appended (only /messages if the base ends in /v1); x-api-key. A custom baseUrl trusts that loopback origin automatically. `openclaw mcp add` probes the server before saving. Launch by Switchboard waits until its key variable and base path are verified.",
+      "notes": "A personal-assistant gateway with a coding headless mode (agent exec, coding tool profile). ANTHROPIC_BASE_URL is a fallback to models.providers.<id>. apiKey takes the key value or an env-var name as a SecretRef env marker (the pinned worked example uses \"LITELLM_KEY\") — name e.g. SWITCHBOARD_TOKEN and export it from the key command to keep the key out of the file. /v1/messages is appended (only /messages if the base ends in /v1); x-api-key. A custom baseUrl trusts that loopback origin automatically. `openclaw mcp add` probes the server before saving. Launch by Switchboard waits until its key variable and base path are verified.",
       "sources": [
         "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/gateway/config-tools/custom-providers.md#L14-L82",
         "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/packages/ai/src/transports/anthropic-transport-stream.ts#L79-L87",
@@ -602,7 +602,7 @@
         "key_env": null,
         "extra_env": {},
         "suffix": "",
-        "config_snippet": null,
+        "config_snippet": "{ \"providerRules\": [ { \"providerId\": \"switchboard\", \"providerName\": \"Switchboard\", \"enabled\": true, \"config\": { \"group\": \"standard-personal\", \"access\": { \"type\": \"api-key\", \"apiKey\": \"{key}\" }, \"api\": { \"type\": \"anthropic-messages\", \"baseUrl\": \"{base}\" }, \"personalModelIds\": [\"<claude model id>\"] } } ] }",
         "requires_flag": null
       },
       "openai": {
@@ -616,13 +616,14 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": null,
-      "notes": "Desktop DMG from https://zcode.z.ai/; the CLI's hosted install.sh URL is unverified (npm zcode-app-cli is a third-party wrapper). Provider in ~/.zcode/v2/provider_config.json (ZCODE_PERSONAL_PROVIDER_CONFIG_FILE overrides) with api.type: anthropic-messages, api.baseUrl, access.apiKey; the file's top-level shape is unverified, so no snippet. /v1 is added if absent, then /messages; sends x-api-key and Bearer.",
+      "notes": "Desktop DMG from https://zcode.z.ai/; the CLI's hosted install.sh URL is unverified (npm zcode-app-cli is a third-party wrapper). Provider in ~/.zcode/v2/provider_config.json (ZCODE_PERSONAL_PROVIDER_CONFIG_FILE overrides): the personal-rules object {providerRules: [...]}, a rule {providerId, providerName?, enabled?, config{group standard-personal, access{api-key}, api{anthropic-messages, baseUrl}, personalModelIds}} per personalProviderConfigRulesSchema. access.apiKey is the literal key value. /v1 is added if absent, then /messages; sends x-api-key and Bearer (an explicit Authorization header wins).",
       "sources": [
         "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/packages/adapters/src/model/model-execution.ts#L282-L435",
         "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/provider/src/config/provider-data-schema.ts#L4-L70",
         "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/README.md#L139-L180",
         "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/apps/zcode-cli/packages/i18n/src/locales/en-US.ts#L31-L50",
-        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/README.en.md#L14-L97"
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/README.en.md#L14-L97",
+        "https://github.com/zai-org/ZCode/blob/29628c9acdb81b703bbd4080c207a0e7ce5e276e/packages/provider/src/config/rule-data-schema.ts"
       ]
     },
     {
@@ -663,9 +664,10 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": null,
-      "notes": "Replaces \"Proto Agent\" (no established agent by that name). Provider config in ~/.kimi-code/config.toml; x-api-key with Authorization forced to null; shell ANTHROPIC_* vars are ignored. No shell MCP add command (/mcp-config in the TUI); project MCP servers are off in headless runs unless trusted or KIMI_CODE_TRUST_WORKSPACE=1. Whether /login can be skipped with only a custom provider is unverified.",
+      "notes": "Replaces \"Proto Agent\" (no established agent by that name). Provider config in ~/.kimi-code/config.toml; x-api-key with Authorization forced to null; shell ANTHROPIC_* vars are ignored (only a declared api_key_env is read). No shell MCP add command (/mcp-config in the TUI); user-level MCP is ~/.kimi-code/mcp.json ($KIMI_CODE_HOME/mcp.json). Project MCP servers are off in headless runs unless trusted or KIMI_CODE_TRUST_WORKSPACE=1. /login manages only the Kimi Code OAuth managed account; a config.toml provider is an independent API source (credential priority api_key/api_key_env > [providers.<name>.env] > startup error), so a configured custom provider needs no /login per the pinned docs — live confirmation pending.",
       "sources": [
         "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/configuration/providers.md#L62-L110",
+        "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/configuration/providers.md#L20-L42",
         "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/packages/kosong/src/providers/anthropic.ts#L1192-L1220",
         "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/packages/agent-core-v2/src/human/llm/requester/bases/anthropic/requester.ts#L179-L181",
         "https://github.com/MoonshotAI/kimi-code/blob/21406fb4c805cc8c715e6d1f16ad3fb5f25f4fe3/docs/en/configuration/env-vars.md#L6",
