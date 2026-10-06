@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# Release 0.6.7; Inbox and Dashboards updated; SB-71 chains built (2026-10-06)
+
+- **0.6.7** (SB-70, Claude Code ↔ Codex continuation) tagged from `7ce4cf1` (#90); release run
+  37473394537 approved on the operator's instruction («давай выпускай»); the record goes into
+  release-0.5.md once it publishes.
+- **Fabric Inbox 0.11.0 and Fabric Dashboards 0.5.6 installed** on this machine (operator closed
+  both apps): downloaded sets verified (SHA256SUMS, GPG, attestation, Gatekeeper, team
+  `KJ35UYYL22`), replaced bundles kept in `~/DATA/_archive/passioncode-app-rollback-2026-10-06/`
+  (Dashboards 0.4.1; Inbox was already 0.11.0 when installed). Both update themselves from now on.
+  **The disk ran out mid-copy** (1.1 GB free, swap 13 GB): the partial Dashboards bundle was
+  removed and the install redone by `mv` from one verified extraction; the session's scratch
+  downloads were deleted. The broker answered `verification_pending` on the first starts (a changed
+  bundle is re-verified; minutes under load). The machine sits at ~98 % disk — see the machine
+  CLAUDE.md gotcha on swap.
+- **SB-71 chains — core, CLI, MCP** (on branch `feat/sb-71-fallback-chains`, see its PR): operator's
+  chains per machine/project/task, preset `subscriptions-first`, catalog and subscription checks,
+  pruning; SCN-039; CONTRACTS → Fallback chains; CLI.md; plugin tools reference. A chain is only
+  recorded — SB-73 makes it act.
+
+**Exact next task:** verify the 0.6.7 publication and record it; send the brand agent the version
+and SB-70 receipts; then SB-72 (ceilings: OpenRouter door daily reset in
+project-observatory-dashboard first), SB-73 (automatic fallback), the SB-71 app screen.
+
+---
+
 # SB-70 built — Claude Code ↔ Codex continuation (2026-10-06)
 
 `switchboard continue <wf> --account <id> --dir <checkout>` now hands a workflow to an account of

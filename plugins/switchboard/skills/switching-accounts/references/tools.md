@@ -6,14 +6,14 @@ MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`). Every result carries
 `isError: true` with one fixed sentence, never a stack trace or a provider body. No tool
 accepts or returns a credential; login and launch are not exposed.
 
-`switchboard mcp --read-only` lists only the four read tools. A session Switchboard
+`switchboard mcp --read-only` lists only the five read tools. A session Switchboard
 launches in isolated mode gets that set.
 
 ## Contents
 
 - [Session detection](#session-detection) — how the server knows which session asks
-- [Read tools](#read-tools) — status, accounts, usage, project context
-- [Write tools](#write-tools) — switch, project set, remove, apply
+- [Read tools](#read-tools) — status, accounts, usage, project context, fallback chains
+- [Write tools](#write-tools) — switch, project set, remove, apply, fallback chain
 - [Refusals](#refusals) — fixed error texts and their remedies
 
 ## Session detection
@@ -128,6 +128,25 @@ Result: `{path, session, results[]}`, one entry per provider this session can us
 | `claude_cli` × native | `already_in_effect`, `needs_global` without `global: true`, else `activated` |
 | any × isolated | `other_session` |
 | rule's account removed, or the change refused | `failed` |
+
+### `switchboard_chain_get` — `workflow_id?`, `pool?` (read)
+
+`{chains[], effective, presets[]}`. A chain is `{scope, executors[], updated_at}`: `scope` is
+`{kind: "machine"}`, `{kind: "project", pool}` or `{kind: "workflow", id}`; each executor is
+`{agent, account_id?, key?}` — a catalog agent id, optionally pinned to an account or to a paid
+key by its Observatory vault name (`project/env/NAME`; never a value). `effective` is the chain
+that applies — the workflow's own, else the project's, else the machine's — or null: **no chain
+applies until the operator sets one**. `presets` lists ready-made orders
+(`subscriptions-first`: claude-code → codex → kimi-code → hermes).
+
+### `switchboard_chain_set` — `scope?`, `executors?` | `preset?` (write)
+
+Only when the operator asks. `scope` is `machine` (default), `project:<pool>` or
+`workflow:<wf_id>`; `executors` in order, first tried first, at most 8; an empty list clears the
+scope. An agent must load MCP servers and take a prompt without a person (catalog `mcp.supported`
+and `headless`), else *“… cannot take over a workflow …”*. Claude Code and Codex run on their
+provider's accounts; any other agent on an API-key account or a paid key, never on a
+subscription sign-in. Returns `{chain}` (null when cleared).
 
 ## Refusals
 

@@ -8,6 +8,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Fallback chains
+
+- `switchboard chain` and the MCP tools `switchboard_chain_get` / `switchboard_chain_set` keep your
+  order of agents for continuing work when an account runs out — for the whole machine, a project
+  or a single task; the narrowest one applies, and none applies until you set one. A ready-made
+  order: Claude Code → Codex → Kimi Code → Hermes. An agent can be pinned to an account or to a
+  paid key named in Project Observatory's vault; other agents never get a Claude or ChatGPT
+  subscription. The chain is recorded only for now: the automatic switch that follows it comes
+  next.
+
 ## 0.6.7 — 2026-10-06
 
 An agent task that ran out of its limit in Claude Code can now continue in Codex, and back, from

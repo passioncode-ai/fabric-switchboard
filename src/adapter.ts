@@ -47,6 +47,19 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // Fallback chains (SB-71): each names the fix.
+  'Name the agent by its catalog id (switchboard agents list).',
+  'Give an executor an account or a key, not both.',
+  'Name the key as its Observatory vault name: project/env/NAME.',
+  'Claude Code and Codex run on saved accounts, not on a key.',
+  'Another agent runs on an API-key account or a paid key, never on a subscription sign-in.',
+  'Not a workflow id: it looks like wf_ and 16 hex digits.',
+  'The same agent and account appear twice in the chain.',
+  'Give a preset or a list of agents, not both.',
+  'Unknown preset.',
+  'Claude Code runs on a Claude account.',
+  'Codex runs on a Codex account.',
+  'A chain holds at most 8 agents.',
   "This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.",
   'Select an API-key account in this pool first.',
   'Unknown agent. `switchboard agents list` names them.',
@@ -261,7 +274,7 @@ const coreErrors: Record<string, string> = {
   'Usage response interrupted.': 'The usage response was interrupted. Check usage again.',
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
-for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Invalid project metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Invalid project metadata', 'Invalid fallback chain metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
 for (const error of ['Unsafe private storage path', 'Unsafe private storage directory', 'Unsafe private storage file', 'Private file permissions are unsafe; rotate its capability before reuse', 'Private file has no parent', 'Invalid private storage path', 'Windows private storage unavailable', 'Unsafe Windows reparse point', 'Private storage belongs to another Windows user', 'Private directory has no parent', 'Unsafe Windows private file', 'Private replacement must stay in one directory', 'Managed file permissions unavailable.']) coreErrors[error] = 'A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.';
 for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.', 'Claude account identity is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
 for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';

@@ -51,6 +51,8 @@ fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove project rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply project rule","description":"Apply the folder's rule to this session when you start work in a project. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, project pool or workflow), the presets, and the chain that applies — the workflow's own, else its project's, else the machine's. None applies until the operator sets one.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A project's pool."}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<pool> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -385,8 +387,51 @@ impl Server {
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,
             "switchboard_project_apply" => self.project_apply(args).await,
+            "switchboard_chain_get" => {
+                self.call(Operation::Chains {
+                    workflow: args
+                        .get("workflow_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    pool: args.get("pool").and_then(Value::as_str).map(str::to_owned),
+                })
+                .await
+            }
+            "switchboard_chain_set" => self.chain_set(args).await,
             _ => return None,
         })
+    }
+
+    async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let scope_text = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .unwrap_or("machine");
+        let scope = match scope_text.split_once(':') {
+            None if scope_text == "machine" => switchboard_core::ChainScope::Machine,
+            Some(("project", pool)) if !pool.is_empty() => {
+                switchboard_core::ChainScope::Project { pool: pool.into() }
+            }
+            Some(("workflow", id)) if !id.is_empty() => {
+                switchboard_core::ChainScope::Workflow { id: id.into() }
+            }
+            _ => return Err("scope is machine, project:<pool> or workflow:<wf_id>.".into()),
+        };
+        let executors: Vec<switchboard_core::Executor> = match args.get("executors") {
+            Some(list) => serde_json::from_value(list.clone()).map_err(|_| {
+                "executors: each needs agent, and at most one of account_id or key."
+            })?,
+            None => Vec::new(),
+        };
+        self.call(Operation::SetChain {
+            scope,
+            executors,
+            preset: args
+                .get("preset")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+        .await
     }
 
     /// One JSON-RPC message in, at most one out.

@@ -12,6 +12,7 @@ pub mod external_keychain {
         probe_external, read_external_quietly, ItemProbe, EXTERNAL_REFUSED,
     };
 }
+mod chains;
 mod persistence;
 pub mod private_fs;
 mod projects;
@@ -22,6 +23,7 @@ mod vault;
 #[cfg(windows)]
 pub mod windows;
 
+pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution};
 pub use rotation::{RotationDecision, RotationPolicy};
@@ -223,6 +225,9 @@ pub struct Snapshot {
     /// Projects reserving pools for their folders (0.6). Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub projects: Vec<Project>,
+    /// Fallback chains per machine, project and workflow (SB-71). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chains: Vec<Chain>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -344,6 +349,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         ),
         "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
         "project" => matches!(detail, "created" | "updated" | "removed"),
+        "fallback_chain" => matches!(detail, "set" | "cleared"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
@@ -421,6 +427,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     }
     projects::validate_rules(s)?;
     projects::validate_projects(s)?;
+    chains::validate_chains(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)
@@ -1018,6 +1025,7 @@ impl Store {
         let mut candidate = state.clone();
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
+        chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;
         self.changed();

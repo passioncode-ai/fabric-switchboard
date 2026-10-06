@@ -23,6 +23,33 @@ fn find(id: &str) -> Option<Value> {
         .cloned()
 }
 
+/// Whether an agent can take over a workflow (SB-71): it loads an MCP server, to accept the
+/// handoff over Observatory's, and takes its first prompt without a person (`headless`).
+pub fn can_continue(id: &str) -> bool {
+    find(id).is_some_and(|a| a["mcp"]["supported"] == true && a["headless"].is_string())
+}
+
+/// Ready-made chains (operator, 2026-10-06: subscriptions first, then paid agents). A preset is
+/// only a starting order; nothing applies until the operator sets a chain.
+pub const PRESETS: &[(&str, &[&str])] = &[(
+    "subscriptions-first",
+    &["claude-code", "codex", "kimi-code", "hermes"],
+)];
+
+/// The presets with each agent's catalog name, for the CLI, MCP and the app.
+pub fn presets() -> Value {
+    json!(PRESETS
+        .iter()
+        .map(|(id, agents)| json!({
+            "id": id,
+            "agents": agents
+                .iter()
+                .map(|a| json!({"agent": a, "name": find(a).map(|x| x["name"].clone()).unwrap_or(Value::Null)}))
+                .collect::<Vec<_>>(),
+        }))
+        .collect::<Vec<_>>())
+}
+
 /// What a launch needs from a `launch`-level profile.
 pub struct Launchable {
     pub id: String,

@@ -771,3 +771,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `continuation::tests` (12, incl. a fake engine), `launch::tests::a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt`, `preflight_refuses_what_a_launch_would_refuse_without_writing`; `real_engine_contract` against engine 0.16.0 in a scratch workspace. Live acceptance with two real accounts and a real limit needs the operator.
 **Product:** unobserved
 **Traces:** SB-52, CONTRACTS → Workflow continuation
+
+## SCN-039 — Choose which agents take over a task, and in what order
+
+**Persona:** P-01
+**Goal:** The operator decides, on their own machine, which agents continue a task when the accounts of its agent run out — for the whole machine, for one project, or for one task — so the switch, when it comes, follows their order and never hands a subscription to an agent that may not use it.
+**Preconditions:** Switchboard installed; for a pinned account, the account saved; for a paid key, its name in the Project Observatory vault.
+**Entry point:** CLI `switchboard chain set|list|clear`; MCP `switchboard_chain_set` / `switchboard_chain_get` (an agent acts only when the operator asks). An app screen comes later (SB-71 remainder).
+**Steps:**
+1. `switchboard chain set --preset subscriptions-first` → the machine's chain reads claude-code → codex → kimi-code → hermes (`switchboard chain list`).
+2. For one project or one task, `switchboard chain set --scope project:<pool>|workflow:<wf_id> <agent>[@account|#key] …` → `chain list --workflow <wf_id>` shows that chain under “applies”.
+3. `switchboard chain clear --scope …` → the next wider chain applies again; with none set, nothing applies.
+**Alt paths:** an agent that loads no MCP server or takes no prompt without a person (Aider) → “aider cannot take over a workflow …”, nothing saved; another agent pinned to a Claude or ChatGPT sign-in → “Another agent runs on an API-key account or a paid key, never on a subscription sign-in.”; a key value instead of a vault name → refused; a removed account or project → the executors and chains that named it are dropped.
+**Expected result:** the order is stored and shown; nothing switches yet — `switchboard continue` hands a task over today, and the automatic fallback that walks the chain is SB-73.
+**UI elements:** CLI output (`machine  claude-code → codex → …`, `applies: …`, presets); MCP results `{chains, effective, presets}`, `{chain}`.
+**States covered:** none set, machine only, project and task chains over it, cleared, pruned after a removal, refused (agent, pin, key, scope).
+**Errors & recovery:** every refusal names the fix and saves nothing; a wrong chain is replaced by setting it again or cleared.
+**Status:** draft
+**Meaning:** XA-01 decisions D-3 (chains are the operator's, per machine/project/task) and D-4 (MCP for everything), operator 2026-10-06.
+**Coverage:** `chains::tests` (5, switchboard-core), `owner_tests::fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve`, `fallback_chains_are_set_listed_and_cleared_from_the_cli`, `handshake_lists_tools_and_rejects_malformed_messages` (MCP chain tools).
+**Product:** unobserved
+**Traces:** SB-71, CONTRACTS → Fallback chains, [XA-01](../packets/cross-agent-continuation.md)
