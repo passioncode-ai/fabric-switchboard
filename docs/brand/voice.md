@@ -1,6 +1,6 @@
 Contract: brand-contract v1
 Voice pack: operator-brief
-Locales: en (primary)
+Locales: en (primary), ru
 Locale parity threshold: 80%
 Derived-from: P-01, JTBD-01
 Status: draft

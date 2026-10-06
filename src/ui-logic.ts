@@ -1,6 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { Account, AccountLimit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -78,8 +79,66 @@ export function ruleState(rule: Pick<ProjectRule, 'enabled' | 'expires_at'>, now
 export function activeRules<T extends Pick<ProjectRule, 'enabled' | 'expires_at'>>(rules: T[] | undefined, nowSeconds: number): T[] {
   return (rules ?? []).filter((rule) => ruleState(rule, nowSeconds) === 'active');
 }
+/**
+ * Journal wording. The core records a fixed vocabulary (`event_valid` in switchboard-core); the
+ * window names each action and outcome in the interface language. Anything outside it — an older
+ * journal, a newer core — shows as recorded, with underscores as spaces.
+ */
+export function eventAction(action: string): string {
+  switch (action) {
+    case 'account_added': return t('Account added');
+    case 'account_updated': return t('Account updated');
+    case 'account_removed': return t('Account removed');
+    case 'account_selected': return t('Account selected');
+    case 'usage': return t('Usage check');
+    case 'request': return t('Managed request');
+    case 'proxy': return t('Proxy');
+    case 'project_rule': return t('Project rule');
+    case 'project': return t('Project');
+    case 'fallback_chain': return t('Fallback chain');
+    case 'fallback': return t('Hand-over');
+    case 'activation': return t('Switch');
+    case 'rotation': return t('Automatic switching');
+    case 'launch': return t('Launch');
+    case 'login': return t('Sign-in');
+    default: return action.replaceAll('.', ' · ').replaceAll('_', ' ');
+  }
+}
+export function eventDetail(detail: string): string {
+  switch (detail) {
+    case 'success': return t('done');
+    case 'observed': return t('observed');
+    case 'unavailable': return t('unavailable');
+    case 'failed': return t('failed');
+    case 'unauthorized': return t('not authorized');
+    case 'rate_limited': return t('rate limited');
+    case 'upstream_error': return t('provider error');
+    case 'network_error': return t('network error');
+    case 'started': return t('started');
+    case 'stopped': return t('stopped');
+    case 'completed': return t('completed');
+    case 'aborted': return t('aborted');
+    case 'connection_failed': return t('connection failed');
+    case 'timeout': return t('timed out');
+    case 'rejected': return t('rejected');
+    case 'saved': return t('saved');
+    case 'paused': return t('paused');
+    case 'removed': return t('removed');
+    case 'applied': return t('applied');
+    case 'created': return t('created');
+    case 'updated': return t('updated');
+    case 'set': return t('set');
+    case 'cleared': return t('cleared');
+    case 'offered': return t('offered');
+    case 'switched': return t('switched');
+    case 'cancelled': return t('cancelled');
+    case 'isolated': return t('isolated session');
+    case 'managed': return t('managed session');
+    default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');
+  }
+}
 /** Hours offered for a rule's expiry; an empty value keeps the rule until it is paused or removed. */
-export const EXPIRY_CHOICES: [string, string][] = [['1', 'For 1 hour'], ['8', 'For 8 hours'], ['24', 'For 24 hours'], ['168', 'For 7 days'], ['', 'Until I pause it']];
+export const EXPIRY_CHOICES: [string, string][] = [['1', t('For 1 hour')], ['8', t('For 8 hours')], ['24', t('For 24 hours')], ['168', t('For 7 days')], ['', t('Until I pause it')]];
 export function expiryFrom(choice: string, nowSeconds: number): number | null {
   const hours = Number(choice);
   return choice && Number.isInteger(hours) && hours > 0 && hours <= 720 ? nowSeconds + hours * 3600 : null;
@@ -106,7 +165,7 @@ export function accountReset(usage: Usage): number | null {
 }
 /** How a limit's time reads: the provider's reported reset, or an estimated retry hold (SB-41). */
 export function limitLabel(limit: Pick<AccountLimit, 'until' | 'resets_at'>): string {
-  return typeof limit.resets_at === 'number' && limit.resets_at === limit.until ? 'Limit resets' : 'Retry hold until';
+  return typeof limit.resets_at === 'number' && limit.resets_at === limit.until ? t('Limit resets') : t('Retry hold until');
 }
 /** A window that limits one metered feature, not the account (core `FEATURE_WINDOW_PREFIX`, SB-40). */
 export function isFeatureWindow(window: Pick<UsageWindow, 'name'>): boolean {
@@ -127,7 +186,7 @@ export function accountUsedPercent(usage: Usage): number | null {
 export function featureWindowLabel(name: string): string {
   const rest = name.slice('feature_'.length);
   const match = /^(.*)_(primary|secondary)$/.exec(rest);
-  return match ? `${match[1]} · ${match[2]} feature limit` : `${rest} · feature limit`;
+  return match ? t('{feature} · {window} feature limit', { feature: match[1], window: t(match[2]) }) : t('{feature} · feature limit', { feature: rest });
 }
 export interface QuotaOrder { state: 'available' | 'blocked' | 'unknown' | 'sign_in' | 'disabled'; until: number | null; used: number }
 export function quotaMaxAge(account: Pick<Account, 'provider' | 'pool'>, policies: QuotaOrderContext['policies'] = []): number {
@@ -160,23 +219,23 @@ export function quotaOrder(account: Account, context: QuotaOrderContext): QuotaO
 }
 /** Days plus hours stay legible for weekly waits; no decrementing counter or negative values. */
 export function resetCountdown(until: number, nowSeconds: number): string {
-  if (!validTime(until) || !Number.isFinite(nowSeconds)) return 'Time unavailable';
+  if (!validTime(until) || !Number.isFinite(nowSeconds)) return t('Time unavailable');
   const remaining = until - nowSeconds;
-  if (remaining <= 0) return 'Due · awaiting check';
-  if (remaining < 60) return '<1m remaining';
+  if (remaining <= 0) return t('Due · awaiting check');
+  if (remaining < 60) return t('<1m remaining');
   const minutes = Math.ceil(remaining / 60), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60), mins = minutes % 60;
-  return `${days ? `${days}d ` : ''}${hours || days ? `${hours}h ` : ''}${mins}m remaining`;
+  return t('{time} remaining', { time: `${days ? `${t('{n}d', { n: days })} ` : ''}${hours || days ? `${t('{n}h', { n: hours })} ` : ''}${t('{n}m', { n: mins })}` });
 }
 
 /** The compact wait shown on a card's second line: "4d 22h", "2h 5m", "36m", "<1m", or "now" once due. */
 export function compactCountdown(until: number, nowSeconds: number): string {
   if (!validTime(until) || !Number.isFinite(nowSeconds)) return '—';
   const remaining = until - nowSeconds;
-  if (remaining <= 0) return 'now';
-  if (remaining < 60) return '<1m';
+  if (remaining <= 0) return t('now');
+  if (remaining < 60) return t('<1m');
   const minutes = Math.ceil(remaining / 60), days = Math.floor(minutes / 1440), hours = Math.floor(minutes % 1440 / 60), mins = minutes % 60;
-  if (days) return `${days}d ${hours}h`;
-  return hours ? `${hours}h ${mins}m` : `${mins}m`;
+  if (days) return `${t('{n}d', { n: days })} ${t('{n}h', { n: hours })}`;
+  return hours ? `${t('{n}h', { n: hours })} ${t('{n}m', { n: mins })}` : t('{n}m', { n: mins });
 }
 
 /** A card's at-a-glance state (compact list): what the status mark shows and how line two reads. */
@@ -281,17 +340,17 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
 
 /** What About says about automatic updates (SB-55), and whether "Restart to update" is offered. */
 export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission'>): { text: string; restart: boolean } {
-  if (!status.available) return { text: status.reason ?? 'Automatic updates work in the installed app only.', restart: false };
+  if (!status.available) return { text: t(status.reason ?? 'Automatic updates work in the installed app only.'), restart: false };
   if (status.state === 'ready' && status.version) {
     return status.needs_permission
-      ? { text: `Version ${status.version} is ready. Restarting asks for an administrator password to replace the app.`, restart: true }
-      : { text: `Version ${status.version} is ready. It starts the next time Switchboard opens, or restart now.`, restart: true };
+      ? { text: t('Version {version} is ready. Restarting asks for an administrator password to replace the app.', { version: status.version }), restart: true }
+      : { text: t('Version {version} is ready. It starts the next time Switchboard opens, or restart now.', { version: status.version }), restart: true };
   }
-  if (!status.enabled) return { text: `Version ${status.current}. Automatic updates are off.`, restart: false };
-  if (status.state === 'downloading' && status.version) return { text: `Downloading version ${status.version}…`, restart: false };
-  if (status.state === 'checking') return { text: 'Checking for updates…', restart: false };
-  if (status.state === 'failed' && status.error) return { text: status.error, restart: false };
-  return { text: `Version ${status.current} is the latest. Switchboard checks again every six hours.`, restart: false };
+  if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
+  if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };
+  if (status.state === 'checking') return { text: t('Checking for updates…'), restart: false };
+  if (status.state === 'failed' && status.error) return { text: t(status.error), restart: false };
+  return { text: t('Version {version} is the latest. Switchboard checks again every six hours.', { version: status.current }), restart: false };
 }
 
 /**
@@ -300,9 +359,9 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
  */
 export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string): string {
   const head = account.signed_in_again
-    ? `${account.label} is signed in again in ${providerLabel} · ${account.pool}.`
-    : `${account.label} added to ${providerLabel} · ${account.pool}.`;
+    ? t('{label} is signed in again in {provider} · {pool}.', { label: account.label, provider: providerLabel, pool: account.pool })
+    : t('{label} added to {provider} · {pool}.', { label: account.label, provider: providerLabel, pool: account.pool });
   return account.login_cleanup === 'pending'
-    ? `${head} Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.`
+    ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
 }

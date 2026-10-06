@@ -1,10 +1,11 @@
+import { t } from './i18n';
 // Runtime platform comes from the native backend, never the browser user agent.
 // This is a syntax hint only; the backend authoritatively checks existence and
 // canonicalizes the path on the machine where it will launch the session.
 export function platformLabel(platform?: string): string {
   if (platform === 'macos') return 'macOS';
   if (platform === 'windows') return 'Windows';
-  return 'Platform unavailable';
+  return t('Platform unavailable');
 }
 
 export function projectPathExample(platform?: string): string {

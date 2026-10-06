@@ -2,6 +2,8 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Adapter } from './types';
 import { readWithDeadline, READ_TIMEOUT } from './read-deadline';
 export const reportFrontendReady = () => invoke('frontend_ready');
+/** The interface language, for the native menu-bar / notification-area menu (L10N-01). */
+export const reportLanguage = (locale: string) => invoke('set_language', { locale });
 
 export const native = isTauri();
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';

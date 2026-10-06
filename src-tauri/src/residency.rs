@@ -168,14 +168,38 @@ pub fn second_launch(app: &AppHandle, args: &[String]) {
     }
 }
 
+/// The tray menu's language (L10N-01): the system's at start, then the window's choice.
+static RUSSIAN: std::sync::OnceLock<std::sync::atomic::AtomicBool> = std::sync::OnceLock::new();
+/// The version a ready update offers, kept so a language change rebuilds the same menu.
+static READY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+fn russian() -> &'static std::sync::atomic::AtomicBool {
+    RUSSIAN.get_or_init(|| {
+        std::sync::atomic::AtomicBool::new(switchboard_core::language::system_prefers_russian())
+    })
+}
+fn in_russian() -> bool {
+    russian().load(std::sync::atomic::Ordering::Relaxed)
+}
+/// The tray's labels: Open, Quit.
+fn labels(ru: bool) -> (&'static str, &'static str) {
+    if ru {
+        ("Открыть Switchboard", "Завершить Switchboard")
+    } else {
+        ("Open Switchboard", "Quit Switchboard")
+    }
+}
+
 /// The tray menu: Open and Quit, and "Restart to update" once an update is ready (SB-55).
 fn menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let open = MenuItemBuilder::with_id("open", "Open Switchboard").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "Quit Switchboard").build(app)?;
+    let (open_label, quit_label) = labels(in_russian());
+    let open = MenuItemBuilder::with_id("open", open_label).build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", quit_label).build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
     match update {
         Some(version) => {
-            let restart = MenuItemBuilder::with_id("update", restart_label(version)).build(app)?;
+            let restart =
+                MenuItemBuilder::with_id("update", restart_label_in(version, in_russian()))
+                    .build(app)?;
             MenuBuilder::new(app)
                 .items(&[&open, &restart, &separator, &quit])
                 .build()
@@ -186,13 +210,30 @@ fn menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<tauri::menu::Men
     }
 }
 
-pub fn restart_label(version: &str) -> String {
-    format!("Restart to update to {version}")
+fn restart_label_in(version: &str, ru: bool) -> String {
+    if ru {
+        format!("Перезапустить для обновления до {version}")
+    } else {
+        format!("Restart to update to {version}")
+    }
 }
 
 /// Adds "Restart to update" to the tray menu once an update is ready.
 pub fn show_update(app: &AppHandle, version: &str) {
+    if let Ok(mut ready) = READY.lock() {
+        *ready = Some(version.to_owned());
+    }
     if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, Some(version))) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// The window's language choice reaches the tray (L10N-01): it rebuilds the menu, keeping a
+/// ready update's item.
+pub fn set_language(app: &AppHandle, ru: bool) {
+    russian().store(ru, std::sync::atomic::Ordering::Relaxed);
+    let ready = READY.lock().ok().and_then(|r| r.clone());
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, ready.as_deref())) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -270,7 +311,19 @@ mod tests {
 
     #[test]
     fn the_tray_names_the_version_it_restarts_into() {
-        assert_eq!(restart_label("0.7.0"), "Restart to update to 0.7.0");
+        assert_eq!(
+            restart_label_in("0.7.0", false),
+            "Restart to update to 0.7.0"
+        );
+        assert_eq!(
+            restart_label_in("0.7.0", true),
+            "Перезапустить для обновления до 0.7.0"
+        );
+        assert_eq!(
+            labels(true),
+            ("Открыть Switchboard", "Завершить Switchboard")
+        );
+        assert_eq!(labels(false), ("Open Switchboard", "Quit Switchboard"));
     }
 
     #[test]

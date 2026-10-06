@@ -13,6 +13,7 @@ pub mod external_keychain {
     };
 }
 mod chains;
+pub mod language;
 mod persistence;
 pub mod private_fs;
 mod projects;

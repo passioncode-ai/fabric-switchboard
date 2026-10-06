@@ -2,11 +2,21 @@
 import assert from 'node:assert/strict';
 import ts from 'typescript';
 import { readFileSync } from 'node:fs';
-const load = async (path) => {
-  const source = readFileSync(new URL(path, import.meta.url), 'utf8').replace(/^import type .*$/gm, '');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
-  return import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+// Compiles a source file and the relative modules it imports (i18n, the dictionaries) into data
+// URLs, so the pure logic runs in Node exactly as the app bundles it.
+const compiled = new Map();
+const url = (path) => {
+  const file = new URL(path, import.meta.url);
+  const key = file.href;
+  if (compiled.has(key)) return compiled.get(key);
+  let source = readFileSync(file, 'utf8').replace(/^import type .*$/gm, '');
+  source = source.replace(/from '(\.\.?\/[^']+)'/g, (_, rel) => `from '${url(new URL(`${rel}.ts`, file).href)}'`);
+  const out = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const data = `data:text/javascript;base64,${Buffer.from(out).toString('base64')}`;
+  compiled.set(key, data);
+  return data;
 };
+const load = async (path) => import(url(path));
 const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
@@ -158,7 +168,7 @@ check(() => {
   for (const message of [logic.LOGIN_FORGOTTEN, logic.LOGIN_SAVED_CLEANUP]) assert(adapter.includes(`  '${message}',`), `verbatim: ${message}`);
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert(!main.includes(logic.LOGIN_FORGOTTEN) && !main.includes(logic.LOGIN_SAVED_CLEANUP), 'main.ts classifies sign-in errors through loginOutcome');
-  assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 3, 'status poll, finish and cancel each classify');
+  assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
 });
 
 // Lifecycle LC-08: the sign-in poll runs only while a sign-in waits; without one, no timer wakes.
@@ -307,6 +317,66 @@ check(() => {
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code · work.');
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code · work.');
   assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code · work\. Switchboard could not remove its temporary sign-in folder yet/);
+});
+
+// L10N-01…04 (fabric-workspace knowledge/localization.md): language, Russian plurals, placeholders.
+const i18n = await load('../src/i18n.ts');
+check(() => {
+  assert.equal(i18n.detectLocale(['ru-RU', 'en-US']), 'ru');
+  assert.equal(i18n.detectLocale(['ru']), 'ru');
+  assert.equal(i18n.detectLocale(['en-US', 'ru-RU']), 'en', 'the first preferred language decides');
+  assert.equal(i18n.detectLocale([]), 'en');
+  assert.equal(i18n.detectLocale(undefined), 'en');
+  assert.equal(i18n.parseLocaleChoice('ru'), 'ru');
+  assert.equal(i18n.parseLocaleChoice('de'), 'system');
+  assert.equal(i18n.parseLocaleChoice(null), 'system');
+  assert.equal(i18n.resolveLocale('system', ['ru-RU']), 'ru');
+  assert.equal(i18n.resolveLocale('en', ['ru-RU']), 'en');
+});
+check(() => {
+  i18n.setLocale('en');
+  assert.equal(i18n.t('Refresh'), 'Refresh');
+  assert.equal(i18n.t('{label} enabled.', { label: 'Work' }), 'Work enabled.');
+  assert.equal(i18n.plural(1, { one: '{n} account restored', other: '{n} accounts restored' }), '1 account restored');
+  i18n.setLocale('ru');
+  assert.equal(i18n.t('Refresh'), 'Обновить');
+  assert.equal(i18n.t('{label} enabled.', { label: 'Work' }), 'Work включён.');
+  assert.equal(i18n.t('A string no dictionary has'), 'A string no dictionary has', 'a missing entry shows English, never a key');
+  const restored = (n) => i18n.plural(n, { one: '{n} account restored', other: '{n} accounts restored' });
+  assert.deepEqual([1, 2, 5, 11, 21, 22, 25, 111].map(restored), [
+    'Восстановлен 1 аккаунт', 'Восстановлено 2 аккаунта', 'Восстановлено 5 аккаунтов', 'Восстановлено 11 аккаунтов',
+    'Восстановлен 21 аккаунт', 'Восстановлено 22 аккаунта', 'Восстановлено 25 аккаунтов', 'Восстановлено 111 аккаунтов']);
+  // L10N-04: a backend refusal is compared in English and shown in Russian.
+  assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
+  assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в Work снова выполнен \(Claude Code · work\)\.$/);
+  i18n.setLocale('en');
+});
+// The journal names the core's fixed event vocabulary in the interface language; anything else shows as recorded.
+check(() => {
+  i18n.setLocale('en');
+  assert.equal(logic.eventAction('account_added'), 'Account added');
+  assert.equal(logic.eventDetail('rate_limited'), 'rate limited');
+  assert.equal(logic.eventDetail('4xx'), 'HTTP 4xx');
+  assert.equal(logic.eventAction('future_action'), 'future action', 'an unknown action shows as recorded');
+  assert.equal(logic.eventDetail('some_new_outcome'), 'some new outcome');
+  i18n.setLocale('ru');
+  assert.equal(logic.eventAction('usage'), 'Проверка использования');
+  assert.equal(logic.eventDetail('observed'), 'получено');
+  assert.equal(logic.eventAction('rotation'), 'Автопереключение');
+  assert.equal(logic.eventDetail('5xx'), 'HTTP 5xx');
+  // Every action and outcome the core accepts has a label, so a new one cannot reach the journal
+  // unnamed (checked in Russian, where a label always differs from the recorded word).
+  const core = readFileSync(new URL('../crates/switchboard-core/src/lib.rs', import.meta.url), 'utf8');
+  const body = core.slice(core.indexOf('pub(crate) fn event_valid'), core.indexOf('/// Two observations report the same quota'));
+  const words = [...body.matchAll(/"([a-z_0-9]+)"/g)].map((m) => m[1]);
+  assert.ok(words.length > 40, 'event_valid vocabulary found');
+  for (const word of words) {
+    if (/^[2-5]xx$/.test(word)) continue;
+    const named = logic.eventAction(word) !== word.replaceAll('_', ' ') || logic.eventDetail(word) !== word.replaceAll('_', ' ');
+    assert.ok(named, `journal word without a label: ${word}`);
+  }
+  i18n.setLocale('en');
 });
 
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
