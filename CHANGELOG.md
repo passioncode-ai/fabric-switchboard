@@ -8,6 +8,33 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.6 — 2026-10-06
+
+Signing in again to an account you already saved no longer renames it or copies it into another
+pool. If you run 0.6.1 or later, this version arrives on its own. Signed by the same team
+(`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
+### Signing in
+
+- **Try again in the sign-in banner repeats the same sign-in.** Before, it lost the account's name
+  and pool and started over in the default pool: finishing it renamed a saved account to its email,
+  or added a second copy of an account saved in another pool — including an account reserved for a
+  project, which then showed up for switching Claude Code.
+- **Signing in to an account you already saved updates it where it is**, from its row, from
+  **+ Add account** or from Try again: its name and pool stay, every saved copy gets the new
+  sign-in, and the notice says it is signed in again. A new account is added only when it is not
+  saved anywhere yet.
+
+### Under the hood
+
+- The local proxy checks an agent's key in constant time, so response timing cannot reveal which
+  key matched.
+- The MCP tool descriptions for `switchboard_usage` and `switchboard_project_apply` now describe
+  what the tools return.
+
 ## 0.6.5 — 2026-10-06
 
 The tag `v0.6.4` was never published; 0.6.5 carries its changes (below) and this fix. If you run
