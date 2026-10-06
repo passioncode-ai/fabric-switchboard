@@ -41,8 +41,10 @@ operator's machine runs such a local engineering build of this tree **with** the
 compiled in, reporting 0.6.4; auto-update replaces it with 0.6.5.
 
 **Checks run:** `./scripts/check.sh` exit 0; `release_preflight.py --tag v0.6.5 --publish true
---windows-signing false` ok. Release run and publication: see the release record entry below
-once it lands (`gh release view v0.6.5`).
+--windows-signing false` ok. **Released:** v0.6.5 published 2026-10-06T03:14:46Z, run
+37406556811 all green, downloaded set verified —
+[release record](evidence/release-0.5.md#release-v065-2026-10-06--the-native-switch-no-longer-sticks-on-a-misfiled-sign-in).
+INSTALL.md's attestation command fixed (#82); org roadmap row updated (fabric-workspace #46).
 
 **Exact next task:** confirm the installed app updated itself to 0.6.5 (log `update_install
 installed`) and that Switch works in Accounts on the operator's machine; then SB-62, SB-61,
