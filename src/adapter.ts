@@ -175,7 +175,7 @@ const safeErrors = new Set([
   'This backup is damaged and cannot be restored.',
   'Backups are written by the desktop app or switchboard serve.',
   'Backups are restored by the desktop app or switchboard serve.',
-  'The backup folder is unavailable.',
+  'Backups belong to the default data folder; this data folder has none.',
   'Backups are not available on this platform.',
   'Backup storage unavailable. Check the backup folder and Keychain access.',
   // Keychain migration and access outcomes (core keychain.rs ACTIONABLE): each names its own recovery.

@@ -334,7 +334,7 @@ fn human_usage_and_events_print_utc_times_and_health() {
     assert!(json["data"][0]["at"].is_i64());
 }
 #[test]
-fn offline_backup_never_writes_and_restore_takes_only_backup_names() {
+fn offline_backup_never_writes_and_a_scratch_folder_restores_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     let folder = tmp.path().join("backups");
     let output = binary()
@@ -363,7 +363,19 @@ fn offline_backup_never_writes_and_restore_takes_only_backup_names() {
         .concat()
         .escape_ascii()
         .to_string()
-        .contains("Choose a backup from the backup folder."));
+        .contains("Backups belong to the default data folder; this data folder has none."));
+    // A scratch folder lists none either, even with a backup folder named in the environment
+    // (SB-61); a restore's file name is checked in switchboard-core (`another_key_or_a_tampered_file_is_refused`).
+    let listed = binary()
+        .env("SWITCHBOARD_BACKUP_DIR", &folder)
+        .arg("--data-dir")
+        .arg(tmp.path().join("data"))
+        .args(["--json", "backup", "list"])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert!(listed["data"]["directory"].is_null(), "{listed}");
 }
 
 /// Lifecycle LC-01's check for `switchboard serve`: SIGTERM and SIGINT each end an idle owner

@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Fixes
+
+- `switchboard --data-dir <folder> backup list` no longer lists the real backups, and
+  `backup restore` there refuses instead of loading the real accounts into the scratch store
+  (SB-61).
+
 ## 0.6.10 — 2026-10-07
 
 Switchboard speaks Russian, updates behave like every PassionCode.ai product, and the fixes of

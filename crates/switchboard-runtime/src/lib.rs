@@ -314,6 +314,18 @@ pub fn backup_dir() -> Option<PathBuf> {
     }
     dirs::data_dir().map(|d| d.join("Fabric Switchboard Backups"))
 }
+/// The backup folder a caller without a running owner falls back to — only for the default data
+/// folder. A `--data-dir` store must never list the operator's backups or restore them into a
+/// scratch store (SB-61).
+fn fallback_backup_dir(root: &std::path::Path) -> Option<PathBuf> {
+    if default_root().ok().as_deref() == Some(root) {
+        backup_dir()
+    } else {
+        None
+    }
+}
+pub const BACKUPS_DEFAULT_FOLDER_ONLY: &str =
+    "Backups belong to the default data folder; this data folder has none.";
 /// Saved sign-ins remembered for a repeated Finish (SB-42).
 const COMPLETED_LOGINS: usize = 16;
 
@@ -1491,7 +1503,7 @@ async fn execute(
         }
         Operation::Backups => {
             let enabled_dir = runtime.and_then(|r| r.backup_folder());
-            let dir = enabled_dir.clone().or_else(backup_dir);
+            let dir = enabled_dir.clone().or_else(|| fallback_backup_dir(root));
             let key = runtime.and_then(|r| r.backup_key()).or_else(|| {
                 dir.as_deref()
                     .and_then(switchboard_core::backup::platform_key)
@@ -1526,8 +1538,8 @@ async fn execute(
         Operation::RestoreBackup { file } => {
             let dir = runtime
                 .and_then(|r| r.backup_folder())
-                .or_else(backup_dir)
-                .ok_or("The backup folder is unavailable.")?;
+                .or_else(|| fallback_backup_dir(root))
+                .ok_or(BACKUPS_DEFAULT_FOLDER_ONLY)?;
             let key = runtime
                 .and_then(|r| r.backup_key())
                 .or_else(|| switchboard_core::backup::platform_key(&dir))
@@ -3716,6 +3728,35 @@ mod usage_gate_tests {
         assert_eq!(first.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(second.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_scratch_data_folder_never_sees_the_real_backups() {
+        // SB-61: without an owner, only the default data folder falls back to the backup folder.
+        // A `--data-dir` store lists none and restores none — the real folder is never read.
+        let root = tempfile::tempdir().unwrap();
+        assert_ne!(default_root().ok().as_deref(), Some(root.path()));
+        assert_eq!(fallback_backup_dir(root.path()), None);
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let listed = execute(store.clone(), root.path(), None, Operation::Backups)
+            .await
+            .unwrap();
+        assert!(listed["directory"].is_null());
+        assert_eq!(listed["backups"], json!([]));
+        assert_eq!(listed["enabled"], false);
+        let restored = execute(
+            store.clone(),
+            root.path(),
+            None,
+            Operation::RestoreBackup {
+                file: "switchboard-backup-20261007T000000Z.sbbackup".into(),
+            },
+        )
+        .await;
+        assert_eq!(restored.unwrap_err(), BACKUPS_DEFAULT_FOLDER_ONLY);
+        assert!(store.snapshot().unwrap().accounts.is_empty());
     }
 
     #[tokio::test]
