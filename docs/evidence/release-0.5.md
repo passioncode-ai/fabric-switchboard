@@ -422,6 +422,21 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
 
+### Release v0.6.8 (2026-10-06) — fallback chains and the automatic hand-over
+
+0.6.8: SB-71 (the operator's fallback chains per machine, project and task: `switchboard chain`,
+MCP `switchboard_chain_get` / `switchboard_chain_set`) and SB-73 phase 1 (a workflow whose
+executor hit its limit goes to the next usable Claude Code or Codex account of its chain on its
+own). Off until a chain is set. Neither is observed live yet.
+
+| Step | Result |
+|---|---|
+| Source | `main` `2b4972f` ([#94](https://github.com/passioncode-ai/fabric-switchboard/pull/94); features [#91](https://github.com/passioncode-ai/fabric-switchboard/pull/91), [#93](https://github.com/passioncode-ai/fabric-switchboard/pull/93)), tag `v0.6.8`; `release_preflight.py --tag v0.6.8 --publish true --windows-signing false` ok; local gate exit 0 (runtime 273 passed) |
+| Release run | [37478551625](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37478551625): preflight, macos, windows, updater, publish all success; both gates approved by the agent on the operator's instruction (2026-10-06: «давай выпускай и делай все что надо») |
+| Published | 2026-10-06T14:45:05Z, **not a prerelease**, 11 assets |
+| Downloaded set | `shasum -a 256 -c SHA256SUMS --ignore-missing` OK for the macOS zip (`b86de9d18145c5bb80aa764bbfe7edf5f8cc0c37e3bbda7638bbe3693ffb50e3`), the Windows setup (`d72b58c3159d71ef74e85b33d6556fa6b08637d2f0a0c7edd4f7b439ede68e3e`) and `latest.json`; GPG good signature, PassionCode.ai release key; `gh attestation verify --signer-repo passioncode-ai/.github` exit 0 ×2; `spctl` → `accepted, Notarized Developer ID`; stapler validate ok; CLI `switchboard 0.6.8`, `switchboard chain --help` present |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.8`, all four platforms |
+
 ### Release v0.6.7 (2026-10-06) — continuing a workflow across providers
 
 0.6.7: SB-70 — `switchboard continue` hands an Observatory workflow from Claude Code to Codex, or

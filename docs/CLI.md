@@ -161,9 +161,9 @@ without a person; Aider, for example, does not and is refused. `@ACCOUNT_ID` pin
 `#project/env/NAME` a paid key by its Observatory vault name — never a key value. Without a pin
 Switchboard chooses an account at the switch. Claude Code and Codex run on their own provider's
 accounts; any other agent on an API-key account or a paid key, never on a subscription sign-in.
-Removing an account or a project drops what pinned it. Setting a chain decides nothing by itself
-yet: `switchboard continue` hands a workflow over today, and the automatic fallback that walks the
-chain is SB-73.
+Removing an account or a project drops what pinned it. When a workflow's executor hits its limit,
+the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code and Codex so far;
+other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
 
 ### Other coding agents
 

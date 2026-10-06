@@ -207,8 +207,8 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   empty is dropped (`chains::prune`).
 - `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets}`; `Operation::SetChain
   {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
-- A chain only records the operator's order: nothing reads it to act yet. The automatic fallback that
-  walks it is SB-73; spending ceilings for paid keys are SB-72.
+- The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
+  are SB-72.
 
 ## Automatic fallback, phase 1 (SB-73, 2026-10-06)
 
