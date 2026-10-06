@@ -1549,3 +1549,15 @@ async fn chat_completions_reach_openai_with_an_api_key_only() {
     p.shutdown().await;
     up.abort();
 }
+
+#[tokio::test]
+async fn in_flight_counts_the_requests_holding_a_slot() {
+    // LC-16: an update activates only when no managed request is in flight.
+    let (_root, store) = store();
+    let proxy = ProxyHandle::start(store).await.unwrap();
+    assert_eq!(proxy.in_flight(), 0);
+    let held = proxy.slots.clone().try_acquire_owned().unwrap();
+    assert_eq!(proxy.in_flight(), 1);
+    drop(held);
+    assert_eq!(proxy.in_flight(), 0);
+}

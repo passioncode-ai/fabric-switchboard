@@ -31,6 +31,9 @@ pub const FIRST_CHECK_AFTER: Duration = Duration::from_secs(90);
 pub const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(60 * 60);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+/// While an update waits to start (and only then), how often the app looks for an idle moment to
+/// start it (LC-16 activation). No other timer runs while nothing is ready.
+pub const IDLE_LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// A bundle swap is a few renames and an unpack of ~15 MB; one that has not finished in five
 /// minutes is stuck (a hung volume), and the loop must not wait on it.
@@ -56,6 +59,10 @@ pub const INSTALL_FAILED: &str =
 pub const INSTALL_STALLED: &str =
     "Installing the update did not finish. Quit and reopen Switchboard to try again.";
 pub const NOT_READY: &str = "No update is ready to install yet.";
+/// The release's feed marks a step a person must take first (a data migration, LC-16 "held
+/// releases"): the update is not downloaded or installed. The mark sits in `latest.json`, which
+/// is not signed; a forged one can only hold an update back, never install anything.
+pub const NEEDS_MIGRATION: &str = "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.";
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub const PERMISSION_REFUSED: &str = "The update needs an administrator password to replace Switchboard in this folder. It was not installed.";
 const SAVE_FAILED: &str = "Could not save the choice in Switchboard's data folder.";
@@ -88,6 +95,22 @@ pub fn availability(exe: &Path, packaged: bool) -> Result<(), &'static str> {
 /// package match the one announced, so a manifest cannot dress an old package as new.
 pub fn offered(current: &semver::Version, announced: &semver::Version) -> bool {
     announced > current
+}
+
+/// An idle moment to start a ready update on its own (LC-16 activation): updates are on, the
+/// update can start without the person (macOS: already in the bundle; Windows: the installer is
+/// downloaded), nobody is looking at the window, and nothing a restart would cut short is running
+/// — no managed request in flight, no sign-in waiting. Seen on two looks in a row, never one, so
+/// a request that is just starting is not cut.
+pub fn idle_moment(
+    enabled: bool,
+    starts_alone: bool,
+    window_hidden: bool,
+    busy: bool,
+    idle_before: bool,
+) -> (bool, bool) {
+    let idle = enabled && starts_alone && window_hidden && !busy;
+    (idle, idle && idle_before)
 }
 
 /// The arguments a relaunch after an update starts with: the program, and `--background` when
@@ -166,6 +189,8 @@ struct Inner {
     /// A macOS bundle swap outlived INSTALL_TIMEOUT. Its thread may still be running, so no
     /// further check starts until the app restarts.
     stalled: bool,
+    /// The idle-moment watch for a ready update is running (at most one).
+    watching: bool,
 }
 
 pub struct Updates {
@@ -189,6 +214,7 @@ impl Updates {
                 restart: None,
                 signal: false,
                 stalled: false,
+                watching: false,
             }),
             wake: tokio::sync::Notify::new(),
         }
@@ -285,7 +311,14 @@ fn now() -> i64 {
 /// Starts the check loop in an installed build. A failed check is retried within the hour, a
 /// finished one in six; turning the switch on wakes it at once.
 pub fn start(app: &AppHandle) {
-    if app.state::<Updates>().available.is_err() {
+    if let Err(reason) = app.state::<Updates>().available {
+        // A copy that never checks says why, once (LC-16 "builds that never check").
+        let code = match reason {
+            UNAVAILABLE_DEVELOPMENT => "dev_build",
+            UNAVAILABLE_TRANSLOCATED => "translocated",
+            _ => "unsupported_platform",
+        };
+        event("update_check", &[("outcome", Field::Code(code))]);
         return;
     }
     let app = app.clone();
@@ -310,8 +343,14 @@ pub fn start(app: &AppHandle) {
 
 /// One check: nothing while switched off or once an update waits to be installed.
 async fn check_once(app: &AppHandle) -> Phase {
+    check(app, false).await
+}
+
+/// One check. `manual` is the person's *Check for updates*: it runs with the switch off too, and
+/// what it finds is downloaded and verified like any update (LC-16).
+async fn check(app: &AppHandle, manual: bool) -> Phase {
     let state = app.state::<Updates>();
-    if !state.is_enabled() {
+    if !manual && !state.is_enabled() {
         return Phase::Idle;
     }
     {
@@ -339,6 +378,7 @@ async fn check_once(app: &AppHandle) -> Phase {
             drop(inner);
             crate::residency::show_update(app, &version);
             event("update_check", &[("outcome", Field::Code("ready"))]);
+            watch_for_idle(app);
             return Phase::Ready;
         }
         Err(message) => {
@@ -349,6 +389,7 @@ async fn check_once(app: &AppHandle) -> Phase {
                 SIGNATURE_FAILED => "signature_failed",
                 DOWNLOAD_FAILED => "download_failed",
                 INSTALL_FAILED | INSTALL_STALLED => "install_failed",
+                NEEDS_MIGRATION => "needs_migration",
                 _ => "check_failed",
             }
         }
@@ -357,6 +398,86 @@ async fn check_once(app: &AppHandle) -> Phase {
     drop(inner);
     event("update_check", &[("outcome", Field::Code(code))]);
     phase
+}
+
+/// The feed's mark for a release that needs a person first: `"needs_migration": true` or a
+/// non-empty runbook string in `latest.json`.
+pub fn needs_migration(feed: &Value) -> bool {
+    match feed.get("needs_migration") {
+        Some(Value::Bool(flag)) => *flag,
+        Some(Value::String(runbook)) => !runbook.trim().is_empty(),
+        _ => false,
+    }
+}
+
+/// The person's *Check for updates*: works with the switch off; returns the status after.
+pub async fn check_now(app: AppHandle) -> Result<Value, String> {
+    let state = app.state::<Updates>();
+    state.available.map_err(str::to_string)?;
+    check(&app, true).await;
+    Ok(app.state::<Updates>().status())
+}
+
+/// Starts the idle-moment watch for a ready update (one at a time). It ends when the update
+/// starts, is discarded or the app quits; until then it looks every IDLE_LOOK_EVERY.
+fn watch_for_idle(app: &AppHandle) {
+    {
+        let state = app.state::<Updates>();
+        let mut inner = state.lock();
+        if inner.watching {
+            return;
+        }
+        inner.watching = true;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut idle_before = false;
+        loop {
+            tokio::time::sleep(IDLE_LOOK_EVERY).await;
+            let state = app.state::<Updates>();
+            let starts_alone = {
+                let inner = state.lock();
+                if inner.restart.is_some() {
+                    break;
+                }
+                match inner.ready.as_ref() {
+                    None => break,
+                    Some(ready) => ready_starts_alone(ready),
+                }
+            };
+            let busy = match app.try_state::<crate::Slot>() {
+                Some(slot) => slot.runtime().await.map_or(true, |runtime| runtime.busy()),
+                None => true,
+            };
+            let (idle, start) = idle_moment(
+                state.is_enabled(),
+                starts_alone,
+                window_hidden(&app),
+                busy,
+                idle_before,
+            );
+            idle_before = idle;
+            if start {
+                event("update_restart", &[("outcome", Field::Code("idle"))]);
+                if restart(app.clone()).await.is_err() {
+                    event("update_restart", &[("outcome", Field::Code("refused"))]);
+                }
+                break;
+            }
+        }
+        app.state::<Updates>().lock().watching = false;
+    });
+}
+
+/// Whether a ready update can start without the person: macOS when it is already in the bundle
+/// (one that needs an administrator password waits for *Restart to update*); Windows when its
+/// installer is downloaded.
+fn ready_starts_alone(ready: &Ready) -> bool {
+    if cfg!(windows) {
+        ready.bytes.is_some()
+    } else {
+        ready.bytes.is_none()
+    }
 }
 
 fn classify(error: tauri_plugin_updater::Error) -> &'static str {
@@ -384,13 +505,18 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
     let Some(mut update) = updater.check().await.map_err(|_| CHECK_FAILED)? else {
         return Ok(None);
     };
+    if needs_migration(&update.raw_json) {
+        return Err(NEEDS_MIGRATION);
+    }
     {
         let mut inner = state.lock();
         inner.phase = Phase::Downloading;
         inner.version = Some(update.version.clone());
     }
     update.timeout = Some(DOWNLOAD_TIMEOUT);
+    event("update_download", &[("outcome", Field::Code("started"))]);
     let bytes = update.download(|_, _| {}, || {}).await.map_err(classify)?;
+    event("update_download", &[("outcome", Field::Code("done"))]);
     #[cfg(target_os = "macos")]
     {
         let bundle = std::env::current_exe()
@@ -589,6 +715,38 @@ pub fn finish(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ready_update_starts_alone_only_on_two_idle_looks_in_a_row() {
+        // LC-16 activation: never under a person, a request or a sign-in; never on one look.
+        assert_eq!(idle_moment(true, true, true, false, false), (true, false));
+        assert_eq!(idle_moment(true, true, true, false, true), (true, true));
+        for (enabled, alone, hidden, busy) in [
+            (false, true, true, false),
+            (true, false, true, false),
+            (true, true, false, false),
+            (true, true, true, true),
+        ] {
+            assert_eq!(
+                idle_moment(enabled, alone, hidden, busy, true),
+                (false, false),
+                "{enabled} {alone} {hidden} {busy}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_release_that_needs_a_person_is_held() {
+        assert!(needs_migration(
+            &json!({"version": "0.7.0", "needs_migration": true})
+        ));
+        assert!(needs_migration(
+            &json!({"needs_migration": "docs/OPERATIONS.md#migrate-0-7"})
+        ));
+        assert!(!needs_migration(&json!({"needs_migration": false})));
+        assert!(!needs_migration(&json!({"needs_migration": "  "})));
+        assert!(!needs_migration(&json!({"version": "0.7.0"})));
+    }
 
     #[test]
     fn checking_is_on_by_default_and_off_only_when_switched_off() {

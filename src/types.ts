@@ -78,6 +78,8 @@ export interface Adapter {
   setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;
   /** Quits through the drain and starts the new version; refused when nothing is ready. */
   restartToUpdate(): Promise<UpdateStatus>;
+  /** The person's check (LC-16): runs with automatic updates off too; resolves with the status after. */
+  checkForUpdates(): Promise<UpdateStatus>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */

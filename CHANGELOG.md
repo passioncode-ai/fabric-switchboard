@@ -18,6 +18,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - The journal names its events in the interface language (“Account added · done”) instead of the
   recorded codes.
 
+### Updates behave like every PassionCode.ai product (LC-16)
+
+- A ready update now starts on its own at an idle moment — window hidden, no managed request
+  running, no sign-in waiting — instead of only at the next start or *Restart to update*. Nothing
+  running in Terminal is stopped.
+- About → *Check for updates* checks at once, also with automatic updates off.
+- A release marked as needing a manual step is held, with the reason shown.
+- The log records downloads (`update_download`) and why a copy never checks.
+
 ### Fixes
 
 - “Turn on for Claude Code” reports the threshold and headroom it actually saved, not always

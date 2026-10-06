@@ -323,6 +323,11 @@ struct CurrentCache {
     entry: Option<(i64, Value)>,
 }
 impl Runtime {
+    /// Something a restart would cut short: a managed request in flight (streams included) or a
+    /// sign-in waiting to finish. An update activates only when this is false (LC-16).
+    pub fn busy(&self) -> bool {
+        self.proxy.in_flight() > 0 || self.logins.lock().map_or(true, |l| !l.is_empty())
+    }
     pub async fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Arc<Self>, String> {
         Self::open_with(root, vault, NATIVE).await
     }

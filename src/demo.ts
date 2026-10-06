@@ -207,6 +207,7 @@ export function createDemoAdapter(): Adapter {
     async updateStatus() { return { ...update }; },
     async setAutoUpdate(enabled) { await pause(); update.enabled = enabled; return { ...update }; },
     async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },
+    async checkForUpdates() { await pause(); update.checked_at = now(); return { ...update }; },
     async analytics() { return { ...analytics }; },
     async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
