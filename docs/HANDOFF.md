@@ -47,7 +47,11 @@ the broker may not restart a person's app).
 **Checks run:** `./scripts/check.sh` exit 0 on this branch (see the PR); `scripts/check_docs.py`.
 
 **Exact next task:** SB-62 (P1) — keep label and pool on the pending sign-in and refuse or
-update an identity saved in another pool in `finish_login`, with tests; then SB-61, SB-66.
+update an identity saved in another pool in `finish_login`, with tests; then the cross-agent
+plan [XA-01](packets/cross-agent-continuation.md) in its order (SB-70 cross-provider continue →
+SB-71 chains → SB-72 ceilings → SB-73 automatic fallback → SB-74 pipelines), decided by the
+operator 2026-10-06 (automatic switch, daily ceiling plus project/task ceilings, chains of their
+choosing per machine/project/task, MCP for everything); then SB-61, SB-66.
 **Operator:** restart Switchboard (tray → *Restart to update*) and press Switch once in
 Accounts; decide on the Actions artifacts; SB-15, SB-02, SB-03, uninstall acceptance.
 
