@@ -289,3 +289,19 @@ Code: `src/i18n.ts`, `src/locales/ru.ts`, `crates/switchboard-core/src/language.
 - Gate: `node scripts/check-locale.mjs` (a missing entry, a changed placeholder, a plural without
   three forms fail); `scripts/test-ui-logic.mjs` covers language choice, plural rules and that every
   `event_valid` word has a journal label.
+
+## Updates to LC-16 (SB-77, 2026-10-07)
+
+Code: `src-tauri/src/updates.rs` (`check_now`, `watch_for_idle`, `idle_moment`, `needs_migration`),
+`Runtime::busy`, `ProxyHandle::in_flight`. Behaviour and events: [DISTRIBUTION → Automatic
+updates](DISTRIBUTION.md#automatic-updates-sb-55).
+
+- IPC `check_for_updates() -> UpdateStatus`: one check now, with the switch off too; refused with
+  the copy's reason where updates are unavailable.
+- `Runtime::busy() -> bool`: a managed request in flight (its slot is held until the response
+  stream ends) or a sign-in waiting. An update activates on its own only when this is false and
+  the window is hidden, on two looks five minutes apart, and only while an update waits.
+- Tests: `a_ready_update_starts_alone_only_on_two_idle_looks_in_a_row`,
+  `a_release_that_needs_a_person_is_held`, `in_flight_counts_the_requests_holding_a_slot`.
+  Refusal of tampered, unsigned or other-key packages is the updater plugin's minisign check with
+  `requireSignedVersion` (DISTRIBUTION → Trust); no test here feeds it a forged package yet.

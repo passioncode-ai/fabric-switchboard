@@ -897,6 +897,8 @@ function updateControls(panel: HTMLElement) {
   const line = updateLine(status);
   panel.append(option, el('p', 'form-note', line.text));
   if (line.restart) panel.append(button(t('Restart to update'), () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, t('Restarting Switchboard with the new version…'), 'update-restart'), 'button', 'update-restart'));
+  // LC-16: the person can always ask, with automatic updates off too.
+  else if (status.available && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void mutate(async () => { updateState = await adapter.checkForUpdates(); await loadUpdate(); }, t('Update check finished.'), 'update-check'), 'button', 'update-check'));
 }
 /** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode.ai tool shares. */
 function analyticsPanel() {

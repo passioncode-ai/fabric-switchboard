@@ -344,7 +344,7 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
   if (status.state === 'ready' && status.version) {
     return status.needs_permission
       ? { text: t('Version {version} is ready. Restarting asks for an administrator password to replace the app.', { version: status.version }), restart: true }
-      : { text: t('Version {version} is ready. It starts the next time Switchboard opens, or restart now.', { version: status.version }), restart: true };
+      : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
   }
   if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
   if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };

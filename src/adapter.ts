@@ -45,6 +45,7 @@ export const nativeAdapter: Adapter = {
   updateStatus: () => readWithDeadline(invoke('update_status')),
   setAutoUpdate: (enabled) => invoke('set_auto_update', { enabled }),
   restartToUpdate: () => invoke('restart_to_update'),
+  checkForUpdates: () => invoke('check_for_updates'),
 };
 
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
@@ -95,6 +96,7 @@ const safeErrors = new Set([
   'The update needs an administrator password to replace Switchboard in this folder. It was not installed.',
   'Could not install the update. Switchboard tries again within the hour.',
   'Installing the update did not finish. Quit and reopen Switchboard to try again.',
+  'This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.',
   'Could not save the choice in Switchboard\'s data folder.',
   'Could not add Switchboard to the login items. Check the system\'s login item settings.',
   'Could not remove Switchboard from the login items. Check the system\'s login item settings.',

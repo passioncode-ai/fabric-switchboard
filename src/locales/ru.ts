@@ -689,7 +689,6 @@ export const RU: Record<string, string> = {
   "now": "сейчас",
   "<1m": "<1 мин",
   "Version {version} is ready. Restarting asks for an administrator password to replace the app.": "Версия {version} готова. Для перезапуска понадобится пароль администратора, чтобы заменить приложение.",
-  "Version {version} is ready. It starts the next time Switchboard opens, or restart now.": "Версия {version} готова. Она запустится при следующем открытии Switchboard — или перезапустите сейчас.",
   "Version {version}. Automatic updates are off.": "Версия {version}. Автоматические обновления выключены.",
   "Downloading version {version}…": "Загрузка версии {version}…",
   "Checking for updates…": "Проверка обновлений…",
@@ -773,4 +772,8 @@ export const RU: Record<string, string> = {
   "Limit resets {date}": "Сброс лимита {date}",
   "Retry hold until {date}": "Повтор не раньше {date}",
   "Installing the update did not finish. Quit and reopen Switchboard to try again.": "Установка обновления не завершилась. Завершите и снова откройте Switchboard, чтобы повторить.",
+  "Check for updates": "Проверить обновления",
+  "Update check finished.": "Проверка обновлений завершена.",
+  "Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.": "Версия {version} готова. Она запустится сама, когда Switchboard простаивает в фоне или откроется снова, — или перезапустите сейчас.",
+  "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.": "Перед установкой этой версии человеку нужно выполнить шаг — что сделать, написано в примечаниях к выпуску. Switchboard остаётся на текущей версии.",
 };

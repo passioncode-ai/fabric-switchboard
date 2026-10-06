@@ -472,6 +472,11 @@ fn set_auto_update(
 async fn restart_to_update(app: tauri::AppHandle) -> Result<Value, String> {
     updates::restart(app).await
 }
+/// The person's *Check for updates* (LC-16): runs with the switch off too.
+#[tauri::command]
+async fn check_for_updates(app: tauri::AppHandle) -> Result<Value, String> {
+    updates::check_now(app).await
+}
 
 fn main() {
     let Launch { smoke, background } = launch(std::env::args());
@@ -596,6 +601,7 @@ fn main() {
             update_status,
             set_auto_update,
             restart_to_update,
+            check_for_updates,
             analytics_status,
             set_analytics,
             snapshot,

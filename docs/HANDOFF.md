@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-77 built — updates behave as LC-16 says (2026-10-07)
+
+Branch `feat/lc16-parity`: a ready update starts at an idle moment (window hidden, no managed
+request in flight, no sign-in waiting, two looks 5 min apart, only while an update waits); About →
+*Check for updates* works with the switch off; held releases (`needs_migration`); `update_download`
+events; never-check reasons logged. Docs: DISTRIBUTION → Automatic updates, CONTRACTS → Updates to
+LC-16, SCN-037, AGENTS lifecycle, strings.md, CHANGELOG. Gate green.
+
+**Exact next task:** release 0.6.10 (Russian interface, SB-78 fixes, SB-77) — the operator approves
+the run; then tell fabric-dashboards-54 (FD-25) the version and record the release.
+
+---
+
 # Audit fixes 2026-10-07 (SB-78) — 0.6.9's Windows job failure found and fixed
 
 The fabric-workspace audit of origin/main 4b4b77b found the 0.6.9 release run 37518902023 failing

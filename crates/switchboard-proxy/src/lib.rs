@@ -85,7 +85,10 @@ pub struct ProxyHandle {
     agent_token: String,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
+    slots: Arc<Semaphore>,
 }
+/// Requests relayed at once; each holds a slot until its response stream ends.
+const SLOTS: usize = 16;
 /// How long a start waits for its recorded port to be released by a previous owner.
 const REBIND_ATTEMPTS: u32 = 5;
 const REBIND_WAIT: Duration = Duration::from_millis(100);
@@ -174,11 +177,12 @@ impl ProxyHandle {
             agent_token: agent.clone(),
             address,
             client,
-            slots: Arc::new(Semaphore::new(16)),
+            slots: Arc::new(Semaphore::new(SLOTS)),
             claude,
             openai,
             chatgpt,
         };
+        let slots = state.slots.clone();
         let router = Router::new()
             .route("/{provider}/{pool}/v1/{*operation}", post(relay))
             .route("/claude/{pool}/api/hello", get(connectivity))
@@ -197,7 +201,13 @@ impl ProxyHandle {
             agent_token: agent,
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
+            slots,
         })
+    }
+    /// Managed requests in flight, streams included: zero means no managed session is waiting
+    /// on an answer right now (an update may activate, LC-16).
+    pub fn in_flight(&self) -> usize {
+        SLOTS.saturating_sub(self.slots.available_permits())
     }
     pub fn address(&self) -> SocketAddr {
         self.address
