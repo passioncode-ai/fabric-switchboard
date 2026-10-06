@@ -152,6 +152,23 @@ pub enum Operation {
     },
     /// The agents' proxy capability, for an agent's `key_cmd` or an `export`.
     AgentKey,
+    /// Fallback chains (SB-71): every chain set, the presets, and the one that applies to a
+    /// workflow and/or a project pool.
+    Chains {
+        #[serde(default)]
+        workflow: Option<String>,
+        #[serde(default)]
+        pool: Option<String>,
+    },
+    /// Sets the chain of a scope in order; an empty list clears it. A preset id may stand for
+    /// the list.
+    SetChain {
+        scope: switchboard_core::ChainScope,
+        #[serde(default)]
+        executors: Vec<switchboard_core::Executor>,
+        #[serde(default)]
+        preset: Option<String>,
+    },
     /// Starts a `launch`-level agent in a folder on the pool's API-key account.
     LaunchAgent {
         agent: String,
@@ -338,6 +355,7 @@ impl Runtime {
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
+                | Operation::Chains { .. }
                 | Operation::Status
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
@@ -1193,6 +1211,49 @@ async fn execute(
             ))
         }
         Operation::AgentCatalog => Ok(agent_catalog::catalog()),
+        Operation::Chains { workflow, pool } => {
+            let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
+            Ok(json!({
+                "chains": store.snapshot()?.chains,
+                "effective": effective,
+                "presets": agent_catalog::presets(),
+            }))
+        }
+        Operation::SetChain {
+            scope,
+            executors,
+            preset,
+        } => {
+            let executors = match preset {
+                Some(id) => {
+                    if !executors.is_empty() {
+                        return Err("Give a preset or a list of agents, not both.".into());
+                    }
+                    agent_catalog::PRESETS
+                        .iter()
+                        .find(|(p, _)| *p == id)
+                        .ok_or("Unknown preset.")?
+                        .1
+                        .iter()
+                        .map(|a| switchboard_core::Executor {
+                            agent: (*a).to_owned(),
+                            account_id: None,
+                            key: None,
+                        })
+                        .collect()
+                }
+                None => executors,
+            };
+            for e in &executors {
+                if !agent_catalog::can_continue(&e.agent) {
+                    return Err(format!(
+                        "{} cannot take over a workflow: an agent in a chain loads MCP servers and takes a prompt without a person (switchboard agents list).",
+                        e.agent.chars().take(40).collect::<String>()
+                    ));
+                }
+            }
+            Ok(json!({"chain": store.set_chain(scope, executors)?}))
+        }
         Operation::AgentConnect { agent, pool } => {
             let address = runtime
                 .map(|r| r.proxy.address().to_string())
@@ -2779,6 +2840,81 @@ mod owner_tests {
             .find(|a| a.id == personal.id)
             .unwrap();
         assert_eq!(mine.label, "Mine");
+    }
+    #[tokio::test]
+    async fn fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve() {
+        // SB-71: the operator's order as a preset, a task's own chain, and an agent that loads no
+        // MCP server (Aider) refused before anything is stored.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let set = runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![],
+                preset: Some("subscriptions-first".into()),
+            })
+            .await
+            .unwrap();
+        let agents: Vec<&str> = set["chain"]["executors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["agent"].as_str().unwrap())
+            .collect();
+        assert_eq!(agents, ["claude-code", "codex", "kimi-code", "hermes"]);
+        let refused = runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![switchboard_core::Executor {
+                    agent: "aider".into(),
+                    account_id: None,
+                    key: None,
+                }],
+                preset: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(refused.contains("cannot take over a workflow"), "{refused}");
+        runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Workflow {
+                    id: "wf_0123456789abcdef".into(),
+                },
+                executors: vec![switchboard_core::Executor {
+                    agent: "codex".into(),
+                    account_id: None,
+                    key: None,
+                }],
+                preset: None,
+            })
+            .await
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["executors"][0]["agent"], "codex");
+        assert_eq!(view["chains"].as_array().unwrap().len(), 2);
+        assert_eq!(view["presets"][0]["id"], "subscriptions-first");
+        let machine = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(machine["effective"]["scope"]["kind"], "machine");
+        assert!(runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![],
+                preset: Some("no-such-preset".into()),
+            })
+            .await
+            .is_err());
     }
     #[tokio::test]
     async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {

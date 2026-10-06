@@ -47,13 +47,15 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |
 | `switchboard_project_remove` | yes | remove the rule for exactly one folder and provider |
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |
+| `switchboard_chain_get` | no | the operator's fallback chains and the one that applies to a workflow or project |
+| `switchboard_chain_set` | yes | set a fallback chain, only when the operator asks |
 
 Arguments, result fields and fixed error texts: read `references/tools.md` before the
 first write call, or when a result field is unclear.
 
 **Degraded paths — say it once, then fall back; never loop:**
 
-- **Only the four read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the five read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI

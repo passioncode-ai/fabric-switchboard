@@ -108,7 +108,7 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the four read tools; usage refresh shows the stored observation
+switchboard mcp --read-only   # only the five read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
@@ -141,6 +141,29 @@ Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS th
 | Codex | `codex mcp add switchboard -- switchboard mcp` |
 
 Restart the agent after installing; it loads servers and skills at session start. The plugin is validated by `python3 scripts/check_plugin.py`, `python3 -m unittest scripts/test_check_plugin.py` and `claude plugin validate ./plugins/switchboard --strict` plus `claude plugin validate . --strict`.
+
+### Fallback chains
+
+Which agents continue a workflow, in what order, when its executor's accounts run out (SB-71,
+[XA-01](packets/cross-agent-continuation.md)). You set them per machine, per project (its pool) or
+per task (one workflow); the narrowest set chain applies, and **none applies until you set one**.
+
+```sh
+switchboard chain set --preset subscriptions-first            # claude-code → codex → kimi-code → hermes
+switchboard chain set --scope project:alpha-web codex claude-code
+switchboard chain set --scope workflow:wf_0123456789abcdef codex@ACCOUNT_ID kimi-code#my-project/prod/OPENROUTER_API_KEY
+switchboard chain list [--workflow wf_…] [--pool …]          # every chain, presets, the one that applies
+switchboard chain clear --scope workflow:wf_0123456789abcdef
+```
+
+An agent is a catalog id (`switchboard agents list`) that loads MCP servers and takes a prompt
+without a person; Aider, for example, does not and is refused. `@ACCOUNT_ID` pins an account,
+`#project/env/NAME` a paid key by its Observatory vault name — never a key value. Without a pin
+Switchboard chooses an account at the switch. Claude Code and Codex run on their own provider's
+accounts; any other agent on an API-key account or a paid key, never on a subscription sign-in.
+Removing an account or a project drops what pinned it. Setting a chain decides nothing by itself
+yet: `switchboard continue` hands a workflow over today, and the automatic fallback that walks the
+chain is SB-73.
 
 ### Other coding agents
 

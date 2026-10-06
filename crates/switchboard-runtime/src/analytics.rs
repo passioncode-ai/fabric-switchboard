@@ -611,6 +611,7 @@ mod tests {
             events: vec![],
             rules: vec![],
             projects: vec![],
+            chains: vec![],
         }
     }
     fn events(server: &Server) -> Vec<Value> {

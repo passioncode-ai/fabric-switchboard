@@ -173,9 +173,35 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_context",
             "switchboard_project_set",
             "switchboard_project_remove",
-            "switchboard_project_apply"
+            "switchboard_project_apply",
+            "switchboard_chain_get",
+            "switchboard_chain_set"
         ]
     );
+    // SB-71: chains over MCP — set from a preset, read back, an agent that cannot take over refused.
+    let (error, set) = agent.tool(
+        "switchboard_chain_set",
+        json!({"scope": "workflow:wf_0123456789abcdef", "preset": "subscriptions-first"}),
+    );
+    assert!(!error, "{set}");
+    let (_, got) = agent.tool(
+        "switchboard_chain_get",
+        json!({"workflow_id": "wf_0123456789abcdef"}),
+    );
+    assert_eq!(got["effective"]["executors"][3]["agent"], "hermes");
+    let (error, refused) = agent.tool(
+        "switchboard_chain_set",
+        json!({"executors": [{"agent": "aider"}]}),
+    );
+    assert!(
+        error && refused.as_str().unwrap().contains("cannot take over"),
+        "{refused}"
+    );
+    let (error, _) = agent.tool(
+        "switchboard_chain_set",
+        json!({"executors": [{"agent": "codex", "key": "sk-live-value"}]}),
+    );
+    assert!(error, "a key value is never accepted, only a vault name");
     assert_eq!(agent.send("{not json")["error"]["code"], -32700);
     assert_eq!(agent.send("[1,2]")["error"]["code"], -32600);
     assert_eq!(
@@ -194,6 +220,16 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         .unwrap()
         .iter()
         .all(|t| t["annotations"]["readOnlyHint"] == true));
+    let read_names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        read_names.contains(&"switchboard_chain_get")
+            && !read_names.contains(&"switchboard_chain_set")
+    );
     assert_eq!(
         reader.request(
             "tools/call",
@@ -454,4 +490,80 @@ fn project_commands_work_offline_from_the_cli() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
+fn fallback_chains_are_set_listed_and_cleared_from_the_cli() {
+    // SB-71: a preset for the machine, a task's own chain with a pinned key, the narrowest one
+    // applying, and refusals for an agent that cannot take over and for a bad scope.
+    let data = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_switchboard"))
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let empty = run(&["chain", "list"]);
+    assert!(empty.status.success());
+    assert!(String::from_utf8_lossy(&empty.stdout).contains("No chain is set"));
+    assert!(run(&["chain", "set", "--preset", "subscriptions-first"])
+        .status
+        .success());
+    let wf = "workflow:wf_0123456789abcdef";
+    let pinned = run(&[
+        "chain",
+        "set",
+        "--scope",
+        wf,
+        "codex",
+        "kimi-code#fabric-switchboard/prod/OPENROUTER_API_KEY",
+    ]);
+    assert!(
+        pinned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pinned.stderr)
+    );
+    let listed = run(&[
+        "--json",
+        "chain",
+        "list",
+        "--workflow",
+        "wf_0123456789abcdef",
+    ]);
+    let value: Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(
+        value["data"]["effective"]["executors"][1]["key"],
+        "fabric-switchboard/prod/OPENROUTER_API_KEY"
+    );
+    assert_eq!(value["data"]["chains"].as_array().unwrap().len(), 2);
+    let human = String::from_utf8_lossy(&run(&["chain", "list"]).stdout).into_owned();
+    assert!(
+        human.contains("machine") && human.contains("claude-code → codex → kimi-code → hermes"),
+        "{human}"
+    );
+    let aider = run(&["chain", "set", "aider"]);
+    assert!(!aider.status.success());
+    assert!(String::from_utf8_lossy(&aider.stderr).contains("cannot take over a workflow"));
+    assert!(!run(&["chain", "set", "--scope", "everywhere", "codex"])
+        .status
+        .success());
+    assert!(
+        !run(&["chain", "set"]).status.success(),
+        "an empty set is not a clear"
+    );
+    assert!(run(&["chain", "clear", "--scope", wf]).status.success());
+    let after: Value = serde_json::from_slice(
+        &run(&[
+            "--json",
+            "chain",
+            "list",
+            "--workflow",
+            "wf_0123456789abcdef",
+        ])
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(after["data"]["effective"]["scope"]["kind"], "machine");
 }

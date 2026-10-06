@@ -184,3 +184,28 @@ Account list order is display-only; it never selects/activates. Within provider/
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+
+## Fallback chains (SB-71, 2026-10-06)
+
+Design: [XA-01](packets/cross-agent-continuation.md). Code: `crates/switchboard-core/src/chains.rs`,
+`agent_catalog::{can_continue, PRESETS}`, `Operation::{Chains, SetChain}`, CLI `switchboard chain`,
+MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
+
+- `Snapshot.chains: Vec<Chain>` (omitted when empty, so older readers are unaffected);
+  `Chain {scope, executors, updated_at}`; `ChainScope` is `{kind: "machine"}`,
+  `{kind: "project", pool}` (an existing project) or `{kind: "workflow", id}` (`wf_` + 16 hex);
+  `Executor {agent, account_id?, key?}` — at most 8 per chain, one chain per scope, at most 256.
+- Validation on every publish (`validate_chains`): an agent id is `[a-z0-9-]{1,40}`; an account or a
+  key, not both; a key is an Observatory vault name `project/env/NAME`, never for Claude Code or
+  Codex; `claude-code` / `codex` pinned only to an account of that provider; any other agent pinned
+  only to an API-key account (never a subscription sign-in). The runtime also requires the agent to
+  be in the catalog with `mcp.supported` and a `headless` form (`can_continue`).
+- `Store::set_chain(scope, executors)`: an empty list clears the scope; the same agent and pin twice
+  is refused; event `fallback_chain` `set` / `cleared`. `Store::chain_for(workflow, pool)`: the
+  workflow's chain, else the project's, else the machine's, else none.
+- Removing an account drops executors pinned to it; removing a project drops its chain; a chain left
+  empty is dropped (`chains::prune`).
+- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets}`; `Operation::SetChain
+  {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
+- A chain only records the operator's order: nothing reads it to act yet. The automatic fallback that
+  walks it is SB-73; spending ceilings for paid keys are SB-72.

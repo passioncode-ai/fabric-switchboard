@@ -90,6 +90,12 @@ enum Command {
         #[command(subcommand)]
         command: AgentsCommand,
     },
+    /// Fallback chains: which agents continue a workflow, in what order, when its accounts run
+    /// out — per machine, per project or per task. None applies until you set one.
+    Chain {
+        #[command(subcommand)]
+        command: ChainCommand,
+    },
     /// Projects (folders that reserve their own accounts) and optional project rules.
     Project {
         #[command(subcommand)]
@@ -272,6 +278,65 @@ enum Rotation {
 enum RotationTarget {
     Managed,
     ClaudeCli,
+}
+#[derive(Subcommand)]
+enum ChainCommand {
+    /// Every chain set, the presets, and the chain that applies to a workflow or a project.
+    List {
+        /// A workflow id (`wf_` and 16 hex digits): show the chain that applies to it.
+        #[arg(long)]
+        workflow: Option<String>,
+        /// A project's pool: show the chain that applies to it.
+        #[arg(long)]
+        pool: Option<String>,
+    },
+    /// Set a chain in order. Each agent is a catalog id (`switchboard agents list`), optionally
+    /// pinned: `codex@ACCOUNT_ID` runs on that account, `kimi-code#project/env/NAME` on a paid
+    /// key named in the Observatory vault. Without a pin Switchboard picks an account at the switch.
+    Set {
+        /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
+        #[arg(long, default_value = "machine")]
+        scope: String,
+        /// A ready-made order instead of a list: `subscriptions-first` (claude-code, codex,
+        /// kimi-code, hermes).
+        #[arg(long)]
+        preset: Option<String>,
+        /// The agents, first tried first.
+        agents: Vec<String>,
+    },
+    /// Remove the chain of a scope.
+    Clear {
+        /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
+        #[arg(long, default_value = "machine")]
+        scope: String,
+    },
+}
+/// `machine`, `project:<pool>` or `workflow:<wf_id>`.
+fn chain_scope(text: &str) -> Result<switchboard_core::ChainScope, String> {
+    use switchboard_core::ChainScope;
+    match text.split_once(':') {
+        None if text == "machine" => Ok(ChainScope::Machine),
+        Some(("project", pool)) if !pool.is_empty() => {
+            Ok(ChainScope::Project { pool: pool.into() })
+        }
+        Some(("workflow", id)) if !id.is_empty() => Ok(ChainScope::Workflow { id: id.into() }),
+        _ => Err("Scope is machine, project:<pool> or workflow:<wf_id>.".into()),
+    }
+}
+/// `agent`, `agent@ACCOUNT_ID` or `agent#project/env/NAME`.
+fn chain_executor(text: &str) -> switchboard_core::Executor {
+    let (agent, account_id, key) = if let Some((a, id)) = text.split_once('@') {
+        (a, Some(id.to_owned()), None)
+    } else if let Some((a, k)) = text.split_once('#') {
+        (a, None, Some(k.to_owned()))
+    } else {
+        (text, None, None)
+    };
+    switchboard_core::Executor {
+        agent: agent.to_owned(),
+        account_id,
+        key,
+    }
 }
 #[derive(Subcommand)]
 enum AgentsCommand {
@@ -564,6 +629,31 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             .into(),
             working_directory: dir.clone(),
         },
+        Command::Chain { command } => match command {
+            ChainCommand::List { workflow, pool } => Operation::Chains {
+                workflow: workflow.clone(),
+                pool: pool.clone(),
+            },
+            ChainCommand::Set {
+                scope,
+                preset,
+                agents,
+            } => {
+                if preset.is_none() && agents.is_empty() {
+                    return Err("Name the agents in order, or a --preset.".into());
+                }
+                Operation::SetChain {
+                    scope: chain_scope(scope)?,
+                    executors: agents.iter().map(|a| chain_executor(a)).collect(),
+                    preset: preset.clone(),
+                }
+            }
+            ChainCommand::Clear { scope } => Operation::SetChain {
+                scope: chain_scope(scope)?,
+                executors: vec![],
+                preset: None,
+            },
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Connect { agent, pool } => Operation::AgentConnect {
@@ -853,6 +943,63 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Agents {
             command: AgentsCommand::Key,
         } => println!("{}", text(&value["key"])),
+        Command::Chain {
+            command: ChainCommand::List { .. },
+        } => {
+            let line = |chain: &Value| {
+                let scope = &chain["scope"];
+                let name = match scope["kind"].as_str() {
+                    Some("project") => format!("project:{}", text(&scope["pool"])),
+                    Some("workflow") => format!("workflow:{}", text(&scope["id"])),
+                    _ => "machine".to_owned(),
+                };
+                let agents: Vec<String> = chain["executors"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|e| {
+                        let pin = e["account_id"]
+                            .as_str()
+                            .map(|id| format!("@{id}"))
+                            .or_else(|| e["key"].as_str().map(|k| format!("#{k}")))
+                            .unwrap_or_default();
+                        format!("{}{pin}", text(&e["agent"]))
+                    })
+                    .collect();
+                format!("{name:28} {}", agents.join(" → "))
+            };
+            let chains = value["chains"].as_array().cloned().unwrap_or_default();
+            if chains.is_empty() {
+                println!(
+                    "No chain is set; none applies until you set one (switchboard chain set …)."
+                );
+            }
+            for chain in &chains {
+                println!("{}", line(chain));
+            }
+            match value["effective"].is_object() {
+                true => println!("\napplies: {}", line(&value["effective"])),
+                false if !chains.is_empty() => {
+                    println!("\napplies: none for this workflow or project")
+                }
+                false => {}
+            }
+            for preset in value["presets"].as_array().into_iter().flatten() {
+                let agents: Vec<String> = preset["agents"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|a| text(&a["agent"]).to_owned())
+                    .collect();
+                println!("preset {}: {}", text(&preset["id"]), agents.join(" → "));
+            }
+        }
+        Command::Chain {
+            command: ChainCommand::Set { .. },
+        } => println!("Chain set."),
+        Command::Chain {
+            command: ChainCommand::Clear { .. },
+        } => println!("Chain cleared."),
         Command::Agents {
             command: AgentsCommand::List,
         } => {

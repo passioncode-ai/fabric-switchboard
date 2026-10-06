@@ -446,6 +446,7 @@ impl Store {
             .position(|p| p.pool == pool)
             .ok_or("Project not found.")?;
         let project = candidate.projects.remove(index);
+        crate::chains::prune(&mut candidate);
         append_event(&mut candidate, "project", None, "removed");
         self.publish(&mut state, candidate)?;
         self.changed();
