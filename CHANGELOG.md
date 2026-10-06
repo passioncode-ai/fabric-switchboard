@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.9 — 2026-10-06
+
+A Switchboard session can now run inside another app's console. If you run 0.6.1 or later, this
+version arrives on its own. Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Sessions in another app's console
 
 - `switchboard launch --in-place` runs a session in the terminal it was started from, instead of
