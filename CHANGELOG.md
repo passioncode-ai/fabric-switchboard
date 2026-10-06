@@ -8,6 +8,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.10 — 2026-10-07
+
+Switchboard speaks Russian, updates behave like every PassionCode.ai product, and the fixes of
+the 2026-10-07 audit. 0.6.9 was never published — its Windows build failed — so this release also
+carries 0.6.9's changes (below). If you run 0.6.1 or later, this version arrives on its own.
+Signed by the same team (`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Switchboard in Russian
 
 - The whole interface is available in Russian: every screen, dialog, notice, error the window
@@ -58,7 +68,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   instead of “Native Claude activation”, “Terminal launch requested” rather than “launched”,
   “PassionCode.ai”, and the tour's first two steps describe what the buttons do (SB-66).
 
-## 0.6.9 — 2026-10-06
+## 0.6.9 — 2026-10-06 (not published; shipped in 0.6.10)
 
 A Switchboard session can now run inside another app's console. If you run 0.6.1 or later, this
 version arrives on its own. Signed by the same team (`KJ35UYYL22`).
