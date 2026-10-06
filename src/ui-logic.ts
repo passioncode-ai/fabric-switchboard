@@ -293,3 +293,16 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
   if (status.state === 'failed' && status.error) return { text: status.error, restart: false };
   return { text: `Version ${status.current} is the latest. Switchboard checks again every six hours.`, restart: false };
 }
+
+/**
+ * The notice after an official sign-in is saved (SB-62). An identity already saved was signed in
+ * again in place — same account, label and pool — so it is never announced as added.
+ */
+export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string): string {
+  const head = account.signed_in_again
+    ? `${account.label} is signed in again in ${providerLabel} · ${account.pool}.`
+    : `${account.label} added to ${providerLabel} · ${account.pool}.`;
+  return account.login_cleanup === 'pending'
+    ? `${head} Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.`
+    : head;
+}

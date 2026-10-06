@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-62 fixed; every PassionCode product updates itself (2026-10-06)
+
+**SB-62 (P1) fixed for 0.6.6.** A sign-in of an account already saved — from its row, from
++ Add account, or from Try again in the sign-in banner — now updates it where it is: label and
+pool kept, every saved copy refreshed, nothing copied into `default`, nothing renamed to its email
+(`file_sign_in`, crates/switchboard-runtime/src/lib.rs; the banner keeps the sign-in's label and
+pool, src/main.ts). Four runtime tests (two red against the old filing) and a ui-logic case; the
+receipt gains `signed_in_again` (CONTRACTS), the notice reads “{label} is signed in again in
+{provider} · {pool}.” (strings.md), SCN-003 and CLI.md updated.
+
+**Automatic updates across the organization (operator request).** Measured on this machine:
+Switchboard, Project Observatory (engine and app), Fabric Inbox (since 0.10.1), Fabric Dashboards
+(since 0.5.6) and the `passioncode` launcher update themselves; **Fabric** builds it for 0.3.3
+(its ADR-0121, plan row P-12, branch `agent/release-032-work` @ `6cdde799`). The rule is
+lifecycle **LC-16** and the track **RM-19** in fabric-workspace (#47, `deacd77`), with RM-20 for
+the cross-agent plan. Installed here: Inbox 0.8.2 and Dashboards 0.4.1 predate their updaters —
+0.11.0 and 0.5.6 are downloaded and verified (SHA256SUMS, GPG, attestation, Gatekeeper) and wait
+for the person to quit both apps (the broker may not stop a person's app).
+
+**Exact next task:** release 0.6.6 with SB-62 (release PR, tag, approval); then XA-01 from SB-70.
+**Operator:** quit Fabric Inbox and Fabric Dashboards once so the verified updates can be
+installed; restart Switchboard (*Restart to update*) and press Switch once.
+
+---
+
 # Cleanup and docs pass — repository in its final state for 0.6.5 (2026-10-06)
 
 **Objective (operator):** clean up after the 0.6.5 work, bring every document and plan in line
@@ -39,9 +64,8 @@ with the code, delete branches nobody needs, and put every bug found on the boar
   SB-64 (SB-52 desktop entry and MCP tool), SB-65 (SS-01), SB-66 (UI copy vs brand pack),
   SB-67 (small UI defects), SB-68 (empty CLI help), SB-69 (states no scenario covers).
 
-**Not done, and why:** GitHub Actions artifacts (~0.9 GB, retained to January, billed to the
-Actions budget) were left alone — deleting them is irreversible and some are cited as evidence;
-the operator decides. The installed app runs 0.6.4 code until restarted (its bundle is 0.6.5;
+**Decided:** GitHub Actions artifacts (~0.9 GB, retained to January) are **kept** — operator,
+2026-10-06: «не удаляй артефакты». The installed app runs 0.6.4 code until restarted (its bundle is 0.6.5;
 the broker may not restart a person's app).
 
 **Checks run:** `./scripts/check.sh` exit 0 on this branch (see the PR); `scripts/check_docs.py`.

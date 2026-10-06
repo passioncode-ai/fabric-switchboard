@@ -52,7 +52,7 @@ export interface Adapter {
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
-  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending' }>;
+  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean }>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;

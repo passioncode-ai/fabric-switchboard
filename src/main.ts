@@ -5,7 +5,7 @@ import { version } from '../package.json';
 import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
@@ -67,7 +67,8 @@ function tourCard(step: number) {
 let agentSetup: AgentSetup | null = null;
 let agentSetupError = false;
 let openMenu: string | null = null;
-let pendingLogin: { id: string; provider: Provider; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
+/** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
+let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
 const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
 let loginItem: LoginItem | null = null;
@@ -499,7 +500,7 @@ async function startLogin(provider: Provider, label = '', pool = 'default') {
   busy = true; notice = ''; render();
   try {
     const result = await adapter.beginLogin({ provider, label, pool });
-    pendingLogin = { id: result.login_id, provider, state: 'pending', error: '' };
+    pendingLogin = { id: result.login_id, provider, label, pool, state: 'pending', error: '' };
     announce(`Sign in to ${providerName(provider)} in the Terminal window that opened. Switchboard adds the account when you finish.`);
   } catch (error) { showNotice(safeError(error), true); }
   finally { busy = false; render(); restoreFocus('login-cancel'); }
@@ -523,9 +524,7 @@ async function pollLogin() {
   try {
     const account = await adapter.finishLogin(login.id);
     // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
-    await loginSaved(account.login_cleanup === 'pending'
-      ? `${account.label} added to ${providerName(account.provider)} · ${account.pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.`
-      : `${account.label} added to ${providerName(account.provider)} · ${account.pool}.`);
+    await loginSaved(signInNotice(account, providerName(account.provider)));
   } catch (error) {
     const text = safeError(error); const outcome = loginOutcome(text);
     // The owner saved the account and released the sign-in; only its staging folder is left.
@@ -564,7 +563,7 @@ function loginBanner(main: HTMLElement) {
   if (login.error) text.append(el('span', 'usage-error', login.error));
   const actions = el('div', 'login-actions');
   if (login.error && login.state === 'pending') actions.append(button('Retry', () => { login.error = ''; render(); void pollLogin(); }, 'button', 'login-retry-finish'));
-  if (login.state === 'ended') actions.append(button('Try again', () => { const provider = login.provider; void adapter.cancelLogin(login.id).catch(() => undefined).finally(() => { pendingLogin = null; void startLogin(provider); }); }, 'button', 'login-retry'));
+  if (login.state === 'ended') actions.append(button('Try again', () => { const { provider, label, pool } = login; void adapter.cancelLogin(login.id).catch(() => undefined).finally(() => { pendingLogin = null; void startLogin(provider, label, pool); }); }, 'button', 'login-retry'));
   actions.append(button(login.state === 'ended' ? 'Dismiss' : 'Cancel', () => void cancelLogin(), 'button quiet', 'login-cancel'));
   banner.append(text, actions); main.append(banner);
 }

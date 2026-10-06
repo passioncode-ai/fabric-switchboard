@@ -247,7 +247,7 @@ pub struct Runtime {
     /// Sign-ins that saved their account (SB-42): login id → account, newest last, at most
     /// `COMPLETED_LOGINS`. A repeated Finish returns the same account without capturing again;
     /// they hold no sign-in slot.
-    completed_logins: Mutex<std::collections::VecDeque<(String, Account)>>,
+    completed_logins: Mutex<std::collections::VecDeque<(String, Account, bool)>>,
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
@@ -399,9 +399,10 @@ impl Runtime {
     /// home could not be removed yet (it is retried before the next sign-in and on every repeated
     /// Finish). A repeated Finish returns the same account and never captures again (SB-42).
     fn finish_login(&self, id: &str) -> Result<Value, String> {
-        let receipt = |account: &Account, cleaned: bool| {
+        let receipt = |account: &Account, cleaned: bool, again: bool| {
             let mut value = json!(account);
             value["login_cleanup"] = json!(if cleaned { "done" } else { "pending" });
+            value["signed_in_again"] = json!(again);
             value
         };
         let mut logins = self
@@ -415,31 +416,29 @@ impl Runtime {
                 .lock()
                 .map_err(|_| "Sign-in state unavailable.")?
                 .iter()
-                .find(|(done, _)| done == id)
-                .map(|(_, account)| account.clone())
+                .find(|(done, _, _)| done == id)
+                .map(|(_, account, again)| (account.clone(), *again))
                 .ok_or("Sign-in not found. Start again.")?;
-            return Ok(receipt(&account, self.retry_cleanup_of(id)));
+            return Ok(receipt(&account.0, self.retry_cleanup_of(id), account.1));
         };
         let account = if let Some(account) = &login.saved {
             account.clone()
         } else {
             let captured = launch::capture_login_profile(login)?;
-            let label = if login.label.trim().is_empty() {
-                captured.label.clone()
-            } else {
-                login.label.clone()
-            };
-            let account = self.store.upsert(
-                label,
+            let (account, again) = file_sign_in(
+                &self.store,
                 login.provider,
-                AuthKind::OAuth,
-                login.pool.clone(),
-                captured.credential,
-                Some(captured.identity),
+                &login.label,
+                &login.pool,
+                captured,
             )?;
+            if again {
+                login.signed_in_again = true;
+            }
             login.saved = Some(account.clone());
             account
         };
+        let again = login.signed_in_again;
         let cleaned = launch::clean_login(login).is_ok();
         // The account is saved: the slot is released even when staging cleanup fails.
         if let Some(login) = logins.remove(id) {
@@ -451,14 +450,14 @@ impl Runtime {
         }
         drop(logins);
         if let Ok(mut completed) = self.completed_logins.lock() {
-            completed.retain(|(done, _)| done != id);
-            completed.push_back((id.to_owned(), account.clone()));
+            completed.retain(|(done, _, _)| done != id);
+            completed.push_back((id.to_owned(), account.clone(), again));
             while completed.len() > COMPLETED_LOGINS {
                 completed.pop_front();
             }
         }
         self.invalidate_current();
-        Ok(receipt(&account, cleaned))
+        Ok(receipt(&account, cleaned, again))
     }
     /// Tries once more to remove a saved sign-in's staging home. True when nothing is left.
     fn retry_cleanup_of(&self, id: &str) -> bool {
@@ -478,7 +477,7 @@ impl Runtime {
             let saved = self
                 .completed_logins
                 .lock()
-                .is_ok_and(|completed| completed.iter().any(|(done, _)| done == id));
+                .is_ok_and(|completed| completed.iter().any(|(done, _, _)| done == id));
             return if saved {
                 Ok(json!({"state": "complete"}))
             } else {
@@ -1638,6 +1637,68 @@ fn import_profiles(
     }
     (imported, failed, skipped)
 }
+/// Files a finished official sign-in (SB-62). A sign-in started from an account's row names its
+/// label and pool and updates that row. One started without a label (+ Add account, or the
+/// sign-in banner's Try again) files the new sign-in into every saved copy of that identity where
+/// it already is, keeping each copy's label and pool, and creates an account only when the
+/// identity is saved nowhere: it never renames an account to its email, and never copies an
+/// account (a project's, say) into another pool. Either way every other saved copy of the
+/// identity gets the new sign-in too — one lineage in every pool (PLAN-0.5 C-6). Returns the
+/// account to report and whether the identity was saved before.
+fn file_sign_in(
+    store: &Store,
+    provider: Provider,
+    label: &str,
+    pool: &str,
+    captured: external::CapturedProfile,
+) -> Result<(Account, bool), String> {
+    let copies: Vec<Account> = matching_accounts(store, provider, &captured.identity)?
+        .into_iter()
+        .filter(|a| a.kind == AuthKind::OAuth)
+        .collect();
+    let again = !copies.is_empty();
+    let primary = if !label.trim().is_empty() || copies.is_empty() {
+        let label = if label.trim().is_empty() {
+            captured.label.clone()
+        } else {
+            label.to_owned()
+        };
+        store.upsert(
+            label,
+            provider,
+            AuthKind::OAuth,
+            pool.to_owned(),
+            captured.credential.clone(),
+            Some(captured.identity.clone()),
+        )?
+    } else {
+        // The copy in the requested pool when there is one, else the first saved.
+        let target = copies
+            .iter()
+            .find(|a| a.pool == pool)
+            .unwrap_or(&copies[0])
+            .clone();
+        store.upsert(
+            target.label,
+            provider,
+            target.kind,
+            target.pool,
+            captured.credential.clone(),
+            Some(captured.identity.clone()),
+        )?
+    };
+    for copy in copies.into_iter().filter(|a| a.id != primary.id) {
+        store.upsert(
+            copy.label,
+            provider,
+            copy.kind,
+            copy.pool,
+            captured.credential.clone(),
+            Some(captured.identity.clone()),
+        )?;
+    }
+    Ok((primary, again))
+}
 pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
 fn replace_native(
     store: &Store,
@@ -2567,6 +2628,156 @@ mod owner_tests {
         assert!(events
             .iter()
             .any(|e| e.action == "activation" && e.detail == "completed"));
+    }
+    /// A finished official sign-in of `account` with a fresh token (SB-62 tests).
+    fn fresh_sign_in(account: &str) -> external::CapturedProfile {
+        let mut credential = credential(account);
+        credential.access_token = format!("{account}-fresh-token");
+        credential.refresh_token = Some(format!("{account}-fresh-refresh"));
+        external::CapturedProfile {
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            credential,
+            identity: identity(account),
+            label: format!("{account}@example.invalid"),
+        }
+    }
+    fn accounts_of(store: &Store) -> Vec<Account> {
+        store.snapshot().unwrap().accounts
+    }
+    #[tokio::test]
+    async fn a_sign_in_without_a_label_updates_the_saved_account_where_it_is() {
+        // SB-62: the banner's Try again (no label, default pool) used to rename the account to its
+        // email in `default`, or copy an account saved elsewhere into `default`.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = runtime
+            .store
+            .upsert(
+                "Work A".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                credential("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let (account, again) = file_sign_in(
+            &runtime.store,
+            Provider::Claude,
+            "",
+            "default",
+            fresh_sign_in("synthetic-a"),
+        )
+        .unwrap();
+        assert!(again);
+        assert_eq!(account.id, work.id);
+        let all = accounts_of(&runtime.store);
+        assert_eq!(all.len(), 1, "no copy appears in default");
+        assert_eq!(
+            all[0].label, "Work A",
+            "the label is not replaced by the email"
+        );
+        assert_eq!(all[0].pool, "work");
+        assert_eq!(
+            runtime
+                .store
+                .stored_credential(&work.id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-a-fresh-refresh")
+        );
+    }
+    #[tokio::test]
+    async fn a_sign_in_without_a_label_keeps_a_custom_label_in_the_same_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        runtime
+            .store
+            .upsert(
+                "Personal".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        file_sign_in(
+            &runtime.store,
+            Provider::Claude,
+            "",
+            "default",
+            fresh_sign_in("synthetic-a"),
+        )
+        .unwrap();
+        let all = accounts_of(&runtime.store);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].label, "Personal");
+    }
+    #[tokio::test]
+    async fn a_new_identity_is_added_under_its_email_in_the_requested_pool() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        save(&runtime.store, "synthetic-b", "default");
+        let (account, again) = file_sign_in(
+            &runtime.store,
+            Provider::Claude,
+            "",
+            "default",
+            fresh_sign_in("synthetic-a"),
+        )
+        .unwrap();
+        assert!(!again);
+        assert_eq!(account.label, "synthetic-a@example.invalid");
+        assert_eq!(account.pool, "default");
+        assert_eq!(accounts_of(&runtime.store).len(), 2);
+    }
+    #[tokio::test]
+    async fn a_row_sign_in_updates_its_row_and_every_other_copy_of_the_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = save(&runtime.store, "synthetic-a", "work");
+        let personal = runtime
+            .store
+            .upsert(
+                "Mine".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "personal".into(),
+                credential("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let (account, again) = file_sign_in(
+            &runtime.store,
+            Provider::Claude,
+            "synthetic-a",
+            "work",
+            fresh_sign_in("synthetic-a"),
+        )
+        .unwrap();
+        assert!(again);
+        assert_eq!(account.id, work.id);
+        assert_eq!(accounts_of(&runtime.store).len(), 2);
+        for id in [&work.id, &personal.id] {
+            assert_eq!(
+                runtime
+                    .store
+                    .stored_credential(id)
+                    .unwrap()
+                    .refresh_token
+                    .as_deref(),
+                Some("synthetic-a-fresh-refresh"),
+                "one lineage in every pool"
+            );
+        }
+        let mine = accounts_of(&runtime.store)
+            .into_iter()
+            .find(|a| a.id == personal.id)
+            .unwrap();
+        assert_eq!(mine.label, "Mine");
     }
     #[tokio::test]
     async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {
