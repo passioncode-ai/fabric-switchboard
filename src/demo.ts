@@ -25,7 +25,7 @@ export function createDemoAdapter(): Adapter {
     ],
     policies: [{ provider: 'claude', pool: 'work', target: 'managed', enabled: false, threshold_percent: 90, hysteresis_percent: 10, cooldown_seconds: 1800, max_age_seconds: 300, last_switched_at: null }],
     routes: { 'claude:work': 'demo-claude-work', 'codex:work': 'demo-codex-work' },
-    events: [{ at: now() - 95, action: 'usage.observed', account_id: 'demo-claude-work', detail: 'Synthetic usage observation' }],
+    events: [{ at: now() - 95, action: 'usage', account_id: 'demo-claude-work', detail: 'observed' }],
     rules: [
       { path: '/srv/projects/alpha-web', provider: 'claude', account_id: 'demo-claude-work', target: 'managed', enabled: true, created_at: now() - 3600, expires_at: now() + 6 * 3600 },
       { path: '/srv/projects/beta-api', provider: 'codex', account_id: 'demo-codex-work', target: 'managed', enabled: false, created_at: now() - 86400, expires_at: null },
@@ -88,7 +88,7 @@ export function createDemoAdapter(): Adapter {
         state.accounts.push(item);
       } else if (input.label) item.label = input.label;
       source.account_id = item.id;
-      log('account.captured', item.id, 'Synthetic current CLI account captured');
+      log('account_added', item.id, 'success');
       return structuredClone(item);
     },
     async importClaudeSwap(pool) {
@@ -100,7 +100,7 @@ export function createDemoAdapter(): Adapter {
           item = { id: crypto.randomUUID(), label, provider: 'claude', kind: 'oauth', pool, enabled: true, created_at: now(), identity: null, external_identity: { account_id: id, organization_id: 'synthetic-swap', email: `${id}@example.test` }, usage: null };
           state.accounts.push(item);
         }
-        imported.push(structuredClone(item)); log('account.imported', item.id, 'Synthetic Claude Swap profile imported');
+        imported.push(structuredClone(item)); log('account_added', item.id, 'success');
       }
       return { imported, failed: 1, skipped: 1 };
     },
@@ -109,7 +109,7 @@ export function createDemoAdapter(): Adapter {
       if (state.projects?.some((p) => p.pool === item.pool)) throw new Error(PROJECT_NOT_NATIVE);
       if (item.provider !== 'claude' || item.kind !== 'oauth' || !item.external_identity) throw new Error('Native activation requires a Claude OAuth account with an external identity.');
       current.claude = { status: 'available', identity: structuredClone(item.external_identity), account_id: id };
-      log('native.activated', id, 'Synthetic native Claude account activation');
+      log('activation', id, 'completed');
     },
     async setPolicy(policy) {
       await pause();
@@ -118,7 +118,6 @@ export function createDemoAdapter(): Adapter {
       const policies = state.policies!;
       const index = policies.findIndex((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
       if (index < 0) policies.push(structuredClone(policy)); else policies[index] = structuredClone(policy);
-      log('policy.updated', '', 'Synthetic rotation settings saved; no automatic switching runs in the demo');
     },
     async snapshot() { await pause(); return structuredClone(state); },
     async runtime() { return { proxy_address: 'Synthetic · no listener', platform: 'Browser demo', live_mode: 'Synthetic fixture' }; },
@@ -131,11 +130,11 @@ export function createDemoAdapter(): Adapter {
         catch { throw new Error('Enter valid credential JSON for the selected provider.'); }
       }
       const item: Account = { id: crypto.randomUUID(), label: input.label, provider: input.provider, kind: input.kind, pool: input.pool, enabled: true, created_at: now(), identity: null, usage: null };
-      state.accounts.push(item); log('account.added', item.id, 'Synthetic account added'); return structuredClone(item);
+      state.accounts.push(item); log('account_added', item.id, 'success'); return structuredClone(item);
     },
     async update(id, label, active) { await pause(); Object.assign(account(id), { label, enabled: active }); if (!active) for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; log('account.updated', id, active ? 'Enabled' : 'Disabled; route cleared'); },
-    async remove(id) { await pause(); if (Object.values(state.routes).includes(id)) throw new Error('Select another account in this pool, or disable this account, before removing it.'); account(id); state.accounts = state.accounts.filter((item) => item.id !== id); state.rules = state.rules!.filter((rule) => rule.account_id !== id); log('account.removed', id, 'Synthetic account removed'); },
-    async select(item) { await pause(); enabled(item.id); state.routes[`${item.provider}:${item.pool}`] = item.id; log('route.selected', item.id, 'Selected for next request'); },
+    async remove(id) { await pause(); if (Object.values(state.routes).includes(id)) throw new Error('Select another account in this pool, or disable this account, before removing it.'); account(id); state.accounts = state.accounts.filter((item) => item.id !== id); state.rules = state.rules!.filter((rule) => rule.account_id !== id); log('account_removed', id, 'success'); },
+    async select(item) { await pause(); enabled(item.id); state.routes[`${item.provider}:${item.pool}`] = item.id; log('account_selected', item.id, 'success'); },
     async launch(id, mode, workingDirectory) { await pause(); if (!isAbsoluteProjectPath(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
     async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, { ...input, started: Date.now() }); return { login_id, message: 'Synthetic sign-in opened; it completes on its own in a few seconds.' }; },
     // A synthetic Terminal "finishes" three seconds after it opened.
@@ -147,9 +146,9 @@ export function createDemoAdapter(): Adapter {
       await pause(); logins.delete(id); signIns += 1;
       const identity: ExternalIdentity = { account_id: `synthetic-signin-${signIns}`, organization_id: 'synthetic-work', email: `signin-${signIns}@example.test` };
       const existing = state.accounts.find((entry) => entry.provider === input.provider && entry.pool === input.pool && entry.label === input.label && input.label);
-      if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account.updated', existing.id, 'Synthetic sign-in renewed'); return structuredClone(existing); }
+      if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account_updated', existing.id, 'success'); return structuredClone(existing); }
       const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
-      state.accounts.push(item); log('account.added', item.id, 'Synthetic sign-in account added');
+      state.accounts.push(item); log('account_added', item.id, 'success');
       // Like the owner since SB-42: a saved account with its temporary folder still to remove.
       if (input.provider === 'codex') return { ...structuredClone(item), login_cleanup: 'pending' as const };
       return structuredClone(item);
@@ -212,6 +211,6 @@ export function createDemoAdapter(): Adapter {
     async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
-    async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage.observed', id, 'Synthetic usage observation'); return structuredClone(usage); },
+    async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage', id, 'observed'); return structuredClone(usage); },
   };
 }

@@ -8,6 +8,30 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Switchboard in Russian
+
+- The whole interface is available in Russian: every screen, dialog, notice, error the window
+  shows, the first-run tour and the menu-bar (Windows: notification-area) menu. Switchboard follows
+  the language of the operating system; About → *Language* overrides it (Same as system, English,
+  Русский) and reloads the window. Dates and times follow the language. Terms follow the
+  PassionCode.ai glossary (fabric-workspace knowledge/localization.md, track RM-25).
+- The journal names its events in the interface language (“Account added · done”) instead of the
+  recorded codes.
+
+### Fixes
+
+- “Turn on for Claude Code” reports the threshold and headroom it actually saved, not always
+  90 % / 10 points (SB-67).
+- API-key and setup-token rows say “Not checked automatically · Quota checks need OAuth” instead of
+  leaving the second line empty (SB-67).
+- *Try again* after a sign-in no longer starts a new sign-in when cancelling the old one failed and
+  left its staging folder behind; the error is shown instead (SB-67).
+- On Windows the app no longer says “Mac”, “menu-bar icon” or “Keychain”: it names the
+  notification area and Windows' own key protection (SB-66).
+- Interface copy matches the brand pack: “Automatic switching” everywhere (no “rotation”), “Switch”
+  instead of “Native Claude activation”, “Terminal launch requested” rather than “launched”,
+  “PassionCode.ai”, and the tour's first two steps describe what the buttons do (SB-66).
+
 ## 0.6.9 — 2026-10-06
 
 A Switchboard session can now run inside another app's console. If you run 0.6.1 or later, this

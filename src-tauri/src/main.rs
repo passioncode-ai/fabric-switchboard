@@ -229,6 +229,11 @@ async fn launch_account(
         })
         .await
 }
+/// The window's interface language (L10N-01), for the tray menu. Anything but "ru" is English.
+#[tauri::command]
+fn set_language(app: tauri::AppHandle, locale: String) {
+    residency::set_language(&app, locale == "ru");
+}
 #[tauri::command]
 async fn begin_login(
     provider: Provider,
@@ -574,6 +579,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             frontend_ready,
+            set_language,
             login_item,
             set_login_item,
             update_status,

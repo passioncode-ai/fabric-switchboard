@@ -2,6 +2,32 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-76 built — Switchboard in Russian; SB-67 fixed, SB-66 mostly (2026-10-07)
+
+Operator request 2026-10-07: a Russian interface for every PassionCode.ai product (this repository
+does Switchboard; the organization's standard is fabric-workspace knowledge/localization.md, track
+RM-25), language = the system's plus a switch. Branch `feat/i18n-ru`:
+
+- `src/i18n.ts` (`t`, `plural`, locale choice), `src/locales/ru.ts` (763 strings, independently
+  proofread), About → Language (Same as system / English / Русский, reloads the window), the tray
+  menu in Russian (`set_language` IPC; system language before the window reports —
+  `switchboard-core::language`), backend sentences translated where shown, journal labels for the
+  core's event vocabulary, Russian-only column widths so longer words do not run under buttons.
+- Gate: `scripts/check-locale.mjs` (every interface string has an entry, placeholders equal, three
+  plural forms); `scripts/test-ui-logic.mjs` 26 cases; full `./scripts/check.sh` green.
+- SB-67 fixed (turn-on numbers, `no_quota` line, Try again after a failed cancel); SB-66: platform
+  words (computer / notification area / Windows key protection), brand terms; a full strings.md
+  resync stays open.
+- Docs: CHANGELOG Unreleased, CONTRACTS → Interface language, SCN-041, brand voice/terminology/
+  strings, README and README.ru, board SB-66/67/76.
+
+**Exact next task:** merge `feat/i18n-ru`; after the operator approves 0.6.9 (run 37518902023) the
+next release carries the Russian interface — then check the installed app and its tray in Russian.
+Next on the board: LC-16 parity with Fabric Dashboards 0.6.1 (activation only at a safe point; a
+manual *Check for updates* that works with the switch off — SB-77), SB-61, SB-68, SB-69, SB-72.
+
+---
+
 # SB-75 built — launch in place for an embedded console (2026-10-06)
 
 Fabric Dashboards (session fabric-dashboards-54) asked for a way to host a Switchboard session in

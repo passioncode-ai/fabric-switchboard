@@ -70,7 +70,7 @@ h1:focus { outline: none; }
 .event-row { padding: var(--space-4); border-bottom: 1px solid var(--border); }
 .event-row:last-child { border-bottom: 0; }
 .event-title { display: flex; justify-content: space-between; gap: var(--space-4); }
-.event-title strong { font-weight: 550; text-transform: capitalize; }
+.event-title strong { font-weight: 550; }
 .event-title time { font-size: var(--t-label); color: var(--muted); white-space: nowrap; }
 .event-row p { color: var(--muted); margin-top: var(--space-1); }
 .event-id { font-family: var(--font-data); color: var(--muted); font-size: var(--t-chip); overflow-wrap: anywhere; }
@@ -212,6 +212,9 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 /* Compact quota cell: line one is meter + share + age, line two the one time that matters. */
 .usage-line { display: grid; grid-template-columns: minmax(32px, 1fr) 4.5ch 7.5ch; align-items: center; gap: var(--space-2); color: var(--muted); white-space: nowrap; min-width: 0; }
 .usage-line:has(.usage-unknown) { display: block; }
+/* Russian words run longer: wider age and action columns, the same in every row. */
+:lang(ru) .usage-line { grid-template-columns: minmax(32px, 1fr) 4.5ch 11ch; }
+:lang(ru) .account-row { grid-template-columns: 28px minmax(0, 1fr) minmax(176px, 248px) 116px 32px; }
 .row-usage .usage-meter { width: 100%; margin-top: 0; height: 4px; }
 .usage-pct { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
 .usage-age { font-variant-numeric: tabular-nums; text-align: right; overflow: hidden; text-overflow: ellipsis; }
@@ -248,6 +251,7 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .login-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
 @media (max-width: 820px) {
   .account-row { grid-template-columns: 28px minmax(0, 1fr) 88px 32px; row-gap: 2px; }
+  :lang(ru) .account-row { grid-template-columns: 28px minmax(0, 1fr) 116px 32px; }
   .account-row .row-usage { grid-column: 2 / 3; grid-row: 2; max-width: 360px; }
   .rotation-bar, .login-banner { flex-direction: column; align-items: stretch; }
   .proxy-status { margin-left: 0; }

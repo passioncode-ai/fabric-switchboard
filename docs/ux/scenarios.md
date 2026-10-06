@@ -813,3 +813,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`).
 **Product:** unobserved
 **Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md)
+
+## SCN-041 — Use Switchboard in Russian
+
+**Persona:** P-01
+**Goal:** Read and operate Switchboard in Russian — or in English on a Russian system — without a setting to find first.
+**Preconditions:** any build; the desktop app or the browser demo.
+**Entry point:** start the app; About → *Language* to override.
+**Steps:**
+1. Start Switchboard on a system whose first preferred language is Russian → every screen, dialog, notice, the tour, dates and the menu-bar (Windows: notification-area) menu are in Russian; on any other language they are in English.
+2. About → *Language* → choose *Same as system*, *English* or *Русский* → the choice is saved on this machine and the window reloads in that language; the tray menu follows at once.
+3. A backend refusal appears → it is shown in the chosen language (the window compares the English sentence and translates it where it is shown, L10N-04); the journal names its events in that language.
+**Alt paths:** the choice cannot be saved (storage refused) → “The language could not be saved on this machine.” and the window stays as it was; a string missing from the Russian dictionary shows in English, never as a key (the gate prevents it in a release).
+**Expected result:** one language per window; Russian follows the PassionCode.ai glossary (fabric-workspace knowledge/localization.md); CLI output, logs, the journal's stored codes and MCP answers stay English.
+**UI elements:** About panel “Language” with three radio options and a help line; tray items “Открыть Switchboard”, “Завершить Switchboard”, “Перезапустить для обновления до {version}”.
+**States covered:** system Russian, system other, overridden to English, overridden to Russian, save refused.
+**Errors & recovery:** the only failure is the save; choosing again retries it.
+**Status:** draft
+**Meaning:** operator request 2026-10-07 («нужен перевод на русский»; system language plus a switch).
+**Coverage:** `scripts/test-ui-logic.mjs` (detectLocale, parseLocaleChoice, resolveLocale, Russian plurals 1/2/5/11/21/22/25/111, a missing entry shows English, L10N-04, journal labels cover `event_valid`), `scripts/check-locale.mjs` in the gate (every interface string has a Russian entry with the same placeholders and three plural forms), `language::tests` (Russian language tags), `residency::tests` (tray labels in both languages); the browser demo reviewed in Russian on Accounts, Projects, Agents, Activity and About (2026-10-07).
+**Product:** unobserved
+**Traces:** SB-76, SB-66, RM-25 (fabric-workspace roadmap), L10N-01…06

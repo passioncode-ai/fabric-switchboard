@@ -258,3 +258,26 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
 - Tests: `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`,
   `the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection`,
   `an_in_place_launch_is_refused_where_it_cannot_run`. Not observed live with a real agent yet.
+
+## Interface language (SB-76, 2026-10-07)
+
+Code: `src/i18n.ts`, `src/locales/ru.ts`, `crates/switchboard-core/src/language.rs`,
+`src-tauri/src/residency.rs` (`set_language`, `labels`, `restart_label_in`).
+
+- The window's language is read once at start: `localStorage['switchboard.locale']` (`en` | `ru`;
+  absent = the system's), else `navigator.languages[0]` (`ru`/`ru-*` → Russian, anything else →
+  English). Changing it reloads the window.
+- `t(source, params)` returns the Russian entry of the English `source` (or `source` itself);
+  `{name}` placeholders are filled from `params`. `plural(n, {one, other})` takes Russian's three
+  forms from the entry of `other`, separated by `|`. Comparisons with backend text use the English
+  sentence; translation happens only where text is shown (L10N-04).
+- IPC `set_language(locale: String) -> ()`: the window reports its language at start; the tray menu
+  is rebuilt in Russian for `ru` and in English otherwise. Before the window reports, the tray
+  follows the system's first preferred language (`language::system_prefers_russian`: macOS
+  `CFLocaleCopyPreferredLanguages`, Windows `GetUserDefaultUILanguage`, else `LC_ALL` /
+  `LC_MESSAGES` / `LANG`).
+- Not localized, by design: the CLI, MCP answers, logs, the store's journal codes and analytics
+  (counts and kinds only, unchanged — ANALYTICS.md).
+- Gate: `node scripts/check-locale.mjs` (a missing entry, a changed placeholder, a plural without
+  three forms fail); `scripts/test-ui-logic.mjs` covers language choice, plural rules and that every
+  `event_valid` word has a journal label.
