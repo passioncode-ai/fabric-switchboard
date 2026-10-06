@@ -11,7 +11,7 @@ Releases made by the [release workflow](DISTRIBUTION.md#how-a-release-happens) (
 ```sh
 gpg --verify SHA256SUMS.asc SHA256SUMS          # "Good signature" from the release key
 shasum -a 256 -c SHA256SUMS --ignore-missing     # OK for each archive you downloaded
-gh attestation verify Fabric-Switchboard-X.Y.Z-macos-universal.zip -R passioncode-ai/fabric-switchboard
+gh attestation verify Fabric-Switchboard-X.Y.Z-macos-universal.zip -R passioncode-ai/fabric-switchboard --signer-repo passioncode-ai/.github
 ```
 
 Windows PowerShell, comparing with the line for the archive in `SHA256SUMS`:
