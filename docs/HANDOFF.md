@@ -2,7 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-# 0.6.10 waits to publish; SB-61, SB-68, SB-69, SB-78 closed on main (2026-10-07)
+# 0.6.10 published and verified (2026-10-07)
+
+Published 2026-10-07T01:27:04Z after the operator approved run 37544406792; the downloaded set is
+verified and recorded (release-0.5.md → v0.6.10), README / README.ru say 0.6.10,
+fabric-workspace roadmap/products updated (#63), fabric-dashboards-54 told (FD-25 can run the
+in-place console). The site's download routes still answered 0.6.8 right after publication.
+This Mac's installed bundle was 0.6.8; it reaches 0.6.10 through its own update check.
+
+**Exact next task:** check `curl -w %{redirect_url} https://passioncode.ai/switchboard/download/macos`
+names v0.6.10, then the board: SB-72 (paid-agent ceilings), SB-73 phase 2 (Kimi Code / Hermes),
+SB-71 app screen, SB-66 strings.md resync; the next release carries SB-61, SB-68, SB-69 and the
+SB-78 remainder (CHANGELOG Unreleased).
+
+---
+
+# 0.6.10 waited to publish; SB-61, SB-68, SB-69, SB-78 closed on main (2026-10-07)
 
 - **0.6.10** (Russian interface SB-76, LC-16 updates SB-77, audit fixes SB-78; carries the never
   published 0.6.9): run 37544406792 — preflight, Windows, macOS and updater jobs succeeded; the
