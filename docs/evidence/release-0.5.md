@@ -422,6 +422,24 @@ Apple-grid icon (#70). Operator requests of 2026-10-05: «ничего не по
 Copies at 0.6.0 or earlier have no updater: they need one manual update to 0.6.1, after which
 updates arrive on their own. The first automatic update is observed on the next release (SB-15).
 
+### Release v0.6.10 (2026-10-07) — Russian interface, LC-16 updates, audit fixes
+
+0.6.10: SB-76 (the whole interface in Russian, system language plus About → Language), SB-77 (a
+ready update starts at an idle moment; *Check for updates* with the switch off; held releases),
+SB-78 (the 2026-10-07 audit: the Windows test build, the automatic hand-over, Windows updates,
+named errors, in-place release of a failed launch) and SB-75 from the unpublished 0.6.9
+(`launch --in-place`). **v0.6.9 was tagged but never published:** its Windows job failed on a
+test that lost its macOS-only mark (run [37518902023](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37518902023), cancelled).
+
+| Step | Result |
+|---|---|
+| Source | `main` `b782352` ([#102](https://github.com/passioncode-ai/fabric-switchboard/pull/102); features [#99](https://github.com/passioncode-ai/fabric-switchboard/pull/99), [#100](https://github.com/passioncode-ai/fabric-switchboard/pull/100), [#101](https://github.com/passioncode-ai/fabric-switchboard/pull/101)), tag `v0.6.10`; `release_preflight.py --tag v0.6.10 --publish true --windows-signing false` ok; local gate exit 0; `cargo xwin check --tests` for Windows clean |
+| Release run | [37544406792](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37544406792): preflight, windows, macos, updater, publish all success; both gates approved by the operator (2026-10-07: «одобрил») |
+| Published | 2026-10-07T01:27:04Z, **not a prerelease**, 11 assets |
+| Downloaded set | `shasum -a 256 -c SHA256SUMS --ignore-missing` OK for the macOS zip (`b633788750ff600dbeccd6a1ee2336f346180e2e837d65aa19c8187dc77765af`), the Windows setup (`9ec7ffdacabc502f0ff42d5e49077871103cc9e585a4b8937d124444029bffee`) and `latest.json`; GPG good signature, PassionCode.ai release key `63B30DC324BD697487AA31944FAFB8AEC803B6A7`; `gh attestation verify --signer-repo passioncode-ai/.github` exit 0 ×2; `spctl` → `accepted, Notarized Developer ID`; stapler validate ok; CLI `switchboard 0.6.10`, team `KJ35UYYL22` |
+| Updater manifest | `releases/latest/download/latest.json` → version `0.6.10`, platforms darwin-aarch64, darwin-universal, darwin-x86_64, windows-x86_64 |
+| Not in it | SB-61, SB-68, SB-69 and the SB-78 remainder were merged after the tag (#103–#107): the next release |
+
 ### Release v0.6.8 (2026-10-06) — fallback chains and the automatic hand-over
 
 0.6.8: SB-71 (the operator's fallback chains per machine, project and task: `switchboard chain`,

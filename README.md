@@ -10,10 +10,10 @@ Windows. It is Fabric's account tool and works on its own; built by
 
 ![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
 
-**Status: [v0.6.8](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.8)**,
-2026-10-06; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
+**Status: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10)**,
+2026-10-07; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
 built natively, not yet Authenticode-signed). Installed copies of 0.6.1 or later update
-themselves; v0.6.3 and v0.6.4 were tagged but never published. Builds are made and signed only by the
+themselves; v0.6.3, v0.6.4 and v0.6.9 were tagged but never published. Builds are made and signed only by the
 [release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Live provider acceptance on
 each platform is tracked on the [board](docs/evidence/backlog.md) (SB-01, SB-02, SB-15).
 
@@ -33,7 +33,9 @@ What each version changed is in the [CHANGELOG](CHANGELOG.md): 0.6 adds projects
 own accounts, keeps running with its window closed, opens at login and updates itself
 ([DISTRIBUTION](docs/DISTRIBUTION.md#automatic-updates-sb-55)); 0.6.7–0.6.8 hand a task from
 Claude Code to Codex with its context and follow your chain of agents when an account runs out
-([CLI](docs/CLI.md#fallback-chains), [XA-01](docs/packets/cross-agent-continuation.md)); 0.5 renews inactive Claude
+([CLI](docs/CLI.md#fallback-chains), [XA-01](docs/packets/cross-agent-continuation.md)); 0.6.10 speaks Russian,
+runs a session inside another app's console (`launch --in-place`) and updates the way every
+PassionCode.ai product does; 0.5 renews inactive Claude
 accounts and keeps encrypted backups; 0.4 adds MCP for agents, project rules and the plugin;
 0.4.1 ends the repeated Keychain dialogs ([KEYCHAIN.md](docs/KEYCHAIN.md)). Release records:
 [0.5.x–0.6.x](docs/evidence/release-0.5.md), [0.4.1](docs/evidence/release-0.4.1.md),
