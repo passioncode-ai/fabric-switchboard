@@ -231,7 +231,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (loadError) {
-    const state = emptyState(t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
+    const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load projects') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
     const state = emptyState(t('Loading your workbench'), t('Reading account metadata from the native app…')); state.setAttribute('role', 'status'); main.append(state);
   } else if (snapshot) {
@@ -276,7 +276,7 @@ function projectsSection() {
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet — sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
     const actions = el('div', 'management-actions');
-    actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => void mutate(() => adapter.removeProject(project.pool), t('Project “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.', { name: project.name, pool: project.pool }), 'new-project'), 'text-button danger-text', `delete-project-${project.pool}`));
+    actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => deleteProjectDialog(project), 'text-button danger-text', `delete-project-${project.pool}`));
     card.append(details, actions); list.append(card);
   }
   section.append(list); return section;
@@ -328,7 +328,7 @@ function rulesSection() {
     const actions = el('div', 'management-actions');
     if (state === 'active') actions.append(button(t('Pause'), () => void mutate(() => adapter.setProjectRule({ path: rule.path, accountId: rule.account_id, target: rule.target, enabled: false, expiresAt: rule.expires_at }), t('Rule paused. Selection and rotation are unchanged.'), `pause-${key}`), 'text-button', `pause-${key}`));
     else actions.append(button(t('Resume…'), () => ruleDialog(rule), 'text-button', `resume-${key}`));
-    actions.append(button(t('Edit'), () => ruleDialog(rule), 'text-button', `edit-${key}`), button(t('Remove'), () => void mutate(() => adapter.removeProjectRule(rule.path, rule.provider), t('Rule removed.'), 'add-rule'), 'text-button danger-text', `remove-${key}`));
+    actions.append(button(t('Edit'), () => ruleDialog(rule), 'text-button', `edit-${key}`), button(t('Remove'), () => removeRuleDialog(rule), 'text-button danger-text', `remove-${key}`));
     card.append(details, actions); list.append(card);
   }
   main.append(list);
@@ -344,7 +344,7 @@ function ruleDialog(existing?: ProjectRule) {
   const target = select([['managed', t('Managed sessions (switch from the next request)')], ['claude_cli', t('Claude Code login (changes every claude session)')]]);
   target.value = existing?.target ?? 'managed';
   const expiry = select(EXPIRY_CHOICES); expiry.value = existing && existing.expires_at === null ? '' : '8';
-  const sync = () => { const chosen = usable.find((item) => item.id === account.value); const option = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; option.disabled = !(chosen?.provider === 'claude' && chosen.kind === 'oauth' && chosen.external_identity); if (option.disabled && target.value === 'claude_cli') target.value = 'managed'; };
+  const sync = () => { const chosen = usable.find((item) => item.id === account.value); const option = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; option.disabled = !(chosen?.provider === 'claude' && chosen.kind === 'oauth' && chosen.external_identity) || !!snapshot!.projects?.some((project) => project.pool === chosen?.pool); if (option.disabled && target.value === 'claude_cli') target.value = 'managed'; };
   account.addEventListener('change', sync); sync();
   const grid = el('div', 'form-grid'); grid.append(field(t('Project folder'), path, t('An absolute path to an existing folder.')), field(t('Account'), account), field(t('Applies to'), target), field(t('Keep the rule'), expiry, t('Pause or remove it any time on this screen.')));
   context.body.append(grid); context.actions.append(submit(existing ? t('Save rule') : t('Add rule')));
@@ -1058,6 +1058,21 @@ function removeDialog(account: Account) {
   context.body.append(el('p', 'form-note', active ? t('This account is selected. Select another account in the same pool, or disable this one in Edit, before removing it.') : t('Existing external clients are not signed out. Managed account metadata and its vault entry will be removed.')));
   const confirm = submit(t('Remove account')); confirm.className = 'button danger'; confirm.disabled = active; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); if (!active) void dialogSave(context, () => adapter.remove(account.id), t('Account removed.')); });
+  context.actions.querySelector('button')?.focus();
+}
+
+/** SB-69: deleting a project asks first, like removing an account (SCN-042). */
+function deleteProjectDialog(project: Project) {
+  const context = openDialog(t('Delete project?'), t('Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.', { name: project.name, pool: project.pool }));
+  const confirm = submit(t('Delete project')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Project “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.', { name: project.name, pool: project.pool })); });
+  context.actions.querySelector('button')?.focus();
+}
+/** SB-69: removing a project rule asks first; pausing it is the reversible choice (SCN-042). */
+function removeRuleDialog(rule: ProjectRule) {
+  const context = openDialog(t('Remove rule?'), t('Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.', { provider: providerName(rule.provider), path: rule.path }));
+  const confirm = submit(t('Remove rule')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProjectRule(rule.path, rule.provider), t('Rule removed.')); });
   context.actions.querySelector('button')?.focus();
 }
 

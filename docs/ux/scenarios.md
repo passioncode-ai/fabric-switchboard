@@ -46,6 +46,12 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-036 | Run another coding agent on Switchboard | draft |
 | SCN-037 | Get new versions without doing anything | draft |
 | SCN-038 | Continue a workflow on another account when a limit runs out | draft |
+| SCN-039 | Choose which agents take over a task, and in what order | draft |
+| SCN-040 | Work moves on by itself when an agent's accounts run out | draft |
+| SCN-041 | Use Switchboard in Russian | draft |
+| SCN-042 | Delete a project or remove a rule only after confirming | draft |
+| SCN-043 | Recover when a read or a refresh after an action fails | draft |
+| SCN-044 | Turn usage analytics off or on | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -835,3 +841,66 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `scripts/test-ui-logic.mjs` (detectLocale, parseLocaleChoice, resolveLocale, Russian plurals 1/2/5/11/21/22/25/111, a missing entry shows English, L10N-04, journal labels cover `event_valid`), `scripts/check-locale.mjs` in the gate (every interface string has a Russian entry with the same placeholders and three plural forms), `language::tests` (Russian language tags), `residency::tests` (tray labels in both languages); the browser demo reviewed in Russian on Accounts, Projects, Agents, Activity and About (2026-10-07).
 **Product:** unobserved
 **Traces:** SB-76, SB-66, RM-25 (fabric-workspace roadmap), L10N-01…06
+
+## SCN-042 — Delete a project or remove a rule only after confirming
+
+**Persona:** P-01
+**Goal:** Never lose a project or a project rule to a stray click.
+**Preconditions:** at least one project or rule (Projects screen).
+**Entry point:** Projects → a project's *Delete*, or a rule's *Remove*.
+**Steps:**
+1. Press *Delete* on a project → a dialog “Delete project?” says what happens: “Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.”, with *Cancel* (focused) and *Delete project*.
+2. Press *Delete project* → the project goes; notice “Project “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.”
+3. Press *Remove* on a rule → “Remove rule?”: “Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.”, with *Cancel* (focused) and *Remove rule* → “Rule removed.”
+**Alt paths:** *Cancel* or Escape closes the dialog and changes nothing; a refusal from the backend stays in the dialog with its text, the dialog open.
+**Expected result:** a project or rule disappears only after the second, explicit press; *Pause* stays the one-step reversible choice for a rule.
+**UI elements:** dialogs “Delete project?” / “Remove rule?”, buttons *Delete project*, *Remove rule* (danger), *Cancel*.
+**States covered:** asking, cancelled, deleted / removed, refused (error in the dialog).
+**Errors & recovery:** the dialog keeps the error and the person can retry or cancel.
+**Status:** draft
+**Meaning:** UX audit 2026-10-06 (SB-69): both acted on one click while removing an account asked first.
+**Coverage:** demo walk-through 2026-10-07 (Russian: project created, *Delete* asked, deleted; rule *Remove* asked); `deleteProjectDialog`, `removeRuleDialog` in src/main.ts.
+**Product:** unobserved
+**Traces:** SB-69, SCN-034
+
+## SCN-043 — Recover when a read or a refresh after an action fails
+
+**Persona:** P-01
+**Goal:** Know what failed and how to retry, without mistaking it for lost accounts.
+**Preconditions:** the native app's reads fail or time out (the owner restarting, a store error).
+**Entry point:** any screen.
+**Steps:**
+1. A screen's read fails → an error state titled for that screen — “Unable to load accounts”, “Unable to load projects” or “Unable to load activity” — with the reason and *Retry*.
+2. An action succeeds but the list cannot be re-read → the action's notice stays, and “The action completed, but the list could not be refreshed. Retry loading accounts.” (or “…accounts could not be refreshed. Retry loading the account list.”) explains that nothing was undone.
+3. A sign-in's *Finish* fails → the sign-in banner keeps the error and waits for *Retry* instead of repeating on every tick; when the owner forgot the sign-in, the banner offers *Try again*, which starts over only after the old sign-in was cancelled (SB-67).
+4. The interface is opened in an ordinary browser (not the app, not the demo) → “Open the native app”: this window has no access to accounts.
+**Alt paths:** a native app that does not answer within the read deadline reads “The native app did not respond. Close and reopen Switchboard, then retry.”
+**Expected result:** every failure names its screen and its next step; no failure shows as an empty account list.
+**UI elements:** error states with *Retry*; the partial-success notice; the sign-in banner's *Retry* / *Try again*; the plain-browser page.
+**States covered:** read failed (accounts, projects, activity), read timed out, action done but refresh failed, finish failed, sign-in forgotten, plain browser.
+**Errors & recovery:** *Retry* re-reads; nothing is repeated automatically under the owner's lock.
+**Status:** draft
+**Meaning:** UX audit 2026-10-06 (SB-69): an activity read failure was titled “Unable to load accounts”; these states had no scenario.
+**Coverage:** `scripts/test-ui-logic.mjs` (loginOutcome, read deadline), src/main.ts error-state titles per page; the Try-again path in SB-67.
+**Product:** unobserved
+**Traces:** SB-69, SB-67, SCN-024
+
+## SCN-044 — Turn usage analytics off or on
+
+**Persona:** P-01
+**Goal:** Decide whether Switchboard sends anonymous counts, knowing exactly what they are.
+**Preconditions:** the installed app (only release builds carry the analytics key).
+**Entry point:** About → *Usage analytics*.
+**Steps:**
+1. Read what is sent: counts of installs, days of use and saved accounts by provider and type — never names, e-mail addresses, sign-ins or pool names (docs/ANALYTICS.md).
+2. Uncheck *Share anonymous usage counts* → “Anonymous usage analytics are off for every PassionCode.ai tool on this computer.”; check it → “Anonymous usage analytics are on.”
+**Alt paths:** a development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
+**Expected result:** one switch, shared by every PassionCode.ai tool on the machine, and the person sees its state.
+**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to every PassionCode.ai tool on this computer.”
+**States covered:** on, off, unavailable (build), reading, read failed, save failed.
+**Errors & recovery:** a failed save keeps the old state and can be retried.
+**Status:** draft
+**Meaning:** a privacy control without a scenario (UX audit 2026-10-06, SB-69).
+**Coverage:** docs/ANALYTICS.md and its planted-identifier test; src/main.ts `analyticsPanel`.
+**Product:** unobserved
+**Traces:** SB-69

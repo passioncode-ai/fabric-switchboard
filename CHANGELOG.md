@@ -26,6 +26,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - Signing in again to an account saved in several pools renews every copy in one step: if a
   credential cannot be written, all copies keep the previous sign-in instead of some moving on
   (SB-78).
+- Deleting a project and removing a project rule now ask first, like removing an account; a
+  rule's *Pause* stays the one-step choice (SB-69).
+- The rule dialog no longer offers “Claude Code login” for an account reserved by a project,
+  which was refused after saving (SB-69).
+- A failed read of the Projects or Activity screen is titled for that screen, not “Unable to
+  load accounts” (SB-69).
 
 ## 0.6.10 — 2026-10-07
 

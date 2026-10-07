@@ -777,4 +777,12 @@ export const RU: Record<string, string> = {
   "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.": "Перед установкой этой версии человеку нужно выполнить шаг — что сделать, написано в примечаниях к выпуску. Switchboard остаётся на текущей версии.",
   "Backups belong to the default data folder; this data folder has none.": "Резервные копии относятся к папке данных по умолчанию; у этой папки данных их нет.",
   "Give a new label, an enabled state, or both.": "Укажите новое имя, состояние «включён» или и то и другое.",
+  "Unable to load activity": "Не удалось загрузить журнал",
+  "Unable to load projects": "Не удалось загрузить проекты",
+  "Delete project?": "Удалить проект?",
+  "Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.": "Удалить «{name}»? Его аккаунты останутся в пуле {pool}, но перестанут быть закреплёнными; сессии в его папках снова будут использовать обычный выбор.",
+  "Delete project": "Удалить проект",
+  "Remove rule?": "Удалить правило?",
+  "Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.": "Удалить правило {provider} для {path}? Сессии там снова будут использовать обычный выбор. Чтобы остановить его на время, лучше приостановите его.",
+  "Remove rule": "Удалить правило",
 };
