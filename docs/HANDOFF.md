@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# 0.6.10 waits to publish; SB-61, SB-68, SB-69, SB-78 closed on main (2026-10-07)
+
+- **0.6.10** (Russian interface SB-76, LC-16 updates SB-77, audit fixes SB-78; carries the never
+  published 0.6.9): run 37544406792 — preflight, Windows, macOS and updater jobs succeeded; the
+  `publish` job waits for the operator's approval. The dead 0.6.9 run 37518902023 was cancelled.
+- **On main since the tag** (ship in the next release, CHANGELOG Unreleased): SB-61 a `--data-dir`
+  store never sees or restores the real backups (#103); SB-68 help on every CLI command and
+  argument, `accounts update` with one flag (#104); SB-78 remainder — `~/.claude.json` up to
+  32 MiB and half-written files, 5 s drain before the Windows installer, honest password refusal,
+  SB-57 test on Windows (#105), sign-in renewal of every saved copy in one transaction (#106);
+  SB-69 confirmations, rule dialog, per-screen error titles, SCN-042…044 (#107).
+- Checks: `./scripts/check.sh` green on each merge; `cargo xwin check --tests` for Windows. The
+  unmasked SB-57 test runs on Windows first in tonight's nightly (23:00 Europe/Warsaw).
+
+**Exact next task:** when the operator approves `publish` of run 37544406792, verify the
+downloaded set (SHA256SUMS + GPG, `gh attestation verify`, spctl, stapler, CLI version,
+latest.json), record it in docs/evidence/release-0.5.md, move README / README.ru status to
+0.6.10, update fabric-workspace roadmap/products, tell fabric-dashboards-54 (FD-25). Then the
+board: SB-72 (paid-agent ceilings, unblocked by Observatory 0.18), SB-73 phase 2, SB-71 app
+screen, SB-66 strings.md resync.
+
+---
+
 # SB-77 built — updates behave as LC-16 says (2026-10-07)
 
 Branch `feat/lc16-parity`: a ready update starts at an idle moment (window hidden, no managed
