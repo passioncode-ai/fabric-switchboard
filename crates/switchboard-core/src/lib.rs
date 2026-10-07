@@ -1,4 +1,5 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
+pub mod agent_keys;
 pub mod backup;
 mod credential;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -229,6 +230,9 @@ pub struct Snapshot {
     /// Fallback chains per machine, project and workflow (SB-71). Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chains: Vec<Chain>,
+    /// Keys agents run on, by service (SB-79): metadata only, the value is in the vault.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_keys: Vec<agent_keys::AgentKey>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -354,6 +358,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "project" => matches!(detail, "created" | "updated" | "removed"),
         "fallback_chain" => matches!(detail, "set" | "cleared"),
         "fallback" => matches!(detail, "offered" | "failed"),
+        "agent_key" => matches!(detail, "saved" | "removed"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
@@ -432,6 +437,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     projects::validate_rules(s)?;
     projects::validate_projects(s)?;
     chains::validate_chains(s)?;
+    agent_keys::validate_agent_keys(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)

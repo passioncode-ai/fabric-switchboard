@@ -1041,3 +1041,92 @@ fn a_sign_in_renews_every_saved_row_of_its_login_or_none() {
         .is_err());
     assert_eq!(refresh(&home.id).as_deref(), Some("new"));
 }
+
+#[test]
+fn an_agent_key_lives_in_the_vault_and_its_metadata_names_only_the_service() {
+    // SB-79: the value never reaches the metadata file; a replacement keeps the vault item.
+    let (root, vault, store) = setup();
+    assert!(store.agent_key("openrouter").unwrap().is_none());
+    assert_eq!(
+        store
+            .set_agent_key("openrouter", "not-a-key", None)
+            .unwrap_err(),
+        switchboard_core::agent_keys::KEY_INVALID
+    );
+    assert_eq!(
+        store
+            .set_agent_key(
+                "openrouter",
+                "sk-or-v1-synthetic-one",
+                Some("no slash".into())
+            )
+            .unwrap_err(),
+        switchboard_core::agent_keys::MODEL_INVALID
+    );
+    let saved = store
+        .set_agent_key(
+            "openrouter",
+            " sk-or-v1-synthetic-one\n",
+            Some("moonshotai/kimi-k2".into()),
+        )
+        .unwrap();
+    assert_eq!(saved.model.as_deref(), Some("moonshotai/kimi-k2"));
+    assert_eq!(
+        store.agent_key_value("openrouter").unwrap(),
+        "sk-or-v1-synthetic-one"
+    );
+    let metadata = fs::read_to_string(root.path().join("accounts.json")).unwrap();
+    assert!(
+        !metadata.contains("sk-or-v1"),
+        "no value in the metadata file"
+    );
+    assert!(metadata.contains("openrouter"));
+    // Replaced: same vault item, model kept when none is given.
+    let again = store
+        .set_agent_key("openrouter", "sk-or-v1-synthetic-two", None)
+        .unwrap();
+    assert_eq!(again.id, saved.id);
+    assert_eq!(again.model.as_deref(), Some("moonshotai/kimi-k2"));
+    assert_eq!(
+        store.agent_key_value("openrouter").unwrap(),
+        "sk-or-v1-synthetic-two"
+    );
+    store
+        .set_agent_key_model("openrouter", "anthropic/claude-sonnet-4.5")
+        .unwrap();
+    assert_eq!(
+        store
+            .agent_key("openrouter")
+            .unwrap()
+            .unwrap()
+            .model
+            .as_deref(),
+        Some("anthropic/claude-sonnet-4.5")
+    );
+    // Survives a restart of the store.
+    drop(store);
+    let reopened = Store::open(root.path().into(), vault.clone()).unwrap();
+    assert_eq!(
+        reopened.agent_key_value("openrouter").unwrap(),
+        "sk-or-v1-synthetic-two"
+    );
+    assert!(reopened.remove_agent_key("openrouter").unwrap());
+    assert!(vault.get(&saved.id).is_err(), "the vault item goes too");
+    assert!(!reopened.remove_agent_key("openrouter").unwrap());
+    assert_eq!(
+        reopened.agent_key_value("openrouter").unwrap_err(),
+        switchboard_core::agent_keys::NO_AGENT_KEY
+    );
+}
+
+#[test]
+fn a_failed_agent_key_save_leaves_nothing_behind() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    assert!(store
+        .set_agent_key("openrouter", "sk-or-v1-synthetic", None)
+        .is_err());
+    assert!(store.agent_key("openrouter").unwrap().is_none());
+}
