@@ -96,6 +96,7 @@ export function eventAction(action: string): string {
     case 'project_rule': return t('Project rule');
     case 'project': return t('Project');
     case 'fallback_chain': return t('Fallback chain');
+    case 'agent_key': return t('Agent key');
     case 'fallback': return t('Hand-over');
     case 'activation': return t('Switch');
     case 'rotation': return t('Automatic switching');

@@ -52,6 +52,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-042 | Delete a project or remove a rule only after confirming | draft |
 | SCN-043 | Recover when a read or a refresh after an action fails | draft |
 | SCN-044 | Turn usage analytics off or on | draft |
+| SCN-045 | Save one OpenRouter key for agents | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -904,3 +905,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** docs/ANALYTICS.md and its planted-identifier test; src/main.ts `analyticsPanel`.
 **Product:** unobserved
 **Traces:** SB-69
+
+## SCN-045 — Save one OpenRouter key for agents
+
+**Persona:** P-01
+**Goal:** Keep one OpenRouter key that agents launched by Switchboard run on, and see what it may still spend — without the key ever appearing in a file, a command line or a log.
+**Preconditions:** an OpenRouter key (starts `sk-or-`); the CLI or an MCP client; the app's Agents panel arrives with SB-79b.
+**Entry point:** `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
+**Steps:**
+1. Save the key with a default model: `switchboard agents openrouter set --key-stdin --model moonshotai/kimi-k2 < key.txt` (the key is piped on stdin, never an argument; interactive input is refused) → “OpenRouter key saved · model moonshotai/kimi-k2”, and the remaining credit OpenRouter reports.
+2. Ask the status later: `switchboard agents openrouter status` (or the MCP tool) → saved date, default model, `limit_remaining` and `usage_daily` from OpenRouter itself; never the key.
+3. Change the model agents start on: `switchboard agents openrouter model anthropic/claude-sonnet-4.5`.
+4. Remove the key: `switchboard agents openrouter remove` → the metadata goes first, then the vault item.
+**Alt paths:** a malformed key (“That is not an OpenRouter key: it starts with sk-or-.”) or model id is refused before anything is written; a key OpenRouter refuses is named as such and stays saved, its balance marked with the refusal; an unreachable OpenRouter leaves the key saved with “its balance shows when OpenRouter answers”; a failed save leaves nothing behind — no metadata row, no vault item; after reinstalling Switchboard an encrypted backup puts the key back with its model (SCN-030).
+**Expected result:** the key's value exists only in the OS vault; metadata names the service, the saved time and the model; the journal records `agent_key saved|removed`; the value leaves the vault only into a launched agent's environment (`switchboard agents key --service openrouter`, CLI only).
+**UI elements:** CLI/MCP only in this slice; the journal names the action “Agent key”.
+**States covered:** no key saved, saved with credit, saved with the credit refused or unreachable, invalid key, invalid model, failed save, removed.
+**Errors & recovery:** every refusal names the fix (the key shape, the model id shape, openrouter.ai/settings/keys); a refused or unreachable balance does not delete the key.
+**Status:** draft
+**Meaning:** one saved key instead of a key pasted per agent (operator request 2026-10-07, XA-02).
+**Coverage:** `an_agent_key_lives_in_the_vault_and_its_metadata_names_only_the_service`, `a_failed_agent_key_save_leaves_nothing_behind` (switchboard-core storage tests), `a_reinstall_gets_projects_rules_selections_and_settings_back` (backup carries the key and model), `the_status_reports_what_the_key_may_spend_and_never_the_key` (runtime, against a loopback OpenRouter stand-in), the MCP handshake test listing `switchboard_openrouter_status` and `switchboard_openrouter_model`. A status against the real OpenRouter with a real key is operator acceptance.
+**Product:** unobserved
+**Traces:** SB-79, XA-02

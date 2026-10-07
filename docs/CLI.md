@@ -186,3 +186,22 @@ switchboard agents launch goose --pool work --dir /abs/folder
 The agent id comes from `agents list`. `agents key` prints a local proxy key, not a provider
 credential: the proxy accepts it only for the pool's API-key account, never for a Claude
 subscription. Keep it out of shared configuration files.
+
+### The OpenRouter key for agents (SB-79)
+
+One OpenRouter key, saved once in the OS vault, for agents that can run on OpenRouter (SB-79b
+launches them on it). The value never touches a file, an argument or a log.
+
+```sh
+switchboard agents openrouter set --key-stdin [--model moonshotai/kimi-k2]   # key piped on stdin
+switchboard agents openrouter status       # saved? default model, what the key may still spend
+switchboard agents openrouter model anthropic/claude-sonnet-4.5
+switchboard agents openrouter remove
+switchboard agents key --service openrouter   # the value, for a session script's export only
+```
+
+`set` refuses interactive input: pipe the key (`< key.txt`, `pbpaste |`). `status` asks
+OpenRouter itself (`GET /api/v1/key`) and shows `limit_remaining` and `usage_daily`; a refused
+key stays saved and is named as refused. An agent over MCP gets the same status and sets the
+model (`switchboard_openrouter_status`, `switchboard_openrouter_model`) — never the key.
+Encrypted backups carry the key, so it returns after a reinstall.

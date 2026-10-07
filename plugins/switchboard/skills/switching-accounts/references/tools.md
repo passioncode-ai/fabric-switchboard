@@ -148,6 +148,22 @@ and `headless`), else *“… cannot take over a workflow …”*. Claude Code a
 provider's accounts; any other agent on an API-key account or a paid key, never on a
 subscription sign-in. Returns `{chain}` (null when cleared).
 
+### `switchboard_openrouter_status` — (read)
+
+`{service, saved, saved_at, model, credit, credit_error}` for the OpenRouter key agents run on.
+`credit` is what the key may still spend, asked of OpenRouter at this call: `label`, `limit`,
+`limit_remaining`, `limit_reset`, `usage`, `usage_daily`, `is_free_tier`. A refused key reports
+`credit_error` and stays saved; OpenRouter not answering does the same with its own text. The
+key's value is never returned — an agent that runs on it gets it from its launch environment,
+not from this server.
+
+### `switchboard_openrouter_model` — `model` (write)
+
+Only when the operator asks. `model` is an OpenRouter id (`vendor/model`, for example
+`moonshotai/kimi-k2` or `anthropic/claude-sonnet-4.5`); agents launched on the operator's key
+start on it. Refuses a malformed id. Saving or removing the key itself is the operator's own
+step (the app, or `switchboard agents openrouter set|remove`), never this server.
+
 ## Refusals
 
 Fixed texts the server returns with `isError: true`; relay them and offer the remedy:

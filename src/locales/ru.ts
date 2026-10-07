@@ -724,6 +724,7 @@ export const RU: Record<string, string> = {
   "Project rule": "Правило проекта",
   "Project": "Проект",
   "Fallback chain": "Цепочка агентов",
+  "Agent key": "Ключ агентов",
   "Hand-over": "Передача",
   "Sign-in": "Вход",
   "done": "выполнено",
@@ -785,4 +786,9 @@ export const RU: Record<string, string> = {
   "Remove rule?": "Удалить правило?",
   "Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.": "Удалить правило {provider} для {path}? Сессии там снова будут использовать обычный выбор. Чтобы остановить его на время, лучше приостановите его.",
   "Remove rule": "Удалить правило",
+  "That is not an OpenRouter key: it starts with sk-or-.": "Это не ключ OpenRouter: он начинается со sk-or-.",
+  "A model is an OpenRouter id such as moonshotai/kimi-k2 (letters, digits and / . _ : -).": "Модель — это идентификатор OpenRouter, например moonshotai/kimi-k2 (буквы, цифры и / . _ : -).",
+  "No OpenRouter key is saved. Add one under Agents.": "Ключ OpenRouter не сохранён. Добавьте его в разделе «Агенты».",
+  "OpenRouter refused this key. Check it on openrouter.ai/settings/keys, then save it again.": "OpenRouter отклонил этот ключ. Проверьте его на openrouter.ai/settings/keys и сохраните снова.",
+  "OpenRouter did not answer. The key is saved; its balance shows when OpenRouter answers.": "OpenRouter не отвечает. Ключ сохранён; баланс появится, когда OpenRouter ответит.",
 };
