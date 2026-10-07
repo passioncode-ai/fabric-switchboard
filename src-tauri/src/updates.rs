@@ -288,6 +288,19 @@ impl Updates {
         }
     }
 
+    /// Whether this exit will start the Windows installer (`finish`): the drain before it is
+    /// shortened so the installer keeps time before the hard exit (LC-01, SB-78).
+    pub fn installs_at_exit(&self) -> bool {
+        let inner = self.lock();
+        installs_at_exit(
+            cfg!(windows),
+            inner.ready.as_ref().is_some_and(Ready::waits_for_quit),
+            inner.signal,
+            inner.restart.is_some(),
+            self.is_enabled(),
+        )
+    }
+
     /// A downloaded installer waits for the quit (Windows).
     pub fn has_pending_install(&self) -> bool {
         self.lock()
@@ -559,6 +572,33 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
     }))
 }
 
+/// Whether an exit starts the Windows installer — the rule `finish` follows: an installer is
+/// waiting, the quit is not a signal, and the person asked (*Restart to update*) or updates are on.
+pub fn installs_at_exit(
+    windows: bool,
+    waiting: bool,
+    signal: bool,
+    restart: bool,
+    enabled: bool,
+) -> bool {
+    windows && waiting && (restart || (!signal && enabled))
+}
+
+/// The drain before an exit that starts the installer: 5 s of the 10 s hard exit stay for it.
+pub const DRAIN_BEFORE_INSTALL: Duration = Duration::from_secs(5);
+
+/// What a failed install at *Restart to update* means: the person declined the administrator
+/// password only when the bundle is known and could not be replaced without one; anything else
+/// is an install failure.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn install_refusal(bundle_known: bool, replaceable: bool) -> &'static str {
+    if bundle_known && !replaceable {
+        PERMISSION_REFUSED
+    } else {
+        INSTALL_FAILED
+    }
+}
+
 /// macOS: the person owns the bundle and may write it and its folder, so the swap needs no
 /// administrator password (the updater would otherwise ask for one, unprompted, in the
 /// background). The probe file, removed on drop, carries this process's own user id.
@@ -605,8 +645,27 @@ pub async fn restart(app: AppHandle) -> Result<Value, String> {
             .await
             .map_err(|_| INSTALL_FAILED.to_string())?;
         if installed.is_err() {
-            event("update_restart", &[("outcome", Field::Code("refused"))]);
-            return Err(PERMISSION_REFUSED.into());
+            // Only a bundle that needed the password can have been refused it; any other
+            // failure is an install failure, not the person's answer (SB-78).
+            let bundle = std::env::current_exe()
+                .ok()
+                .and_then(|exe| tauri_plugin_updater::extract_path_from_executable(&exe).ok());
+            let message = install_refusal(
+                bundle.is_some(),
+                bundle.as_deref().is_some_and(replaceable_without_password),
+            );
+            event(
+                "update_restart",
+                &[(
+                    "outcome",
+                    Field::Code(if message == PERMISSION_REFUSED {
+                        "refused"
+                    } else {
+                        "install_failed"
+                    }),
+                )],
+            );
+            return Err(message.into());
         }
         if let Some(ready) = state.lock().ready.as_mut() {
             ready.bytes = None;
@@ -733,6 +792,40 @@ mod tests {
                 "{enabled} {alone} {hidden} {busy}"
             );
         }
+    }
+
+    #[test]
+    fn the_installer_starts_only_on_an_ordinary_quit_with_updates_on_or_a_restart() {
+        // (windows, waiting, signal, restart, enabled)
+        assert!(installs_at_exit(true, true, false, false, true));
+        assert!(
+            installs_at_exit(true, true, false, true, false),
+            "the person asked"
+        );
+        assert!(
+            !installs_at_exit(true, true, true, false, true),
+            "never after a signal"
+        );
+        assert!(
+            !installs_at_exit(true, true, false, false, false),
+            "switched off"
+        );
+        assert!(
+            !installs_at_exit(true, false, false, true, true),
+            "nothing waiting"
+        );
+        assert!(
+            !installs_at_exit(false, true, false, true, true),
+            "macOS installs elsewhere"
+        );
+        assert!(DRAIN_BEFORE_INSTALL < switchboard_runtime::HARD_EXIT_AFTER);
+    }
+
+    #[test]
+    fn only_a_bundle_that_needed_the_password_reports_a_refusal() {
+        assert_eq!(install_refusal(true, false), PERMISSION_REFUSED);
+        assert_eq!(install_refusal(true, true), INSTALL_FAILED);
+        assert_eq!(install_refusal(false, false), INSTALL_FAILED);
     }
 
     #[test]
