@@ -936,3 +936,108 @@ fn an_update_changes_only_what_it_names() {
     assert!(store.update_fields(&a.id, Some(" ".into()), None).is_err());
     assert_eq!(label(&store), "Renamed");
 }
+
+/// Fails exactly the `fail_at`-th credential write (1-based); every other call works.
+struct NthPutFails {
+    memory: MemoryVault,
+    puts: std::sync::atomic::AtomicUsize,
+    fail_at: usize,
+}
+impl Vault for NthPutFails {
+    fn put(&self, id: &str, c: &Credential) -> Result<(), String> {
+        if self.puts.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_at {
+            return Err("synthetic-sensitive-error".into());
+        }
+        self.memory.put(id, c)
+    }
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.memory.get(id)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.memory.delete(id)
+    }
+}
+
+#[test]
+fn a_sign_in_renews_every_saved_row_of_its_login_or_none() {
+    // SB-62/SB-78: one login saved in two pools; signing in again renews both in one
+    // transaction, and a failed write leaves both on the old credential.
+    use switchboard_core::ExternalIdentity;
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let identity = ExternalIdentity {
+        account_id: Some("synthetic-a".into()),
+        organization_id: None,
+        email: Some("synthetic-a@example.invalid".into()),
+    };
+    let root = TempDir::new().unwrap();
+    // Writes 1 and 2 save the two rows; write 4 is the second row of the renewal.
+    let vault = Arc::new(NthPutFails {
+        memory: MemoryVault::default(),
+        puts: Default::default(),
+        fail_at: 4,
+    });
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    let save = |pool: &str| {
+        store
+            .upsert(
+                "A".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                pool.into(),
+                oauth("old"),
+                Some(identity.clone()),
+            )
+            .unwrap()
+    };
+    let (home, work) = (save("default"), save("work"));
+    let rows = vec![
+        (home.id.clone(), None),
+        (work.id.clone(), Some("Work".into())),
+    ];
+    let refresh = |id: &str| store.stored_credential(id).unwrap().refresh_token;
+    assert!(store
+        .renew_rows(Provider::Claude, &rows, &oauth("new"), &identity)
+        .is_err());
+    assert_eq!(refresh(&home.id).as_deref(), Some("old"), "rolled back");
+    assert_eq!(refresh(&work.id).as_deref(), Some("old"));
+    assert!(store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .iter()
+        .all(|a| a.label == "A"));
+    // The next attempt goes through: both rows, one renamed.
+    let renewed = store
+        .renew_rows(Provider::Claude, &rows, &oauth("new"), &identity)
+        .unwrap();
+    assert_eq!(renewed.len(), 2);
+    assert_eq!(refresh(&home.id).as_deref(), Some("new"));
+    assert_eq!(refresh(&work.id).as_deref(), Some("new"));
+    let labels: Vec<String> = store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .iter()
+        .map(|a| a.label.clone())
+        .collect();
+    assert_eq!(labels, vec!["A".to_string(), "Work".to_string()]);
+    // Another login's credential is refused for these rows.
+    let other = ExternalIdentity {
+        account_id: Some("synthetic-b".into()),
+        organization_id: None,
+        email: None,
+    };
+    assert!(store
+        .renew_rows(Provider::Claude, &rows, &oauth("b"), &other)
+        .is_err());
+    assert_eq!(refresh(&home.id).as_deref(), Some("new"));
+}

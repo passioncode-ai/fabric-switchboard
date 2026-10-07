@@ -1781,48 +1781,55 @@ fn file_sign_in(
         .into_iter()
         .filter(|a| a.kind == AuthKind::OAuth)
         .collect();
-    let again = !copies.is_empty();
-    let primary = if !label.trim().is_empty() || copies.is_empty() {
-        let label = if label.trim().is_empty() {
+    let label = label.trim();
+    if copies.is_empty() {
+        let label = if label.is_empty() {
             captured.label.clone()
         } else {
             label.to_owned()
         };
-        store.upsert(
+        let account = store.upsert(
             label,
             provider,
             AuthKind::OAuth,
             pool.to_owned(),
-            captured.credential.clone(),
-            Some(captured.identity.clone()),
-        )?
-    } else {
-        // The copy in the requested pool when there is one, else the first saved.
-        let target = copies
-            .iter()
-            .find(|a| a.pool == pool)
-            .unwrap_or(&copies[0])
-            .clone();
-        store.upsert(
-            target.label,
-            provider,
-            target.kind,
-            target.pool,
-            captured.credential.clone(),
-            Some(captured.identity.clone()),
-        )?
-    };
-    for copy in copies.into_iter().filter(|a| a.id != primary.id) {
-        store.upsert(
-            copy.label,
-            provider,
-            copy.kind,
-            copy.pool,
-            captured.credential.clone(),
-            Some(captured.identity.clone()),
+            captured.credential,
+            Some(captured.identity),
         )?;
+        return Ok((account, false));
     }
-    Ok((primary, again))
+    // Signed in again: every saved row of this login takes the new credential in one
+    // transaction (SB-62, SB-78). The row in the requested pool is the one reported (and
+    // renamed, when a label was given); without one, the first saved.
+    let in_pool = copies.iter().find(|a| a.pool == pool).map(|a| a.id.clone());
+    let rows: Vec<(String, Option<String>)> = copies
+        .iter()
+        .map(|a| {
+            let rename =
+                (!label.is_empty() && Some(&a.id) == in_pool.as_ref()).then(|| label.to_owned());
+            (a.id.clone(), rename)
+        })
+        .collect();
+    let renewed = store.renew_rows(provider, &rows, &captured.credential, &captured.identity)?;
+    if in_pool.is_none() && !label.is_empty() {
+        // A new pool named with a label: the copies are renewed first, so a failure here
+        // leaves every saved row on the new credential and only this one unsaved.
+        let account = store.upsert(
+            label.to_owned(),
+            provider,
+            AuthKind::OAuth,
+            pool.to_owned(),
+            captured.credential,
+            Some(captured.identity),
+        )?;
+        return Ok((account, true));
+    }
+    let primary = in_pool.unwrap_or_else(|| copies[0].id.clone());
+    let account = renewed
+        .into_iter()
+        .find(|a| a.id == primary)
+        .ok_or("Account not found")?;
+    Ok((account, true))
 }
 pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
 fn replace_native(

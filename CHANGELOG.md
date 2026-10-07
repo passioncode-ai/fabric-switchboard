@@ -23,6 +23,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   installer always has time to start (SB-78).
 - macOS: a failed install at *Restart to update* says the administrator password was refused
   only when one was asked for (SB-78).
+- Signing in again to an account saved in several pools renews every copy in one step: if a
+  credential cannot be written, all copies keep the previous sign-in instead of some moving on
+  (SB-78).
 
 ## 0.6.10 — 2026-10-07
 

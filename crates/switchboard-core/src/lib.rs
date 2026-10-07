@@ -774,6 +774,98 @@ impl Store {
         self.changed();
         Ok(account)
     }
+    /// One sign-in renews every saved row of its login at once (SB-62, SB-78): each row keeps its
+    /// pool and, unless `labels` names a new one, its label; all take the new credential and
+    /// identity, and the metadata is published once. If any credential or the metadata cannot be
+    /// written, every credential already replaced is put back — no row is left on the old
+    /// credential while another holds the new one.
+    pub fn renew_rows(
+        &self,
+        provider: Provider,
+        rows: &[(String, Option<String>)],
+        credential: &Credential,
+        external_identity: &ExternalIdentity,
+    ) -> Result<Vec<Account>, String> {
+        if rows.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !external_identity.valid()
+            || rows
+                .iter()
+                .any(|(_, label)| label.as_deref().is_some_and(|l| !label_valid(l)))
+        {
+            return Err("Label, pool or identity is invalid".into());
+        }
+        credential.validate(provider, AuthKind::OAuth)?;
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let mut renewed = Vec::new();
+        let mut olds = Vec::new();
+        for (id, label) in rows {
+            let account = candidate
+                .accounts
+                .iter_mut()
+                .find(|a| &a.id == id && a.provider == provider && a.kind == AuthKind::OAuth)
+                .ok_or("Account not found")?;
+            if !account
+                .external_identity
+                .as_ref()
+                .is_some_and(|i| i.matches(external_identity))
+            {
+                return Err("Credential identity does not match account identity".into());
+            }
+            let old = self
+                .vault
+                .get(id)
+                .map_err(vault::surface("Credential storage unavailable"))?;
+            if let Some(label) = label {
+                account.label = label.trim().into();
+            }
+            account.identity = credential.account_id.clone();
+            account.external_identity = Some(external_identity.clone());
+            if old.access_token != credential.access_token
+                || old.expires_at != credential.expires_at
+            {
+                account.usage = None;
+                account.usage_health = None;
+            }
+            renewed.push(account.clone());
+            olds.push((id.clone(), old));
+        }
+        for account in &renewed {
+            append_event(
+                &mut candidate,
+                "account_updated",
+                Some(&account.id),
+                "success",
+            );
+        }
+        validate_snapshot(&candidate)?;
+        let mut written: Vec<&(String, Credential)> = Vec::new();
+        let mut failure = None;
+        for entry in &olds {
+            match self.vault.put(&entry.0, credential) {
+                Ok(()) => written.push(entry),
+                Err(error) => {
+                    failure = Some(vault::surface("Credential storage unavailable")(error));
+                    break;
+                }
+            }
+        }
+        if failure.is_none() && self.publish(&mut state, candidate).is_err() {
+            failure = Some("Account metadata could not be saved".into());
+        }
+        if let Some(error) = failure {
+            for (id, old) in written {
+                self.vault
+                    .put(id, old)
+                    .map_err(|_| "Storage failure; credential cleanup requires recovery")?;
+            }
+            return Err(error);
+        }
+        self.changed();
+        Ok(renewed)
+    }
     pub fn match_external(
         &self,
         provider: Provider,
