@@ -57,6 +57,9 @@ pub struct Restored {
     pub rules: usize,
     #[serde(default)]
     pub routes: usize,
+    /// Agent keys put back where this install had none (SB-79).
+    #[serde(default)]
+    pub agent_keys: usize,
     #[serde(default)]
     pub settings: usize,
 }
@@ -97,6 +100,17 @@ struct Payload {
     routes: BTreeMap<String, String>,
     #[serde(default)]
     settings: BTreeMap<String, String>,
+    /// Keys agents run on (SB-79), with their values: sealed like every credential here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    agent_keys: Vec<AgentKeyCopy>,
+}
+/// One agent key inside the sealed payload. Never Debug: it carries the value.
+#[derive(Serialize, Deserialize)]
+struct AgentKeyCopy {
+    service: String,
+    value: String,
+    #[serde(default)]
+    model: Option<String>,
 }
 
 fn key(keys: &dyn BackupKey, create: bool) -> Result<(LessSafeKey, String), String> {
@@ -194,6 +208,18 @@ pub fn write(
             (!text.is_empty()).then(|| ((*name).to_owned(), text))
         })
         .collect();
+    let agent_keys = snapshot
+        .agent_keys
+        .iter()
+        .filter_map(|k| {
+            let value = store.agent_key_value(&k.service).ok()?;
+            Some(AgentKeyCopy {
+                service: k.service.clone(),
+                value,
+                model: k.model.clone(),
+            })
+        })
+        .collect();
     let payload = serde_json::to_vec(&Payload {
         accounts,
         policies: snapshot.policies,
@@ -202,6 +228,7 @@ pub fn write(
         projects: snapshot.projects,
         routes: snapshot.routes,
         settings,
+        agent_keys,
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -352,6 +379,7 @@ pub fn restore(
         rules: 0,
         routes: 0,
         settings: 0,
+        agent_keys: 0,
     };
     let existing = store.snapshot()?;
     // Backup account id → the id it has here, for rules and selections.
@@ -519,6 +547,16 @@ pub fn restore(
         }
         if store.select(provider, pool, id).is_ok() {
             result.routes += 1;
+        }
+    }
+    for copy in payload.agent_keys {
+        // Never over a key saved on this install.
+        if store.agent_key(&copy.service)?.is_none()
+            && store
+                .set_agent_key(&copy.service, &copy.value, copy.model)
+                .is_ok()
+        {
+            result.agent_keys += 1;
         }
     }
     for (name, value) in payload.settings {
@@ -696,6 +734,13 @@ mod tests {
         original.select(Provider::Claude, "default", &b.id).unwrap();
         original.select(Provider::Claude, "alpha", &a.id).unwrap();
         std::fs::write(original.root().join("login-item"), "off\n").unwrap();
+        original
+            .set_agent_key(
+                "openrouter",
+                "sk-or-v1-synthetic-agent",
+                Some("moonshotai/kimi-k2".into()),
+            )
+            .unwrap();
         let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
         // Reinstall: `switchboard uninstall` removed the data folder; the backups stayed.
         let fresh = store(&temp.path().join("two"));
@@ -709,6 +754,20 @@ mod tests {
                 restored.settings
             ),
             (2, 1, 1, 2, 1)
+        );
+        assert_eq!(restored.agent_keys, 1);
+        assert_eq!(
+            fresh.agent_key_value("openrouter").unwrap(),
+            "sk-or-v1-synthetic-agent"
+        );
+        assert_eq!(
+            fresh
+                .agent_key("openrouter")
+                .unwrap()
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("moonshotai/kimi-k2")
         );
         let snap = fresh.snapshot().unwrap();
         let by_label = |l: &str| snap.accounts.iter().find(|x| x.label == l).unwrap().clone();
@@ -744,6 +803,7 @@ mod tests {
             ),
             (0, 2, 0, 0, 0, 0)
         );
+        assert_eq!(again.agent_keys, 0, "never over a key saved here");
         assert_eq!(
             std::fs::read_to_string(fresh.root().join("login-item"))
                 .unwrap()

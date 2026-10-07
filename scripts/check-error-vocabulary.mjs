@@ -42,6 +42,10 @@ const ALLOWLIST = {
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
   "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',
+  // core agent_keys.rs set_agent_key(): every caller that can reach the UI names "openrouter"
+  // literally (the MCP tools and the Agents panel); only the CLI accepts another --service, and
+  // its errors print to the terminal.
+  'Unknown key service.': 'only the CLI can name a service other than openrouter',
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',

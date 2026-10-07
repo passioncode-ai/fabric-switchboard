@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-79 slice 1 built — the OpenRouter key for agents (2026-10-07)
+
+Branch `feat/sb-79-agent-key`, on top of the XA-02 plan (#111). The key is saved once
+(`switchboard agents openrouter set --key-stdin`, value in the OS vault, metadata by service with
+the default model), its status asks OpenRouter `GET /key` (pinned base; a refused key stays
+saved and is named as refused), the model changes with `… model`, `agents key --service
+openrouter` prints the value for a session script only. MCP: `switchboard_openrouter_status`
+(read) and `switchboard_openrouter_model` (write) — never the key. Encrypted backups carry it
+(counted in `Restored.agent_keys`). A failed save leaves nothing behind; journal `agent_key
+saved|removed` with labels in both languages. Docs: CONTRACTS → Agent keys, CLI → The OpenRouter
+key for agents, SCN-045, CHANGELOG Unreleased, board SB-79. Gate green.
+
+**Exact next task:** SB-79b — catalog `openrouter` recipes (XA-02 A-3), `switchboard agents
+launch --openrouter [--model]`, the Agents → OpenRouter key panel (*Launch on OpenRouter* per
+agent); then SB-80 (Hermes model/provider) and SB-81 (Kimi Code accounts). A live
+`openrouter status` against the real OpenRouter with a real key is operator acceptance.
+
+---
+
 # 0.6.10 published and verified (2026-10-07)
 
 Published 2026-10-07T01:27:04Z after the operator approved run 37544406792; the downloaded set is

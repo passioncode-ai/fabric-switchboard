@@ -49,6 +49,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |
 | `switchboard_chain_get` | no | the operator's fallback chains and the one that applies to a workflow or project |
 | `switchboard_chain_set` | yes | set a fallback chain, only when the operator asks |
+| `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend — never the key |
+| `switchboard_openrouter_model` | yes | change the model agents start on, only when the operator asks |
 
 Arguments, result fields and fixed error texts: read `references/tools.md` before the
 first write call, or when a result field is unclear.

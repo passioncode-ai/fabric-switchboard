@@ -416,7 +416,19 @@ enum AgentsCommand {
         pool: String,
     },
     /// Print the agents' proxy key, for an agent's key command. Not a provider credential.
-    Key,
+    /// With `--service openrouter`, the saved OpenRouter key instead — for a session script's
+    /// `export`, never to paste anywhere.
+    Key {
+        /// `openrouter`: the key agents run on (`switchboard agents openrouter set`).
+        #[arg(long, value_enum)]
+        service: Option<KeyService>,
+    },
+    /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
+    /// change the default model, or remove it.
+    Openrouter {
+        #[command(subcommand)]
+        command: OpenrouterCommand,
+    },
     /// Start an agent configured by environment alone in a folder, on the pool's API-key account.
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
@@ -428,6 +440,31 @@ enum AgentsCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum KeyService {
+    Openrouter,
+}
+#[derive(Subcommand)]
+enum OpenrouterCommand {
+    /// Save the key piped on stdin (`sk-or-…`); it goes to the OS vault, never to a file.
+    Set {
+        /// The model agents start on, an OpenRouter id such as `moonshotai/kimi-k2`.
+        #[arg(long)]
+        model: Option<String>,
+        /// Read the key from piped stdin. Interactive input is refused (no echo).
+        #[arg(long, required = true)]
+        key_stdin: bool,
+    },
+    /// Whether a key is saved, its default model and what it may still spend (asks OpenRouter).
+    Status,
+    /// Change the default model.
+    Model {
+        /// An OpenRouter model id, for example `anthropic/claude-sonnet-4.5`.
+        model: String,
+    },
+    /// Remove the key from Switchboard and the OS vault.
+    Remove,
 }
 #[derive(Subcommand)]
 enum Backup {
@@ -747,7 +784,30 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 agent: agent.clone(),
                 pool: pool.clone(),
             },
-            AgentsCommand::Key => Operation::AgentKey,
+            AgentsCommand::Key { service: None } => Operation::AgentKey,
+            AgentsCommand::Key {
+                service: Some(KeyService::Openrouter),
+            } => Operation::AgentKeyValue {
+                service: "openrouter".into(),
+            },
+            AgentsCommand::Openrouter { command } => match command {
+                OpenrouterCommand::Set { model, .. } => Operation::AgentKeySet {
+                    service: "openrouter".into(),
+                    key: read_secret()?,
+                    model: model.clone(),
+                },
+                OpenrouterCommand::Status => Operation::AgentKeyStatus {
+                    service: "openrouter".into(),
+                    credit: true,
+                },
+                OpenrouterCommand::Model { model } => Operation::AgentKeyModel {
+                    service: "openrouter".into(),
+                    model: model.clone(),
+                },
+                OpenrouterCommand::Remove => Operation::AgentKeyRemove {
+                    service: "openrouter".into(),
+                },
+            },
             AgentsCommand::Launch { agent, pool, dir } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
@@ -1109,8 +1169,39 @@ fn print_result(value: &Value, cli: &Cli) {
             }
         }
         Command::Agents {
-            command: AgentsCommand::Key,
+            command: AgentsCommand::Key { .. },
         } => println!("{}", text(&value["key"])),
+        Command::Agents {
+            command:
+                AgentsCommand::Openrouter {
+                    command: OpenrouterCommand::Status,
+                },
+        } => {
+            if value["saved"] != true {
+                println!("No OpenRouter key is saved.");
+            } else {
+                println!(
+                    "OpenRouter key saved · model {}",
+                    value["model"].as_str().unwrap_or("not set")
+                );
+                let credit = &value["credit"];
+                if credit.is_object() {
+                    let money = |v: &Value| v.as_f64().map(|n| format!("${n:.2}"));
+                    println!(
+                        "Remaining {} · spent today {} · limit {}",
+                        money(&credit["limit_remaining"]).unwrap_or_else(|| "no limit".into()),
+                        money(&credit["usage_daily"]).unwrap_or_else(|| "unknown".into()),
+                        match (money(&credit["limit"]), credit["limit_reset"].as_str()) {
+                            (Some(limit), Some(reset)) => format!("{limit} {reset}"),
+                            (Some(limit), None) => limit,
+                            _ => "none".into(),
+                        }
+                    );
+                } else if let Some(error) = value["credit_error"].as_str() {
+                    println!("{error}");
+                }
+            }
+        }
         Command::Chain {
             command: ChainCommand::List { .. },
         } => {

@@ -175,7 +175,9 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_remove",
             "switchboard_project_apply",
             "switchboard_chain_get",
-            "switchboard_chain_set"
+            "switchboard_chain_set",
+            "switchboard_openrouter_status",
+            "switchboard_openrouter_model"
         ]
     );
     // SB-71: chains over MCP — set from a preset, read back, an agent that cannot take over refused.

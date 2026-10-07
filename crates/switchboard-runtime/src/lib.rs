@@ -1,5 +1,6 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod agent_catalog;
+pub mod agent_keys;
 pub mod agents;
 pub mod analytics;
 mod blocking;
@@ -169,6 +170,34 @@ pub enum Operation {
     },
     /// The agents' proxy capability, for an agent's `key_cmd` or an `export`.
     AgentKey,
+    /// Saves the key agents run on for a service (SB-79); `model` sets the default model.
+    AgentKeySet {
+        service: String,
+        key: String,
+        #[serde(default)]
+        model: Option<String>,
+    },
+    /// The saved key's metadata and, with `credit`, what it may still spend (asked of the
+    /// service). Never the key.
+    AgentKeyStatus {
+        service: String,
+        #[serde(default)]
+        credit: bool,
+    },
+    /// Changes the default model of the saved key.
+    AgentKeyModel {
+        service: String,
+        model: String,
+    },
+    /// Removes the saved key and its vault item.
+    AgentKeyRemove {
+        service: String,
+    },
+    /// The key's value, for a launched agent's environment. Only the CLI asks for it (a session
+    /// script's `export`); the desktop window and `switchboard mcp` never send it.
+    AgentKeyValue {
+        service: String,
+    },
     /// Fallback chains (SB-71): every chain set, the presets, and the one that applies to a
     /// workflow and/or a project pool.
     Chains {
@@ -392,6 +421,8 @@ impl Runtime {
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
+                | Operation::AgentKeyStatus { .. }
+                | Operation::AgentKeyValue { .. }
                 | Operation::Chains { .. }
                 | Operation::LaunchAccount { .. }
                 | Operation::Status
@@ -1300,6 +1331,27 @@ async fn execute(
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "switchboard".into());
             agent_catalog::connect(&agent, address.as_deref(), &pool, &cli)
+        }
+        Operation::AgentKeySet {
+            service,
+            key,
+            model,
+        } => {
+            let saved = store.set_agent_key(&service, &key, model)?;
+            Ok(json!({"service": saved.service, "saved_at": saved.saved_at, "model": saved.model}))
+        }
+        Operation::AgentKeyStatus { service, credit } => {
+            agent_keys::status(&store, &service, credit).await
+        }
+        Operation::AgentKeyModel { service, model } => {
+            let saved = store.set_agent_key_model(&service, &model)?;
+            Ok(json!({"service": saved.service, "model": saved.model}))
+        }
+        Operation::AgentKeyRemove { service } => {
+            Ok(json!({"removed": store.remove_agent_key(&service)?}))
+        }
+        Operation::AgentKeyValue { service } => {
+            Ok(json!({"key": store.agent_key_value(&service)?}))
         }
         Operation::AgentKey => {
             let token = match runtime {

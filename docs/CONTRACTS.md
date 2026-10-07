@@ -305,3 +305,35 @@ updates](DISTRIBUTION.md#automatic-updates-sb-55).
   `a_release_that_needs_a_person_is_held`, `in_flight_counts_the_requests_holding_a_slot`.
   Refusal of tampered, unsigned or other-key packages is the updater plugin's minisign check with
   `requireSignedVersion` (DISTRIBUTION → Trust); no test here feeds it a forged package yet.
+
+## Agent keys (SB-79, slice 1, 2026-10-07)
+
+Design: [XA-02](packets/agent-keys-and-kimi.md). Code: `crates/switchboard-core/src/agent_keys.rs`,
+`crates/switchboard-runtime/src/agent_keys.rs`, `backup.rs` (`AgentKeyCopy`),
+`Operation::{AgentKeySet, AgentKeyStatus, AgentKeyModel, AgentKeyRemove, AgentKeyValue}`, CLI
+`switchboard agents openrouter set|status|model|remove` and `agents key --service openrouter`,
+MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (write).
+
+- `Snapshot.agent_keys: Vec<AgentKey>` (omitted when empty); `AgentKey {service, id, saved_at,
+  model?}` — metadata only; the value lives in the vault under `id`, like every credential.
+  `service` is today only `openrouter`; the value must start `sk-or-`; a model is an OpenRouter id
+  (`vendor/model`, letters, digits and `/ . _ : -`, at most 120).
+- Validation on every publish (`validate_agent_keys`): one entry per service, a unique UUID that
+  no account uses, a positive `saved_at`, a valid model.
+- `Store::set_agent_key(service, key, model)`: replaces in place (same vault item, the model kept
+  when not given); a metadata failure puts the previous value back, so a failed save leaves
+  nothing behind. `set_agent_key_model`, `agent_key` (metadata), `agent_key_value` (the value —
+  a launched agent's environment and `agents key` only, never the window or MCP),
+  `remove_agent_key` (metadata first, then the vault item). Events `agent_key` `saved` /
+  `removed`.
+- Status (`AgentKeyStatus {service, credit}`) asks OpenRouter itself what the key may still spend:
+  `GET {base}/key` with a 10 s timeout, redirects off, the base pinned to
+  `https://openrouter.ai/api/v1` (a test overrides it through `SWITCHBOARD_OPENROUTER_BASE`, which
+  accepts only `http://127.0.0.1:<port>`). The answer carries the label (control characters
+  dropped, at most 80), `limit`, `limit_remaining`, `limit_reset`, `usage`, `usage_daily`,
+  `is_free_tier` — never the key. A 401/403 is `KEY_REFUSED` (the key stays saved); anything else
+  is `UNREACHABLE`.
+- Encrypted backups carry the key with its value (`AgentKeyCopy`, sealed like every credential);
+  a restore puts it back where the install has none and counts it in `Restored.agent_keys`.
+- The launch recipes that hand the key to agents through their environment are slice 2 (SB-79b,
+  catalog `openrouter` recipes and `agents launch --openrouter`).
