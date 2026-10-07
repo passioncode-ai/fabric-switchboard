@@ -690,7 +690,14 @@ fn main() {
             let slot = handle.state::<Slot>();
             let owner = tauri::async_runtime::block_on(async { slot.owner.lock().await.take() });
             if let Some(owner) = owner {
-                tauri::async_runtime::block_on(owner.shutdown(switchboard_runtime::DRAIN_DEADLINE));
+                // An exit that starts the Windows installer drains for less, so the installer
+                // keeps half of the hard-exit window (SB-78).
+                let deadline = if handle.state::<updates::Updates>().installs_at_exit() {
+                    updates::DRAIN_BEFORE_INSTALL
+                } else {
+                    switchboard_runtime::DRAIN_DEADLINE
+                };
+                tauri::async_runtime::block_on(owner.shutdown(deadline));
             }
             // After the drain: the Windows installer, or the relaunch after "Restart to update".
             updates::finish(handle);

@@ -16,6 +16,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - Every `switchboard` command and argument explains itself in `--help`, and
   `switchboard accounts update` takes `--label` or `--enabled` alone; the other keeps its value
   (SB-68).
+- A busy machine's `~/.claude.json` over 1 MiB no longer silently stops Switchboard from
+  noticing a new Claude Code sign-in, and a file caught half-written is not taken for a changed
+  sign-in (SB-78).
+- On Windows, a quit that starts the update installer drains for 5 seconds instead of 8, so the
+  installer always has time to start (SB-78).
+- macOS: a failed install at *Restart to update* says the administrator password was refused
+  only when one was asked for (SB-78).
 
 ## 0.6.10 — 2026-10-07
 

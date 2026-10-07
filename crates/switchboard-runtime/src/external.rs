@@ -16,6 +16,9 @@ use switchboard_core::{AuthKind, Credential, ExternalIdentity, Provider};
 use unicode_normalization::UnicodeNormalization;
 
 const CAP: usize = 1024 * 1024;
+/// Claude Code's `~/.claude.json` keeps per-project history and grows past 1 MiB on a busy
+/// machine; at the old cap the sign-in section was silently never read there (SB-78).
+const CONFIG_CAP: usize = 32 * 1024 * 1024;
 const SECRET_CAP: usize = 64 * 1024;
 const UNAVAILABLE: &str = "External sign-in unavailable or its files are unsafe.";
 #[derive(Clone)]
@@ -483,7 +486,7 @@ fn capture(
         });
     }
     let config = reader
-        .read(&c.config, CAP)?
+        .read(&c.config, CONFIG_CAP)?
         .ok_or("No current Claude sign-in found.")?;
     let auth = current_auth(reader, c)?.ok_or("No current Claude sign-in found.")?;
     // Claude Code empties its tokens after `invalid_grant`: that is a signed-out state, not a
@@ -494,7 +497,7 @@ fn capture(
     let result = claude_profile(&auth, &config, None)?;
     // Only the part of the config the profile came from must hold still: Claude Code rewrites
     // the rest of the file all the time (SB-57).
-    let config_after = reader.read(&c.config, CAP)?;
+    let config_after = reader.read(&c.config, CONFIG_CAP)?;
     if config_after.as_deref().and_then(account_section) != account_section(&config)
         || current_auth(reader, c)?.as_deref() != Some(auth.as_slice())
     {
@@ -839,32 +842,66 @@ fn file_stamp(path: &Path) -> Option<(u64, u64, u64, i128)> {
 /// file's own stamp changed since the last call.
 type FileStamp = Option<(u64, u64, u64, i128)>;
 fn config_stamp(path: &Path) -> Stamp {
-    /// The config last digested: its path, its file stamp then, and the digest.
-    static LAST: std::sync::Mutex<Option<(PathBuf, FileStamp, Stamp)>> =
+    /// The config last digested: its path, its file stamp then (None while the last read did
+    /// not settle, so the next call reads again), and the digest.
+    static LAST: std::sync::Mutex<Option<(PathBuf, Option<FileStamp>, Stamp)>> =
         std::sync::Mutex::new(None);
     let file = file_stamp(path);
     let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some((at, stamp, digest)) = last.as_ref() {
-        if at == path && *stamp == file {
-            return digest.clone();
+    let previous = match last.as_ref() {
+        Some((at, stamp, digest)) if at == path => {
+            if *stamp == Some(file) {
+                return digest.clone();
+            }
+            Some(digest.clone())
+        }
+        _ => None,
+    };
+    let read = Native.read(path, CONFIG_CAP);
+    if read.is_err() {
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::oplog::event(
+                "credential_source",
+                &[
+                    ("provider", crate::oplog::Field::Code("claude")),
+                    ("state", crate::oplog::Field::Code("config_unreadable")),
+                ],
+            );
         }
     }
-    let digest = Stamp::Account(
-        Native
-            .read(path, CAP)
-            .ok()
-            .flatten()
-            .and_then(|bytes| account_section(&bytes)),
-    );
-    *last = Some((path.to_owned(), file, digest.clone()));
+    let (digest, settled) = next_config_digest(previous.as_ref(), read);
+    *last = Some((path.to_owned(), settled.then_some(file), digest.clone()));
     digest
+}
+/// The config's digest after one read, and whether it settled. A file caught half-written (not
+/// JSON) or unreadable keeps the previous digest and is read again next time: a rewrite in
+/// progress is not a changed sign-in (SB-78).
+fn next_config_digest(
+    previous: Option<&Stamp>,
+    read: Result<Option<Vec<u8>>, String>,
+) -> (Stamp, bool) {
+    let keep = || previous.cloned().unwrap_or(Stamp::Account(None));
+    match read {
+        Ok(None) => (Stamp::Account(None), true),
+        Ok(Some(bytes)) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(value) => (
+                Stamp::Account(value.get("oauthAccount").and_then(section_digest)),
+                true,
+            ),
+            Err(_) => (keep(), false),
+        },
+        Err(_) => (keep(), false),
+    }
+}
+fn section_digest(section: &Value) -> Option<[u8; 32]> {
+    Some(Sha256::digest(serde_json::to_vec(section).ok()?).into())
 }
 /// `oauthAccount` of a Claude Code config, canonically serialized and digested; None when the
 /// config is not JSON or has no such section.
 fn account_section(config: &[u8]) -> Option<[u8; 32]> {
     let value: Value = serde_json::from_slice(config).ok()?;
-    let section = value.get("oauthAccount")?;
-    Some(Sha256::digest(serde_json::to_vec(section).ok()?).into())
+    section_digest(value.get("oauthAccount")?)
 }
 /// Keychain stamps are CFAbsoluteTime bit patterns (seconds since 2001-01-01).
 fn item_seconds(bits: i64) -> i64 {
@@ -1893,6 +1930,72 @@ pub fn activate_claude(
     )
 }
 
+/// A temporary folder the reader accepts: on macOS the temporary folder sits behind the /var
+/// link, which a read refuses, so tests use its canonical path; on Windows canonicalizing would
+/// add a `\\?\` prefix, so its path is used as it is.
+#[cfg(test)]
+pub(crate) fn readable_temp(dir: &Path) -> PathBuf {
+    if cfg!(windows) {
+        dir.to_path_buf()
+    } else {
+        dir.canonicalize().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod config_digest_tests {
+    use super::*;
+
+    #[test]
+    fn a_half_written_config_is_not_a_changed_sign_in() {
+        let full = br#"{"oauthAccount":{"emailAddress":"a@example.test"},"projects":{}}"#.to_vec();
+        let (first, settled) = next_config_digest(None, Ok(Some(full.clone())));
+        assert!(settled);
+        assert!(matches!(first, Stamp::Account(Some(_))));
+        // Claude Code mid-rewrite: the previous digest stands, and the next call reads again.
+        let half = full[..full.len() / 2].to_vec();
+        assert_eq!(
+            next_config_digest(Some(&first), Ok(Some(half))),
+            (first.clone(), false)
+        );
+        // Unreadable (too large, unsafe): the same.
+        assert_eq!(
+            next_config_digest(Some(&first), Err("too large".into())),
+            (first.clone(), false)
+        );
+        // Settled again with the same section: the same digest.
+        assert_eq!(
+            next_config_digest(Some(&first), Ok(Some(full))),
+            (first, true)
+        );
+        // Signed out: the section is gone.
+        assert_eq!(
+            next_config_digest(None, Ok(Some(br#"{"projects":{}}"#.to_vec()))),
+            (Stamp::Account(None), true)
+        );
+        assert_eq!(
+            next_config_digest(None, Ok(None)),
+            (Stamp::Account(None), true)
+        );
+    }
+
+    #[test]
+    fn a_config_past_one_mebibyte_is_still_read() {
+        // A busy machine's ~/.claude.json: 2 MiB of project history around the section.
+        let dir = tempfile::tempdir().unwrap();
+        let path = readable_temp(dir.path()).join(".claude.json");
+        let history = "x".repeat(2 * 1024 * 1024);
+        let config = format!(
+            r#"{{"projects":{{"/p":"{history}"}},"oauthAccount":{{"emailAddress":"a@example.test"}}}}"#
+        );
+        std::fs::write(&path, &config).unwrap();
+        let (digest, settled) = next_config_digest(None, Native.read(&path, CONFIG_CAP));
+        assert!(settled);
+        assert_eq!(digest, Stamp::Account(account_section(config.as_bytes())));
+        assert!(matches!(digest, Stamp::Account(Some(_))));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2048,7 +2151,6 @@ mod tests {
     /// the file's owner to be the current user, and the elevated CI runner's new files belong
     /// to the Administrators group (OPERATIONS → Windows private filesystem); an ordinary user
     /// owns their own `~/.claude.json`.
-    #[cfg(unix)]
     #[test]
     fn the_native_config_stamp_ignores_unrelated_rewrites() {
         let a = account_section(&config("a@example.test")).unwrap();
@@ -2058,8 +2160,7 @@ mod tests {
         // The native stamp re-reads only when the file's own stamp changed, and an unrelated
         // rewrite leaves it equal.
         let dir = tempfile::tempdir().unwrap();
-        // The reader refuses a path through a link, and macOS's temporary folder is behind one.
-        let base = dir.path().canonicalize().unwrap();
+        let base = readable_temp(dir.path());
         let path = base.join(".claude.json");
         fs::write(&path, config("a@example.test")).unwrap();
         let first = config_stamp(&path);
