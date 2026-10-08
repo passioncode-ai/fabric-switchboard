@@ -43,6 +43,15 @@ export const nativeAdapter: Adapter = {
   openrouterSave: (key, model) => invoke('openrouter_save', { key, model }),
   openrouterModel: (model) => invoke('openrouter_model', { model }),
   openrouterRemove: () => invoke('openrouter_remove'),
+  // Not under the read deadline: each account asks Kimi itself (8 s timeout in the backend).
+  kimiAccounts: () => invoke('kimi_accounts'),
+  kimiLoginBegin: (label, region) => invoke('kimi_login_begin', { label, region }),
+  kimiLoginStatus: (id) => readWithDeadline(invoke('kimi_login_status', { id })),
+  kimiLoginFinish: (id) => invoke('kimi_login_finish', { id }),
+  kimiLoginCancel: (id) => invoke('kimi_login_cancel', { id }),
+  kimiSignInAgain: (id) => invoke('kimi_sign_in_again', { id }),
+  kimiLaunch: (id, workingDirectory) => invoke('kimi_launch', { id, workingDirectory }),
+  kimiRemove: (id) => invoke('kimi_remove', { id }),
   launchOnOpenrouter: (agent, model, workingDirectory) => invoke('launch_agent', { agent, pool: '', workingDirectory, via: 'openrouter', model }),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
@@ -57,6 +66,21 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // Kimi Code accounts (SB-81): each names the fix.
+  'This Kimi Code account is already saved.',
+  'This sign-in is already saved as an account.',
+  'Finish or close the Kimi Code sign-in in Terminal before cancelling.',
+  'The sign-in folder could not be removed.',
+  'Region is mainland-cn (kimi.com) or global (kimi.ai).',
+  'Kimi Code account not found. Refresh the list and choose another.',
+  'This account is signed out. Sign in to it again.',
+  'Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.',
+  'Kimi did not answer. Try again in a minute.',
+  'Kimi refused this sign-in. Sign in to the account again.',
+  'Kimi Code is not installed. Install it from kimi.com/code, then try again.',
+  'This Kimi Code sign-in is no longer waiting. Start it again.',
+  'Finish the Kimi Code sign-in in Terminal first.',
+  'The Kimi Code sign-in did not save a login. Start it again and complete it in the browser.',
   // Agent keys (SB-79): each names the fix.
   'That is not an OpenRouter key: it starts with sk-or-.',
   'A model is an OpenRouter id such as moonshotai/kimi-k2 (letters, digits and / . _ : -).',
@@ -301,7 +325,7 @@ const coreErrors: Record<string, string> = {
   'Usage response interrupted.': 'The usage response was interrupted. Check usage again.',
 };
 for (const error of ['Vault unavailable', 'Credential unavailable', 'Native credential storage unavailable', 'Credential storage unavailable', 'Private account storage unavailable', 'Account store unavailable']) coreErrors[error] = 'Storage unavailable. Check native credential storage access and retry.';
-for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Invalid project metadata', 'Invalid fallback chain metadata', 'Invalid agent key metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
+for (const error of ['Unsafe account storage file', 'Unsafe account storage directory', 'Unsafe account metadata file', 'Invalid account metadata', 'Invalid route metadata', 'Invalid event metadata', 'Invalid metadata bounds', 'Invalid project rule metadata', 'Invalid project metadata', 'Invalid fallback chain metadata', 'Invalid agent key metadata', 'Invalid Kimi Code account metadata', 'Account metadata exceeds size limit', 'Duplicate rotation policy', 'Private file exceeds size limit']) coreErrors[error] = 'Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.';
 for (const error of ['Unsafe private storage path', 'Unsafe private storage directory', 'Unsafe private storage file', 'Private file permissions are unsafe; rotate its capability before reuse', 'Private file has no parent', 'Invalid private storage path', 'Windows private storage unavailable', 'Unsafe Windows reparse point', 'Private storage belongs to another Windows user', 'Private directory has no parent', 'Unsafe Windows private file', 'Private replacement must stay in one directory', 'Managed file permissions unavailable.']) coreErrors[error] = 'A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.';
 for (const error of ['External profile format is invalid.', 'External credential format is invalid.', 'Claude account identity is missing.', 'Codex config is invalid.', 'Claude credential and config identities differ.', 'Claude profile identity is missing.', 'Stored Claude identity differs from its native profile.', 'Claude native credential is missing.', 'Claude native credential is invalid.', 'Claude account identity is invalid.']) coreErrors[error] = 'The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.';
 for (const error of ['Claude account lock was lost.', 'Claude account lock heartbeat failed.']) coreErrors[error] = 'The Claude account lock could not be kept. Wait for other account updates to finish, then refresh and retry.';

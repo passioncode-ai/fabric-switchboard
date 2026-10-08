@@ -306,6 +306,48 @@ updates](DISTRIBUTION.md#automatic-updates-sb-55).
   Refusal of tampered, unsigned or other-key packages is the updater plugin's minisign check with
   `requireSignedVersion` (DISTRIBUTION → Trust); no test here feeds it a forged package yet.
 
+## Kimi Code accounts (SB-81, 2026-10-08)
+
+Design: [XA-02](packets/agent-keys-and-kimi.md) A-5..A-7; facts:
+[research](research/kimi-hermes-openrouter-2026-10-07.md) Part 1. Code:
+`crates/switchboard-core/src/kimi_accounts.rs`, `crates/switchboard-runtime/src/kimi.rs`,
+`Operation::{KimiAccounts, KimiLoginBegin, KimiLoginStatus, KimiLoginFinish, KimiLoginCancel,
+KimiSignInAgain, KimiLaunch, KimiRename, KimiRemove}`, CLI `switchboard kimi
+list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_accounts` (read).
+
+- `Snapshot.kimi_accounts: Vec<KimiAccount {id, label, region, added_at, nickname?, tier?}>`
+  (omitted when empty) — metadata only. `region` is `mainland-cn` or `global`; `nickname` and
+  `tier` (`user_level_name`) are cut to 80 characters without control characters. Validation:
+  unique UUIDs no account or agent key uses, a valid label, a known region, a positive time.
+  Events `kimi_account` `added` / `removed`.
+- The credential lives only in the account's own `KIMI_CODE_HOME`, `<data>/kimi/<id>/`, written
+  and renewed only by the official `kimi`: never in the vault, a backup or another home, never
+  renewed by Switchboard (Kimi's refresh tokens rotate). Encrypted backups do not carry Kimi
+  accounts; after a reinstall each is signed in again.
+- Sign-in: `KimiLoginBegin` makes the home (0700) with a `.kimi-login` marker and runs
+  `kimi login --region <region>` in Terminal (the device code shows there and in the browser);
+  the script marks `.completed` on success. `KimiLoginStatus` answers `pending | complete |
+  ended`. `KimiLoginFinish` needs `.completed` and a non-empty access token in
+  `credentials/kimi-code.json` (mainland) or the newest `credentials/kimi-code-env-*.json`
+  (global), asks `GET {base}/me` for the nickname and tier (a failure saves the account without
+  them) and names it by the label, else the nickname. `KimiLoginCancel` removes an unsaved home
+  once its Terminal closed. A failed Terminal start removes the home at once.
+- Status (`KimiAccounts`): for each account and for the ordinary home (`KIMI_CODE_HOME`, else
+  `~/.kimi-code`, shown and never written — A-6) the token is read in-process while it is valid
+  (`expires_at` more than 60 s ahead) and sent only to `GET {base}/usages` and `GET {base}/me`
+  (8 s timeout, redirects off, an honest `FabricSwitchboard/<version>` User-Agent). `base` is
+  pinned per region — `https://api.kimi.com/coding/v1`, `https://api.kimi.ai/coding/v1` — and a
+  test overrides it only with `http://127.0.0.1:<port>` (`SWITCHBOARD_KIMI_BASE`). Windows
+  `5h`, `7d`, `month`, `month_code` from `usages.limit_*` (`used_ratio` as a number or a string,
+  clamped to 0..1; `reset_time` RFC 3339). Without a valid token the status names why
+  (`KIMI_SIGNED_OUT`, `KIMI_TOKEN_STALE` — Kimi renews it when it next runs); 401/403 is
+  `KIMI_REFUSED`; anything else `KIMI_UNREACHABLE`. A newer nickname or tier is saved.
+- `KimiLaunch` runs the official `kimi` with `KIMI_CODE_HOME` in a folder (Terminal); its script
+  lives in `<data>/kimi/sessions/<id>/`, outside the home. `KimiSignInAgain` reruns `kimi login`
+  in the same home. `KimiRemove` forgets the account, then deletes its home.
+- The token is never handed to another agent or the proxy (A-7); chains name Kimi Code by agent
+  (`kimi-code`), and handing a workflow to a saved Kimi account is SB-73 phase 2.
+
 ## Agent keys (SB-79, slice 1, 2026-10-07)
 
 Design: [XA-02](packets/agent-keys-and-kimi.md). Code: `crates/switchboard-core/src/agent_keys.rs`,

@@ -112,6 +112,12 @@ enum Command {
         #[command(subcommand)]
         command: AgentsCommand,
     },
+    /// Kimi Code subscription accounts: sign in with the official `kimi login`, see each plan's
+    /// usage, and launch `kimi` on an account. Each login stays in its own folder.
+    Kimi {
+        #[command(subcommand)]
+        command: KimiCommand,
+    },
     /// Fallback chains: which agents continue a workflow, in what order, when its accounts run
     /// out — per machine, per project or per task. None applies until you set one.
     Chain {
@@ -447,6 +453,55 @@ enum AgentsCommand {
         /// model.
         #[arg(long, requires = "openrouter")]
         model: Option<String>,
+    },
+}
+#[derive(Subcommand)]
+enum KimiCommand {
+    /// Every saved account with its tier and plan usage, and the ordinary `kimi`'s sign-in.
+    List,
+    /// Start `kimi login` in Terminal for a new account; finish with `switchboard kimi finish`.
+    Login {
+        /// A name for the account; default: Kimi's nickname for it.
+        #[arg(long, default_value = "")]
+        label: String,
+        /// `mainland-cn` (kimi.com) or `global` (kimi.ai).
+        #[arg(long, default_value = "mainland-cn")]
+        region: String,
+    },
+    /// Save a sign-in once Terminal says it is logged in.
+    Finish {
+        /// The id `switchboard kimi login` printed.
+        id: String,
+    },
+    /// Drop a sign-in that was not finished.
+    Cancel {
+        /// The id `switchboard kimi login` printed.
+        id: String,
+    },
+    /// Sign in to a saved account again (when Kimi refused its login).
+    Relogin {
+        /// The account id (`switchboard kimi list`).
+        id: String,
+    },
+    /// Start `kimi` on an account in a folder, in Terminal.
+    Launch {
+        /// The account id (`switchboard kimi list`).
+        id: String,
+        /// The absolute folder it starts in; default: the current folder.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+    /// Rename an account.
+    Rename {
+        /// The account id (`switchboard kimi list`).
+        id: String,
+        /// The new name.
+        label: String,
+    },
+    /// Forget an account and delete its login folder.
+    Remove {
+        /// The account id (`switchboard kimi list`).
+        id: String,
     },
 }
 #[derive(Clone, Copy, ValueEnum)]
@@ -834,6 +889,25 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 model: model.clone(),
             },
         },
+        Command::Kimi { command } => match command {
+            KimiCommand::List => Operation::KimiAccounts,
+            KimiCommand::Login { label, region } => Operation::KimiLoginBegin {
+                label: label.clone(),
+                region: region.clone(),
+            },
+            KimiCommand::Finish { id } => Operation::KimiLoginFinish { id: id.clone() },
+            KimiCommand::Cancel { id } => Operation::KimiLoginCancel { id: id.clone() },
+            KimiCommand::Relogin { id } => Operation::KimiSignInAgain { id: id.clone() },
+            KimiCommand::Launch { id, dir } => Operation::KimiLaunch {
+                id: id.clone(),
+                working_directory: folder(dir)?,
+            },
+            KimiCommand::Rename { id, label } => Operation::KimiRename {
+                id: id.clone(),
+                label: label.clone(),
+            },
+            KimiCommand::Remove { id } => Operation::KimiRemove { id: id.clone() },
+        },
         Command::Project { command } => match command {
             Project::List => Operation::Snapshot,
             Project::Show { path } => Operation::ResolveProject {
@@ -1188,6 +1262,61 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Kimi {
+            command: KimiCommand::List,
+        } => {
+            let windows = |status: &Value| {
+                let list: Vec<String> = status["windows"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|w| {
+                        format!(
+                            "{} {}%",
+                            w["name"].as_str().unwrap_or("?"),
+                            w["used_percent"].as_f64().unwrap_or(0.0)
+                        )
+                    })
+                    .collect();
+                if list.is_empty() {
+                    status["error"].as_str().unwrap_or("no usage").to_owned()
+                } else {
+                    list.join(" · ")
+                }
+            };
+            let accounts = value["accounts"].as_array().cloned().unwrap_or_default();
+            if accounts.is_empty() {
+                println!("No Kimi Code account is saved. Add one with `switchboard kimi login`.");
+            }
+            for item in accounts {
+                let a = &item["account"];
+                println!(
+                    "{}  {} · {}{} · {}",
+                    text(&a["id"]),
+                    text(&a["label"]),
+                    text(&a["region"]),
+                    a["tier"]
+                        .as_str()
+                        .map(|t| format!(" · {t}"))
+                        .unwrap_or_default(),
+                    windows(&item["status"])
+                );
+            }
+            let current = &value["current"];
+            if current.is_object() {
+                println!(
+                    "In use now (ordinary kimi): {} · {}",
+                    current["nickname"].as_str().unwrap_or("signed in"),
+                    windows(current)
+                );
+            }
+        }
+        Command::Kimi {
+            command: KimiCommand::Login { .. },
+        } => println!(
+            "Sign in in the Terminal window, then run: switchboard kimi finish {}",
+            text(&value["login_id"])
+        ),
         Command::Agents {
             command: AgentsCommand::Key { .. },
         } => println!("{}", text(&value["key"])),

@@ -1,5 +1,5 @@
 import { isAbsoluteProjectPath } from './platform';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, LoginInput, OpenrouterStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, KimiAccounts, LoginInput, OpenrouterStatus, Snapshot, UpdateStatus } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -31,6 +31,7 @@ export function createDemoAdapter(): Adapter {
       { path: '/srv/projects/beta-api', provider: 'codex', account_id: 'demo-codex-work', target: 'managed', enabled: false, created_at: now() - 86400, expires_at: null },
     ],
   };
+  const kimi: KimiAccounts = { installed: true, current: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 18, resets_at: now() + 9000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null, region: 'global' }, accounts: [{ account: { id: '00000000-0000-4000-8000-0000000000a1', label: 'Kimi · work', region: 'global', added_at: now() - 86_400, nickname: 'Demo', tier: 'Allegretto' }, status: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 64, resets_at: now() + 4200 }, { name: '7d', used_percent: 31, resets_at: now() + 300_000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null } }] };
   const openrouter: OpenrouterStatus = { service: 'openrouter', saved: false, saved_at: null, model: null, credit: null, credit_error: null };
   const setup: AgentSetup = { cli_path: null, bundled_cli: '/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard', linked_cli: null, can_link: true, commands: { claude_code: 'claude mcp add --scope user switchboard -- switchboard mcp', codex: 'codex mcp add switchboard -- switchboard mcp', claude_plugin: 'claude plugin marketplace add passioncode-ai/fabric-switchboard && claude plugin install switchboard@switchboard' } };
   state.accounts[0].external_identity = studio;
@@ -209,6 +210,15 @@ export function createDemoAdapter(): Adapter {
     async openrouterSave(key, model) { await pause(); if (!key.startsWith('sk-or-')) throw new Error('That is not an OpenRouter key: it starts with sk-or-.'); Object.assign(openrouter, { saved: true, saved_at: now(), model: model ?? openrouter.model, credit: { label: 'demo', limit: 5, limit_remaining: 5, limit_reset: 'daily', usage: 0, usage_daily: 0, is_free_tier: false }, credit_error: null }); log('agent_key', '', 'saved'); },
     async openrouterModel(model) { await pause(); if (!openrouter.saved) throw new Error('No OpenRouter key is saved. Add one under Agents.'); openrouter.model = model; },
     async openrouterRemove() { await pause(); Object.assign(openrouter, { saved: false, saved_at: null, model: null, credit: null, credit_error: null }); log('agent_key', '', 'removed'); },
+    // SB-81: one synthetic Kimi Code account; signing in and launching need the native app.
+    async kimiAccounts() { return structuredClone(kimi); },
+    async kimiLoginBegin() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    async kimiLoginStatus() { return { state: 'ended' as const }; },
+    async kimiLoginFinish() { await pause(); throw new Error('This Kimi Code sign-in is no longer waiting. Start it again.'); },
+    async kimiLoginCancel() { await pause(); },
+    async kimiSignInAgain() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    async kimiLaunch() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    async kimiRemove(id) { await pause(); kimi.accounts = kimi.accounts.filter((a) => a.account.id !== id); log('kimi_account', '', 'removed'); },
     async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
     async updateStatus() { return { ...update }; },

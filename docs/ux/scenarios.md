@@ -54,6 +54,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-044 | Turn usage analytics off or on | draft |
 | SCN-045 | Save one OpenRouter key for agents | draft |
 | SCN-046 | Launch an agent on the OpenRouter key | draft |
+| SCN-047 | Keep several Kimi Code subscription accounts | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -948,3 +949,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `every_openrouter_recipe_is_complete_and_never_puts_the_key_on_a_command_line` (catalog), `an_openrouter_launch_needs_a_saved_key_and_a_valid_model`, `an_openrouter_session_reads_the_key_when_it_starts_and_never_holds_it`, `a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot`, `a_session_script_hands_the_key_to_the_agent_and_stops_without_it` (runs the zsh script, macOS), `an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key` (CLI). A real agent answering on a real OpenRouter key is operator acceptance.
 **Product:** unobserved
 **Traces:** SB-79, XA-02
+
+## SCN-047 — Keep several Kimi Code subscription accounts
+
+**Persona:** P-01
+**Goal:** Sign in to each Kimi Code membership once, see what each may still use, and start `kimi` on the one with room left — without the logins overwriting each other.
+**Preconditions:** the official `kimi` installed; a Kimi Code membership (kimi.com or kimi.ai).
+**Entry point:** Accounts → *Kimi Code* · `switchboard kimi`.
+**Steps:**
+1. *Add Kimi Code account*, optionally a label and the service, *Open sign-in* → Terminal runs `kimi login`; confirm the code in the browser signed in to that account → the dialog saves it on its own when Terminal reports success: “Kimi Code account saved.”
+2. Read the row → the label, tier and service, and “5 hours 64%, resets in 1h 10m · 7 days 31% · Month 42%”, asked of Kimi at each refresh.
+3. *Launch* and a folder → Terminal starts `kimi` on that account in the folder.
+4. The line above the rows names the ordinary `kimi`'s sign-in and its usage; it is never changed.
+**Alt paths:** `kimi` not installed → the section says so and offers no sign-in; the sign-in is closed without success → “This Kimi Code sign-in is no longer waiting. Start it again.”; Escape while it waits → the sign-in folder goes once Terminal closes; Kimi refuses a saved login → the row says so and offers *Sign in again*; the login waits for Kimi to renew it → “Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.”; Kimi unreachable → “Kimi did not answer. Try again in a minute.”, the account stays; *Remove* asks first and deletes the account's login folder.
+**Expected result:** each login exists only in its own folder under Switchboard's data, written and renewed only by the official `kimi`; the store keeps the label, region, nickname and tier; no token, e-mail or phone reaches the store, the window, a backup or a log.
+**UI elements:** the *Kimi Code* group on Accounts (count, ordinary-kimi line, rows with tier · service, windows line, *Launch* / *Sign in again*, *Remove*), *Add Kimi Code account*, *Refresh*, the sign-in, launch and remove dialogs.
+**States covered:** reading, read failed (*Retry*), not installed, no accounts, signed in with windows, refused, stale, unreachable, sign-in waiting, sign-in ended, removed.
+**Errors & recovery:** every refusal names the fix; nothing Switchboard does renews or moves a Kimi login.
+**Status:** draft
+**Meaning:** Kimi Code subscriptions managed beside Claude Code and Codex (operator request 2026-10-07, XA-02, SB-81).
+**Coverage:** `finishing_saves_the_account_by_nickname_and_never_the_token` (against a loopback Kimi stand-in, including the ordinary home left byte-for-byte unchanged), `a_token_is_read_only_while_valid_and_a_tombstone_is_signed_out`, `plan_windows_read_ratios_as_numbers_or_strings_and_clamp_them`, `a_sign_in_runs_kimi_login_in_its_own_home_and_a_failed_terminal_leaves_nothing`, `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`, `the_base_is_pinned_and_only_a_loopback_stand_in_overrides_it` (runtime), `kimi_accounts_list_offline_and_refuse_unknown_ids_without_touching_the_ordinary_home` (CLI), `scripts/test-ui-logic.mjs` (the windows line in both languages). A real membership signed in through the real Kimi is operator acceptance.
+**Product:** unobserved
+**Traces:** SB-81, XA-02

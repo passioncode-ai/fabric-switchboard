@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Added
+
+- Kimi Code subscription accounts (SB-81): *Accounts → Kimi Code* signs an account in with the
+  official `kimi login` (in Terminal), shows its membership tier and 5-hour, 7-day and monthly
+  usage, launches `kimi` on it in a folder, and shows the ordinary `kimi`'s sign-in. Each login
+  stays in its own folder; Switchboard never copies or renews it. CLI `switchboard kimi`, MCP
+  `switchboard_kimi_accounts`.
+
 ## 0.6.11 — 2026-10-08
 
 One OpenRouter key for agents: save it once, see what it may still spend, and launch Hermes, Kimi

@@ -157,6 +157,17 @@ subscription sign-in. Returns `{chain}` (null when cleared).
 key's value is never returned — an agent that runs on it gets it from its launch environment,
 not from this server.
 
+### `switchboard_kimi_accounts` — (read)
+
+`{accounts: [{account, status}], current, installed}`. `account`: `id`, `label`, `region`
+(`mainland-cn` or `global`), `added_at`, `nickname`, `tier` (the membership level). `status`:
+`signed_in`, `nickname`, `tier`, `windows` — `[{name: "5h" | "7d" | "month" | "month_code",
+used_percent, resets_at}]`, asked of Kimi at this call — and `error` when Kimi refused the login,
+did not answer, or the login waits for Kimi to renew it (launching the account once does).
+`current` is the ordinary `kimi` (`~/.kimi-code`) the same way, shown and never switched. No
+token is returned or handed to any agent; signing in, launching and removing accounts are the
+operator's (the app, or `switchboard kimi login|launch|remove`).
+
 ### `switchboard_openrouter_model` — `model` (write)
 
 Only when the operator asks. `model` is an OpenRouter id (`vendor/model`, for example

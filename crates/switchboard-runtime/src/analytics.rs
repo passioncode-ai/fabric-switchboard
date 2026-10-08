@@ -613,6 +613,7 @@ mod tests {
             projects: vec![],
             chains: vec![],
             agent_keys: vec![],
+            kimi_accounts: vec![],
         }
     }
     fn events(server: &Server) -> Vec<Value> {

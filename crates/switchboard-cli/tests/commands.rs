@@ -89,6 +89,39 @@ fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot launch on the OpenRouter key"));
 }
 #[test]
+fn kimi_accounts_list_offline_and_refuse_unknown_ids_without_touching_the_ordinary_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ordinary = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .env("KIMI_CODE_HOME", ordinary.path().join("absent"))
+            .output()
+            .unwrap()
+    };
+    let output = run(&["--json", "kimi", "list"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["data"]["accounts"], serde_json::json!([]));
+    assert_eq!(json["data"]["current"], serde_json::Value::Null);
+    let output = run(&["kimi", "finish", "not-an-id"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no longer waiting"));
+    let output = run(&["kimi", "remove", "00000000-0000-4000-8000-000000000001"]);
+    assert!(output.status.success());
+    assert_eq!(
+        run(&["kimi", "login", "--region", "moon"]).status.code(),
+        Some(1)
+    );
+    assert!(!ordinary.path().join("absent").exists());
+}
+#[test]
 fn oversized_or_malformed_secret_stdin_is_not_echoed() {
     let tmp = tempfile::tempdir().unwrap();
     for input in [b"fixture-secret-not-valid-json".to_vec(), vec![b'x'; 65537]] {

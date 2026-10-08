@@ -187,6 +187,23 @@ The agent id comes from `agents list`. `agents key` prints a local proxy key, no
 credential: the proxy accepts it only for the pool's API-key account, never for a Claude
 subscription. Keep it out of shared configuration files.
 
+### Kimi Code accounts (SB-81)
+
+Kimi Code subscription accounts, each signed in by the official `kimi` in a folder of its own.
+
+```sh
+switchboard kimi login [--label Work] [--region mainland-cn|global]   # kimi login in Terminal
+switchboard kimi finish <id>          # once Terminal says you are logged in
+switchboard kimi list                 # tier and 5-hour / 7-day / monthly usage, asked of Kimi
+switchboard kimi launch <id> --dir ~/src/app
+switchboard kimi relogin <id>         # when Kimi refused the saved login
+switchboard kimi rename <id> "New name" ; switchboard kimi remove <id>
+```
+
+`list` also shows the ordinary `kimi`'s sign-in (`~/.kimi-code`), never changed. Switchboard
+never copies or renews a Kimi login: when `list` says Kimi renews it on its next run, launch
+the account once. Backups do not carry these logins.
+
 ### The OpenRouter key for agents (SB-79)
 
 One OpenRouter key, saved once in the OS vault, for agents that can run on OpenRouter. The value

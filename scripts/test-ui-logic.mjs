@@ -401,4 +401,14 @@ check(() => {
   i18n.setLocale('en');
 });
 
+// SB-81: Kimi Code plan windows read as named shares with the time to their reset.
+check(() => {
+  const now = 1_800_000_000;
+  assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 25.4, resets_at: now + 3 * 3600 + 600 }, { name: '7d', used_percent: 50, resets_at: null }, { name: 'month', used_percent: 100, resets_at: now - 5 }], now), '5 hours 25%, resets in 3h 10m · 7 days 50% · Month 100%');
+  assert.equal(logic.kimiWindowsLine([], now), '');
+  i18n.setLocale('ru');
+  assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 10, resets_at: now + 1800 }], now), '5 часов 10%, сброс через 30 мин');
+  i18n.setLocale('en');
+});
+
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

@@ -6,6 +6,7 @@ mod credential;
 mod keychain;
 #[cfg(target_os = "macos")]
 mod keychain_macos;
+pub mod kimi_accounts;
 /// Reading items other programs own, without a dialog (macOS).
 #[cfg(target_os = "macos")]
 pub mod external_keychain {
@@ -233,6 +234,10 @@ pub struct Snapshot {
     /// Keys agents run on, by service (SB-79): metadata only, the value is in the vault.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_keys: Vec<agent_keys::AgentKey>,
+    /// Kimi Code subscription accounts (SB-81): metadata only; each credential stays in its own
+    /// `KIMI_CODE_HOME`, never in the vault or a backup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kimi_accounts: Vec<kimi_accounts::KimiAccount>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -359,6 +364,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "fallback_chain" => matches!(detail, "set" | "cleared"),
         "fallback" => matches!(detail, "offered" | "failed"),
         "agent_key" => matches!(detail, "saved" | "removed"),
+        "kimi_account" => matches!(detail, "added" | "removed"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
@@ -438,6 +444,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     projects::validate_projects(s)?;
     chains::validate_chains(s)?;
     agent_keys::validate_agent_keys(s)?;
+    kimi_accounts::validate_kimi_accounts(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)
