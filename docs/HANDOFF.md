@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# Claude signed-out recovery and installed-owner restart (2026-10-08)
+
+Branch `codex/auth-recovery-20261008` restores the operator's previous Claude identity and
+restarts the stale installed owner into 0.6.10. Codex identity and connected terminals were
+preserved. The code fix recognizes a shared-MCP-only Keychain object as signed out, allowing
+normal activation while preserving MCP/plugin sign-ins. Unknown envelopes remain refused.
+See the [bounded run and recovery receipt](runs/2026-10-08-auth-recovery/README.md).
+
+**Exact next task:** include the recovery fix in the next approved signed release; retry FD-25
+in-place console acceptance now that LaunchAccount returns HTTP 200. A reported provider change
+in a closed terminal remains unattributed; retain its terminal handle if it happens again.
+The 0.6.11 approval and SB-72 decisions below were not changed by this incident recovery.
+
+---
+
 # SB-80 built — Hermes's model and provider (2026-10-08)
 
 Branch `feat/sb-80-hermes-model`: Agents → *Hermes model and provider* reads `hermes config get
