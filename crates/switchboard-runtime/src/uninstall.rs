@@ -28,6 +28,8 @@ const OWNED: &[&str] = &[
     "auto-update",
     "logins",
     "vault",
+    // Kimi Code homes (SB-81): each holds the only copy of an account's login.
+    "kimi",
 ];
 /// Session homes: the CLIs' own history (conversations, project memory) lives there, so
 /// uninstall keeps them and removes only the credential-bearing files Switchboard or a sign-in
@@ -316,6 +318,8 @@ mod tests {
             .id
             .clone();
         std::fs::write(root.join("my-notes.txt"), "the person's file").unwrap();
+        std::fs::create_dir_all(root.join("kimi/acct/credentials")).unwrap();
+        std::fs::write(root.join("kimi/acct/credentials/kimi-code.json"), "{}").unwrap();
         let bin = temp.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let app_cli = temp.path().join("App.app/Contents/MacOS/switchboard");
@@ -337,6 +341,10 @@ mod tests {
         assert!(!root.join("accounts.json").exists());
         // The session home's history stays; its credential file goes.
         assert!(root.join("homes/x/history.jsonl").exists());
+        assert!(
+            !root.join("kimi").exists(),
+            "a Kimi login outlived uninstall"
+        );
         assert!(!root.join("homes/x/settings.json").exists());
         assert!(
             root.join("my-notes.txt").exists(),
