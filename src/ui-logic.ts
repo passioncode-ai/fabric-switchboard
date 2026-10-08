@@ -97,6 +97,7 @@ export function eventAction(action: string): string {
     case 'project': return t('Project');
     case 'fallback_chain': return t('Fallback chain');
     case 'agent_key': return t('Agent key');
+    case 'kimi_account': return t('Kimi Code account');
     case 'fallback': return t('Hand-over');
     case 'activation': return t('Switch');
     case 'rotation': return t('Automatic switching');
@@ -125,6 +126,7 @@ export function eventDetail(detail: string): string {
     case 'saved': return t('saved');
     case 'paused': return t('paused');
     case 'removed': return t('removed');
+    case 'added': return t('added');
     case 'applied': return t('applied');
     case 'created': return t('created');
     case 'updated': return t('updated');
@@ -375,4 +377,14 @@ export function openrouterCreditLine(credit: Pick<OpenrouterCredit, 'limit' | 'l
   if (!limit || !remaining) return t('No spending limit · spent today {today}', { today });
   const reset = ({ daily: t('resets daily'), weekly: t('resets weekly'), monthly: t('resets monthly') } as Record<string, string>)[credit.limit_reset ?? ''];
   return reset ? t('{remaining} of {limit} left, {reset} · spent today {today}', { remaining, limit, reset, today }) : t('{remaining} of {limit} left · spent today {today}', { remaining, limit, today });
+}
+/** One Kimi Code plan window (SB-81), as the backend reads `GET /usages`. */
+export interface KimiWindow { name: string; used_percent: number; resets_at: number | null }
+/** The plan windows of a Kimi Code account on one line: "5 hours 25% · resets in 3h 10m · 7 days 50%". */
+export function kimiWindowsLine(windows: KimiWindow[], nowSeconds: number): string {
+  const names: Record<string, string> = { '5h': t('5 hours'), '7d': t('7 days'), month: t('Month'), month_code: t('Month · code') };
+  return windows.map((w) => {
+    const part = `${names[w.name] ?? w.name} ${Math.round(w.used_percent)}%`;
+    return w.resets_at && w.resets_at > nowSeconds ? `${part}, ${t('resets in {time}', { time: compactCountdown(w.resets_at, nowSeconds) })}` : part;
+  }).join(' · ');
 }

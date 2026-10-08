@@ -10,6 +10,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub mod kimi;
 pub mod launch;
 mod limits;
 mod monitor;
@@ -232,11 +233,52 @@ pub enum Operation {
         session: projects::Session,
         global: bool,
     },
+    /// Kimi Code subscription accounts (SB-81) with their plan windows, and the ordinary `kimi`'s
+    /// sign-in (shown, never switched).
+    KimiAccounts,
+    /// Starts the official `kimi login` in Terminal for a new account home.
+    KimiLoginBegin {
+        #[serde(default)]
+        label: String,
+        #[serde(default = "kimi_default_region")]
+        region: String,
+    },
+    KimiLoginStatus {
+        id: String,
+    },
+    /// Saves a completed sign-in as an account.
+    KimiLoginFinish {
+        id: String,
+    },
+    KimiLoginCancel {
+        id: String,
+    },
+    /// Runs `kimi login` again in an account's own home.
+    KimiSignInAgain {
+        id: String,
+    },
+    /// Starts the official `kimi` on an account in a folder.
+    KimiLaunch {
+        id: String,
+        working_directory: PathBuf,
+    },
+    KimiRename {
+        id: String,
+        label: String,
+    },
+    /// Forgets an account and deletes its home.
+    KimiRemove {
+        id: String,
+    },
     Backups,
     BackupNow,
     RestoreBackup {
         file: String,
     },
+}
+
+fn kimi_default_region() -> String {
+    "mainland-cn".into()
 }
 
 /// What a launched third-party agent runs on (XA-02).
@@ -440,6 +482,8 @@ impl Runtime {
                 | Operation::AgentKey
                 | Operation::AgentKeyStatus { .. }
                 | Operation::AgentKeyValue { .. }
+                | Operation::KimiAccounts
+                | Operation::KimiLoginStatus { .. }
                 | Operation::Chains { .. }
                 | Operation::LaunchAccount { .. }
                 | Operation::Status
@@ -1370,6 +1414,34 @@ async fn execute(
         Operation::AgentKeyValue { service } => {
             Ok(json!({"key": store.agent_key_value(&service)?}))
         }
+        Operation::KimiAccounts => kimi::accounts(root, &store, monitor::now()).await,
+        Operation::KimiLoginBegin { label, region } => {
+            kimi::begin_login(root, &label, &region, launch::start_terminal)
+        }
+        Operation::KimiLoginStatus { id } => Ok(json!({"state": kimi::login_state(root, &id)})),
+        Operation::KimiLoginFinish { id } => {
+            kimi::finish_login(root, &store, &id, monitor::now()).await
+        }
+        Operation::KimiLoginCancel { id } => {
+            kimi::cancel_login(root, &store, &id).map(|()| json!({"cancelled": true}))
+        }
+        Operation::KimiSignInAgain { id } => {
+            kimi::sign_in_again(root, &store, &id, launch::start_terminal)
+        }
+        Operation::KimiLaunch {
+            id,
+            working_directory,
+        } => kimi::launch(
+            root,
+            &store,
+            &id,
+            &working_directory,
+            launch::start_terminal,
+        ),
+        Operation::KimiRename { id, label } => Ok(json!({
+            "account": store.update_kimi_account(&id, Some(&label), None, None)?
+        })),
+        Operation::KimiRemove { id } => Ok(json!({"removed": kimi::remove(root, &store, &id)?})),
         Operation::AgentKey => {
             let token = match runtime {
                 Some(r) => r.proxy.token().to_owned(),

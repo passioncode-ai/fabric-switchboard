@@ -364,6 +364,82 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         .execute(Operation::RemoveProject { pool })
         .await
 }
+/// Kimi Code subscription accounts (SB-81): metadata and plan usage, never a token.
+#[tauri::command]
+async fn kimi_accounts(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiAccounts)
+        .await
+}
+#[tauri::command]
+async fn kimi_login_begin(
+    label: String,
+    region: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiLoginBegin { label, region })
+        .await
+}
+#[tauri::command]
+async fn kimi_login_status(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiLoginStatus { id })
+        .await
+}
+#[tauri::command]
+async fn kimi_login_finish(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiLoginFinish { id })
+        .await
+}
+#[tauri::command]
+async fn kimi_login_cancel(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiLoginCancel { id })
+        .await
+}
+#[tauri::command]
+async fn kimi_sign_in_again(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiSignInAgain { id })
+        .await
+}
+#[tauri::command]
+async fn kimi_launch(
+    id: String,
+    working_directory: std::path::PathBuf,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiLaunch {
+            id,
+            working_directory,
+        })
+        .await
+}
+#[tauri::command]
+async fn kimi_remove(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::KimiRemove { id })
+        .await
+}
 /// The OpenRouter key agents run on (SB-79): metadata and what it may still spend, asked of
 /// OpenRouter. Never the key — `AgentKeyValue` is the CLI's alone.
 #[tauri::command]
@@ -693,6 +769,14 @@ fn main() {
             openrouter_save,
             openrouter_model,
             openrouter_remove,
+            kimi_accounts,
+            kimi_login_begin,
+            kimi_login_status,
+            kimi_login_finish,
+            kimi_login_cancel,
+            kimi_sign_in_again,
+            kimi_launch,
+            kimi_remove,
             remove_project,
             agent_setup,
             link_cli

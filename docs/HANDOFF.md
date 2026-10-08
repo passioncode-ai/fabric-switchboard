@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-81 built — Kimi Code subscription accounts; 0.6.11 waits for approval (2026-10-08)
+
+- **0.6.11** (SB-79 both slices, SB-61, SB-68, SB-69, SB-78 remainder): PR #116, tag `v0.6.11`,
+  release run 37714019602 — preflight succeeded; macOS and Windows wait for the operator's
+  approval of the `release` environment.
+- **OpenRouter key for acceptance:** issued through Project Observatory's door —
+  `fabric-switchboard-agents`, $10 daily ceiling, in `vault:fabric-switchboard/prod/OPENROUTER_API_KEY`.
+  Saving it into Switchboard needs 0.6.11 installed (0.6.10's owner does not know the operation).
+- **SB-81** (branch `feat/sb-81-kimi-accounts`): `Snapshot.kimi_accounts`, one owned
+  `KIMI_CODE_HOME` per account (`<data>/kimi/<id>/`), sign-in through the official `kimi login`
+  in Terminal, tier and plan windows from `GET /usages` and `/me`, launch, sign in again, remove,
+  the ordinary `kimi` shown; Accounts → *Kimi Code*, CLI `switchboard kimi`, MCP
+  `switchboard_kimi_accounts`; SCN-047, CONTRACTS → Kimi Code accounts, CLI.md, CHANGELOG
+  Unreleased. Gate green (473 tests); `cargo xwin check --tests` clean.
+
+**Exact next task:** once run 37714019602 publishes, verify the downloaded set and record it in
+docs/evidence/release-0.5.md; with 0.6.11 installed, save the Observatory-issued key
+(`use_secret.py run fabric-switchboard OPENROUTER_API_KEY -- sh -c 'printf %s "$OPENROUTER_API_KEY" |
+switchboard agents openrouter set --key-stdin --model moonshotai/kimi-k2'`), check
+`switchboard agents openrouter status`, launch Hermes on it. Then SB-80 (Hermes model/provider).
+
+---
+
 # SB-79b built — agents launch on the OpenRouter key (2026-10-08)
 
 Branch `feat/sb-79b-openrouter-launch` (continues the Kimi Code session that started the catalog

@@ -165,10 +165,10 @@ fn agent_tools(
         }
     }
 }
-fn private_dir(path: &Path) -> Result<(), String> {
+pub(crate) fn private_dir(path: &Path) -> Result<(), String> {
     switchboard_core::private_fs::private_dir(path)
 }
-fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Result<(), String> {
+pub(crate) fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Result<(), String> {
     switchboard_core::private_fs::private_write(path, bytes)?;
     #[cfg(unix)]
     if executable {
@@ -240,7 +240,7 @@ type FromCommand<'a> = Option<(&'a str, &'a Path, &'a [String])>;
 const KEY_UNREADABLE: &str =
     "Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.";
 #[cfg(not(windows))]
-fn script(
+pub(crate) fn script(
     home: &Path,
     program: &Path,
     args: &[&str],
@@ -364,7 +364,7 @@ fn windows_script_with(
     result
 }
 #[cfg(windows)]
-fn script(
+pub(crate) fn script(
     home: &Path,
     program: &Path,
     args: &[&str],
@@ -441,7 +441,7 @@ const NATIVE: Host = Host {
     agent_cli,
     start_terminal,
 };
-fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     start_terminal(&write_launch_script(home, content)?)
 }
 /// After the proxy had to move from `old` to `new` (its port was taken), points the files
@@ -478,7 +478,7 @@ pub(crate) fn repoint_managed(root: &Path, old: u16, new: u16) -> usize {
     }
     changed
 }
-fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
+pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
     #[cfg(windows)]
     let path = home.join("launch.ps1");
     #[cfg(not(windows))]
@@ -488,7 +488,7 @@ fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
     private_write(&path, content.as_bytes(), true)?;
     Ok(path)
 }
-fn start_terminal(path: &Path) -> Result<(), String> {
+pub(crate) fn start_terminal(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let status = Command::new("/usr/bin/open")
@@ -770,7 +770,7 @@ fn process_age(pid: u32) -> Option<Duration> {
         .then(|| parse_elapsed(&String::from_utf8_lossy(&output.stdout)))
         .flatten()
 }
-fn ensure_idle(home: &Path) -> Result<(), String> {
+pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
     let pending = home.join(".launch-pending");
     match fs::symlink_metadata(&pending) {
         Ok(meta) => {
@@ -994,7 +994,7 @@ pub fn launch_agent(
 }
 /// The folder a third-party agent starts in: an existing absolute folder outside Switchboard's
 /// own data.
-fn agent_folder(root: &Path, working_directory: &Path) -> Result<PathBuf, String> {
+pub(crate) fn agent_folder(root: &Path, working_directory: &Path) -> Result<PathBuf, String> {
     if !working_directory.is_absolute() {
         return Err("Choose an existing project directory.".into());
     }

@@ -74,6 +74,15 @@ export interface Adapter {
   openrouterSave(key: string, model: string | null): Promise<unknown>;
   openrouterModel(model: string): Promise<unknown>;
   openrouterRemove(): Promise<unknown>;
+  /** Kimi Code subscription accounts (SB-81) with plan usage asked of Kimi, and the ordinary `kimi`. */
+  kimiAccounts(): Promise<KimiAccounts>;
+  kimiLoginBegin(label: string, region: KimiRegion): Promise<{ login_id: string }>;
+  kimiLoginStatus(id: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
+  kimiLoginFinish(id: string): Promise<{ account: KimiAccount }>;
+  kimiLoginCancel(id: string): Promise<unknown>;
+  kimiSignInAgain(id: string): Promise<unknown>;
+  kimiLaunch(id: string, workingDirectory: string): Promise<unknown>;
+  kimiRemove(id: string): Promise<unknown>;
   /** Starts an agent with an OpenRouter recipe on the saved key; `model` null: the key's model. */
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
   loginItem(): Promise<LoginItem>;
@@ -94,6 +103,11 @@ export interface LoginItem { available: boolean; enabled: boolean }
 export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null; openrouter?: { model_flag: string[] | null; model_env: string | null; default: boolean; notes: string | null } | null }
 /** What OpenRouter says the saved key may spend (`GET /key`), in US dollars; null where it has no limit. */
 export interface OpenrouterCredit { label: string | null; limit: number | null; limit_remaining: number | null; limit_reset: string | null; usage: number | null; usage_daily: number | null; is_free_tier: boolean | null }
+export type KimiRegion = 'mainland-cn' | 'global';
+export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null }
+/** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
+export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion }
+export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }

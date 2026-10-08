@@ -6,9 +6,9 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -71,6 +71,9 @@ let agentSetupError = false;
 /** The OpenRouter key for agents (SB-79); null while it is read. */
 let openrouter: OpenrouterStatus | null = null;
 let openrouterError = '';
+/** Kimi Code subscription accounts (SB-81); null while they are read. */
+let kimi: KimiAccounts | null = null;
+let kimiError = '';
 let openMenu: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
 let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
@@ -144,6 +147,7 @@ async function reload() {
   loading = false; render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   void loadOpenrouter();
+  void loadKimi();
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -703,7 +707,7 @@ function renderAccounts(main: HTMLElement) {
     const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
     const empty = emptyState(t('Start with one account'), backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, projects and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, projects and settings back, or add an account.' }, { date: date(backup.created_at) }) : t('Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.'));
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
-    empty.append(addMenu()); main.append(empty); return;
+    empty.append(addMenu()); main.append(empty, kimiSection()); return;
   }
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each pool: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
@@ -726,6 +730,98 @@ function renderAccounts(main: HTMLElement) {
     main.append(section);
   }
   main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
+  main.append(kimiSection());
+}
+async function loadKimi() {
+  try { kimi = await adapter.kimiAccounts(); kimiError = ''; } catch (error) { kimiError = safeError(error); }
+  backgroundRender();
+}
+/** The state line of a Kimi Code home: its plan windows, or why there are none. */
+function kimiStatusLine(status: KimiStatus) {
+  if (status.error) return el('span', status.signed_in ? 'usage-sub is-stale' : 'usage-error', t(status.error));
+  const line = kimiWindowsLine(status.windows ?? [], Date.now() / 1000);
+  return el('span', 'usage-sub', line || t('Usage unknown'));
+}
+/** SB-81: Kimi Code subscription accounts, each signed in by the official kimi in its own folder. */
+function kimiSection() {
+  const section = el('section', 'account-group'); section.setAttribute('aria-labelledby', 'kimi-heading');
+  const heading = el('div', 'group-heading'); const title = el('h2', '', 'Kimi Code'); title.id = 'kimi-heading';
+  heading.append(title);
+  if (kimi) heading.append(el('span', 'count', plural(kimi.accounts.length, { one: '{n} account', other: '{n} accounts' })));
+  section.append(heading);
+  if (kimiError && !kimi) { section.append(el('p', 'usage-error', t(kimiError)), button(t('Retry'), () => void loadKimi(), 'text-button', 'kimi-retry')); return section; }
+  if (!kimi) { section.append(el('p', 'form-note', t('Reading Kimi Code accounts…'))); return section; }
+  const current = el('p', 'form-note');
+  if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), ' · ', kimiStatusLine(kimi.current));
+  else if (kimi.current) { current.append(t('Ordinary kimi: '), kimiStatusLine(kimi.current)); }
+  else current.append(kimi.installed ? t('Ordinary kimi: not signed in.') : t('Kimi Code is not installed. Install it from kimi.com/code, then add an account.'));
+  section.append(current);
+  const list = el('div', 'account-list'); list.setAttribute('role', 'list');
+  for (const { account, status } of kimi.accounts) {
+    const row = el('div', 'kimi-row'); row.setAttribute('role', 'listitem');
+    const name = el('div', 'kimi-name'); name.append(el('strong', '', account.label), el('span', 'muted-text', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
+    const actions = el('div', 'management-actions');
+    const refused = !status.signed_in;
+    if (refused) actions.append(button(t('Sign in again'), () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-relogin-${account.id}`), 'button', `kimi-relogin-${account.id}`));
+    else actions.append(button(t('Launch'), () => kimiLaunchDialog(account.id, account.label), 'button primary', `kimi-launch-${account.id}`));
+    actions.append(button(t('Remove'), () => kimiRemoveDialog(account.id, account.label), 'button quiet', `kimi-remove-${account.id}`));
+    row.append(name, kimiStatusLine(status), actions);
+    list.append(row);
+  }
+  if (kimi.accounts.length) section.append(list);
+  const footer = el('div', 'management-actions');
+  if (kimi.installed) footer.append(button(t('Add Kimi Code account'), () => kimiAddDialog(), kimi.accounts.length ? 'button' : 'button primary', 'kimi-add'));
+  footer.append(button(t('Refresh'), () => { kimi = null; render(); void loadKimi(); }, 'button quiet', 'kimi-refresh'));
+  section.append(footer, el('p', 'surface-note', t('Each Kimi Code account signs in with the official kimi in its own folder and stays there; Switchboard never copies or renews its login. Usage comes from Kimi at each refresh.')));
+  return section;
+}
+/** Signs a new account in with `kimi login` in Terminal and saves it once Terminal reports success. */
+function kimiAddDialog() {
+  const context = openDialog(t('Add a Kimi Code account'), t('Terminal opens the official kimi login: confirm the code in your browser, signed in to the account to add. Switchboard saves it when Terminal says you are logged in.'));
+  const label = input(''); label.required = false; label.placeholder = t('Kimi\'s nickname for the account');
+  const region = select([['mainland-cn', t('kimi.com (mainland China)')], ['global', t('kimi.ai (global)')]]);
+  const grid = el('div', 'form-grid'); grid.append(field(t('Label'), label, t('Optional.')), field(t('Service'), region, t('Where the membership was bought.')));
+  context.body.append(grid);
+  const startButton = submit(t('Open sign-in')); context.actions.append(startButton);
+  let loginId: string | null = null; let finishing = false;
+  const poll = window.setInterval(() => {
+    if (!loginId || finishing) return;
+    void adapter.kimiLoginStatus(loginId).then(({ state }) => {
+      if (state === 'ended') { window.clearInterval(poll); context.error.textContent = t('This Kimi Code sign-in is no longer waiting. Start it again.'); return; }
+      if (state !== 'complete') return;
+      finishing = true; window.clearInterval(poll);
+      void dialogSave(context, async () => { const { account } = await adapter.kimiLoginFinish(loginId!); loginId = null; await loadKimi(); return account; }, t('Kimi Code account saved.'));
+    }, () => { /* the next look retries */ });
+  }, 1500);
+  context.beforeCancel(async () => { window.clearInterval(poll); if (loginId) await adapter.kimiLoginCancel(loginId); });
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault(); if (loginId) return;
+    context.error.textContent = ''; context.setBusy(true);
+    adapter.kimiLoginBegin(label.value.trim(), region.value as KimiRegion).then(({ login_id }) => {
+      loginId = login_id; context.setBusy(false); startButton.disabled = true;
+      context.body.append(el('p', 'form-note', t('Waiting for the sign-in in Terminal…')));
+    }, (error) => { context.setBusy(false); context.error.textContent = t(safeError(error)); });
+  });
+}
+function kimiLaunchDialog(id: string, accountLabel: string) {
+  const context = openDialog(t('Launch {label}', { label: accountLabel }), t('Starts the official kimi on this account in Terminal, in the folder you choose.'));
+  const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
+  context.body.append(field(t('Launch in folder'), dir));
+  context.actions.append(submit(t('Launch')));
+  dir.addEventListener('input', () => dir.setCustomValidity(''));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault(); const value = dir.value.trim();
+    if (!isAbsoluteProjectPath(value, runtime?.platform)) { dir.setCustomValidity(t('Enter an absolute project directory, for example {example}.', { example: projectPathExample(runtime?.platform) })); dir.reportValidity(); return; }
+    lastWorkingDirectory = value;
+    void dialogSave(context, () => adapter.kimiLaunch(id, value), t('Terminal launch requested for {agent}.', { agent: accountLabel }));
+  });
+  dir.focus();
+}
+function kimiRemoveDialog(id: string, accountLabel: string) {
+  const context = openDialog(t('Remove {label}?', { label: accountLabel }), t('Switchboard forgets the account and deletes its login folder. The Kimi membership itself is not touched; sign in again to add it back.'));
+  const confirm = submit(t('Remove account')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.kimiRemove(id); await loadKimi(); }, t('Kimi Code account removed.')); });
+  context.actions.querySelector('button')?.focus();
 }
 function accountRow(account: Account) {
   const current = currentMatch(account); const active = selected(account); const signIn = signInRequired(account);
