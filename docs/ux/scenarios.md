@@ -56,6 +56,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-046 | Launch an agent on the OpenRouter key | draft |
 | SCN-047 | Keep several Kimi Code subscription accounts | draft |
 | SCN-048 | See and change Hermes's model and provider | draft |
+| SCN-049 | See the provider terms notice | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -992,3 +993,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `only_four_non_secret_keys_survive_the_read`, `provider_and_model_shapes_are_checked_before_hermes_runs`, `a_change_runs_hermes_config_set_provider_first_then_reads_back` (a stand-in `hermes` records the calls), the MCP handshake listing `switchboard_hermes_status` and `switchboard_hermes_set`. Hermes clearing the old endpoint was measured on a scratch `HERMES_HOME`.
 **Product:** unobserved
 **Traces:** SB-80, XA-02
+
+## SCN-049 — See the provider terms notice
+
+**Persona:** P-01
+**Goal:** Know, before and while adding accounts, that Switchboard must be used within the providers' terms and that the person answers for their own accounts.
+**Preconditions:** none; first start in this app's window storage for the banner.
+**Entry point:** Accounts (banner, from the first start until dismissed) · About → *Provider terms* (always).
+**Steps:**
+1. Open the app for the first time → Accounts shows, above everything else on the screen, including the empty “Start with one account” state: “Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can get your account blocked. You are responsible for how you use your accounts.”
+2. *Dismiss* → the banner closes, focus returns to the page title, and the choice is saved; later starts do not show it on Accounts.
+3. Open About → the *Provider terms* panel shows the same text, dismissed or not.
+**Alt paths:** a window store that refuses to save → the banner closes for this run and shows again next start rather than never; Russian → «Пользуйтесь Switchboard в соответствии с правилами Anthropic и OpenAI. Нарушение правил провайдера может привести к блокировке аккаунта. Ответственность за использование аккаунтов несёте вы.»
+**Expected result:** the notice is in sight on first run and while the first account is added, can be dismissed once, and stays readable in About; nothing else in the product repeats it.
+**UI elements:** the banner on Accounts (text, *Dismiss*), the About panel *Provider terms*.
+**States covered:** first start, dismissed, dismissal not saved, About.
+**Errors & recovery:** none; storage failure only means the banner shows again.
+**Status:** draft
+**Meaning:** operator decision 2026-10-08: a plain notice, no legal essay, no mention elsewhere.
+**Coverage:** `scripts/test-ui-logic.mjs` (where the notice shows, the dismissal remembered across starts and a refusing store, the text in English and Russian, the wiring in `renderAccounts` and `renderAbout`); browser demo 2026-10-08: banner on Accounts, *Dismiss* stores `switchboard.terms-notice` and survives a reload, About panel present, Russian text after switching the language.
+**Product:** unobserved
+**Traces:** SCN-001, SCN-035

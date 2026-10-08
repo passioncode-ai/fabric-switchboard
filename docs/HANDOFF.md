@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-08 — Provider terms notice (SCN-049)
+
+Operator decision 2026-10-08: a plain notice that Switchboard is used within the terms of Anthropic
+and OpenAI, that breaking them can get the account blocked, and that each person is responsible for
+their accounts. Accounts shows it as a dismissible banner from the first start (it is in sight while
+the first account is added); the dismissal is stored as `switchboard.terms-notice`; About →
+*Provider terms* shows it always. EN and RU through the locale catalog; README (EN, RU) carries the
+same paragraph under *Using it*. Decisions live in `src/ui-logic.ts` (`termsNoticeOn`,
+`termsNoticeDismissed`, `dismissTermsNotice`) and are covered by `scripts/test-ui-logic.mjs`;
+browser demo checked in both languages. `./scripts/check.sh` exit 0. Not in a release yet.
+
+**Exact next task:** include it in the next operator-approved release; the 0.6.14 entry's next
+tasks below are unchanged.
+
+---
+
 ## 2026-10-08 — 0.6.14 published; GitHub and wiki refresh
 
 The operator requested current downloads, refreshed README/wiki/GitHub presentation and cleanup.

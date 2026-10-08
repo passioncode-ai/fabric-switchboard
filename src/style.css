@@ -300,3 +300,4 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .kimi-name { display: grid; gap: 2px; min-width: 0; }
 .kimi-row .usage-sub, .kimi-row .usage-error { overflow-wrap: anywhere; }
 @media (max-width: 720px) { .kimi-row { grid-template-columns: 1fr; } }
+.terms-notice { background: var(--panel-2); border: 1px solid var(--border); }

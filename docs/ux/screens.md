@@ -32,3 +32,6 @@ Scenarios: SCN-003, SCN-018…SCN-020, SCN-022, SCN-028, SCN-029. Accounts are g
 
 ### Quota order and countdown — 2026-10-04
 SCN-021, SCN-032. Within provider/pool groups, fresh remaining quota precedes known waits, unknown data, sign-in and disabled rows. The quota cell is two lines (2026-10-05): meter, share used and check age; then the countdown and date of the next reset or end of wait, or the failed/stale/sign-in text. A coloured status mark on the provider icon carries the card state; the screen-reader label states it in words. Expanded windows show individual waits. Retry holds have their own label. Existing token/component system; no animation. Pause/resume stops automatic timer text updates; ticks only update text, without changing focus. [Verification](../evidence/quota-order-2026-10-04.md).
+
+### Provider terms notice — 2026-10-08
+SCN-049. Accounts opens with a neutral banner (panel-2 background, border, the text and a *Dismiss* text button) above the project-rules strip, in every state Accounts renders, including the empty first-account state; it stays until dismissed (`switchboard.terms-notice` in window storage). About carries a *Provider terms* panel with the same text, right after *A local account workbench*. Existing tokens and components; no animation. Checked in the browser demo 2026-10-08 in English and Russian.

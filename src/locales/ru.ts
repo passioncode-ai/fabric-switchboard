@@ -908,4 +908,6 @@ export const RU: Record<string, string> = {
   "The provider's model id; for OpenRouter, vendor/model as on openrouter.ai/models.": "Идентификатор модели у провайдера; для OpenRouter — vendor/model, как на openrouter.ai/models.",
   "Save": "Сохранить",
   "Hermes settings saved.": "Настройки Hermes сохранены.",
+  "Provider terms": "Правила провайдеров",
+  "Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can get your account blocked. You are responsible for how you use your accounts.": "Пользуйтесь Switchboard в соответствии с правилами Anthropic и OpenAI. Нарушение правил провайдера может привести к блокировке аккаунта. Ответственность за использование аккаунтов несёте вы.",
 };

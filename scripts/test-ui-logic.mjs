@@ -411,4 +411,43 @@ check(() => {
   i18n.setLocale('en');
 });
 
+// SCN-049: the provider terms notice — a banner on Accounts from the first start (so it is in sight
+// while the first account is added) until dismissed, remembered across starts; always in About.
+check(() => {
+  const memory = () => { const data = new Map(); return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => { data.set(k, String(v)); } }; };
+  const store = memory();
+  assert.equal(logic.termsNoticeDismissed(store), false, 'first start: not dismissed');
+  assert.equal(logic.termsNoticeOn('accounts', logic.termsNoticeDismissed(store)), 'banner', 'first start: banner on Accounts');
+  assert.equal(logic.termsNoticeOn('about', logic.termsNoticeDismissed(store)), 'panel');
+  for (const page of ['projects', 'agents', 'activity']) assert.equal(logic.termsNoticeOn(page, false), null, `${page} never shows it`);
+  assert.equal(logic.dismissTermsNotice(store), true);
+  assert.equal(store.getItem(logic.TERMS_NOTICE_KEY), '1');
+  // The next start reads the same store: the banner stays dismissed, About keeps the panel.
+  assert.equal(logic.termsNoticeDismissed(store), true, 'dismissal remembered');
+  assert.equal(logic.termsNoticeOn('accounts', true), null);
+  assert.equal(logic.termsNoticeOn('about', true), 'panel', 'About shows it permanently');
+  // A store that refuses counts as not dismissed: the banner returns next start rather than never.
+  const refusing = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } };
+  assert.equal(logic.termsNoticeDismissed(refusing), false);
+  assert.equal(logic.dismissTermsNotice(refusing), false);
+  assert.equal(logic.termsNoticeDismissed(null), false);
+  assert.equal(logic.dismissTermsNotice(null), false);
+});
+check(() => {
+  assert.equal(logic.termsNoticeText(), "Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can get your account blocked. You are responsible for how you use your accounts.");
+  i18n.setLocale('ru');
+  assert.equal(logic.termsNoticeText(), 'Пользуйтесь Switchboard в соответствии с правилами Anthropic и OpenAI. Нарушение правил провайдера может привести к блокировке аккаунта. Ответственность за использование аккаунтов несёте вы.');
+  i18n.setLocale('en');
+});
+// The wiring: Accounts draws the banner first in every state it renders, including the empty
+// first-account state; About draws the panel; the banner's Dismiss remembers the choice.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /function renderAccounts\(main: HTMLElement\) \{\n  termsBanner\(main\);/, 'renderAccounts starts with the banner');
+  assert.match(main, /function renderAbout\(main: HTMLElement\) \{[\s\S]*?main\.append\(section, termsPanel\(\),/, 'About carries the panel');
+  assert.match(main, /termsNoticeOn\(page, termsDismissed\) !== 'banner'/, 'the banner follows termsNoticeOn');
+  assert.match(main, /dismissTermsNotice\(noticeStore\(\)\); termsDismissed = true;/, 'Dismiss stores the choice');
+  assert.match(main, /let termsDismissed = termsNoticeDismissed\(noticeStore\(\)\);/, 'the stored choice is read at start');
+});
+
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
