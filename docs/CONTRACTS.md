@@ -306,6 +306,27 @@ updates](DISTRIBUTION.md#automatic-updates-sb-55).
   Refusal of tampered, unsigned or other-key packages is the updater plugin's minisign check with
   `requireSignedVersion` (DISTRIBUTION → Trust); no test here feeds it a forged package yet.
 
+## Hermes's model and provider (SB-80, 2026-10-08)
+
+Design: [XA-02](packets/agent-keys-and-kimi.md) A-4; facts:
+[research](research/kimi-hermes-openrouter-2026-10-07.md) Part 2. Code:
+`crates/switchboard-runtime/src/hermes.rs`, `Operation::{HermesModel, HermesSetModel {provider?,
+model?}}`, CLI `switchboard agents hermes [status|set --provider --model]`, MCP
+`switchboard_hermes_status` (read) and `switchboard_hermes_set` (write).
+
+- Read: `hermes config get model --json` (15 s deadline, killed and reaped, stdout only, at most
+  64 KiB, no shell). Only `default` (alias `model`), `provider`, `base_url` (scheme, host, port
+  and path — no query or credentials) and `api_mode` are kept; Hermes masks secret-shaped values
+  and Switchboard drops them anyway. An empty home prints `""`: `configured: false`.
+- Change: the one write to another agent's config, only on the person's request, through
+  Hermes's own `hermes config set model.provider <id>` (first — Hermes then clears a `base_url`
+  that belonged to the previous provider, measured on a scratch `HERMES_HOME`) and
+  `model.default <id>`, then the status is read back. Hermes accepts any string, so Switchboard
+  checks the shapes first: a provider `[a-z0-9][a-z0-9._:-]{0,39}`, a model
+  `[A-Za-z0-9][A-Za-z0-9/._:-]{0,119}`. `COMMON_PROVIDERS` is the app's list; any id of the shape
+  is accepted, since Hermes adds providers between releases. A key for the new provider is
+  Hermes's own business; Switchboard never sets one.
+
 ## Kimi Code accounts (SB-81, 2026-10-08)
 
 Design: [XA-02](packets/agent-keys-and-kimi.md) A-5..A-7; facts:
