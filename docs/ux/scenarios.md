@@ -55,6 +55,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-045 | Save one OpenRouter key for agents | draft |
 | SCN-046 | Launch an agent on the OpenRouter key | draft |
 | SCN-047 | Keep several Kimi Code subscription accounts | draft |
+| SCN-048 | See and change Hermes's model and provider | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -971,3 +972,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `finishing_saves_the_account_by_nickname_and_never_the_token` (against a loopback Kimi stand-in, including the ordinary home left byte-for-byte unchanged), `a_token_is_read_only_while_valid_and_a_tombstone_is_signed_out`, `plan_windows_read_ratios_as_numbers_or_strings_and_clamp_them`, `a_sign_in_runs_kimi_login_in_its_own_home_and_a_failed_terminal_leaves_nothing`, `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`, `the_base_is_pinned_and_only_a_loopback_stand_in_overrides_it` (runtime), `kimi_accounts_list_offline_and_refuse_unknown_ids_without_touching_the_ordinary_home` (CLI), `scripts/test-ui-logic.mjs` (the windows line in both languages). A real membership signed in through the real Kimi is operator acceptance.
 **Product:** unobserved
 **Traces:** SB-81, XA-02
+
+## SCN-048 — See and change Hermes's model and provider
+
+**Persona:** P-01
+**Goal:** Know which model and provider the ordinary Hermes runs on, and change them without editing its config by hand.
+**Preconditions:** Hermes Agent installed.
+**Entry point:** Agents → *Hermes model and provider* · `switchboard agents hermes` · MCP `switchboard_hermes_status`.
+**Steps:**
+1. Open Agents → the panel reads “Model: deepseek/deepseek-v4-pro-0813”, “Provider: openrouter” and the endpoint.
+2. *Change*, pick a provider from the list and/or type a model, *Save* → Hermes's own `hermes config set` runs; the panel shows the new values: “Hermes settings saved.”
+**Alt paths:** Hermes not installed → the panel says so and offers nothing; Hermes does not answer → “Hermes did not answer. Run hermes config check, then try again.”; a malformed provider or model → refused before Hermes runs; a home with no model section → “not set”.
+**Expected result:** only the provider and default model change, in Hermes's own config and format; no key is read, shown or set; sessions already running keep theirs.
+**UI elements:** the panel (model, provider, endpoint, *Change*, *Refresh*), the change dialog (provider list, model field).
+**States covered:** reading, read failed (*Retry*), not installed, not configured, configured, Hermes error, saved.
+**Errors & recovery:** every refusal names the fix; a new provider needs its key inside Hermes (the panel says so).
+**Status:** draft
+**Meaning:** Hermes's model and provider visible and changeable from Switchboard (operator request 2026-10-07, XA-02, SB-80).
+**Coverage:** `only_four_non_secret_keys_survive_the_read`, `provider_and_model_shapes_are_checked_before_hermes_runs`, `a_change_runs_hermes_config_set_provider_first_then_reads_back` (a stand-in `hermes` records the calls), the MCP handshake listing `switchboard_hermes_status` and `switchboard_hermes_set`. Hermes clearing the old endpoint was measured on a scratch `HERMES_HOME`.
+**Product:** unobserved
+**Traces:** SB-80, XA-02

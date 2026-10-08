@@ -10,6 +10,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub mod hermes;
 pub mod kimi;
 pub mod launch;
 mod limits;
@@ -232,6 +233,15 @@ pub enum Operation {
         path: PathBuf,
         session: projects::Session,
         global: bool,
+    },
+    /// The ordinary Hermes's model and provider (SB-80), from `hermes config get model --json`.
+    HermesModel,
+    /// Changes Hermes's provider and/or default model with `hermes config set` (person's request).
+    HermesSetModel {
+        #[serde(default)]
+        provider: Option<String>,
+        #[serde(default)]
+        model: Option<String>,
     },
     /// Kimi Code subscription accounts (SB-81) with their plan windows, and the ordinary `kimi`'s
     /// sign-in (shown, never switched).
@@ -483,6 +493,7 @@ impl Runtime {
                 | Operation::AgentKeyStatus { .. }
                 | Operation::AgentKeyValue { .. }
                 | Operation::KimiAccounts
+                | Operation::HermesModel
                 | Operation::KimiLoginStatus { .. }
                 | Operation::Chains { .. }
                 | Operation::LaunchAccount { .. }
@@ -1413,6 +1424,14 @@ async fn execute(
         }
         Operation::AgentKeyValue { service } => {
             Ok(json!({"key": store.agent_key_value(&service)?}))
+        }
+        Operation::HermesModel => tokio::task::spawn_blocking(hermes::status)
+            .await
+            .map_err(|_| hermes::HERMES_FAILED.to_string()),
+        Operation::HermesSetModel { provider, model } => {
+            tokio::task::spawn_blocking(move || hermes::set(provider.as_deref(), model.as_deref()))
+                .await
+                .map_err(|_| hermes::HERMES_FAILED.to_string())?
         }
         Operation::KimiAccounts => kimi::accounts(root, &store, monitor::now()).await,
         Operation::KimiLoginBegin { label, region } => {

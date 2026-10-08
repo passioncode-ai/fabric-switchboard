@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-80 built — Hermes's model and provider (2026-10-08)
+
+Branch `feat/sb-80-hermes-model`: Agents → *Hermes model and provider* reads `hermes config get
+model --json` and changes provider/model through Hermes's own `hermes config set` (ids checked
+first; Hermes accepts any string). CLI `switchboard agents hermes [set]`, MCP
+`switchboard_hermes_status` / `switchboard_hermes_set`. SCN-048, CONTRACTS, CLI.md, CHANGELOG.
+0.6.11 (run 37714019602) still waits for the operator's approval of the `release` environment.
+
+**Exact next task:** when run 37714019602 publishes, verify the set and record it in
+docs/evidence/release-0.5.md; with 0.6.11 installed, save the Observatory-issued key and launch
+Hermes on it (command in the SB-81 entry below). Then SB-72 (spending ceilings).
+
+---
+
 # SB-81 built — Kimi Code subscription accounts; 0.6.11 waits for approval (2026-10-08)
 
 - **0.6.11** (SB-79 both slices, SB-61, SB-68, SB-69, SB-78 remainder): PR #116, tag `v0.6.11`,

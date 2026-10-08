@@ -177,6 +177,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_chain_get",
             "switchboard_chain_set",
             "switchboard_openrouter_status",
+            "switchboard_hermes_status",
+            "switchboard_hermes_set",
             "switchboard_kimi_accounts",
             "switchboard_openrouter_model"
         ]

@@ -187,6 +187,15 @@ The agent id comes from `agents list`. `agents key` prints a local proxy key, no
 credential: the proxy accepts it only for the pool's API-key account, never for a Claude
 subscription. Keep it out of shared configuration files.
 
+### Hermes's model and provider (SB-80)
+
+```sh
+switchboard agents hermes                       # model, provider and endpoint Hermes runs on
+switchboard agents hermes set --provider openrouter --model moonshotai/kimi-k2
+```
+
+`set` runs Hermes's own `hermes config set`; the new provider needs its own key inside Hermes.
+
 ### Kimi Code accounts (SB-81)
 
 Kimi Code subscription accounts, each signed in by the official `kimi` in a folder of its own.

@@ -364,6 +364,23 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         .execute(Operation::RemoveProject { pool })
         .await
 }
+/// Hermes's model and provider (SB-80): read, and changed only on the person's request.
+#[tauri::command]
+async fn hermes_model(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::HermesModel).await
+}
+#[tauri::command]
+async fn hermes_set_model(
+    provider: Option<String>,
+    model: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::HermesSetModel { provider, model })
+        .await
+}
 /// Kimi Code subscription accounts (SB-81): metadata and plan usage, never a token.
 #[tauri::command]
 async fn kimi_accounts(state: State<'_, Slot>) -> Result<Value, String> {
@@ -770,6 +787,8 @@ fn main() {
             openrouter_model,
             openrouter_remove,
             kimi_accounts,
+            hermes_model,
+            hermes_set_model,
             kimi_login_begin,
             kimi_login_status,
             kimi_login_finish,
