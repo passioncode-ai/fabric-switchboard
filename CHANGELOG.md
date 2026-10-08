@@ -15,6 +15,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   usage, launches `kimi` on it in a folder, and shows the ordinary `kimi`'s sign-in. Each login
   stays in its own folder; Switchboard never copies or renews it. CLI `switchboard kimi`, MCP
   `switchboard_kimi_accounts`.
+- Hermes's model and provider on the Agents screen, changed on request through Hermes's own
+  `hermes config set` (SB-80). CLI `switchboard agents hermes [set --provider --model]`, MCP
+  `switchboard_hermes_status` / `switchboard_hermes_set`.
 
 ## 0.6.11 — 2026-10-08
 

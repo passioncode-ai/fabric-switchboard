@@ -8,7 +8,7 @@ import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLang
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -71,6 +71,9 @@ let agentSetupError = false;
 /** The OpenRouter key for agents (SB-79); null while it is read. */
 let openrouter: OpenrouterStatus | null = null;
 let openrouterError = '';
+/** The ordinary Hermes's model and provider (SB-80); null while it is read. */
+let hermes: HermesModel | null = null;
+let hermesError = '';
 /** Kimi Code subscription accounts (SB-81); null while they are read. */
 let kimi: KimiAccounts | null = null;
 let kimiError = '';
@@ -148,6 +151,7 @@ async function reload() {
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   void loadOpenrouter();
   void loadKimi();
+  void loadHermes();
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -383,7 +387,47 @@ function renderAgents(main: HTMLElement) {
     if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
     setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
   }
-  main.append(setup, openrouterPanel(), otherAgents());
+  main.append(setup, openrouterPanel(), hermesPanel(), otherAgents());
+}
+async function loadHermes() {
+  try { hermes = await adapter.hermesModel(); hermesError = ''; } catch (error) { hermesError = safeError(error); }
+  backgroundRender();
+}
+/** SB-80: the model and provider the ordinary Hermes runs on, changed through hermes config set. */
+function hermesPanel() {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'hermes-heading');
+  const heading = el('h2', '', t('Hermes model and provider')); heading.id = 'hermes-heading'; section.append(heading);
+  if (hermesError && !hermes) { section.append(el('p', 'usage-error', t(hermesError)), button(t('Retry'), () => void loadHermes(), 'text-button', 'hermes-retry')); return section; }
+  if (!hermes) { section.append(el('p', 'form-note', t('Reading Hermes settings…'))); return section; }
+  if (!hermes.installed) { section.append(el('p', 'form-note', t('Hermes is not installed on this computer.'))); return section; }
+  if (hermes.error) section.append(el('p', 'usage-error', t(hermes.error)));
+  else {
+    const facts = el('div', 'openrouter-facts');
+    facts.append(el('p', '', t('Model: {model}', { model: hermes.model ?? t('not set') })), el('p', '', t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })));
+    if (hermes.base_url) facts.append(el('p', 'form-note', hermes.base_url));
+    section.append(facts);
+  }
+  const actions = el('div', 'management-actions');
+  actions.append(button(t('Change'), () => hermesDialog(), 'button', 'hermes-change'), button(t('Refresh'), () => { hermes = null; render(); void loadHermes(); }, 'button quiet', 'hermes-refresh'));
+  section.append(actions, el('p', 'form-note', t('Switchboard changes these only when you ask, through Hermes\'s own hermes config set. A new provider needs its own key in Hermes.')));
+  return section;
+}
+function hermesDialog() {
+  const current = hermes!;
+  const context = openDialog(t('Change Hermes\'s model or provider'), t('Hermes uses them from its next start. Sessions already running keep theirs.'));
+  const options = [...new Set([current.provider, ...current.providers].filter((p): p is string => !!p))];
+  const provider = select(options.map((p) => [p, p])); if (current.provider) provider.value = current.provider;
+  const model = input(current.model ?? ''); model.placeholder = 'moonshotai/kimi-k2';
+  const grid = el('div', 'form-grid'); grid.append(field(t('Provider'), provider), field(t('Model'), model, t('The provider\'s model id; for OpenRouter, vendor/model as on openrouter.ai/models.')));
+  context.body.append(grid);
+  context.actions.append(submit(t('Save')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const nextProvider = provider.value !== current.provider ? provider.value : null;
+    const nextModel = model.value.trim() !== (current.model ?? '') ? model.value.trim() : null;
+    void dialogSave(context, async () => { hermes = await adapter.hermesSetModel(nextProvider, nextModel); }, t('Hermes settings saved.'));
+  });
+  model.focus();
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
 async function loadOpenrouter() {

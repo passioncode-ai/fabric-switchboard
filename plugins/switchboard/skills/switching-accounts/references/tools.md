@@ -157,6 +157,21 @@ subscription sign-in. Returns `{chain}` (null when cleared).
 key's value is never returned — an agent that runs on it gets it from its launch environment,
 not from this server.
 
+### `switchboard_hermes_status` — (read)
+
+`{installed, configured, model, provider, base_url, api_mode, providers, error}` for the
+operator's ordinary Hermes Agent, read with `hermes config get model --json`. Only those four
+keys are kept (`base_url` without query or credentials); `providers` lists the common provider
+ids the app offers. `error` names a Hermes that did not answer.
+
+### `switchboard_hermes_set` — `provider?`, `model?` (write)
+
+Only when the operator asks. Runs Hermes's own `hermes config set model.provider` (first) and
+`model.default`, then returns the status. Ids are checked before Hermes runs: a provider is
+lowercase letters, digits and `- . _ :`; a model is letters, digits and `/ . _ : -`. Changing the
+provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs
+its own key inside Hermes, which this server never sets.
+
 ### `switchboard_kimi_accounts` — (read)
 
 `{accounts: [{account, status}], current, installed}`. `account`: `id`, `label`, `region`

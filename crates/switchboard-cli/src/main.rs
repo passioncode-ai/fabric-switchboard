@@ -435,6 +435,11 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: OpenrouterCommand,
     },
+    /// Hermes's model and provider (its own config); `set` changes them with `hermes config set`.
+    Hermes {
+        #[command(subcommand)]
+        command: Option<HermesCommand>,
+    },
     /// Start an agent in a folder in Terminal: on the pool's API-key account through the proxy,
     /// or with `--openrouter` on the saved OpenRouter key.
     Launch {
@@ -452,6 +457,20 @@ enum AgentsCommand {
         /// The OpenRouter model for this launch, such as `moonshotai/kimi-k2`; default: the key's
         /// model.
         #[arg(long, requires = "openrouter")]
+        model: Option<String>,
+    },
+}
+#[derive(Subcommand)]
+enum HermesCommand {
+    /// The model and provider the ordinary Hermes runs on (the default).
+    Status,
+    /// Change the provider and/or the default model, through Hermes's own `hermes config set`.
+    Set {
+        /// A Hermes provider id, for example `openrouter`, `anthropic`, `nous`, `kimi-coding`.
+        #[arg(long)]
+        provider: Option<String>,
+        /// The default model, for example `moonshotai/kimi-k2`.
+        #[arg(long)]
         model: Option<String>,
     },
 }
@@ -871,6 +890,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     service: "openrouter".into(),
                 },
             },
+            AgentsCommand::Hermes {
+                command: None | Some(HermesCommand::Status),
+            } => Operation::HermesModel,
+            AgentsCommand::Hermes {
+                command: Some(HermesCommand::Set { provider, model }),
+            } => Operation::HermesSetModel {
+                provider: provider.clone(),
+                model: model.clone(),
+            },
             AgentsCommand::Launch {
                 agent,
                 pool,
@@ -1258,6 +1286,25 @@ fn print_result(value: &Value, cli: &Cli) {
                     rule["expires_at"]
                         .as_str()
                         .map(|t| format!(" · until {t}"))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        Command::Agents {
+            command: AgentsCommand::Hermes { .. },
+        } => {
+            if value["installed"] != true {
+                println!("Hermes is not installed.");
+            } else if let Some(error) = value["error"].as_str() {
+                println!("{error}");
+            } else {
+                println!(
+                    "Hermes · model {} · provider {}{}",
+                    value["model"].as_str().unwrap_or("not set"),
+                    value["provider"].as_str().unwrap_or("not set"),
+                    value["base_url"]
+                        .as_str()
+                        .map(|b| format!(" · {b}"))
                         .unwrap_or_default()
                 );
             }

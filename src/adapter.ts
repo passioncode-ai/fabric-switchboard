@@ -43,6 +43,8 @@ export const nativeAdapter: Adapter = {
   openrouterSave: (key, model) => invoke('openrouter_save', { key, model }),
   openrouterModel: (model) => invoke('openrouter_model', { model }),
   openrouterRemove: () => invoke('openrouter_remove'),
+  hermesModel: () => readWithDeadline(invoke('hermes_model'), 20_000),
+  hermesSetModel: (provider, model) => invoke('hermes_set_model', { provider, model }),
   // Not under the read deadline: each account asks Kimi itself (8 s timeout in the backend).
   kimiAccounts: () => invoke('kimi_accounts'),
   kimiLoginBegin: (label, region) => invoke('kimi_login_begin', { label, region }),
@@ -66,6 +68,12 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // Hermes's model and provider (SB-80): each names the fix.
+  'Hermes is not installed. Install it from hermes-agent.nousresearch.com, then try again.',
+  'Hermes did not answer. Run hermes config check, then try again.',
+  'A Hermes provider is an id such as openrouter, anthropic or nous (lowercase letters, digits and - . _ :).',
+  'A model is an id such as moonshotai/kimi-k2 or claude-sonnet-4.5 (letters, digits and / . _ : -).',
+  'Name a provider, a model or both.',
   // Kimi Code accounts (SB-81): each names the fix.
   'This Kimi Code account is already saved.',
   'This sign-in is already saved as an account.',
