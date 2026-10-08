@@ -1,5 +1,5 @@
 //! Private, capability-authenticated CLI control channel, separate from inference.
-use crate::{Operation, Runtime};
+use crate::{oplog, Operation, Runtime};
 use axum::{
     body::{to_bytes, Body, Bytes},
     extract::State,
@@ -172,10 +172,54 @@ async fn hello(State(state): State<Control>, request: Request<Body>) -> Response
     if nonce.len() != 64 || !nonce.bytes().all(|b| b.is_ascii_hexdigit()) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    Json(Hello {
+    let mut response = Json(Hello {
         proof: proof(&state.token, nonce),
     })
-    .into_response()
+    .into_response();
+    // In a header, not the body: a client of an earlier version refuses unknown body fields.
+    response.headers_mut().insert(
+        VERSION_HEADER,
+        axum::http::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+    );
+    response
+}
+/// The owner's version, sent with every identity answer so a client can tell a version skew
+/// (an update installed while an earlier owner still runs) from a refusal.
+const VERSION_HEADER: &str = "x-switchboard-version";
+pub const CONTROL_OWNER_OLDER: &str = "The running Switchboard is an earlier version than this command and does not know it. Restart Switchboard to finish its update (Restart to update in its menu, or quit and open it), then try again. No offline operation was attempted.";
+pub const CONTROL_OWNER_NEWER: &str = "This switchboard command is an earlier version than the running Switchboard. Use the command bundled with the app (Agents → Link switchboard), then try again. No offline operation was attempted.";
+pub const CONTROL_BUSY: &str =
+    "Switchboard is busy with other requests. Try again in a moment. No operation was attempted.";
+/// Every refusal is logged by code (LC-12): which check refused, never the request.
+fn refuse(status: StatusCode, reason: &'static str) -> Response {
+    oplog::event(
+        "control_refused",
+        &[
+            ("status", oplog::Field::Number(i64::from(status.as_u16()))),
+            ("reason", oplog::Field::Code(reason)),
+        ],
+    );
+    status.into_response()
+}
+/// `major.minor.patch` of a version string; anything else is not compared.
+fn version_triple(text: &str) -> Option<(u64, u64, u64)> {
+    let core = text.split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|p| p.parse::<u64>().ok());
+    let triple = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(triple)
+}
+/// The message for a request the owner refused as malformed (400): a version skew when the two
+/// versions differ, else the plain refusal. An owner that sends no version predates 0.6.11.
+fn malformed_refusal(owner: Option<&str>) -> &'static str {
+    let mine = version_triple(env!("CARGO_PKG_VERSION"));
+    let Some(owner) = owner else {
+        return CONTROL_OWNER_OLDER;
+    };
+    match (version_triple(owner), mine) {
+        (Some(theirs), Some(mine)) if theirs < mine => CONTROL_OWNER_OLDER,
+        (Some(theirs), Some(mine)) if theirs > mine => CONTROL_OWNER_NEWER,
+        _ => "Control request refused. No offline operation was attempted.",
+    }
 }
 async fn handle(State(state): State<Control>, request: Request<Body>) -> Response {
     let headers = request.headers();
@@ -186,7 +230,7 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         || headers.get("host").and_then(|h| h.to_str().ok())
             != Some(state.address.to_string().as_str())
     {
-        return StatusCode::FORBIDDEN.into_response();
+        return refuse(StatusCode::FORBIDDEN, "unsafe_request");
     }
     let expected = format!("Bearer {}", state.token);
     let authorized = headers.get_all("authorization").iter().count() == 1
@@ -194,10 +238,10 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
             .get("authorization")
             .is_some_and(|h| bool::from(h.as_bytes().ct_eq(expected.as_bytes())));
     if !authorized {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return refuse(StatusCode::UNAUTHORIZED, "unauthorized");
     }
     let Ok(_permit) = state.slots.clone().try_acquire_owned() else {
-        return StatusCode::TOO_MANY_REQUESTS.into_response();
+        return refuse(StatusCode::TOO_MANY_REQUESTS, "busy");
     };
     let bytes = match tokio::time::timeout(
         Duration::from_secs(10),
@@ -206,12 +250,13 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
     .await
     {
         Ok(Ok(bytes)) => bytes,
-        Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
-        Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
+        Ok(Err(_)) => return refuse(StatusCode::PAYLOAD_TOO_LARGE, "too_large"),
+        Err(_) => return refuse(StatusCode::REQUEST_TIMEOUT, "body_timeout"),
     };
     let operation = match serde_json::from_slice::<Operation>(&bytes) {
         Ok(op) => op,
-        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        // Most often a client newer than this owner (an update installed, not yet restarted).
+        Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
     let reply = match state.runtime.execute(operation).await {
         Ok(value) => Reply::Ok { value },
@@ -318,6 +363,12 @@ async fn request_on_connection(
     if !hello.status().is_success() {
         return Err("Control authentication refused. No offline operation was attempted.".into());
     }
+    let owner_version = hello
+        .headers()
+        .get(VERSION_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.len() <= 32)
+        .map(str::to_owned);
     if hello
         .headers()
         .get("connection")
@@ -361,6 +412,12 @@ async fn request_on_connection(
         .map_err(|_| "Control request did not complete. Check state before retrying a mutation.")?;
     if response.status() == StatusCode::UNAUTHORIZED || response.status() == StatusCode::FORBIDDEN {
         return Err("Control authentication refused. No offline operation was attempted.".into());
+    }
+    if response.status() == StatusCode::BAD_REQUEST {
+        return Err(malformed_refusal(owner_version.as_deref()).into());
+    }
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        return Err(CONTROL_BUSY.into());
     }
     if !response.status().is_success() {
         return Err("Control request refused. No offline operation was attempted.".into());
@@ -484,6 +541,38 @@ mod tests {
                 .status(),
             StatusCode::PAYLOAD_TOO_LARGE
         );
+    }
+    #[test]
+    fn a_malformed_request_is_named_by_which_side_is_older() {
+        assert_eq!(version_triple("0.6.10"), Some((0, 6, 10)));
+        assert_eq!(version_triple("0.6.11-rc.1"), Some((0, 6, 11)));
+        assert_eq!(version_triple("0.6"), None);
+        assert_eq!(version_triple("1.2.3.4"), None);
+        // An owner that sends no version predates the header, so it is the older one.
+        assert_eq!(malformed_refusal(None), CONTROL_OWNER_OLDER);
+        assert_eq!(malformed_refusal(Some("0.6.8")), CONTROL_OWNER_OLDER);
+        assert_eq!(malformed_refusal(Some("999.0.0")), CONTROL_OWNER_NEWER);
+        assert!(malformed_refusal(Some(env!("CARGO_PKG_VERSION")))
+            .starts_with("Control request refused"));
+        assert!(malformed_refusal(Some("garbage")).starts_with("Control request refused"));
+    }
+    #[tokio::test]
+    async fn the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew() {
+        let (_tmp, _owner, desc) = fixture().await;
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let hello = client
+            .get(format!("http://{}/v1/hello", desc.address))
+            .header("x-switchboard-challenge", "a".repeat(64))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            hello.headers().get(VERSION_HEADER).unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+        // The body keeps its one field, so a client of an earlier version still reads it.
+        let body: serde_json::Value = hello.json().await.unwrap();
+        assert_eq!(body.as_object().unwrap().len(), 1);
     }
     #[tokio::test]
     async fn tampered_capability_does_not_fallback_to_offline() {

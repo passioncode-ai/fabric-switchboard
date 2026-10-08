@@ -8,6 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Fixes
+
+- After an update is installed while an earlier Switchboard still runs, a `switchboard` command it
+  does not know (for example `launch --in-place`) now says to restart Switchboard to finish the
+  update, instead of “Control request refused”. The running Switchboard names its version to the
+  command, and every refused control request is logged with its reason.
+- `switchboard uninstall` also removes the Kimi Code login folders (`kimi`).
+
 ### Added
 
 - Kimi Code subscription accounts (SB-81): *Accounts → Kimi Code* signs an account in with the
