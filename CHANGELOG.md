@@ -6,29 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.13 — 2026-10-08
+## 0.6.14 — 2026-10-08
 
 Kimi Code accounts, Hermes model settings and a shared OpenRouter key for supported agents.
 This release also restores Claude account activation when Claude Code leaves only MCP sign-ins
 in its Keychain entry, and explains when a running Switchboard needs a restart after an update.
-It includes the changes prepared for 0.6.11 and 0.6.12, which were superseded before publication.
+It includes the changes prepared for 0.6.11, 0.6.12 and 0.6.13, which were superseded before publication.
 
 **Windows:** windows_authenticode: NOT_SIGNED. Built natively; the installer is not yet
 Authenticode-signed, so SmartScreen may warn.
-
-
-### Fixes
-
-- The OpenRouter CLI test provides its own synthetic Hermes executable, so a clean Windows build no longer depends on an installed third-party agent.
-- Update the build-time `source-map-js` dependency to 1.2.2, fixing GHSA-68fv-2mgg-jv7q.
-- Switching to a saved Claude account works when Claude Code has left only shared MCP or
-  plugin sign-ins in its Keychain entry. Those sign-ins are preserved. An unrecognized or
-  malformed entry is still refused without changing it.
-- After an update is installed while an earlier Switchboard still runs, a `switchboard` command it
-  does not know (for example `launch --in-place`) now says to restart Switchboard to finish the
-  update, instead of “Control request refused”. The running Switchboard names its version to the
-  command, and every refused control request is logged with its reason.
-- `switchboard uninstall` also removes the Kimi Code login folders (`kimi`).
 
 ### Added
 
@@ -40,9 +26,6 @@ Authenticode-signed, so SmartScreen may warn.
 - Hermes's model and provider on the Agents screen, changed on request through Hermes's own
   `hermes config set` (SB-80). CLI `switchboard agents hermes [set --provider --model]`, MCP
   `switchboard_hermes_status` / `switchboard_hermes_set`.
-
-### Also included from the unpublished 0.6.11 candidate
-
 - One OpenRouter key for agents, saved once: `switchboard agents openrouter set --key-stdin` (the
   key is piped on stdin, never an argument) keeps it in the OS vault; `status` shows what the key
   may still spend, asked of OpenRouter itself; `model` changes the model agents start on;
@@ -59,6 +42,14 @@ Authenticode-signed, so SmartScreen may warn.
 
 ### Fixes
 
+- Switching to a saved Claude account works when Claude Code has left only shared MCP or
+  plugin sign-ins in its Keychain entry. Those sign-ins are preserved. An unrecognized or
+  malformed entry is still refused without changing it.
+- After an update is installed while an earlier Switchboard still runs, a `switchboard` command it
+  does not know (for example `launch --in-place`) now says to restart Switchboard to finish the
+  update, instead of “Control request refused”. The running Switchboard names its version to the
+  command, and every refused control request is logged with its reason.
+- `switchboard uninstall` also removes the Kimi Code login folders (`kimi`).
 - `switchboard --data-dir <folder> backup list` no longer lists the real backups, and
   `backup restore` there refuses instead of loading the real accounts into the scratch store
   (SB-61).
@@ -81,6 +72,12 @@ Authenticode-signed, so SmartScreen may warn.
   which was refused after saving (SB-69).
 - A failed read of the Projects or Activity screen is titled for that screen, not “Unable to
   load accounts” (SB-69).
+
+### Build maintenance
+
+- Native config-reader tests create user-owned files on Windows, including elevated CI, while retaining the strict production ownership check.
+- The OpenRouter CLI test provides its own synthetic Hermes executable, so a clean Windows build no longer depends on an installed third-party agent.
+- Update the build-time `source-map-js` dependency to 1.2.2, fixing GHSA-68fv-2mgg-jv7q.
 
 ## 0.6.10 — 2026-10-07
 

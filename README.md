@@ -12,7 +12,7 @@ A desktop app, CLI and MCP server for macOS and Windows, built by
 [Installation](docs/INSTALL.md) · [Release notes](CHANGELOG.md) ·
 [Product page](https://passioncode.ai/switchboard/)
 
-![Fabric Switchboard 0.6.12 Accounts screen with current sign-ins, quota and separate account pools](docs/evidence/screenshots/accounts-0.6.12.png)
+![Fabric Switchboard 0.6.13 Accounts screen with current sign-ins, quota and separate account pools](docs/evidence/screenshots/accounts-0.6.13.png)
 
 *Current interface, shown with synthetic demo accounts. [Screenshot provenance](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
 
@@ -35,9 +35,9 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 ## Release status
 
 **Latest published: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10).**
-This branch prepares **0.6.13**, including Kimi, Hermes and OpenRouter additions plus the
+This branch prepares **0.6.14**, including Kimi, Hermes and OpenRouter additions plus the
 Claude sign-in and update-version fixes. The screenshot shows that candidate.
-Versions 0.6.11 and 0.6.12 were superseded before publication.
+Versions 0.6.11–0.6.13 were superseded before publication.
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows x64
 releases are built natively and are not yet Authenticode-signed. Installed copies from

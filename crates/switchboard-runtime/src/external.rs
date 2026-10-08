@@ -1995,7 +1995,7 @@ mod config_digest_tests {
         let config = format!(
             r#"{{"projects":{{"/p":"{history}"}},"oauthAccount":{{"emailAddress":"a@example.test"}}}}"#
         );
-        std::fs::write(&path, &config).unwrap();
+        switchboard_core::private_fs::private_write(&path, config.as_bytes()).unwrap();
         let (digest, settled) = next_config_digest(None, Native.read(&path, CONFIG_CAP));
         assert!(settled);
         assert_eq!(digest, Stamp::Account(account_section(config.as_bytes())));
@@ -2154,10 +2154,9 @@ mod tests {
         assert_eq!(account_section(br#"{"projects":{}}"#), None);
         assert_eq!(account_section(b"not json"), None);
     }
-    /// The real reader and probe over a real file. Unix only: on Windows the reader requires
-    /// the file's owner to be the current user, and the elevated CI runner's new files belong
-    /// to the Administrators group (OPERATIONS → Windows private filesystem); an ordinary user
-    /// owns their own `~/.claude.json`.
+    /// The real reader and probe over a user-owned file on every platform. Use the private
+    /// writer so elevated Windows CI creates it with the user's SID, not Administrators.
+    /// The native reader's strict owner check stays part of the exercised path.
     #[test]
     fn the_native_config_stamp_ignores_unrelated_rewrites() {
         let a = account_section(&config("a@example.test")).unwrap();
@@ -2169,13 +2168,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let base = readable_temp(dir.path());
         let path = base.join(".claude.json");
-        fs::write(&path, config("a@example.test")).unwrap();
+        switchboard_core::private_fs::private_write(&path, &config("a@example.test")).unwrap();
         let first = config_stamp(&path);
         assert_eq!(first, Stamp::Account(Some(a)));
         std::thread::sleep(std::time::Duration::from_millis(20));
-        fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+        switchboard_core::private_fs::private_write(&path, &serde_json::to_vec(&other).unwrap())
+            .unwrap();
         assert_eq!(config_stamp(&path), first);
-        fs::write(&path, config("b@example.test")).unwrap();
+        switchboard_core::private_fs::private_write(&path, &config("b@example.test")).unwrap();
         assert_ne!(config_stamp(&path), first);
 
         // The probe the background runs takes that stamp: an unrelated rewrite of the config
@@ -2189,12 +2189,13 @@ mod tests {
             user: "fixture".into(),
             mac: false,
         };
-        fs::write(&path, config("a@example.test")).unwrap();
+        switchboard_core::private_fs::private_write(&path, &config("a@example.test")).unwrap();
         let before = probe_context(Provider::Claude, &c, &NativeProbe);
         std::thread::sleep(std::time::Duration::from_millis(20));
-        fs::write(&path, serde_json::to_vec(&other).unwrap()).unwrap();
+        switchboard_core::private_fs::private_write(&path, &serde_json::to_vec(&other).unwrap())
+            .unwrap();
         assert_eq!(probe_context(Provider::Claude, &c, &NativeProbe), before);
-        fs::write(&path, config("b@example.test")).unwrap();
+        switchboard_core::private_fs::private_write(&path, &config("b@example.test")).unwrap();
         assert_ne!(probe_context(Provider::Claude, &c, &NativeProbe), before);
     }
     #[test]
