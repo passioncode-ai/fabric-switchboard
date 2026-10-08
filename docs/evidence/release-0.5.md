@@ -1,5 +1,7 @@
 # Evidence — 0.5 prompt-free switching, renewal, one-click accounts; 0.5.1 Claude Swap parity
 
+Latest release preparation and verification: [0.6.14 receipt](../runs/2026-10-08-release-0612/README.md). The dated records below retain their original scope.
+
 Run: [PLAN-0.5](../PLAN-0.5.md), 2026-10-02, branch `agent/switchboard-0.5`, first built on `main` `5bac51c`,
 then rebased onto `main` `1cfc793` (0.4.1-beta.1 and its shared-trust vault). At integration the
 withdrawn file vault (D-1) was removed; the rows below marked *(pre-integration)* exercised it and

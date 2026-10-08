@@ -1,6 +1,6 @@
 # Install Fabric Switchboard
 
-Fabric Switchboard is a local account workbench for Claude Code and Codex CLI. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
+Fabric Switchboard is a local account workbench for Claude Code, Codex CLI and Kimi Code. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
 
 Find the selected release and platform links on the [Switchboard download page](https://passioncode.ai/switchboard/#download), or browse [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases). Release publication is separate from a successful build; see the [release records](evidence/release-0.5.md) for each release's checks.
 
@@ -40,6 +40,15 @@ The app and CLI are Developer ID signed with hardened runtime and **notarized by
 2. Either install the plugin (the MCP server plus the `switching-accounts` skill): `claude plugin marketplace add passioncode-ai/fabric-switchboard`, then `claude plugin install switchboard@switchboard`; or register the server alone: `claude mcp add --scope user switchboard -- switchboard mcp` (Codex: `codex mcp add switchboard -- switchboard mcp`).
 3. `claude mcp list` shows `switchboard … ✔ Connected`. A safe first call is the read-only `switchboard_accounts` tool; an empty vault answers `{"accounts":[]}`. Switching the ordinary Claude Code login needs an explicit `global: true`. Tools and rules: [CLI — For agents](CLI.md#for-agents).
 
+### Finish an update
+
+If an updated CLI asks you to restart Switchboard, the installed files are newer than the
+running app. Choose **Restart to update** from Switchboard's menu, or **Quit Switchboard**
+and open it again from Applications. Closing the window only hides the app.
+Keep the CLI linked to the copy inside the app as shown above, so both update together.
+The managed proxy address and capability persist across the restart; existing agent processes
+are not terminated. See [the lifecycle contract](../AGENTS.md#lifecycle).
+
 ## Windows
 
 The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe` CLI.
@@ -53,7 +62,7 @@ The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe
 
 ## Start a session
 
-Install the official Claude Code or Codex CLI separately before signing in or launching a coding session. Switchboard does not include a provider subscription or API credits.
+Install the official Claude Code, Codex CLI or Kimi Code CLI separately before signing in or launching that agent. Switchboard does not include a provider subscription or API credits.
 
 Open **Add account** and explicitly capture your current CLI account, or choose the official sign-in flow for another account. Assign a label and pool, such as `work` or `personal`. **Select** sets the account for the next managed request; it does not change the native CLI account. Native Claude activation and automatic rotation are separate opt-in operations.
 
