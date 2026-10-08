@@ -6,7 +6,7 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
@@ -65,6 +65,21 @@ function tourCard(step: number) {
   actions.append(button(last ? t('Start using Switchboard') : t('Next'), () => tourGo(last ? null : step + 1), 'button primary', 'tour-next'));
   card.append(count, title, el('p', '', item.text), dots, actions);
   return card;
+}
+/** Provider terms (operator decision 2026-10-08, SCN-049): a banner on Accounts until dismissed, always in About. */
+const noticeStore = () => { try { return localStorage; } catch { return null; } };
+let termsDismissed = termsNoticeDismissed(noticeStore());
+function termsBanner(main: HTMLElement) {
+  if (termsNoticeOn(page, termsDismissed) !== 'banner') return;
+  const banner = el('section', 'notice terms-notice'); banner.setAttribute('aria-label', t('Provider terms'));
+  banner.append(el('span', '', termsNoticeText()), button(t('Dismiss'), () => { dismissTermsNotice(noticeStore()); termsDismissed = true; render(); restoreFocus('page-title'); }, 'text-button', 'dismiss-terms'));
+  main.append(banner);
+}
+function termsPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'terms-heading');
+  const heading = el('h2', '', t('Provider terms')); heading.id = 'terms-heading';
+  panel.append(heading, el('p', '', termsNoticeText()));
+  return panel;
 }
 let agentSetup: AgentSetup | null = null;
 let agentSetupError = false;
@@ -742,6 +757,7 @@ function switchNative(account: Account) {
   void mutate(() => adapter.activateNative(account.id), demo ? t('Synthetic switch: Claude Code now uses {label}. No local credentials were read or written.', { label: account.label }) : t('Claude Code now uses {label}. New claude sessions start on it; a running session may need a restart.', { label: account.label }), `primary-${account.id}`);
 }
 function renderAccounts(main: HTMLElement) {
+  termsBanner(main);
   rulesStrip(main);
   renderCurrent(main);
   renderPolicies(main);
@@ -1093,7 +1109,7 @@ function renderAbout(main: HTMLElement) {
     [t('Automatic switching'), t('Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
-  main.append(section, tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), languagePanel(), productPanel());
+  main.append(section, termsPanel(), tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), languagePanel(), productPanel());
 }
 async function loadBackups() {
   try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }

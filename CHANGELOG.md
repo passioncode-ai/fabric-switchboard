@@ -6,6 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+### Added
+
+- A provider terms notice (operator decision 2026-10-08, SCN-049): Accounts shows it from the first
+  start, while the first account is added, until you dismiss it; About shows it always. It says to
+  use Switchboard in line with the terms of Anthropic and OpenAI, that breaking a provider's terms
+  can get the account blocked, and that you are responsible for how you use your accounts.
+
 ## 0.6.14 — 2026-10-08
 
 Kimi Code accounts, Hermes model settings and a shared OpenRouter key for supported agents.

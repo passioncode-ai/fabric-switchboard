@@ -388,3 +388,27 @@ export function kimiWindowsLine(windows: KimiWindow[], nowSeconds: number): stri
     return w.resets_at && w.resets_at > nowSeconds ? `${part}, ${t('resets in {time}', { time: compactCountdown(w.resets_at, nowSeconds) })}` : part;
   }).join(' · ');
 }
+/**
+ * Provider terms notice (operator decision 2026-10-08, SCN-049). About shows it always; Accounts
+ * shows it from the first start until the person dismisses it, so it is in sight while the first
+ * account is added. A store that refuses to read or write counts as not dismissed: the notice
+ * shows again next start rather than never (as the tour, SCN-035).
+ */
+export const TERMS_NOTICE_KEY = 'switchboard.terms-notice';
+export interface NoticeStore { getItem(key: string): string | null; setItem(key: string, value: string): void }
+export function termsNoticeText(): string {
+  return t('Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider\'s terms can get your account blocked. You are responsible for how you use your accounts.');
+}
+export function termsNoticeDismissed(store: NoticeStore | null | undefined): boolean {
+  try { return !!store?.getItem(TERMS_NOTICE_KEY); } catch { return false; }
+}
+/** Remembers the dismissal; false when the store refused it (the notice is hidden for this run only). */
+export function dismissTermsNotice(store: NoticeStore | null | undefined): boolean {
+  if (!store) return false;
+  try { store.setItem(TERMS_NOTICE_KEY, '1'); return true; } catch { return false; }
+}
+/** How a screen shows the notice: a dismissible banner, a permanent About panel, or not at all. */
+export function termsNoticeOn(page: string, dismissed: boolean): 'banner' | 'panel' | null {
+  if (page === 'about') return 'panel';
+  return page === 'accounts' && !dismissed ? 'banner' : null;
+}

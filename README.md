@@ -168,6 +168,9 @@ demo has no real accounts, no CLI launch and no network calls to providers.
 7. **Language** — the window speaks English or Russian, following the operating system;
    About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041--use-switchboard-in-russian)).
 
+Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can
+get your account blocked. You are responsible for how you use your accounts.
+
 The persistent credential stays in the OS vault, but isolated mode writes the working copy
 of the access token that the official CLI needs into a private file (0600 on macOS, a
 user-only DACL on Windows). The refresh token is not written there; when the token
