@@ -1,18 +1,60 @@
-# Fabric Switchboard — PassionCode.ai
+# Fabric Switchboard
 
 [English](README.md) · **Русский**
 
-Fabric Switchboard — локальный менеджер аккаунтов Claude Code и Codex CLI с desktop-интерфейсом и командой `switchboard`: инструмент Fabric, который работает и сам по себе. Постоянные секреты защищены macOS Keychain или Windows DPAPI; рабочие и личные аккаунты разделены пулами. В управляемой сессии выбранный аккаунт меняется **со следующего запроса**: текущий поток ответа продолжает использовать прежний.
+Локальный менеджер аккаунтов и квот **Claude Code, Codex CLI и Kimi Code**.
+Показывает текущий аккаунт и его квоту, помогает выбрать другой и открыть сессию в нужном
+проекте. Приложение для macOS и Windows, команда `switchboard` и MCP-сервер от
+[PassionCode.ai](https://passioncode.ai/).
 
-**Статус: стабильный, [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10) (2026-10-07).** Стабильная ветка начинается с v0.6.0; v0.6.3, v0.6.4 и v0.6.9 были помечены тегами, но не опубликованы. macOS universal подписан Developer ID, **нотаризован Apple** и со stapled-тикетом; Windows x64 собирается нативно в [release workflow](docs/DISTRIBUTION.md#how-a-release-happens), Authenticode-подписи пока нет. Установленные копии начиная с 0.6.1 обновляются сами. Что менялось от версии к версии — в [CHANGELOG](CHANGELOG.md): в 0.6 проекты со своими аккаунтами, работа с закрытым окном, запуск при входе в систему и автообновление; в 0.6.7–0.6.8 передача задачи из Claude Code в Codex с контекстом и ваши цепочки агентов, по которым работа продолжается, когда кончается аккаунт ([CLI](docs/CLI.md#fallback-chains)); в 0.6.10 русский интерфейс, запуск сессии прямо в консоли другого приложения и автообновление по общему стандарту PassionCode.ai; в 0.5 продление неактивных аккаунтов Claude и шифрованные резервные копии; в 0.4 MCP для агентов (`switchboard mcp`, 8 инструментов), правила проектов и плагин; 0.4.1 убрал повторяющиеся диалоги Keychain ([KEYCHAIN.md](docs/KEYCHAIN.md)). Вход и запросы через реальные аккаунты провайдеров на каждой платформе отслеживаются на [доске](docs/evidence/backlog.md) (SB-01, SB-02, SB-15). Подключить агента: сделайте ссылку на CLI внутри приложения, чтобы он обновлялся вместе с ним (`ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" ~/.local/bin/switchboard`, или Agents → *Link switchboard into ~/.local/bin*), и выполните `claude mcp add --scope user switchboard -- switchboard mcp`.
+**[Скачать для macOS](https://passioncode.ai/switchboard/download/macos)** ·
+**[Скачать для Windows](https://passioncode.ai/switchboard/download/windows)** ·
+[Установка](docs/INSTALL.md) · [Что нового](CHANGELOG.md) ·
+[Сайт](https://passioncode.ai/switchboard/)
 
-- [Сайт](https://passioncode.ai/switchboard/) · скачать для [macOS](https://passioncode.ai/switchboard/download/macos) / [Windows](https://passioncode.ai/switchboard/download/windows) · [релизы](https://github.com/passioncode-ai/fabric-switchboard/releases) · [установка готовых архивов](docs/INSTALL.md).
-- [Исследование четырёх решений](docs/research/README.md): исходники, архитектура, хранение и механика переключения; 69 ссылок на фиксированные коммиты.
-- [Спецификация](docs/SPEC.md): функции, оси совместимости, состояния, безопасность, протоколы, Windows и критерии приёмки.
-- [Карта решения на русском](docs/PRODUCT.ru.md): что построено, что заимствовано как идея, ограничения и очередность развития.
-- [Точка входа для следующего агента](docs/HANDOFF.md): проверки, решения и точная следующая задача.
-- [CLI](docs/CLI.md): команды, JSON, stdin и общий владелец сессий.
-- [Дистрибутивы](docs/DISTRIBUTION.md): macOS universal app/CLI, подпись и Windows installer/CLI.
+![Fabric Switchboard 0.6.12: текущие аккаунты, квоты и отдельные пулы](docs/evidence/screenshots/accounts-0.6.12.png)
+
+*Текущий интерфейс на английском с демонстрационными аккаунтами. В приложении также есть русский язык. [Данные о снимке](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
+
+## Что можно делать
+
+| Задача | В Switchboard |
+|---|---|
+| Разделять рабочие и личные аккаунты | Пулы, правила проектов и отдельные профили сессий |
+| Видеть, когда понадобится другой аккаунт | Квоты провайдера, время сброса и явные отметки неизвестной квоты или истёкшего входа |
+| Выбирать следующий аккаунт | Переключение обычного Claude Code или маршрутизация управляемых запросов; текущий ответ сохраняет свой аккаунт |
+| Работать с подписками Kimi Code | Официальный вход, тариф и квоты, запуск выбранного аккаунта в проекте |
+| Настраивать другие агенты | Модель и провайдер Hermes, запуск поддерживаемых агентов через OpenRouter |
+| Работать из терминала или агента | CLI, MCP-инструменты и запуск в текущей консоли через `launch --in-place` |
+
+Секреты защищены macOS Keychain или Windows DPAPI. Автопереключение включается по вашему
+выбору. Каждый аккаунт Kimi остаётся в отдельной папке входа: Switchboard не копирует и не
+продлевает его авторизацию. Подробности: [аккаунты и переключение](docs/ACCOUNTS-AND-ROTATION.md),
+[поддержка агентов](docs/AGENT-SUPPORT.md).
+
+## Текущая версия
+
+**Последний опубликованный релиз: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10).**
+В этой ветке готовится **0.6.12**: Kimi, Hermes, OpenRouter и исправления входа Claude и
+ошибки после обновления. На снимке показана эта сборка. Версия 0.6.11 заменена до публикации.
+
+macOS universal подписывается Developer ID и проходит нотариальную проверку Apple.
+Windows x64 собирается нативно; подписи Authenticode пока нет. Начиная с 0.6.1 приложение
+обновляется автоматически. Сборку и подписи выполняет защищённый
+[release workflow](docs/DISTRIBUTION.md#how-a-release-happens).
+Проверки с реальными аккаунтами провайдеров отмечаются отдельно на
+[доске](docs/evidence/backlog.md) (SB-01, SB-02, SB-15).
+
+Открытый исходный код под **GNU AGPL-3.0**; доступна коммерческая лицензия.
+[Условия](#лицензия).
+
+## Документация
+
+- [CLI и MCP](docs/CLI.md): команды, JSON, вход и запуск агентов.
+- [Карта продукта](docs/PRODUCT.ru.md): возможности и ограничения.
+- [Спецификация](docs/SPEC.md): поведение, безопасность и критерии приёмки.
+- [Эксплуатация](docs/OPERATIONS.md): профили, восстановление и удаление.
+- [Передача работы](docs/HANDOFF.md): проверки и следующая задача.
 
 ## Запуск из исходников
 

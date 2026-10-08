@@ -1,4 +1,8 @@
 > **How to read this file.** Newest entry first; only the top entry's *Exact next task* is
+
+## 2026-10-08 — 0.6.12 release preparation
+
+The operator requested current downloads, refreshed README/wiki/GitHub presentation and cleanup of old build caches. [Run entry](runs/2026-10-08-release-0612/README.md) owns the release checks and exact next action. 0.6.11 is an unpublished candidate; 0.6.12 combines it with PR #120's version-skew message and PR #121's MCP-only Claude Keychain recovery. Publication is not yet claimed.
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 

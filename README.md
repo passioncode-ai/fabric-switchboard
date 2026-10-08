@@ -2,45 +2,52 @@
 
 **English** · [Русский](README.ru.md)
 
-Fabric Switchboard keeps your Claude Code and Codex CLI accounts in one local workbench. See
-reported usage, separate work from personal accounts, and choose what handles your next
-request. It is a desktop app plus the `switchboard` command-line tool, for macOS and
-Windows. It is Fabric's account tool and works on its own; built by
-[PassionCode.ai](https://passioncode.ai/), whose toolkit is for AI-native teams.
+Local accounts and quota management for **Claude Code, Codex CLI and Kimi Code**.
+See which account is in use, check its remaining quota and open a session for your project.
+A desktop app, CLI and MCP server for macOS and Windows, built by
+[PassionCode.ai](https://passioncode.ai/).
 
-![Fabric Switchboard 0.6: accounts with quota, reset countdowns and status marks (synthetic demo data)](docs/evidence/screenshots/accounts-0.6.png)
+**[Download for macOS](https://passioncode.ai/switchboard/download/macos)** ·
+**[Download for Windows](https://passioncode.ai/switchboard/download/windows)** ·
+[Installation](docs/INSTALL.md) · [Release notes](CHANGELOG.md) ·
+[Product page](https://passioncode.ai/switchboard/)
 
-**Status: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10)**,
-2026-10-07; stable since v0.6.0 (macOS universal, notarized by Apple and stapled; Windows x64
-built natively, not yet Authenticode-signed). Installed copies of 0.6.1 or later update
-themselves; v0.6.3, v0.6.4 and v0.6.9 were tagged but never published. Builds are made and signed only by the
-[release workflow](docs/DISTRIBUTION.md#how-a-release-happens). Live provider acceptance on
-each platform is tracked on the [board](docs/evidence/backlog.md) (SB-01, SB-02, SB-15).
+![Fabric Switchboard 0.6.12 Accounts screen with current sign-ins, quota and separate account pools](docs/evidence/screenshots/accounts-0.6.12.png)
 
-- **Download:** [macOS](https://passioncode.ai/switchboard/download/macos) ·
-  [Windows](https://passioncode.ai/switchboard/download/windows) ·
-  [product page](https://passioncode.ai/switchboard/) ·
-  [all releases](https://github.com/passioncode-ai/fabric-switchboard/releases) ·
-  [installation notes](docs/INSTALL.md)
-- **License:** open source under the GNU AGPL-3.0; a commercial license is available.
-  See [License](#license).
+*Current interface, shown with synthetic demo accounts. [Screenshot provenance](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
 
-Saved secrets are protected by macOS Keychain or Windows DPAPI, and work and personal
-accounts live in separate pools. In a managed session the selected account changes **from
-the next request**: a response already streaming keeps the identity it started with.
+## What you can do
 
-What each version changed is in the [CHANGELOG](CHANGELOG.md): 0.6 adds projects with their
-own accounts, keeps running with its window closed, opens at login and updates itself
-([DISTRIBUTION](docs/DISTRIBUTION.md#automatic-updates-sb-55)); 0.6.7–0.6.8 hand a task from
-Claude Code to Codex with its context and follow your chain of agents when an account runs out
-([CLI](docs/CLI.md#fallback-chains), [XA-01](docs/packets/cross-agent-continuation.md)); 0.6.10 speaks Russian,
-runs a session inside another app's console (`launch --in-place`) and updates the way every
-PassionCode.ai product does; 0.5 renews inactive Claude
-accounts and keeps encrypted backups; 0.4 adds MCP for agents, project rules and the plugin;
-0.4.1 ends the repeated Keychain dialogs ([KEYCHAIN.md](docs/KEYCHAIN.md)). Release records:
-[0.5.x–0.6.x](docs/evidence/release-0.5.md), [0.4.1](docs/evidence/release-0.4.1.md),
-[0.4.0](docs/evidence/release-0.4.md), [0.3.1](docs/evidence/release-0.3.1.md),
-[0.2](docs/evidence/release-0.2.md), the [historical 0.1 verification](docs/evidence/verification.md).
+| Task | In Switchboard |
+|---|---|
+| Keep work and personal accounts separate | Account pools, project rules and isolated session homes |
+| See when another account is needed | Reported usage, reset countdowns and explicit unknown or expired states |
+| Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
+| Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |
+| Configure other coding agents | Hermes model/provider settings and OpenRouter launch for supported agents |
+| Work from your terminal or agent | `switchboard` CLI, MCP tools and `launch --in-place` |
+
+Saved secrets use macOS Keychain or Windows DPAPI. Automatic switching is opt-in.
+Kimi accounts stay in their own sign-in folders; Switchboard does not copy or renew them.
+See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
+[agent support](docs/AGENT-SUPPORT.md) for the boundaries of each mode.
+
+## Release status
+
+**Latest published: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10).**
+This branch prepares **0.6.12**, including Kimi, Hermes and OpenRouter additions plus the
+Claude sign-in and update-version fixes. The screenshot shows that candidate.
+Version 0.6.11 was superseded before publication.
+
+macOS releases are universal, Developer ID signed and notarized by Apple. Windows x64
+releases are built natively and are not yet Authenticode-signed. Installed copies from
+0.6.1 update automatically. Builds and signatures come from the protected
+[release workflow](docs/DISTRIBUTION.md#how-a-release-happens).
+Live-provider acceptance is tracked separately on the [board](docs/evidence/backlog.md)
+(SB-01, SB-02, SB-15).
+
+Open source under the **GNU AGPL-3.0**, with a commercial license available.
+[License details](#license).
 
 ## Quick start for a new teammate
 
