@@ -6,10 +6,23 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.12 — 2026-10-08
+
+Kimi Code accounts, Hermes model settings and a shared OpenRouter key for supported agents.
+This release also restores Claude account activation when Claude Code leaves only MCP sign-ins
+in its Keychain entry, and explains when a running Switchboard needs a restart after an update.
+It includes the changes prepared for 0.6.11, which was superseded before publication.
+
+**Windows:** windows_authenticode: NOT_SIGNED. Built natively; the installer is not yet
+Authenticode-signed, so SmartScreen may warn.
+
 
 ### Fixes
 
+- Update the build-time `source-map-js` dependency to 1.2.2, fixing GHSA-68fv-2mgg-jv7q.
+- Switching to a saved Claude account works when Claude Code has left only shared MCP or
+  plugin sign-ins in its Keychain entry. Those sign-ins are preserved. An unrecognized or
+  malformed entry is still refused without changing it.
 - After an update is installed while an earlier Switchboard still runs, a `switchboard` command it
   does not know (for example `launch --in-place`) now says to restart Switchboard to finish the
   update, instead of “Control request refused”. The running Switchboard names its version to the
@@ -27,17 +40,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
   `hermes config set` (SB-80). CLI `switchboard agents hermes [set --provider --model]`, MCP
   `switchboard_hermes_status` / `switchboard_hermes_set`.
 
-## 0.6.11 — 2026-10-08
-
-One OpenRouter key for agents: save it once, see what it may still spend, and launch Hermes, Kimi
-Code, Goose and seven other agents on it from the app or the CLI. Plus the fixes merged after
-0.6.10. If you run 0.6.1 or later, this version arrives on its own. Signed by the same team
-(`KJ35UYYL22`).
-
-**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
-Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
-
-### Added
+### Also included from the unpublished 0.6.11 candidate
 
 - One OpenRouter key for agents, saved once: `switchboard agents openrouter set --key-stdin` (the
   key is piped on stdin, never an argument) keeps it in the OS vault; `status` shows what the key
