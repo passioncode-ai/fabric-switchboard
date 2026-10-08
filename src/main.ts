@@ -6,9 +6,9 @@ import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './plat
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -68,6 +68,9 @@ function tourCard(step: number) {
 }
 let agentSetup: AgentSetup | null = null;
 let agentSetupError = false;
+/** The OpenRouter key for agents (SB-79); null while it is read. */
+let openrouter: OpenrouterStatus | null = null;
+let openrouterError = '';
 let openMenu: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
 let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
@@ -140,6 +143,7 @@ async function reload() {
   else { runtime = null; runtimeError = true; }
   loading = false; render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
+  void loadOpenrouter();
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -375,7 +379,66 @@ function renderAgents(main: HTMLElement) {
     if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
     setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
   }
-  main.append(setup, otherAgents());
+  main.append(setup, openrouterPanel(), otherAgents());
+}
+/** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
+async function loadOpenrouter() {
+  try { openrouter = await adapter.openrouterStatus(); openrouterError = ''; } catch (error) { openrouterError = safeError(error); }
+  backgroundRender();
+}
+const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
+/** SB-79: one OpenRouter key that agents launched from Switchboard run on (SCN-045). */
+function openrouterPanel() {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'openrouter-heading');
+  const heading = el('h2', '', t('OpenRouter key for agents')); heading.id = 'openrouter-heading';
+  const names = openrouterAgents().map((agent) => agent.name).join(', ');
+  section.append(heading, el('p', '', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
+  if (openrouterError && !openrouter) { section.append(el('p', 'usage-error', t(openrouterError)), button(t('Retry'), () => void loadOpenrouter(), 'text-button', 'openrouter-retry')); return section; }
+  if (!openrouter) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
+  if (!openrouter.saved) {
+    section.append(el('p', 'form-note', t('No key is saved.')), button(t('Add OpenRouter key'), () => openrouterKeyDialog(), 'button primary', 'openrouter-add'));
+    return section;
+  }
+  const facts = el('div', 'openrouter-facts');
+  facts.append(el('p', '', openrouter.model ? t('Default model: {model}', { model: openrouter.model }) : t('No default model: each launch names one.')));
+  if (openrouter.credit) facts.append(el('p', '', openrouterCreditLine(openrouter.credit)));
+  else if (openrouter.credit_error) facts.append(el('p', 'usage-error', t(openrouter.credit_error)));
+  section.append(facts);
+  const actions = el('div', 'management-actions');
+  actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
+  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button below. CLI: switchboard agents launch <agent> --openrouter.')));
+  return section;
+}
+/** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
+function openrouterKeyDialog() {
+  const replacing = !!openrouter?.saved;
+  const context = openDialog(replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.'));
+  const key = input('', 'password'); key.placeholder = 'sk-or-…';
+  const model = input(openrouter?.model ?? ''); model.required = false; model.placeholder = 'moonshotai/kimi-k2';
+  const grid = el('div', 'form-grid');
+  grid.append(field(t('Key'), key, t('Starts with sk-or-. Switchboard never shows it again.')), field(t('Default model'), model, t('An OpenRouter model id. Optional: a launch can name its own.')));
+  context.body.append(grid);
+  context.actions.append(submit(replacing ? t('Replace key') : t('Save key')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = key.value.trim(); key.value = '';
+    void dialogSave(context, async () => { await adapter.openrouterSave(value, model.value.trim() || null); await loadOpenrouter(); }, t('OpenRouter key saved. Agents launched on it receive it when they start.'));
+  });
+  key.focus();
+}
+function openrouterModelDialog() {
+  const context = openDialog(t('Default model'), t('The OpenRouter model agents start on unless a launch names another.'));
+  const model = input(openrouter?.model ?? ''); model.placeholder = 'moonshotai/kimi-k2';
+  context.body.append(field(t('Model'), model, t('An OpenRouter model id: vendor/model, as listed on openrouter.ai/models.')));
+  context.actions.append(submit(t('Save model')));
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterModel(model.value.trim()); await loadOpenrouter(); }, t('Default model saved.')); });
+  model.focus();
+}
+function openrouterRemoveDialog() {
+  const context = openDialog(t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+  const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(); await loadOpenrouter(); }, t('OpenRouter key removed.')); });
+  context.actions.querySelector('button')?.focus();
 }
 /** Third-party agents (catalog/agents.json, operator request 2026-10-05): how each connects. */
 function otherAgents() {
@@ -427,13 +490,50 @@ async function agentDialog(agent: AgentInfo) {
   pool.addEventListener('change', () => void show());
   const grid = el('div', 'form-grid'); grid.append(field(t('Pool'), pool, t('The pool whose selected API-key account this agent will use.')));
   context.body.append(grid, out);
-  if (agent.level !== 'mcp' && agent.binary) {
-    const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
-    context.body.append(field(t('Launch in folder'), dir, t('Starts the agent in Terminal in this folder, on the pool\'s API-key account.')));
-    context.actions.append(submit(t('Launch {agent}', { agent: agent.name })));
-    context.form.addEventListener('submit', (event) => { event.preventDefault(); lastWorkingDirectory = dir.value.trim(); void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, dir.value.trim()), t('Terminal launch requested for {agent}.', { agent: agent.name })); });
+  const launches = agent.level !== 'mcp' && !!agent.binary;
+  const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
+  const folder = () => {
+    const value = dir.value.trim();
+    if (isAbsoluteProjectPath(value, runtime?.platform)) { dir.setCustomValidity(''); lastWorkingDirectory = value; return value; }
+    dir.setCustomValidity(t('Enter an absolute project directory, for example {example}.', { example: projectPathExample(runtime?.platform) })); dir.reportValidity(); return null;
+  };
+  dir.addEventListener('input', () => dir.setCustomValidity(''));
+  const viaKey = agent.openrouter ? openrouterLaunch(agent, context, folder) : null;
+  // The operator's choice (2026-10-08): agents with a recipe start on the OpenRouter key by
+  // default; one whose recipe says `default: false` (Kimi Code, on its subscription) keeps it second.
+  const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
+  if (launches || viaKey) context.body.append(field(t('Launch in folder'), dir, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the pool\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
+  if (viaKey) context.body.append(viaKey.part);
+  const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name })); };
+  if (keyFirst) {
+    if (launches) context.actions.append(button(t('Launch through the proxy'), throughProxy, 'button', `proxy-launch-${agent.id}`));
+    context.actions.append(submit(t('Launch on OpenRouter')));
+    context.form.addEventListener('submit', (event) => { event.preventDefault(); viaKey!.run!(); });
+  } else {
+    if (viaKey?.run) viaKey.part.append(button(t('Launch on OpenRouter'), viaKey.run, 'button', `openrouter-launch-${agent.id}`));
+    if (launches) {
+      context.actions.append(submit(t('Launch {agent}', { agent: agent.name })));
+      context.form.addEventListener('submit', (event) => { event.preventDefault(); throughProxy(); });
+    }
   }
   void show();
+}
+/** SB-79: an agent with an OpenRouter recipe launches on the saved key, with this launch's model.
+ * `run` is null while no key is saved. */
+function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () => string | null): { part: HTMLElement; run: (() => void) | null } {
+  const part = el('div', 'agent-setup');
+  part.append(el('h3', 'pool-heading', t('On the OpenRouter key')));
+  if (!openrouter?.saved) { part.append(el('p', 'form-note', t('Save an OpenRouter key on the Agents screen first; then {agent} launches on it.', { agent: agent.name }))); return { part, run: null }; }
+  const picksItself = !agent.openrouter?.model_flag?.length && !agent.openrouter?.model_env;
+  const model = input(openrouter.model ?? ''); model.required = false; model.placeholder = 'moonshotai/kimi-k2';
+  if (picksItself) part.append(el('p', 'form-note', t('{agent} picks its model in its own interface; the key comes from Switchboard.', { agent: agent.name })));
+  else part.append(field(t('Model for this launch'), model, openrouter.model ? t('Default: {model}.', { model: openrouter.model }) : t('No default model is saved: name one.')));
+  if (agent.openrouter?.notes) part.append(el('p', 'form-note', agent.openrouter.notes));
+  const run = () => {
+    const value = folder(); if (!value) return;
+    void dialogSave(context, () => adapter.launchOnOpenrouter(agent.id, picksItself ? null : model.value.trim() || null, value), t('Terminal launch requested for {agent} on OpenRouter.', { agent: agent.name }));
+  };
+  return { part, run };
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 // ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──

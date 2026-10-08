@@ -189,8 +189,8 @@ subscription. Keep it out of shared configuration files.
 
 ### The OpenRouter key for agents (SB-79)
 
-One OpenRouter key, saved once in the OS vault, for agents that can run on OpenRouter (SB-79b
-launches them on it). The value never touches a file, an argument or a log.
+One OpenRouter key, saved once in the OS vault, for agents that can run on OpenRouter. The value
+never touches a file, an argument or a log.
 
 ```sh
 switchboard agents openrouter set --key-stdin [--model moonshotai/kimi-k2]   # key piped on stdin
@@ -205,3 +205,16 @@ OpenRouter itself (`GET /api/v1/key`) and shows `limit_remaining` and `usage_dai
 key stays saved and is named as refused. An agent over MCP gets the same status and sets the
 model (`switchboard_openrouter_status`, `switchboard_openrouter_model`) — never the key.
 Encrypted backups carry the key, so it returns after a reinstall.
+
+Launch an agent on the key in Terminal (no owner needed; the pool does not apply):
+
+```sh
+switchboard agents launch hermes --openrouter --dir ~/src/app [--model moonshotai/kimi-k2]
+```
+
+`--model` defaults to the key's model. The session script reads the key from `switchboard agents
+key --service openrouter` when it starts and exports it under the agent's own variable
+(`OPENROUTER_API_KEY`, `KIMI_MODEL_API_KEY` for Kimi Code, `OPENAI_API_KEY` for Qwen Code).
+Hermes, pi, omp and Qwen Code start in their own home under Switchboard's data folder, so a key
+they saved themselves cannot win. Which agents launch this way, and their caveats:
+[AGENT-SUPPORT.md](AGENT-SUPPORT.md) ("OpenRouter key" lines). OpenClaw and Cline cannot.

@@ -50,6 +50,74 @@ pub fn presets() -> Value {
         .collect::<Vec<_>>())
 }
 
+/// How one agent launches on the operator's OpenRouter key (SB-79, XA-02 A-3): the key and the
+/// model reach it only through its environment and its own arguments — never a config write.
+pub struct OpenrouterRecipe {
+    pub id: String,
+    pub name: String,
+    pub binary: String,
+    /// The environment variable that takes the key's value.
+    pub key_env: String,
+    /// The variable that takes `base_url`, when the agent needs one (Kimi Code, Qwen Code).
+    pub base_env: Option<String>,
+    pub base_url: Option<String>,
+    /// Extra argv entries; `{model}` inside an entry is replaced by the chosen model.
+    pub model_flag: Vec<String>,
+    /// The environment variable that takes the chosen model, for agents configured by env.
+    pub model_env: Option<String>,
+    /// Fixed extra argv entries (Qwen Code's `--auth-type openai`).
+    pub args: Vec<String>,
+    pub extra_env: BTreeMap<String, String>,
+    /// Isolation variable pointed at the launch's own home, so a saved login cannot win over
+    /// the launch's key (`HERMES_HOME`, `PI_CODING_AGENT_DIR`, `QWEN_HOME`).
+    pub isolate_env: Option<String>,
+    /// What the operator should know: a saved login that wins over the key, a model chosen in
+    /// the agent itself.
+    pub notes: Option<String>,
+}
+
+/// An agent's OpenRouter launch recipe. Agents without one (Cline's TUI insists on its own
+/// onboarding; OpenClaw's sessions run in its Gateway, which never sees a launch's environment)
+/// are refused.
+pub fn openrouter(id: &str) -> Result<OpenrouterRecipe, String> {
+    let agent = find(id).ok_or("Unknown agent. `switchboard agents list` names them.")?;
+    let recipe = &agent["openrouter"];
+    let text = |v: &Value| v.as_str().map(str::to_owned);
+    let list = |v: &Value| {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    match (text(&recipe["key_env"]), text(&agent["binary"])) {
+        (Some(key_env), Some(binary)) => Ok(OpenrouterRecipe {
+            id: id.to_owned(),
+            name: text(&agent["name"]).unwrap_or_else(|| id.to_owned()),
+            binary,
+            key_env,
+            base_env: text(&recipe["base_env"]),
+            base_url: text(&recipe["base_url"]),
+            model_flag: list(&recipe["model_flag"]),
+            model_env: text(&recipe["model_env"]),
+            args: list(&recipe["args"]),
+            extra_env: recipe["extra_env"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            isolate_env: text(&recipe["isolate_env"]),
+            notes: text(&recipe["notes"]),
+        }),
+        _ => Err("This agent cannot launch on the OpenRouter key. `switchboard agents list` marks the ones that can.".into()),
+    }
+}
+
 /// What a launch needs from a `launch`-level profile.
 pub struct Launchable {
     pub id: String,
@@ -199,6 +267,94 @@ mod tests {
             }
         }
         assert!(ids.contains("hermes") && ids.contains("claude-code") && ids.contains("codex"));
+    }
+
+    #[test]
+    fn every_openrouter_recipe_is_complete_and_never_puts_the_key_on_a_command_line() {
+        let env_name = |n: &str| {
+            !n.is_empty()
+                && n.bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        };
+        let mut launchable = Vec::new();
+        for a in catalog()["agents"].as_array().unwrap() {
+            let id = a["id"].as_str().unwrap();
+            if a["openrouter"].is_null() {
+                assert!(openrouter(id).is_err(), "{id}");
+                continue;
+            }
+            let r = openrouter(id).unwrap_or_else(|e| panic!("{id}: {e}"));
+            launchable.push(id.to_owned());
+            // Whether the app offers the key first (Kimi Code stays on its subscription).
+            assert!(a["openrouter"]["default"].is_boolean(), "{id}");
+            assert!(env_name(&r.key_env), "{id}");
+            for name in [&r.base_env, &r.model_env, &r.isolate_env]
+                .into_iter()
+                .flatten()
+                .chain(r.extra_env.keys())
+            {
+                assert!(env_name(name), "{id}: {name}");
+            }
+            assert_eq!(r.base_env.is_some(), r.base_url.is_some(), "{id}");
+            if let Some(url) = &r.base_url {
+                assert!(url.starts_with("https://openrouter.ai/"), "{id}");
+            }
+            assert!(
+                r.model_flag.is_empty() || r.model_flag.iter().any(|a| a.contains("{model}")),
+                "{id}: a model flag without the model"
+            );
+            assert!(
+                r.model_env.is_none() || r.model_flag.is_empty(),
+                "{id}: one way to name the model"
+            );
+            for arg in r.args.iter().chain(&r.model_flag) {
+                assert!(
+                    !matches!(
+                        arg.as_str(),
+                        "--api-key" | "-k" | "--key" | "--openai-api-key"
+                    ),
+                    "{id}: a key flag lands in process listings"
+                );
+            }
+        }
+        for id in [
+            "hermes",
+            "kimi-code",
+            "pi",
+            "opencode",
+            "goose",
+            "aider",
+            "qwen-code",
+        ] {
+            assert!(launchable.iter().any(|l| l == id), "{id} has no recipe");
+        }
+        // Their sessions never read a launch's environment (the Gateway; the onboarding TUI).
+        assert!(openrouter("openclaw").is_err());
+        assert!(openrouter("cline").is_err());
+        assert!(openrouter("no-such-agent")
+            .err()
+            .unwrap()
+            .contains("Unknown agent"));
+        let hermes = openrouter("hermes").unwrap();
+        assert_eq!(
+            hermes.model_flag,
+            ["--provider", "openrouter", "-m", "{model}"]
+        );
+        assert_eq!(hermes.isolate_env.as_deref(), Some("HERMES_HOME"));
+        let kimi = openrouter("kimi-code").unwrap();
+        assert_eq!(kimi.key_env, "KIMI_MODEL_API_KEY");
+        assert_eq!(kimi.model_env.as_deref(), Some("KIMI_MODEL_NAME"));
+        assert_eq!(
+            kimi.isolate_env, None,
+            "its subscription login stays where it is"
+        );
+        let agents = catalog()["agents"].clone();
+        let kimi_entry = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "kimi-code");
+        assert_eq!(kimi_entry.unwrap()["openrouter"]["default"], false);
     }
 
     #[test]

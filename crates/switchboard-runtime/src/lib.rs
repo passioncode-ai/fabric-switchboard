@@ -215,11 +215,17 @@ pub enum Operation {
         #[serde(default)]
         preset: Option<String>,
     },
-    /// Starts a `launch`-level agent in a folder on the pool's API-key account.
+    /// Starts an agent in a folder: through the proxy on the pool's API-key account, or on the
+    /// saved OpenRouter key (`via: openrouter`, SB-79) with `model` (default: the key's model).
     LaunchAgent {
         agent: String,
+        #[serde(default)]
         pool: String,
         working_directory: PathBuf,
+        #[serde(default)]
+        via: AgentVia,
+        #[serde(default)]
+        model: Option<String>,
     },
     ApplyProject {
         path: PathBuf,
@@ -231,6 +237,17 @@ pub enum Operation {
     RestoreBackup {
         file: String,
     },
+}
+
+/// What a launched third-party agent runs on (XA-02).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentVia {
+    /// Switchboard's proxy, on the pool's API-key account.
+    #[default]
+    Proxy,
+    /// The operator's saved OpenRouter key; no proxy, pool or account.
+    Openrouter,
 }
 
 /// The ordinary CLI sign-in: read by capture/current/rotation, written only by activation.
@@ -1364,8 +1381,23 @@ async fn execute(
         }
         Operation::LaunchAgent {
             agent,
+            working_directory,
+            via: AgentVia::Openrouter,
+            model,
+            ..
+        } => launch::launch_agent_openrouter(
+            root,
+            &store,
+            &agent,
+            model.as_deref(),
+            &working_directory,
+        ),
+        Operation::LaunchAgent {
+            agent,
             pool,
             working_directory,
+            via: AgentVia::Proxy,
+            ..
         } => {
             let runtime = needs_owner()?;
             launch::launch_agent(
@@ -2337,6 +2369,8 @@ mod owner_tests {
             agent: agent.into(),
             pool: "agents".into(),
             working_directory: repo.path().to_owned(),
+            via: AgentVia::Proxy,
+            model: None,
         };
         assert_eq!(
             runtime.execute(launch("goose")).await.unwrap_err(),

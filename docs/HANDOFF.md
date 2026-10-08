@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+# SB-79b built — agents launch on the OpenRouter key (2026-10-08)
+
+Branch `feat/sb-79b-openrouter-launch` (continues the Kimi Code session that started the catalog
+recipes; two of its recipes were corrected: OpenClaw dropped — its sessions run in its Gateway
+daemon, which never sees a launch's environment — and Hermes switched to `--provider openrouter -m`
+because `HERMES_INFERENCE_PROVIDER` loses to its config). Ten agents carry an `openrouter` recipe
+in `catalog/agents.json`; `switchboard agents launch <agent> --openrouter [--model]` needs no
+owner; the session script reads the key from `agents key --service openrouter` when it starts and
+stops before the agent without it (zsh and PowerShell); Hermes, pi, omp and Qwen Code run in their
+own home. App: *Agents → OpenRouter key for agents* (add, replace, model, remove, balance) and, in
+each agent's setup, *Launch on OpenRouter* — the primary action when a key is saved, except Kimi
+Code, which stays on its subscription by default (operator 2026-10-08, recipe `default: false`).
+Russian strings, SCN-045 updated, SCN-046, CONTRACTS → Agent keys, CLI.md, AGENT-SUPPORT, CHANGELOG.
+Checked: `./scripts/check.sh` green; the browser demo (`?demo=1`) in English and Russian.
+
+**Exact next task:** operator acceptance of SB-79 — save a real key in the app, check the balance
+line, launch Hermes and Goose on it (Hermes's empty `HERMES_HOME` setup prompt is unverified);
+then SB-80 (Hermes model/provider) and SB-81 (Kimi Code subscription accounts and launch).
+
+---
+
 # SB-79 slice 1 built — the OpenRouter key for agents (2026-10-07)
 
 Branch `feat/sb-79-agent-key`, on top of the XA-02 plan (#111). The key is saved once

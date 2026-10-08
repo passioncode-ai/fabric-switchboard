@@ -335,5 +335,27 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
   is `UNREACHABLE`.
 - Encrypted backups carry the key with its value (`AgentKeyCopy`, sealed like every credential);
   a restore puts it back where the install has none and counts it in `Restored.agent_keys`.
-- The launch recipes that hand the key to agents through their environment are slice 2 (SB-79b,
-  catalog `openrouter` recipes and `agents launch --openrouter`).
+- Launching on the key (SB-79b, 2026-10-08) — `crates/switchboard-runtime/src/agent_catalog.rs`
+  (`OpenrouterRecipe`, `openrouter`), `launch.rs` (`launch_agent_openrouter`, `script_with`),
+  `Operation::LaunchAgent {agent, pool, working_directory, via, model}`:
+  - The catalog's `openrouter` object is the recipe: `key_env`, `base_env` + `base_url` (an
+    `https://openrouter.ai/` URL, Kimi Code and Qwen Code only), the model as `model_flag` (argv
+    entries with `{model}`) or `model_env`, never both; fixed `args`, `extra_env`, `isolate_env`,
+    `default` (the app offers the key as the agent's first launch; `false` for Kimi Code, which
+    runs on its subscription by default — operator, 2026-10-08) and `notes`. Ten agents carry one (Hermes, Kilo, omp, pi, Kimi Code, Aider, OpenCode, Goose,
+    Qwen Code, Crush). OpenClaw and Cline carry none: OpenClaw's interactive sessions run in its
+    Gateway daemon, which never sees a launch's environment; Cline's TUI sends a fresh install to
+    onboarding. Any other id is refused with "This agent cannot launch on the OpenRouter key…".
+  - `via: "openrouter"` needs no owner, proxy, pool or account. The model is the launch's
+    (`model_valid`) or the key's default; an agent that takes a model and has neither is refused
+    (`OPENROUTER_MODEL_NEEDED`); Crush picks its model in its own TUI (`model_choice: "agent"`).
+  - The session lives in `runtimes/agent-<id>-openrouter/` (0700); `isolate_env` points at its
+    own `agent-home/` there, so a login the agent saved itself cannot win over the key.
+  - The key never touches disk (XA-02 A-2): the script clears the conflicting variables, exports
+    the recipe's plain variables, then runs `<cli> --data-dir <root> agents key --service
+    openrouter` and exports its output under `key_env`; a failed or empty answer prints
+    `KEY_UNREADABLE` and exits before the agent starts. PowerShell does the same with
+    `$LASTEXITCODE`. `a_session_script_hands_the_key_to_the_agent_and_stops_without_it` runs the
+    zsh script with a stand-in CLI and agent.
+  - The desktop window gets `openrouter_status`, `openrouter_save`, `openrouter_model`,
+    `openrouter_remove` and `launch_agent {via, model}` — never `AgentKeyValue`.

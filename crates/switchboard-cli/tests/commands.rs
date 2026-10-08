@@ -53,6 +53,42 @@ fn offline_list_and_status_are_json_and_launch_requires_owner() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("switchboard serve"));
 }
 #[test]
+fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let launch = |extra: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(["agents", "launch", "hermes", "--dir"])
+            .arg(folder.path())
+            .args(extra)
+            .output()
+            .unwrap()
+    };
+    // No proxy is involved, so no owner is needed: the refusal names the missing key.
+    let output = launch(&["--openrouter", "--model", "moonshotai/kimi-k2"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("No OpenRouter key is saved"), "{stderr}");
+    // A model belongs to an OpenRouter launch, and a pool to a proxy launch.
+    assert_eq!(launch(&["--model", "a/b"]).status.code(), Some(2));
+    assert_eq!(
+        launch(&["--openrouter", "--pool", "agents"]).status.code(),
+        Some(2)
+    );
+    // Agents whose sessions never read the launch's environment are refused by name.
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["agents", "launch", "openclaw", "--openrouter", "--dir"])
+        .arg(folder.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot launch on the OpenRouter key"));
+}
+#[test]
 fn oversized_or_malformed_secret_stdin_is_not_echoed() {
     let tmp = tempfile::tempdir().unwrap();
     for input in [b"fixture-secret-not-valid-json".to_vec(), vec![b'x'; 65537]] {

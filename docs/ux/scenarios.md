@@ -53,6 +53,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-043 | Recover when a read or a refresh after an action fails | draft |
 | SCN-044 | Turn usage analytics off or on | draft |
 | SCN-045 | Save one OpenRouter key for agents | draft |
+| SCN-046 | Launch an agent on the OpenRouter key | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -910,8 +911,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 
 **Persona:** P-01
 **Goal:** Keep one OpenRouter key that agents launched by Switchboard run on, and see what it may still spend — without the key ever appearing in a file, a command line or a log.
-**Preconditions:** an OpenRouter key (starts `sk-or-`); the CLI or an MCP client; the app's Agents panel arrives with SB-79b.
-**Entry point:** `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
+**Preconditions:** an OpenRouter key (starts `sk-or-`); the app, the CLI or an MCP client.
+**Entry point:** Agents → *OpenRouter key for agents* · `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
 **Steps:**
 1. Save the key with a default model: `switchboard agents openrouter set --key-stdin --model moonshotai/kimi-k2 < key.txt` (the key is piped on stdin, never an argument; interactive input is refused) → “OpenRouter key saved · model moonshotai/kimi-k2”, and the remaining credit OpenRouter reports.
 2. Ask the status later: `switchboard agents openrouter status` (or the MCP tool) → saved date, default model, `limit_remaining` and `usage_daily` from OpenRouter itself; never the key.
@@ -919,11 +920,31 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 4. Remove the key: `switchboard agents openrouter remove` → the metadata goes first, then the vault item.
 **Alt paths:** a malformed key (“That is not an OpenRouter key: it starts with sk-or-.”) or model id is refused before anything is written; a key OpenRouter refuses is named as such and stays saved, its balance marked with the refusal; an unreachable OpenRouter leaves the key saved with “its balance shows when OpenRouter answers”; a failed save leaves nothing behind — no metadata row, no vault item; after reinstalling Switchboard an encrypted backup puts the key back with its model (SCN-030).
 **Expected result:** the key's value exists only in the OS vault; metadata names the service, the saved time and the model; the journal records `agent_key saved|removed`; the value leaves the vault only into a launched agent's environment (`switchboard agents key --service openrouter`, CLI only).
-**UI elements:** CLI/MCP only in this slice; the journal names the action “Agent key”.
-**States covered:** no key saved, saved with credit, saved with the credit refused or unreachable, invalid key, invalid model, failed save, removed.
+**UI elements:** the *OpenRouter key for agents* panel on Agents — before a key: *No key is saved.* and *Add OpenRouter key*; after: the default model, the balance line (“$3.25 of $5.00 left, resets daily · spent today $1.75”, or the refusal), *Change model*, *Replace key*, *Remove key* (asks first); the key field is a password field cleared on submit and never filled again. The journal names the action “Agent key”.
+**States covered:** reading, read failed (with *Retry*), no key saved, saved with credit, saved with no spending limit, saved with the credit refused or unreachable, invalid key, invalid model, failed save, removed.
 **Errors & recovery:** every refusal names the fix (the key shape, the model id shape, openrouter.ai/settings/keys); a refused or unreachable balance does not delete the key.
 **Status:** draft
 **Meaning:** one saved key instead of a key pasted per agent (operator request 2026-10-07, XA-02).
-**Coverage:** `an_agent_key_lives_in_the_vault_and_its_metadata_names_only_the_service`, `a_failed_agent_key_save_leaves_nothing_behind` (switchboard-core storage tests), `a_reinstall_gets_projects_rules_selections_and_settings_back` (backup carries the key and model), `the_status_reports_what_the_key_may_spend_and_never_the_key` (runtime, against a loopback OpenRouter stand-in), the MCP handshake test listing `switchboard_openrouter_status` and `switchboard_openrouter_model`. A status against the real OpenRouter with a real key is operator acceptance.
+**Coverage:** `an_agent_key_lives_in_the_vault_and_its_metadata_names_only_the_service`, `a_failed_agent_key_save_leaves_nothing_behind` (switchboard-core storage tests), `a_reinstall_gets_projects_rules_selections_and_settings_back` (backup carries the key and model), `the_status_reports_what_the_key_may_spend_and_never_the_key` (runtime, against a loopback OpenRouter stand-in), the MCP handshake test listing `switchboard_openrouter_status` and `switchboard_openrouter_model`, `scripts/test-ui-logic.mjs` (the balance line in both languages). A status against the real OpenRouter with a real key is operator acceptance.
+**Product:** unobserved
+**Traces:** SB-79, XA-02
+
+## SCN-046 — Launch an agent on the OpenRouter key
+
+**Persona:** P-01
+**Goal:** Start Hermes, Kimi Code, Goose or another agent that runs on OpenRouter in a project folder, on the saved key and a chosen model, without pasting the key into the agent.
+**Preconditions:** an OpenRouter key saved (SCN-045); the agent installed; the `switchboard` command reachable (bundled with the app, or linked under Agents).
+**Entry point:** Agents → an agent's *Set up* → *On the OpenRouter key* · `switchboard agents launch <agent> --openrouter [--model <id>] --dir <folder>`.
+**Steps:**
+1. Open the agent's setup, enter the folder and, if needed, a model other than the default; choose *Launch on OpenRouter* → Terminal opens in the folder and the agent starts on that model; the notice reads “Terminal launch requested for Hermes on OpenRouter.”
+2. From the CLI: `switchboard agents launch hermes --openrouter --dir ~/src/app --model moonshotai/kimi-k2` → the same, with no running app needed.
+**Alt paths:** no key saved → the agent's setup says to save one first, the CLI answers “No OpenRouter key is saved. Add one under Agents.”; no model given and no default → “Choose a model for this launch, or set the default model…”; a malformed model id → the model refusal; Crush → its setup says it picks the model in its own interface, and it starts with the key only; OpenClaw and Cline → no OpenRouter section, the CLI refuses (“This agent cannot launch on the OpenRouter key…”); the agent not installed → “Hermes is not installed. Install it first, then launch it again.”; a relative folder → the absolute-folder hint; the session cannot read the key when it starts (removed meanwhile, vault locked) → the Terminal prints “Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.” and the agent does not start.
+**Expected result:** the agent runs on the key and model; the key exists in the agent's process environment only — not in the session script, an argument, the agent's own config or a log; agents whose own saved login would win (Hermes, pi, omp, Qwen Code) start in their own home under Switchboard's data folder.
+**UI elements:** the folder field, *On the OpenRouter key* with *Model for this launch* (default named), the agent's caveat from the catalog. With a key saved, *Launch on OpenRouter* is the dialog's primary action (Enter) and *Launch through the proxy* the secondary one — except Kimi Code, which runs on its subscription by default (operator, 2026-10-08): there *Launch on OpenRouter* sits in the section and leaves Kimi's login and config untouched.
+**States covered:** no key, key with default model, key without default model, agent picks its own model, not installed, invalid folder, invalid model, key unreadable at start.
+**Errors & recovery:** every refusal names the fix; nothing is written to the agent's config; a failed start leaves only the session folder, rewritten by the next launch.
+**Status:** draft
+**Meaning:** launching an agent on the operator's OpenRouter key from one place (operator request 2026-10-07, XA-02, SB-79b).
+**Coverage:** `every_openrouter_recipe_is_complete_and_never_puts_the_key_on_a_command_line` (catalog), `an_openrouter_launch_needs_a_saved_key_and_a_valid_model`, `an_openrouter_session_reads_the_key_when_it_starts_and_never_holds_it`, `a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot`, `a_session_script_hands_the_key_to_the_agent_and_stops_without_it` (runs the zsh script, macOS), `an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key` (CLI). A real agent answering on a real OpenRouter key is operator acceptance.
 **Product:** unobserved
 **Traces:** SB-79, XA-02

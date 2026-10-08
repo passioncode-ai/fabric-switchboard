@@ -364,6 +364,57 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         .execute(Operation::RemoveProject { pool })
         .await
 }
+/// The OpenRouter key agents run on (SB-79): metadata and what it may still spend, asked of
+/// OpenRouter. Never the key — `AgentKeyValue` is the CLI's alone.
+#[tauri::command]
+async fn openrouter_status(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentKeyStatus {
+            service: "openrouter".into(),
+            credit: true,
+        })
+        .await
+}
+/// Saves the key typed into the panel; the answer is metadata only.
+#[tauri::command]
+async fn openrouter_save(
+    key: String,
+    model: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key,
+            model,
+        })
+        .await
+}
+#[tauri::command]
+async fn openrouter_model(model: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentKeyModel {
+            service: "openrouter".into(),
+            model,
+        })
+        .await
+}
+#[tauri::command]
+async fn openrouter_remove(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+        })
+        .await
+}
 /// How one third-party agent connects (catalog/agents.json); commands only, never a key.
 #[tauri::command]
 async fn agent_connect(
@@ -382,6 +433,8 @@ async fn launch_agent(
     agent: String,
     pool: String,
     working_directory: std::path::PathBuf,
+    via: Option<switchboard_runtime::AgentVia>,
+    model: Option<String>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -391,6 +444,8 @@ async fn launch_agent(
             agent,
             pool,
             working_directory,
+            via: via.unwrap_or_default(),
+            model,
         })
         .await
 }
@@ -634,6 +689,10 @@ fn main() {
             save_project,
             agent_connect,
             launch_agent,
+            openrouter_status,
+            openrouter_save,
+            openrouter_model,
+            openrouter_remove,
             remove_project,
             agent_setup,
             link_cli
