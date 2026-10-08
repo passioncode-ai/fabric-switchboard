@@ -8,6 +8,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.11 — 2026-10-08
+
+One OpenRouter key for agents: save it once, see what it may still spend, and launch Hermes, Kimi
+Code, Goose and seven other agents on it from the app or the CLI. Plus the fixes merged after
+0.6.10. If you run 0.6.1 or later, this version arrives on its own. Signed by the same team
+(`KJ35UYYL22`).
+
+**Windows:** windows_authenticode: NOT_SIGNED. The installer is built natively but not
+Authenticode-signed until the organization's Azure signing account exists; SmartScreen may warn.
+
 ### Added
 
 - One OpenRouter key for agents, saved once: `switchboard agents openrouter set --key-stdin` (the
