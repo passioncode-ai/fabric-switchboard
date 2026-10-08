@@ -56,8 +56,18 @@ fn offline_list_and_status_are_json_and_launch_requires_owner() {
 fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     let tmp = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();
+    // Discovery must not depend on Hermes being installed on the developer's machine.
+    // No key is saved, so this placeholder must never be executed.
+    let executables = tempfile::tempdir().unwrap();
+    let hermes = executables.path().join(if cfg!(windows) {
+        "hermes.exe"
+    } else {
+        "hermes"
+    });
+    std::fs::write(&hermes, b"synthetic discovery fixture, never executed").unwrap();
     let launch = |extra: &[&str]| {
         binary()
+            .env("PATH", executables.path())
             .arg("--data-dir")
             .arg(tmp.path())
             .args(["agents", "launch", "hermes", "--dir"])

@@ -1,4 +1,4 @@
-# 0.6.12 release and documentation refresh
+# 0.6.13 release and documentation refresh
 
 Objective: publish the fixes following 0.6.10, refresh English/Russian repository presentation and the product wiki, verify downloads, and remove obsolete Switchboard build caches.
 
@@ -27,3 +27,7 @@ Release preparation in progress. Complete the local gate, merge the release PR, 
 Humanization: on; own pass. Reviewed the new English/Russian introduction, feature table and release notes for concrete claims, consistent terms and unsupported superlatives. No claims of measured productivity or live-provider success were added.
 
 Local gate: `./scripts/check.sh` passed, 480 Rust tests passed, 3 opt-in tests ignored. Brand linter clean; documentation links and v0.6.12 release preflight passed. `npm audit` reports zero vulnerabilities after the bounded source-map-js update. [Machine-readable receipt](checks.json).
+
+## Windows fixture correction and 0.6.13
+
+Run [37714019602](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37714019602) for 0.6.11 failed in `an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key`: the clean Windows runner had no Hermes executable, so discovery refused before reaching the expected missing-key check. The local machine had Hermes, hiding the fixture dependency. The inherited 0.6.12 run was cancelled; both tags remain unchanged. Version 0.6.13 gives that test a private synthetic discovery file and a subprocess-only PATH. No product behavior changes; no real Hermes or provider call. The screenshot remains the exact 0.6.12 renderer; 0.6.13 changes only release metadata, the fixture and documents.
