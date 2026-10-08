@@ -89,5 +89,12 @@
   "limits": {
     "windows_authenticode": "NOT_SIGNED",
     "live_provider_acceptance": "NOT_RUN"
+  },
+  "site_redirects": {
+    "verified_at": "2026-10-08T14:31:16.567817+00:00",
+    "routes": {
+      "https://passioncode.ai/switchboard/download/macos": "https://github.com/passioncode-ai/fabric-switchboard/releases/download/v0.6.14/Fabric-Switchboard-0.6.14-macos-universal.zip",
+      "https://passioncode.ai/switchboard/download/windows": "https://github.com/passioncode-ai/fabric-switchboard/releases/download/v0.6.14/Fabric-Switchboard-0.6.14-windows-x64.zip"
+    }
   }
 }

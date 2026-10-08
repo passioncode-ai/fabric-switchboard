@@ -22,6 +22,8 @@ Based on main `af71a71e2efc468f40cc226b265bed905488cbcd`, including PRs #120 and
 
 All 11 public assets downloaded anonymously. Every SHA256SUMS entry matched; GPG verified against the organization's published release key. `gh attestation verify` passed for both ZIPs with signer `passioncode-ai/.github`. The downloaded Mac archive passed `codesign --verify --deep --strict`, `spctl --assess` (Notarized Developer ID) and `xcrun stapler validate`; bundled/standalone CLI both report 0.6.14 and contain arm64 + x86_64. The updater manifest names only 0.6.14 assets with matching signatures. Native Windows tests, installation and installed CLI checks passed in the workflow. [Machine-readable publication receipt](publication.json).
 
+The stable website download routes for macOS and Windows both resolve to the verified 0.6.14 ZIPs (HTTP 302, checked after publication). GitHub About description/topics now include Kimi Code and MCP.
+
 Windows Authenticode remains NOT_SIGNED. Interactive Windows and live-provider acceptance remain separate open checks. No real credentials were read or changed in this release task.
 
 **Exact next action:** merge the documentation receipt and workspace PR #76, then run the dedicated Fabric workspace sync and verify its deployed identity and Switchboard source pin. After publication, the next product work is FD-25 in-place acceptance and the board's remaining operator-assisted checks.
