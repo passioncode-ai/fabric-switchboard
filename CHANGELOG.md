@@ -6,12 +6,12 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.12 — 2026-10-08
+## 0.6.13 — 2026-10-08
 
 Kimi Code accounts, Hermes model settings and a shared OpenRouter key for supported agents.
 This release also restores Claude account activation when Claude Code leaves only MCP sign-ins
 in its Keychain entry, and explains when a running Switchboard needs a restart after an update.
-It includes the changes prepared for 0.6.11, which was superseded before publication.
+It includes the changes prepared for 0.6.11 and 0.6.12, which were superseded before publication.
 
 **Windows:** windows_authenticode: NOT_SIGNED. Built natively; the installer is not yet
 Authenticode-signed, so SmartScreen may warn.
@@ -19,6 +19,7 @@ Authenticode-signed, so SmartScreen may warn.
 
 ### Fixes
 
+- The OpenRouter CLI test provides its own synthetic Hermes executable, so a clean Windows build no longer depends on an installed third-party agent.
 - Update the build-time `source-map-js` dependency to 1.2.2, fixing GHSA-68fv-2mgg-jv7q.
 - Switching to a saved Claude account works when Claude Code has left only shared MCP or
   plugin sign-ins in its Keychain entry. Those sign-ins are preserved. An unrecognized or
