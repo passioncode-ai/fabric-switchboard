@@ -1,4 +1,4 @@
-# 0.6.13 release and documentation refresh
+# 0.6.14 release and documentation refresh
 
 Objective: publish the fixes following 0.6.10, refresh English/Russian repository presentation and the product wiki, verify downloads, and remove obsolete Switchboard build caches.
 
@@ -31,3 +31,9 @@ Local gate: `./scripts/check.sh` passed, 480 Rust tests passed, 3 opt-in tests i
 ## Windows fixture correction and 0.6.13
 
 Run [37714019602](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37714019602) for 0.6.11 failed in `an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key`: the clean Windows runner had no Hermes executable, so discovery refused before reaching the expected missing-key check. The local machine had Hermes, hiding the fixture dependency. The inherited 0.6.12 run was cancelled; both tags remain unchanged. Version 0.6.13 gives that test a private synthetic discovery file and a subprocess-only PATH. No product behavior changes; no real Hermes or provider call. The screenshot remains the exact 0.6.12 renderer; 0.6.13 changes only release metadata, the fixture and documents.
+
+## Windows ownership fixtures and 0.6.14
+
+Run [37787672484](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37787672484) passed the corrected CLI fixture, then found two runtime fixtures whose files belonged to Administrators on the elevated Windows runner: `a_config_past_one_mebibyte_is_still_read` and `the_native_config_stamp_ignores_unrelated_rewrites`. Their writes now use `private_fs::private_write`, which explicitly creates files owned by the current user's SID. The production reader's strict owner check is unchanged. Version 0.6.13 was cancelled before publication; 0.6.14 carries the fixture corrections.
+
+The README's final dark-theme screenshot is `docs/evidence/screenshots/accounts-0.6.13.png`, captured directly from the same demo route on 2026-10-08 at 1440 × 1200 CSS pixels, DPR 2, English, dark appearance. Source tag `v0.6.13` (`c6b24a3bb423f11658f7dcf960f70dd0c8c8d29f`). Visually reviewed after capture; no image alteration, no real accounts. The 0.6.14 renderer differs only in its version label. The preceding light capture is retained as dated evidence.

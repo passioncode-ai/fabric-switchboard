@@ -1,14 +1,14 @@
 {
-  "checked_at": "2026-10-08T13:50:01.851722+00:00",
+  "checked_at": "2026-10-08T14:01:22.621512+00:00",
   "check_command": "./scripts/check.sh",
   "exit_code": 0,
   "rust_passed": 480,
   "rust_ignored": 3,
-  "log_sha256": "da6abe2683cff9c47120645a62c5e4406838dc7ddfc3193a89c318e9c5424b50",
+  "log_sha256": "046c8acf0343dd6c3095d48ef8221e7cab4609cf8c271d43fd8d4ae030637ec0",
   "additional_checks": [
     "brand_lint.py docs/brand: clean",
     "check_docs.py: 87 files, 694 relative links, 0 errors",
-    "release_preflight.py v0.6.13: ok",
+    "release_preflight.py v0.6.14: ok",
     "npm audit after source-map-js 1.2.2: 0 vulnerabilities"
   ],
   "limits": [
@@ -16,5 +16,5 @@
     "Windows native tests run in the protected release workflow",
     "Publication pending"
   ],
-  "version": "0.6.13"
+  "version": "0.6.14"
 }
