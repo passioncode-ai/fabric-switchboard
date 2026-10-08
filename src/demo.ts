@@ -1,5 +1,5 @@
 import { isAbsoluteProjectPath } from './platform';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, LoginInput, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, LoginInput, OpenrouterStatus, Snapshot, UpdateStatus } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -31,6 +31,7 @@ export function createDemoAdapter(): Adapter {
       { path: '/srv/projects/beta-api', provider: 'codex', account_id: 'demo-codex-work', target: 'managed', enabled: false, created_at: now() - 86400, expires_at: null },
     ],
   };
+  const openrouter: OpenrouterStatus = { service: 'openrouter', saved: false, saved_at: null, model: null, credit: null, credit_error: null };
   const setup: AgentSetup = { cli_path: null, bundled_cli: '/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard', linked_cli: null, can_link: true, commands: { claude_code: 'claude mcp add --scope user switchboard -- switchboard mcp', codex: 'codex mcp add switchboard -- switchboard mcp', claude_plugin: 'claude plugin marketplace add passioncode-ai/fabric-switchboard && claude plugin install switchboard@switchboard' } };
   state.accounts[0].external_identity = studio;
   state.accounts[1].external_identity = codexIdentity;
@@ -203,6 +204,12 @@ export function createDemoAdapter(): Adapter {
     async restoreBackup(file) { await pause(); if (!backups.some((entry) => entry.file === file)) throw new Error('Backup not found. Refresh the list and choose another.'); return { added: 0, skipped: state.accounts.length, failed: 0 }; },
     async agentConnect(agent, pool) { await pause(); return { name: agent, level: 'proxy', mcp: { supported: true, add_command: `${agent} mcp add switchboard -- switchboard mcp`, config_path: null, config_snippet: null }, anthropic: { base_url: `http://127.0.0.1:47000/claude/${pool}`, env: {}, config_snippet: null }, openai: { base_url: `http://127.0.0.1:47000/codex/${pool}/v1` }, key_command: 'switchboard agents key', requires: `An API-key account selected in the pool ${pool}: the proxy refuses subscription sign-ins for third-party agents.`, launch: `switchboard agents launch ${agent} --pool ${pool} --dir <project folder>`, warning: null, notes: 'Synthetic demo: the native app shows this agent\'s exact setup.' }; },
     async launchAgent() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    // SB-79: a synthetic key; the demo keeps only its metadata, as the app does.
+    async openrouterStatus() { return structuredClone(openrouter); },
+    async openrouterSave(key, model) { await pause(); if (!key.startsWith('sk-or-')) throw new Error('That is not an OpenRouter key: it starts with sk-or-.'); Object.assign(openrouter, { saved: true, saved_at: now(), model: model ?? openrouter.model, credit: { label: 'demo', limit: 5, limit_remaining: 5, limit_reset: 'daily', usage: 0, usage_daily: 0, is_free_tier: false }, credit_error: null }); log('agent_key', '', 'saved'); },
+    async openrouterModel(model) { await pause(); if (!openrouter.saved) throw new Error('No OpenRouter key is saved. Add one under Agents.'); openrouter.model = model; },
+    async openrouterRemove() { await pause(); Object.assign(openrouter, { saved: false, saved_at: null, model: null, credit: null, credit_error: null }); log('agent_key', '', 'removed'); },
+    async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
     async updateStatus() { return { ...update }; },
     async setAutoUpdate(enabled) { await pause(); update.enabled = enabled; return { ...update }; },

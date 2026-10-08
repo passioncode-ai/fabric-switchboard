@@ -233,6 +233,12 @@ pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     }
     None
 }
+/// A variable the session script fills from a command's output when it starts — a secret the
+/// script must not hold (SB-79, XA-02 A-2): `(name, program, arguments)`.
+type FromCommand<'a> = Option<(&'a str, &'a Path, &'a [String])>;
+/// Printed by a session script that could not read its key; names the fix, never the key.
+const KEY_UNREADABLE: &str =
+    "Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.";
 #[cfg(not(windows))]
 fn script(
     home: &Path,
@@ -242,9 +248,32 @@ fn script(
     login: bool,
     working_directory: &Path,
 ) -> String {
+    script_with(home, program, args, env, None, login, working_directory)
+}
+#[cfg(not(windows))]
+fn script_with(
+    home: &Path,
+    program: &Path,
+    args: &[&str],
+    env: &BTreeMap<String, String>,
+    from_command: FromCommand,
+    login: bool,
+    working_directory: &Path,
+) -> String {
     let mut result = format!("#!/bin/zsh\nset +x\nunset {}\n", CONFLICTS.join(" "));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
+    }
+    if let Some((name, command, arguments)) = from_command {
+        let mut call = quote(command.to_string_lossy().as_ref());
+        for argument in arguments {
+            call.push(' ');
+            call.push_str(&quote(argument));
+        }
+        result.push_str(&format!(
+            "{name}=\"$({call})\" && [ -n \"${name}\" ] || {{ print -u2 {}; exit 1; }}\nexport {name}\n",
+            quote(KEY_UNREADABLE)
+        ));
     }
     result.push_str(&format!(
         "cd {} || exit 1\n",
@@ -281,6 +310,18 @@ fn windows_script(
     login: bool,
     working_directory: &Path,
 ) -> String {
+    windows_script_with(home, program, args, env, None, login, working_directory)
+}
+#[cfg(any(windows, test))]
+fn windows_script_with(
+    home: &Path,
+    program: &Path,
+    args: &[&str],
+    env: &BTreeMap<String, String>,
+    from_command: FromCommand,
+    login: bool,
+    working_directory: &Path,
+) -> String {
     let q = |p: &Path| powershell_quote(&p.to_string_lossy());
     let mut result = String::from("$ErrorActionPreference = 'Stop'\nSet-PSDebug -Off\n");
     for variable in CONFLICTS {
@@ -294,6 +335,19 @@ fn windows_script(
             "[Environment]::SetEnvironmentVariable({}, {}, 'Process')\n",
             powershell_quote(key),
             powershell_quote(value)
+        ));
+    }
+    if let Some((name, command, arguments)) = from_command {
+        let arguments = arguments
+            .iter()
+            .map(|a| powershell_quote(a))
+            .collect::<Vec<_>>()
+            .join(", ");
+        result.push_str(&format!(
+            "$global:LASTEXITCODE = 0\n$switchboardSecret = & {} @({arguments})\nif ($LASTEXITCODE -ne 0 -or -not $switchboardSecret) {{ [Console]::Error.WriteLine({}); exit 1 }}\n[Environment]::SetEnvironmentVariable({}, [string]$switchboardSecret, 'Process')\nRemove-Variable switchboardSecret\n",
+            q(command),
+            powershell_quote(KEY_UNREADABLE),
+            powershell_quote(name)
         ));
     }
     result.push_str(&format!("$homePath = {}\n$marker = Join-Path $homePath '.session-process'\n$process = Get-Process -Id $PID\n@{{ pid = $PID; created = $process.StartTime.ToUniversalTime().ToFileTimeUtc() }} | ConvertTo-Json -Compress | Set-Content -LiteralPath $marker -Encoding ASCII\nRemove-Item -LiteralPath (Join-Path $homePath '.launch-pending') -Force\nSet-Location -LiteralPath {}\n",q(home),q(working_directory)));
@@ -319,6 +373,26 @@ fn script(
     working_directory: &Path,
 ) -> String {
     windows_script(home, program, args, env, login, working_directory)
+}
+#[cfg(windows)]
+fn script_with(
+    home: &Path,
+    program: &Path,
+    args: &[&str],
+    env: &BTreeMap<String, String>,
+    from_command: FromCommand,
+    login: bool,
+    working_directory: &Path,
+) -> String {
+    windows_script_with(
+        home,
+        program,
+        args,
+        env,
+        from_command,
+        login,
+        working_directory,
+    )
 }
 /// A reservation guards only the window between writing a home and its script removing
 /// the marker; a Terminal that never ran the script must not hold the home forever.
@@ -883,18 +957,7 @@ pub fn launch_agent(
     working_directory: &Path,
 ) -> Result<Value, String> {
     let profile = crate::agent_catalog::launchable(agent)?;
-    if !working_directory.is_absolute() {
-        return Err("Choose an existing project directory.".into());
-    }
-    let working_directory = working_directory
-        .canonicalize()
-        .map_err(|_| "Choose an existing project directory.")?;
-    let private_root = root
-        .canonicalize()
-        .map_err(|_| "Managed home unavailable.")?;
-    if !working_directory.is_dir() || working_directory.starts_with(&private_root) {
-        return Err("Choose an existing project directory.".into());
-    }
+    let working_directory = agent_folder(root, working_directory)?;
     let (account, _) = store
         .route(Provider::Claude, pool)
         .map_err(|_| "Select an API-key account in this pool first.".to_string())?;
@@ -928,6 +991,141 @@ pub fn launch_agent(
     Ok(
         json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
     )
+}
+/// The folder a third-party agent starts in: an existing absolute folder outside Switchboard's
+/// own data.
+fn agent_folder(root: &Path, working_directory: &Path) -> Result<PathBuf, String> {
+    if !working_directory.is_absolute() {
+        return Err("Choose an existing project directory.".into());
+    }
+    let working_directory = working_directory
+        .canonicalize()
+        .map_err(|_| "Choose an existing project directory.")?;
+    let private_root = root
+        .canonicalize()
+        .map_err(|_| "Managed home unavailable.")?;
+    if !working_directory.is_dir() || working_directory.starts_with(&private_root) {
+        return Err("Choose an existing project directory.".into());
+    }
+    Ok(working_directory)
+}
+pub const OPENROUTER_MODEL_NEEDED: &str =
+    "Choose a model for this launch, or set the default model of the OpenRouter key under Agents.";
+/// Starts an agent with an OpenRouter recipe (catalog `openrouter`, SB-79) in a folder on the
+/// operator's saved OpenRouter key and `model` (default: the key's model). The key never touches
+/// disk: the session script reads it from `switchboard agents key --service openrouter` when it
+/// starts (XA-02 A-2). No proxy, pool or account is involved.
+pub fn launch_agent_openrouter(
+    root: &Path,
+    store: &Store,
+    agent: &str,
+    model: Option<&str>,
+    working_directory: &Path,
+) -> Result<Value, String> {
+    let recipe = crate::agent_catalog::openrouter(agent)?;
+    let program = find_program(&recipe.binary).ok_or_else(|| {
+        format!(
+            "{} is not installed. Install it first, then launch it again.",
+            recipe.name
+        )
+    })?;
+    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let (path, result) = openrouter_session(
+        root,
+        store,
+        &recipe,
+        &program,
+        &cli,
+        model,
+        working_directory,
+    )?;
+    start_terminal(&path)?;
+    Ok(result)
+}
+pub const OPENROUTER_CLI_MISSING: &str =
+    "The switchboard command was not found. Install it from Agents, then launch again.";
+/// Writes the session of an OpenRouter launch and returns its script and the answer. Separate
+/// from starting Terminal so tests read the script a real launch would run.
+fn openrouter_session(
+    root: &Path,
+    store: &Store,
+    recipe: &crate::agent_catalog::OpenrouterRecipe,
+    program: &Path,
+    cli: &Path,
+    model: Option<&str>,
+    working_directory: &Path,
+) -> Result<(PathBuf, Value), String> {
+    let working_directory = agent_folder(root, working_directory)?;
+    let saved = store
+        .agent_key("openrouter")?
+        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+    let model = match model {
+        Some(m) if !switchboard_core::agent_keys::model_valid(m) => {
+            return Err(switchboard_core::agent_keys::MODEL_INVALID.into())
+        }
+        Some(m) => Some(m.to_owned()),
+        None => saved.model.clone(),
+    };
+    let takes_model = !recipe.model_flag.is_empty() || recipe.model_env.is_some();
+    if takes_model && model.is_none() {
+        return Err(OPENROUTER_MODEL_NEEDED.into());
+    }
+    let homes = root.join("runtimes");
+    private_dir(&homes)?;
+    let home = homes.join(format!("agent-{}-openrouter", recipe.id));
+    private_dir(&home)?;
+    let mut env = BTreeMap::new();
+    if let (Some(base_env), Some(base_url)) = (&recipe.base_env, &recipe.base_url) {
+        env.insert(base_env.clone(), base_url.clone());
+    }
+    if let (Some(model_env), Some(model)) = (&recipe.model_env, &model) {
+        env.insert(model_env.clone(), model.clone());
+    }
+    env.extend(recipe.extra_env.clone());
+    if let Some(isolate) = &recipe.isolate_env {
+        let own = home.join("agent-home");
+        private_dir(&own)?;
+        env.insert(isolate.clone(), own.to_string_lossy().into_owned());
+    }
+    let mut args = recipe.args.clone();
+    if let Some(model) = &model {
+        args.extend(
+            recipe
+                .model_flag
+                .iter()
+                .map(|a| a.replace("{model}", model)),
+        );
+    }
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let key_command = [
+        "--data-dir".to_string(),
+        root.to_string_lossy().into_owned(),
+        "agents".into(),
+        "key".into(),
+        "--service".into(),
+        "openrouter".into(),
+    ];
+    let content = script_with(
+        &home,
+        program,
+        &args,
+        &env,
+        Some((&recipe.key_env, cli, &key_command)),
+        false,
+        &working_directory,
+    );
+    let path = write_launch_script(&home, &content)?;
+    Ok((
+        path,
+        json!({
+            "launched": true,
+            "agent": recipe.id,
+            "name": recipe.name,
+            "via": "openrouter",
+            "model": if takes_model { model } else { None },
+            "model_choice": if takes_model { "launch" } else { "agent" },
+        }),
+    ))
 }
 pub fn launch(
     root: &Path,
@@ -1757,6 +1955,198 @@ mod tests {
         agent_cli: no_agent_cli,
         start_terminal: terminal_opens,
     };
+    fn openrouter_key(f: &Fixture, model: Option<&str>) {
+        f.store
+            .set_agent_key(
+                "openrouter",
+                "sk-or-v1-synthetic-must-not-reach-disk",
+                model.map(str::to_owned),
+            )
+            .unwrap();
+    }
+    fn openrouter_launch(
+        f: &Fixture,
+        agent: &str,
+        model: Option<&str>,
+    ) -> Result<(PathBuf, Value), String> {
+        openrouter_session(
+            &f.root,
+            &f.store,
+            &crate::agent_catalog::openrouter(agent).unwrap(),
+            Path::new("/opt/Agent Tools/agent"),
+            Path::new("/opt/Switchboard Tools/switch'board"),
+            model,
+            &f.project,
+        )
+    }
+    #[test]
+    fn an_openrouter_launch_needs_a_saved_key_and_a_valid_model() {
+        let f = fixture();
+        assert_eq!(
+            openrouter_launch(&f, "hermes", Some("moonshotai/kimi-k2")).unwrap_err(),
+            switchboard_core::agent_keys::NO_AGENT_KEY
+        );
+        openrouter_key(&f, None);
+        assert_eq!(
+            openrouter_launch(&f, "hermes", None).unwrap_err(),
+            OPENROUTER_MODEL_NEEDED
+        );
+        assert_eq!(
+            openrouter_launch(&f, "hermes", Some("no model; rm -rf")).unwrap_err(),
+            switchboard_core::agent_keys::MODEL_INVALID
+        );
+        // An agent that picks its model itself starts without one.
+        let (_, answer) = openrouter_launch(&f, "crush", None).unwrap();
+        assert_eq!(answer["model"], Value::Null);
+        assert_eq!(answer["model_choice"], "agent");
+        // Nothing outside an existing folder outside Switchboard's data.
+        let inside = openrouter_session(
+            &f.root,
+            &f.store,
+            &crate::agent_catalog::openrouter("goose").unwrap(),
+            Path::new("/bin/true"),
+            Path::new("/bin/true"),
+            Some("a/b"),
+            &f.root,
+        );
+        assert!(inside.is_err());
+    }
+    #[test]
+    fn an_openrouter_session_reads_the_key_when_it_starts_and_never_holds_it() {
+        let f = fixture();
+        openrouter_key(&f, Some("moonshotai/kimi-k2"));
+        let (path, answer) = openrouter_launch(&f, "hermes", None).unwrap();
+        assert_eq!(answer["via"], "openrouter");
+        assert_eq!(answer["model"], "moonshotai/kimi-k2");
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("sk-or-"), "the key reached the script");
+        let home = f.root.join("runtimes/agent-hermes-openrouter");
+        assert!(path.starts_with(&home));
+        assert!(home.join("agent-home").is_dir());
+        let (_, answer) = openrouter_launch(&f, "kimi-code", Some("qwen/qwen3-coder")).unwrap();
+        assert_eq!(answer["model"], "qwen/qwen3-coder");
+        let kimi = fs::read_to_string(f.root.join("runtimes/agent-kimi-code-openrouter").join(
+            if cfg!(windows) {
+                "launch.ps1"
+            } else {
+                "launch.command"
+            },
+        ))
+        .unwrap();
+        for expected in [
+            "KIMI_MODEL_BASE_URL",
+            "https://openrouter.ai/api/v1",
+            "KIMI_MODEL_NAME",
+            "qwen/qwen3-coder",
+            "KIMI_MODEL_PROVIDER_TYPE",
+        ] {
+            assert!(kimi.contains(expected), "{expected}");
+        }
+        assert!(!kimi.contains("sk-or-"));
+        #[cfg(not(windows))]
+        {
+            assert!(text.contains(&format!(
+                "export HERMES_HOME={}",
+                quote(home.join("agent-home").to_string_lossy().as_ref())
+            )));
+            assert!(text.contains(
+                "OPENROUTER_API_KEY=\"$('/opt/Switchboard Tools/switch'\\''board' '--data-dir' "
+            ));
+            assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+            assert!(text.contains("export OPENROUTER_API_KEY\n"));
+            assert!(text.contains(
+                "exec '/opt/Agent Tools/agent' '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'"
+            ));
+            assert!(text.contains("unset ANTHROPIC_API_KEY"));
+        }
+    }
+    #[test]
+    fn a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot() {
+        let env = BTreeMap::from([("GOOSE_PROVIDER".into(), "openrouter".into())]);
+        let arguments = [
+            "agents".to_string(),
+            "key".into(),
+            "--service".into(),
+            "openrouter".into(),
+        ];
+        let text = windows_script_with(
+            Path::new("C:/Data/runtimes/agent-goose-openrouter"),
+            Path::new("C:/Tools/goose.exe"),
+            &[],
+            &env,
+            Some((
+                "OPENROUTER_API_KEY",
+                Path::new("C:/Program Files/Switchboard/switch'board.exe"),
+                &arguments,
+            )),
+            false,
+            Path::new("C:/Projects/app"),
+        );
+        assert!(text.contains(
+            "$switchboardSecret = & 'C:/Program Files/Switchboard/switch''board.exe' @('agents', 'key', '--service', 'openrouter')"
+        ));
+        assert!(text.contains("if ($LASTEXITCODE -ne 0 -or -not $switchboardSecret) {"));
+        assert!(text.contains(
+            "[Environment]::SetEnvironmentVariable('OPENROUTER_API_KEY', [string]$switchboardSecret, 'Process')"
+        ));
+        assert!(text.contains("Remove-Variable switchboardSecret"));
+        // The key is read after the conflicting variables are cleared, before the agent runs.
+        let read = text.find("$switchboardSecret = &").unwrap();
+        assert!(text.find("'OPENAI_API_KEY', $null").unwrap() < read);
+        assert!(read < text.find("& 'C:/Tools/goose.exe'").unwrap());
+    }
+    /// Runs the script a launch writes under zsh with a stand-in CLI and agent: the agent sees the
+    /// key in its environment, and a CLI that cannot answer stops the session before the agent.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_session_script_hands_the_key_to_the_agent_and_stops_without_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir(&home).unwrap();
+        let tool = |name: &str, body: &str| {
+            let path = temp.path().join(name);
+            fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+            path
+        };
+        let seen = temp.path().join("seen");
+        let agent = tool(
+            "agent",
+            &format!(
+                "printf '%s|%s' \"$OPENROUTER_API_KEY\" \"$1\" > {}",
+                quote(seen.to_string_lossy().as_ref())
+            ),
+        );
+        let run = |cli: &Path| {
+            let arguments = ["agents".to_string(), "key".into()];
+            let text = script_with(
+                &home,
+                &agent,
+                &["--model"],
+                &BTreeMap::new(),
+                Some(("OPENROUTER_API_KEY", cli, &arguments)),
+                false,
+                temp.path(),
+            );
+            let path = home.join("launch.command");
+            private_write(&path, text.as_bytes(), true).unwrap();
+            Command::new("/bin/zsh").arg(&path).output().unwrap()
+        };
+        let answers = tool("cli-ok", "printf 'sk-or-v1-synthetic\\n'");
+        assert!(run(&answers).status.success());
+        assert_eq!(
+            fs::read_to_string(&seen).unwrap(),
+            "sk-or-v1-synthetic|--model"
+        );
+        fs::remove_file(&seen).unwrap();
+        for failing in [tool("cli-fails", "exit 3"), tool("cli-silent", "exit 0")] {
+            let output = run(&failing);
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains(KEY_UNREADABLE));
+            assert!(!seen.exists(), "the agent ran without a key");
+        }
+    }
     struct Fixture {
         temp: tempfile::TempDir,
         root: PathBuf,

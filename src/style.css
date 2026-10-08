@@ -81,6 +81,7 @@ h1:focus { outline: none; }
 .definitions dt { font-weight: 600; }
 .definitions dd { margin: 0; color: var(--muted); }
 .about-panel + .about-panel { margin-top: var(--space-4); }
+.openrouter-facts { margin: var(--space-3) 0; display: grid; gap: var(--space-1); }
 .appearance-options { display: flex; flex-wrap: wrap; gap: var(--space-2); border: 0; margin: 0; padding: 0; }
 .appearance-option { display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); cursor: pointer; }
 .appearance-option:has(input:checked) { background: var(--accent-weak); border-color: var(--accent-text); font-weight: 600; }
@@ -291,4 +292,5 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .agent-chip { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel); font-size: var(--t-label); }
 .agent-chip .text-button { margin-left: auto; }
 .agent-setup { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.agent-setup > .button { justify-self: start; }
 .agent-setup code.address { white-space: pre-wrap; word-break: break-all; }

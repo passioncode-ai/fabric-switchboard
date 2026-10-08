@@ -68,6 +68,14 @@ export interface Adapter {
   removeProject(pool: string): Promise<unknown>;
   agentConnect(agent: string, pool: string): Promise<AgentConnection>;
   launchAgent(agent: string, pool: string, workingDirectory: string): Promise<unknown>;
+  /** The OpenRouter key agents run on (SB-79): metadata and what it may still spend, never the key. */
+  openrouterStatus(): Promise<OpenrouterStatus>;
+  /** Saves the key; the answer is metadata only. */
+  openrouterSave(key: string, model: string | null): Promise<unknown>;
+  openrouterModel(model: string): Promise<unknown>;
+  openrouterRemove(): Promise<unknown>;
+  /** Starts an agent with an OpenRouter recipe on the saved key; `model` null: the key's model. */
+  launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
@@ -83,7 +91,10 @@ export interface Adapter {
 }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */
-export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null }
+export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null; openrouter?: { model_flag: string[] | null; model_env: string | null; default: boolean; notes: string | null } | null }
+/** What OpenRouter says the saved key may spend (`GET /key`), in US dollars; null where it has no limit. */
+export interface OpenrouterCredit { label: string | null; limit: number | null; limit_remaining: number | null; limit_reset: string | null; usage: number | null; usage_daily: number | null; is_free_tier: boolean | null }
+export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }
 export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';

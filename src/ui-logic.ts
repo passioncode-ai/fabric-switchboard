@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, OpenrouterCredit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -365,4 +365,14 @@ export function signInNotice(account: { label: string; pool: string; signed_in_a
   return account.login_cleanup === 'pending'
     ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
+}
+/** The balance line of the saved OpenRouter key (SB-79): numbers only, in US dollars. */
+export function openrouterCreditLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_remaining' | 'limit_reset' | 'usage_daily'>): string {
+  const money = (value: number | null) => value === null || !Number.isFinite(value) ? null : `$${value.toFixed(2)}`;
+  const remaining = money(credit.limit_remaining);
+  const today = money(credit.usage_daily) ?? t('unknown');
+  const limit = money(credit.limit);
+  if (!limit || !remaining) return t('No spending limit · spent today {today}', { today });
+  const reset = ({ daily: t('resets daily'), weekly: t('resets weekly'), monthly: t('resets monthly') } as Record<string, string>)[credit.limit_reset ?? ''];
+  return reset ? t('{remaining} of {limit} left, {reset} · spent today {today}', { remaining, limit, reset, today }) : t('{remaining} of {limit} left · spent today {today}', { remaining, limit, today });
 }

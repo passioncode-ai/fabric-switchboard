@@ -38,6 +38,23 @@
         "key_env": null,
         "notes": "providers.<name>.transport: chat_completions (CC) or codex_responses (R). Which path is appended for Responses is unverified."
       },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "--provider",
+          "openrouter",
+          "-m",
+          "{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": "HERMES_HOME",
+        "default": true,
+        "notes": "`~/.hermes/.env` and `hermes auth` pool entries win over the launch's key, so the launch runs in its own `HERMES_HOME`; whether an empty home starts Hermes's setup wizard is unverified."
+      },
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": "Adopts external logins by default (reads Claude Code's credential files): set auth.adopt_external_logins: false. Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
@@ -86,6 +103,21 @@
         "base_env": null,
         "key_env": null,
         "notes": "@ai-sdk/openai-compatible speaks CC; @ai-sdk/openai speaks Responses with baseURL …/codex/<pool>/v1."
+      },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "-m",
+          "openrouter/{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": null,
+        "default": true,
+        "notes": "A key saved with `kilo auth login` for openrouter wins over the launch's key."
       },
       "proxy_ok": true,
       "level": "proxy",
@@ -185,7 +217,7 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": null,
-      "notes": "CLI uses createAnthropic, so x-api-key. In the extension it is the \"Use custom base URL\" checkbox; that the extension takes the same path is unverified. `cline mcp` opens a wizard; CLINE_MCP_SETTINGS_PATH overrides the MCP file.",
+      "notes": "CLI uses createAnthropic, so x-api-key. In the extension it is the \"Use custom base URL\" checkbox; that the extension takes the same path is unverified. `cline mcp` opens a wizard; CLINE_MCP_SETTINGS_PATH overrides the MCP file. No OpenRouter launch: the TUI sends a fresh install to onboarding before it reads `OPENROUTER_API_KEY`.",
       "sources": [
         "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/apps/cli/src/commands/auth.ts#L88-L92",
         "https://github.com/cline/cline/blob/68b24a92b71ee98c3e8ea4aca7a7a1c0f97a43b8/sdk/packages/llms/src/providers/vendors/anthropic.ts#L18-L26",
@@ -276,6 +308,21 @@
         "base_env": null,
         "key_env": null,
         "notes": "models.yml api: openai-completions (CC) or openai-responses (R)."
+      },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "--model",
+          "openrouter/{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": "PI_CODING_AGENT_DIR",
+        "default": true,
+        "notes": "A login saved with `/login` wins over the launch's key, so the launch uses its own `PI_CODING_AGENT_DIR`."
       },
       "proxy_ok": true,
       "level": "proxy",
@@ -422,6 +469,23 @@
         "key_env": null,
         "notes": "\"api\": \"openai-completions\" (CC) or \"openai-responses\" (R)."
       },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "--provider",
+          "openrouter",
+          "--model",
+          "{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": "PI_CODING_AGENT_DIR",
+        "default": true,
+        "notes": "Runs in its own `PI_CODING_AGENT_DIR` so a saved `auth.json` cannot win."
+      },
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
@@ -521,7 +585,7 @@
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": "Impersonates Claude Code when handed an sk-ant-oat subscription token; give it an Anthropic API-key account only, never a Claude subscription token.",
-      "notes": "A personal-assistant gateway with a coding headless mode (agent exec, coding tool profile). ANTHROPIC_BASE_URL is a fallback to models.providers.<id>. apiKey takes the key value or an env-var name as a SecretRef env marker (the pinned worked example uses \"LITELLM_KEY\") — name e.g. SWITCHBOARD_TOKEN and export it from the key command to keep the key out of the file. /v1/messages is appended (only /messages if the base ends in /v1); x-api-key. A custom baseUrl trusts that loopback origin automatically. `openclaw mcp add` probes the server before saving. Launch by Switchboard waits until its key variable and base path are verified.",
+      "notes": "A personal-assistant gateway with a coding headless mode (agent exec, coding tool profile). ANTHROPIC_BASE_URL is a fallback to models.providers.<id>. apiKey takes the key value or an env-var name as a SecretRef env marker (the pinned worked example uses \"LITELLM_KEY\") — name e.g. SWITCHBOARD_TOKEN and export it from the key command to keep the key out of the file. /v1/messages is appended (only /messages if the base ends in /v1); x-api-key. A custom baseUrl trusts that loopback origin automatically. `openclaw mcp add` probes the server before saving. Launch by Switchboard waits until its key variable and base path are verified. No OpenRouter launch: an interactive OpenClaw session runs through its Gateway daemon, which never sees a launch's environment; only one-shot `openclaw agent exec --auth-env-only` takes a per-run key.",
       "sources": [
         "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/docs/gateway/config-tools/custom-providers.md#L14-L82",
         "https://github.com/openclaw/openclaw/blob/78e406060b56bac2d09810161ac7b483861e9879/packages/ai/src/transports/anthropic-transport-stream.ts#L79-L87",
@@ -661,6 +725,20 @@
         "key_env": null,
         "notes": "type = \"openai\" is CC, type = \"openai_responses\" is R; both Bearer, base …/codex/<pool>/v1."
       },
+      "openrouter": {
+        "key_env": "KIMI_MODEL_API_KEY",
+        "base_env": "KIMI_MODEL_BASE_URL",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model_flag": null,
+        "model_env": "KIMI_MODEL_NAME",
+        "args": [],
+        "extra_env": {
+          "KIMI_MODEL_PROVIDER_TYPE": "openai"
+        },
+        "isolate_env": null,
+        "default": false,
+        "notes": "Runs on the Kimi Code subscription by default; an OpenRouter launch sets `KIMI_MODEL_*` for that session only and leaves its login and config alone. Reads `KIMI_MODEL_*` only; a shell `OPENROUTER_API_KEY` is ignored."
+      },
       "proxy_ok": true,
       "level": "proxy",
       "subscription_warning": null,
@@ -759,6 +837,21 @@
         "key_env": null,
         "notes": "CC via OPENAI_API_BASE / --openai-api-base; Responses unverified. Would need the WIP Chat Completions route plus an OpenAI API-key account."
       },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "--model",
+          "openrouter/{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": null,
+        "default": true,
+        "notes": null
+      },
       "proxy_ok": true,
       "level": "launch",
       "subscription_warning": null,
@@ -807,6 +900,21 @@
         "base_env": null,
         "key_env": null,
         "notes": "Built-in openai provider always uses Responses at ${baseURL}/responses with Bearer: set provider.openai.options.baseURL = http://127.0.0.1:<port>/codex/<pool>/v1. A custom provider must use @ai-sdk/openai; @ai-sdk/openai-compatible is CC."
+      },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": [
+          "-m",
+          "openrouter/{model}"
+        ],
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": null,
+        "default": true,
+        "notes": "A key saved with `/connect` (auth.json) likely wins over the launch's key (unverified at runtime)."
       },
       "proxy_ok": true,
       "level": "proxy",
@@ -906,6 +1014,21 @@
         "key_env": "OPENAI_API_KEY",
         "notes": "OPENAI_HOST=http://127.0.0.1:<port> plus OPENAI_BASE_PATH=codex/<pool>/v1/responses; a base path ending in responses forces Responses. Bearer."
       },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": null,
+        "model_env": "GOOSE_MODEL",
+        "args": [],
+        "extra_env": {
+          "GOOSE_PROVIDER": "openrouter",
+          "GOOSE_DISABLE_KEYRING": "1"
+        },
+        "isolate_env": null,
+        "default": true,
+        "notes": null
+      },
       "proxy_ok": true,
       "level": "launch",
       "subscription_warning": null,
@@ -1001,6 +1124,21 @@
         "key_env": null,
         "notes": "CC by default; \"wireApi\": \"responses\" on a modelProviders.openai[] entry sends to <base without /v1>/v1/responses."
       },
+      "openrouter": {
+        "key_env": "OPENAI_API_KEY",
+        "base_env": "OPENAI_BASE_URL",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model_flag": null,
+        "model_env": "OPENAI_MODEL",
+        "args": [
+          "--auth-type",
+          "openai"
+        ],
+        "extra_env": {},
+        "isolate_env": "QWEN_HOME",
+        "default": true,
+        "notes": "A `modelProviders` entry in settings wins over the launch's environment, so the launch uses its own `QWEN_HOME`."
+      },
       "proxy_ok": true,
       "level": "launch",
       "subscription_warning": null,
@@ -1049,6 +1187,18 @@
         "base_env": null,
         "key_env": null,
         "notes": "--type openai uses Responses only for model IDs on fantasy's built-in Responses list; --type openai-compat uses CC."
+      },
+      "openrouter": {
+        "key_env": "OPENROUTER_API_KEY",
+        "base_env": null,
+        "base_url": null,
+        "model_flag": null,
+        "model_env": null,
+        "args": [],
+        "extra_env": {},
+        "isolate_env": null,
+        "default": true,
+        "notes": "The interactive TUI takes no model flag: pick the model in its picker (Ctrl+L); the key comes from the launch."
       },
       "proxy_ok": true,
       "level": "proxy",

@@ -36,6 +36,8 @@ def render(catalog):
         '- **Through Switchboard** — it can also send its model requests to Switchboard\'s local proxy (`http://127.0.0.1:<port>/claude/<pool>` for the Anthropic Messages API, `…/codex/<pool>/v1` for the OpenAI Responses and Chat Completions APIs), which serves the pool\'s selected account and switches accounts for it. It is set up once in the agent\'s own config; `switchboard agents connect <id>` prints the exact lines.',
         '- **Launch from Switchboard** — configured by environment alone, so `switchboard agents launch <id> --pool <pool> --dir <folder>` (or *Agents → Other agents → Set up → Launch*) starts it in Terminal. Agents set up once in their config launch the same way.',
         '',
+        '**OpenRouter key.** Agents with an OpenRouter recipe also launch on one OpenRouter key saved in Switchboard (`switchboard agents openrouter set --key-stdin`, or *Agents → OpenRouter key for agents*): `switchboard agents launch <id> --openrouter [--model <id>]`. The key reaches the agent only through its environment, read by the session script when it starts; no config file, argument or script holds it.',
+        '',
         '**Accounts.** A subscription sign-in (Claude.ai, a Claude setup token, ChatGPT) is for the provider\'s own client — Claude Code or Codex — by the providers\' terms. Other agents get their own proxy key (`switchboard agents key`, derived from the session capability, never stored in their config), and the proxy serves that key only from **API-key accounts**; a pool whose selected account is a subscription sign-in answers 403. Projects still apply: a project\'s account starts only inside its folders.',
         '',
         '| # | Agent | Kind | Level | MCP | Anthropic endpoint | OpenAI endpoint | Headless |',
@@ -67,6 +69,9 @@ def render(catalog):
         elif not mcp.get('supported'):
             lines.append('- Tools: no MCP support.')
         lines.append(f"- Setup: `switchboard agents connect {a['id']} --pool <pool>`" + (f"; launch: `switchboard agents launch {a['id']} --pool <pool> --dir <folder>`" if a['level'] != 'mcp' and a.get('binary') else ''))
+        r = a.get('openrouter')
+        if r:
+            lines.append(f"- OpenRouter key: `switchboard agents launch {a['id']} --openrouter [--model <id>] --dir <folder>` (`{r['key_env']}`" + (f", {r['isolate_env']} isolated" if r.get('isolate_env') else '') + ')' + (f". {r['notes']}" if r.get('notes') else ''))
         if a.get('subscription_warning'):
             lines.append(f"- **Accounts:** {a['subscription_warning']}")
         if a.get('notes'):

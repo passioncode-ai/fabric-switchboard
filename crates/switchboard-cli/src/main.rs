@@ -11,7 +11,7 @@ use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
     arm_hard_exit, control, default_root, execute_offline, oplog,
     projects::{detect_session, Session},
-    rfc3339, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
+    rfc3339, AgentVia, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
 
 #[derive(Parser)]
@@ -429,16 +429,24 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: OpenrouterCommand,
     },
-    /// Start an agent configured by environment alone in a folder, on the pool's API-key account.
+    /// Start an agent in a folder in Terminal: on the pool's API-key account through the proxy,
+    /// or with `--openrouter` on the saved OpenRouter key.
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
         agent: String,
-        /// The pool whose API-key account it uses.
-        #[arg(long, default_value = "default")]
+        /// The pool whose API-key account it uses (not with `--openrouter`).
+        #[arg(long, default_value = "default", conflicts_with = "openrouter")]
         pool: String,
         /// The absolute folder it starts in; default: the current folder.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Run on the OpenRouter key saved with `switchboard agents openrouter set`.
+        #[arg(long)]
+        openrouter: bool,
+        /// The OpenRouter model for this launch, such as `moonshotai/kimi-k2`; default: the key's
+        /// model.
+        #[arg(long, requires = "openrouter")]
+        model: Option<String>,
     },
 }
 #[derive(Clone, Copy, ValueEnum)]
@@ -808,10 +816,22 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     service: "openrouter".into(),
                 },
             },
-            AgentsCommand::Launch { agent, pool, dir } => Operation::LaunchAgent {
+            AgentsCommand::Launch {
+                agent,
+                pool,
+                dir,
+                openrouter,
+                model,
+            } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
                 working_directory: folder(dir)?,
+                via: if *openrouter {
+                    AgentVia::Openrouter
+                } else {
+                    AgentVia::Proxy
+                },
+                model: model.clone(),
             },
         },
         Command::Project { command } => match command {

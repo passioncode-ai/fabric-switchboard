@@ -391,4 +391,14 @@ check(() => {
   i18n.setLocale('en');
 });
 
+// SB-79: the OpenRouter balance line shows dollars, the reset period in words, and no limit honestly.
+check(() => {
+  assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: 'daily', usage_daily: 1.75 }), '$3.25 of $5.00 left, resets daily · spent today $1.75');
+  assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: null, usage_daily: null }), '$3.25 of $5.00 left · spent today unknown');
+  assert.equal(logic.openrouterCreditLine({ limit: null, limit_remaining: null, limit_reset: null, usage_daily: 0.5 }), 'No spending limit · spent today $0.50');
+  i18n.setLocale('ru');
+  assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: 'weekly', usage_daily: 0 }), 'Осталось $3.25 из $5.00, сброс раз в неделю · сегодня потрачено $0.00');
+  i18n.setLocale('en');
+});
+
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

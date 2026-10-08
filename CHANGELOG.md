@@ -10,14 +10,19 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ### Added
 
-- One OpenRouter key for agents, saved once: `switchboard agents openrouter set` (the key is
-  pasted at the prompt, never an argument) keeps it in the OS vault; `status` shows what the key
+- One OpenRouter key for agents, saved once: `switchboard agents openrouter set --key-stdin` (the
+  key is piped on stdin, never an argument) keeps it in the OS vault; `status` shows what the key
   may still spend, asked of OpenRouter itself; `model` changes the model agents start on;
   `remove` deletes it. Agents read it with `switchboard agents key --service openrouter`, and an
   agent over MCP sees the status and sets the model (`switchboard_openrouter_status`,
   `switchboard_openrouter_model`) — never the key. Encrypted backups carry it, so it returns
-  after a reinstall. First slice of SB-79; launching agents on the key from the app, CLI and MCP
-  follows (SB-79b).
+  after a reinstall. First slice of SB-79.
+- Agents launch on the OpenRouter key (SB-79b): `switchboard agents launch <agent> --openrouter
+  [--model <id>]`, and in the app *Agents → OpenRouter key for agents* (add, replace, change the
+  model, remove; the balance OpenRouter reports) with *Launch on OpenRouter* in each agent's
+  setup. Ten agents: Hermes, Kilo, omp, pi, Kimi Code, Aider, OpenCode, Goose, Qwen Code, Crush.
+  The key reaches the agent only through its environment, read by the session script when it
+  starts.
 
 ### Fixes
 

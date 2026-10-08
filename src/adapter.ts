@@ -38,6 +38,12 @@ export const nativeAdapter: Adapter = {
   removeProject: (pool) => invoke('remove_project', { pool }),
   agentConnect: (agent, pool) => readWithDeadline(invoke('agent_connect', { agent, pool })),
   launchAgent: (agent, pool, workingDirectory) => invoke('launch_agent', { agent, pool, workingDirectory }),
+  // Not under the read deadline: the status asks OpenRouter itself (10 s timeout in the backend).
+  openrouterStatus: () => invoke('openrouter_status'),
+  openrouterSave: (key, model) => invoke('openrouter_save', { key, model }),
+  openrouterModel: (model) => invoke('openrouter_model', { model }),
+  openrouterRemove: () => invoke('openrouter_remove'),
+  launchOnOpenrouter: (agent, model, workingDirectory) => invoke('launch_agent', { agent, pool: '', workingDirectory, via: 'openrouter', model }),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
@@ -57,6 +63,9 @@ const safeErrors = new Set([
   'No OpenRouter key is saved. Add one under Agents.',
   'OpenRouter refused this key. Check it on openrouter.ai/settings/keys, then save it again.',
   'OpenRouter did not answer. The key is saved; its balance shows when OpenRouter answers.',
+  'Choose a model for this launch, or set the default model of the OpenRouter key under Agents.',
+  'This agent cannot launch on the OpenRouter key. `switchboard agents list` marks the ones that can.',
+  'The switchboard command was not found. Install it from Agents, then launch again.',
   // Fallback chains (SB-71): each names the fix.
   'Name the agent by its catalog id (switchboard agents list).',
   'Give an executor an account or a key, not both.',
