@@ -1,6 +1,6 @@
 # Packet XA-01 — cross-agent continuation and fallback chains
 
-**State:** designed 2026-10-06 (operator request and decisions below); SB-70 released in 0.6.7; SB-71 (core, CLI, MCP) and SB-73 phase 1 (Claude Code ↔ Codex) released in 0.6.8; SB-72 waits on the OpenRouter door's daily reset (project-observatory-dashboard#175); SB-74 on Fabric's ADR. **Board:**
+**State:** designed 2026-10-06 (operator request and decisions below); SB-70 released in 0.6.7; SB-71 (core, CLI, MCP) and SB-73 phase 1 (Claude Code ↔ Codex) released in 0.6.8; SB-72 is unblocked — the OpenRouter door's daily reset landed (project-observatory-dashboard#175, closed 2026-10-06) — and builds with SB-73 phase 2; SB-74 on Fabric's ADR. **Board:**
 SB-70 … SB-74. **Org track:** fabric-workspace roadmap RM-19 (the pipeline part also under
 RM-06). **Program link:** org-index agent-memory N-018 step 2 (cross-provider pack), N-021,
 N-022. **Shared:** [contracts](../CONTRACTS.md), [continuation skeleton](n-018-continuation.md),
@@ -92,9 +92,9 @@ A session has exactly one owner of its launch, and that owner decides its switch
 - Enforced at the provider, not by counting tokens locally: each paid executor runs on a key
   issued for its scope through Observatory's door (`openrouter.py issue --limit … --to
   vault:<project>/…`), so a runaway agent stops at the provider's 402 even if Switchboard is not
-  running. A daily reset needs the door extended (OpenRouter keys can carry a reset period; the
-  door exposes only a total ceiling today) — that extension is a pull request to
-  project-observatory-dashboard, never a bypass with the provisioning key.
+  running. The daily reset is the door's (`openrouter.py issue --limit N --reset daily`, `limit
+  --set N --reset daily`; project-observatory-dashboard#175), never a bypass with the
+  provisioning key.
 - Before each switch to a paid executor Switchboard reads the key's spend (`ping`); a ceiling
   already reached skips that executor and moves down the chain, logged.
 
