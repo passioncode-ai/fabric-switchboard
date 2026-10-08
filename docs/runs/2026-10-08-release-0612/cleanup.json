@@ -1,0 +1,60 @@
+{
+  "at": "2026-10-08T13:50:45.952403+00:00",
+  "removed": [
+    {
+      "path": "primary-checkout/artifacts/xwin",
+      "allocated_bytes": 1171013632
+    },
+    {
+      "path": "primary-checkout/artifacts/Fabric-Switchboard-0.1.0-macos-arm64.zip",
+      "allocated_bytes": 4665344
+    },
+    {
+      "path": "primary-checkout/dist",
+      "allocated_bytes": 393216
+    },
+    {
+      "path": "primary-checkout/src-tauri/gen",
+      "allocated_bytes": 458752
+    },
+    {
+      "path": "previous-task-worktree/node_modules",
+      "allocated_bytes": 59715584
+    },
+    {
+      "path": "previous-task-worktree/dist",
+      "allocated_bytes": 393216
+    },
+    {
+      "path": "previous-task-worktree/src-tauri/gen",
+      "allocated_bytes": 331776
+    },
+    {
+      "path": "temporary-build/Fabric Switchboard.app",
+      "allocated_bytes": 38141952
+    },
+    {
+      "path": "release-worktree/target",
+      "allocated_bytes": 5971267584
+    },
+    {
+      "path": "release-worktree/node_modules",
+      "allocated_bytes": 60461056
+    },
+    {
+      "path": "release-worktree/dist",
+      "allocated_bytes": 393216
+    },
+    {
+      "path": "release-worktree/src-tauri/gen",
+      "allocated_bytes": 331776
+    }
+  ],
+  "allocated_bytes_removed": 7307567104,
+  "preserved": [
+    "active primary Vite node_modules",
+    "running app data, credentials and caches",
+    "historical build receipts and logs"
+  ],
+  "completed_at": "2026-10-08T14:07:28.245264+00:00"
+}

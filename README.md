@@ -34,9 +34,9 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10).**
-This branch prepares **0.6.14**, including Kimi, Hermes and OpenRouter additions plus the
-Claude sign-in and update-version fixes. The screenshot shows that candidate.
+**Latest published: [v0.6.14](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.14)** · October 8, 2026.
+Includes Kimi Code accounts, Hermes model/provider settings, OpenRouter launches and
+the Claude sign-in and update-version fixes. [Download verification](docs/runs/2026-10-08-release-0612/README.md#published-release).
 Versions 0.6.11–0.6.13 were superseded before publication.
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows x64

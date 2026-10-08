@@ -1,10 +1,27 @@
 > **How to read this file.** Newest entry first; only the top entry's *Exact next task* is
-
-## 2026-10-08 — 0.6.14 release preparation
-
-The operator requested current downloads, refreshed README/wiki/GitHub presentation and cleanup of old build caches. [Run entry](runs/2026-10-08-release-0612/README.md) owns the release checks and exact next action. 0.6.11 and 0.6.13 exposed Windows fixture dependencies; 0.6.12 and 0.6.13 were cancelled. 0.6.14 makes the tests self-contained with user-owned files and combines the prior changes with PR #120's version-skew message and PR #121's MCP-only Claude Keychain recovery. Publication is not yet claimed.
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
+
+## 2026-10-08 — 0.6.14 published; GitHub and wiki refresh
+
+The operator requested current downloads, refreshed README/wiki/GitHub presentation and cleanup.
+[Release run 37789186866](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/37789186866)
+published **v0.6.14**, source `a8618a21b2dae8f94f4de9e70b6ead49457f5395`.
+Both platform archives were downloaded anonymously and verified: SHA-256, GPG, GitHub attestations;
+macOS also passed codesign, Gatekeeper and staple validation. Native Windows tests and installed-CLI
+checks passed. Windows remains Authenticode **NOT_SIGNED**; live-provider acceptance remains open.
+The release includes PR #120's version-skew message and PR #121's MCP-only Claude Keychain recovery.
+README EN/RU, product/install docs, About description/topics and a synthetic screenshot are updated.
+[Run entry](runs/2026-10-08-release-0612/README.md) owns receipts and cleanup (6.806 GiB).
+[Wiki handoff](https://github.com/passioncode-ai/fabric-workspace/blob/codex/switchboard-0612/docs/handoffs/2026-10-08-switchboard-0613.md)
+owns the knowledge change; Fabric's workspace receipt owns the deployed identity/source pins.
+
+**Exact next task:** finish the wiki sync after this documentation PR and workspace PR #76 merge,
+then retry FD-25 in-place console acceptance and the board's operator-assisted SB-79–SB-81 checks.
+SB-72 spending/key-scope decisions and the closed terminal's unexplained provider change remain open.
+No real provider calls or credential changes were made during this release task.
+
+---
 
 # Claude signed-out recovery and installed-owner restart (2026-10-08)
 

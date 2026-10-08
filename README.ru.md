@@ -34,9 +34,10 @@
 
 ## Текущая версия
 
-**Последний опубликованный релиз: [v0.6.10](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.10).**
-В этой ветке готовится **0.6.14**: Kimi, Hermes, OpenRouter и исправления входа Claude и
-ошибки после обновления. На снимке показана эта сборка. Версии 0.6.11–0.6.13 заменены до публикации.
+**Текущий релиз: [v0.6.14](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.14)** · 8 октября 2026.
+Аккаунты Kimi Code, настройка модели и провайдера Hermes, запуск через OpenRouter,
+исправления входа Claude и ошибки после обновления. [Проверка скачиваемых файлов](docs/runs/2026-10-08-release-0612/README.md#published-release).
+Версии 0.6.11–0.6.13 заменены до публикации.
 
 macOS universal подписывается Developer ID и проходит нотариальную проверку Apple.
 Windows x64 собирается нативно; подписи Authenticode пока нет. Начиная с 0.6.1 приложение

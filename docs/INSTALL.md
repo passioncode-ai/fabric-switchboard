@@ -1,6 +1,6 @@
 # Install Fabric Switchboard
 
-Fabric Switchboard is a local account workbench for Claude Code and Codex CLI. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
+Fabric Switchboard is a local account workbench for Claude Code, Codex CLI and Kimi Code. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
 
 Find the selected release and platform links on the [Switchboard download page](https://passioncode.ai/switchboard/#download), or browse [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases). Release publication is separate from a successful build; see the [release records](evidence/release-0.5.md) for each release's checks.
 
@@ -40,6 +40,15 @@ The app and CLI are Developer ID signed with hardened runtime and **notarized by
 2. Either install the plugin (the MCP server plus the `switching-accounts` skill): `claude plugin marketplace add passioncode-ai/fabric-switchboard`, then `claude plugin install switchboard@switchboard`; or register the server alone: `claude mcp add --scope user switchboard -- switchboard mcp` (Codex: `codex mcp add switchboard -- switchboard mcp`).
 3. `claude mcp list` shows `switchboard … ✔ Connected`. A safe first call is the read-only `switchboard_accounts` tool; an empty vault answers `{"accounts":[]}`. Switching the ordinary Claude Code login needs an explicit `global: true`. Tools and rules: [CLI — For agents](CLI.md#for-agents).
 
+### Finish an update
+
+If an updated CLI asks you to restart Switchboard, the installed files are newer than the
+running app. Choose **Restart to update** from Switchboard's menu, or **Quit Switchboard**
+and open it again from Applications. Closing the window only hides the app.
+Keep the CLI linked to the copy inside the app as shown above, so both update together.
+The managed proxy address and capability persist across the restart; existing agent processes
+are not terminated. See [the lifecycle contract](../AGENTS.md#lifecycle).
+
 ## Windows
 
 The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe` CLI.
@@ -49,11 +58,11 @@ The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe
 3. Follow the installer prompts. The desktop app requires Microsoft WebView2; the installer handles its bootstrapper when needed. An internet connection may be needed for that runtime download.
 4. Open Fabric Switchboard from the Start menu. The installer also puts `switchboard.exe` beside the app (since 0.6.0); the Agents panel shows its path and the commands that register it. The separate CLI in the ZIP is the same program and can stay in the extracted folder. In PowerShell, change to that folder and run `.\switchboard.exe --help` to inspect commands.
 
-**Windows limit:** the Windows binaries are **not Authenticode signed**. Up to 0.5.3-beta.1 they were cross-built on a Mac; since then they are built natively on a Windows runner, where the storage and runtime tests run, and the release receipt says `windows_authenticode: NOT_SIGNED` until signing is switched on ([DISTRIBUTION.md](DISTRIBUTION.md#windows-windows-job-windows-latest)). Installation and use on a Windows desktop have **not been verified**. SmartScreen or another Windows protection may block them. If blocked, keep the protection in place and wait for a signed, verified release or [report the exact warning](https://github.com/passioncode-ai/fabric-switchboard/issues).
+**Windows limit:** the Windows binaries are **not Authenticode signed**. Up to 0.5.3-beta.1 they were cross-built on a Mac; since then they are built natively on a Windows runner, where the storage and runtime tests run, and the release receipt says `windows_authenticode: NOT_SIGNED` until signing is switched on ([DISTRIBUTION.md](DISTRIBUTION.md#windows-windows-job-windows-latest)). The release workflow checks silent installation and runs the installed CLI. Interactive use on a Windows desktop and live-provider acceptance have **not been verified**. SmartScreen or another Windows protection may block them. If blocked, keep the protection in place and wait for a signed, verified release or [report the exact warning](https://github.com/passioncode-ai/fabric-switchboard/issues).
 
 ## Start a session
 
-Install the official Claude Code or Codex CLI separately before signing in or launching a coding session. Switchboard does not include a provider subscription or API credits.
+Install the official Claude Code, Codex CLI or Kimi Code CLI separately before signing in or launching that agent. Switchboard does not include a provider subscription or API credits.
 
 Open **Add account** and explicitly capture your current CLI account, or choose the official sign-in flow for another account. Assign a label and pool, such as `work` or `personal`. **Select** sets the account for the next managed request; it does not change the native CLI account. Native Claude activation and automatic rotation are separate opt-in operations.
 
