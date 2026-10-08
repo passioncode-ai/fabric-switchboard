@@ -1628,14 +1628,21 @@ const SHARED_KEYS: [&str; 5] = [
     "mcpXaaIdpConfig",
     "pluginSecrets",
 ];
-/// `claudeAiOauth` emptied by Claude Code after `invalid_grant`: the sign-in has ended.
+/// Claude Code may empty or remove its provider OAuth section while retaining shared
+/// MCP/plugin sign-ins. Only a recognized object without that section is signed out;
+/// an unknown credential envelope remains unavailable rather than being overwritten.
 fn wiped(auth: &[u8]) -> bool {
     parse(auth).is_ok_and(|v| {
-        v.get("claudeAiOauth").is_some_and(|o| {
-            o.get("accessToken")
+        let Some(object) = v.as_object() else {
+            return false;
+        };
+        match object.get("claudeAiOauth") {
+            None => object.keys().all(|key| SHARED_KEYS.contains(&key.as_str())),
+            Some(o) => o
+                .get("accessToken")
                 .and_then(Value::as_str)
-                .is_none_or(str::is_empty)
-        })
+                .is_none_or(str::is_empty),
+        }
     })
 }
 /// The live credential and config read under Claude Code's locks, handed to the caller before
@@ -2511,6 +2518,66 @@ mod tests {
             || Ok(())
         )
         .is_err());
+    }
+    #[test]
+    fn mcp_only_live_item_is_signed_out_and_activation_preserves_shared_secrets() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        let shared = json!({"mcpOAuth":{"server":{"accessToken":"fixture-mcp"}},
+            "pluginSecrets":{"plugin":"fixture-plugin"}});
+        put_live(&f, &c, shared.clone());
+        assert_eq!(
+            capture(&f, Provider::Claude, &c).err().unwrap(),
+            "No current Claude sign-in found."
+        );
+        let new = target("new", json!({}));
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            None,
+            &mut |_| panic!("no outgoing provider credential to preserve"),
+            || Ok(()),
+        )
+        .unwrap();
+        let restored = live(&f, &c);
+        assert_eq!(restored["claudeAiOauth"]["accessToken"], "new");
+        assert_eq!(restored["mcpOAuth"], shared["mcpOAuth"]);
+        assert_eq!(restored["pluginSecrets"], shared["pluginSecrets"]);
+    }
+    #[test]
+    fn signed_out_detection_does_not_accept_unrecognized_credential_envelopes() {
+        assert!(wiped(b"{}"));
+        for raw in [
+            b"null".as_slice(),
+            b"[]",
+            b"broken",
+            b"{\"access_token\":\"fixture\"}",
+            b"{\"unknown\":{}}",
+            b"{\"claudeAiOauth\":{\"accessToken\":\"fixture\"}}",
+        ] {
+            assert!(!wiped(raw));
+            let f = Fixture::new();
+            let c = mac_ctx();
+            f.put(&c.config, &config("old@example.test"));
+            f.keys
+                .borrow_mut()
+                .insert((c.service.clone(), c.user.clone()), raw.to_vec());
+            let new = target("new", json!({}));
+            assert!(activate(
+                &f,
+                &c,
+                &new.credential,
+                &new.identity,
+                None,
+                &mut |_| Ok(()),
+                || Ok(())
+            )
+            .is_err());
+            assert_eq!(f.keys.borrow()[&(c.service.clone(), c.user.clone())], raw);
+        }
     }
     #[test]
     fn a_managed_api_key_is_removed_and_returns_on_rollback() {

@@ -38,6 +38,65 @@ No evidence currently attributes a Codex-to-Claude conversion to Switchboard.
    This is operator-requested recovery, never a fixture or provider acceptance test.
 4. Run focused tests and repository gate, document limits, push branch and verify.
 
-## Resume
-Implement synthetic regression in external.rs; no other repository changes or release
-approval. Existing task lease: auth-recovery-20261008.
+## Recovery receipt
+
+At 13:01 UTC the old owner drained in 44 ms and the installed 0.6.10 owner started
+from the application bundle. The metadata-only LaunchAccount check changed from
+HTTP 400 to HTTP 200 with a resolved account, and the proxy descriptor was byte-identical.
+This proves the compatibility blocker removed, not a completed FD-25 embedded-console run.
+
+At 13:06 UTC the last configured Claude identity was recovered. The live Keychain object
+contained only shared MCP keys. Under the two native credential locks, with identity and
+unchanged-value checks, that signed-out envelope was normalized to an empty provider OAuth
+section understood by installed 0.6.10. Secret bytes stayed in memory and on stdin to
+`security -i`; no secret was written to argv, a log, this repository or a plaintext backup.
+Locks were released, then the bundled CLI performed its normal `accounts activate` against
+the saved identity (exit 0). The shared MCP values matched before/after. This was authorized
+live recovery, separate from all synthetic regression testing. No login flow was launched.
+
+Official `claude auth status`: loggedIn=false/exit 1 before; loggedIn=true,
+authMethod=claude.ai/exit 0 after. `switchboard current`: both providers available;
+Claude matches the pre-incident configured identity; Codex matches its initial identity.
+All 29 inventoried Orca terminals remain connected: 20 Claude, 4 Codex, 1 Kimi, 4 shells.
+The current project terminal retained the same handle and Codex identity. No terminal input
+was sent, no agent was stopped, and rotation policies and empty fallback chains were retained.
+
+## Implementation and verification
+
+`external::wiped` now recognizes an object containing only known shared MCP/plugin keys
+with its provider OAuth section absent. Unknown envelopes, scalar/array JSON and malformed
+JSON remain refused; a missing Keychain item beneath a configured account remains refused.
+The same predicate governs capture and activation under the existing native locks.
+
+- Fail-first: `cargo test -p switchboard-runtime mcp_only_live_item --locked` exited 101
+  before the fix: Unsupported OAuth JSON schema instead of the signed-out result.
+- `cargo test -p switchboard-runtime external::tests --locked`: 41 passed after the fix.
+- Rejection coverage additionally exercises activation and verifies unchanged bytes.
+- `npm ci --ignore-scripts`: exit 0; audit reported one existing high-severity dependency
+  advisory, not altered as part of account recovery.
+- UX linter: NOT_RUN, `docs/ux/lint.py` does not exist. SCN-028 updated; no visual or copy change.
+- Full gate: pending final receipt below. An initial attempt caught a typo in the new
+  rejection fixture field; corrected before the final gate.
+
+## Remaining scope and exact next task
+
+The operator's closed Codex-to-Claude terminal cannot be attributed from these observations:
+Orca session search is disabled, Switchboard fallback chains are empty and retained lifecycle
+logs contain no fallback events. Do not claim the missing provider sign-in caused a process
+replacement, or that a restart proves every active conversation can generate a response.
+No release approval was given and no release was published by this run.
+
+Next: include this fix in the next approved signed release; then verify the installed build
+recognizes the signed-out envelope through the synthetic suite's acceptance receipt. If a
+provider changes again, retain the affected Orca terminal and capture its handle, launch command
+and runtime provider before closing it. FD-25 can retry its own in-place console acceptance.
+
+## Skills actually used
+
+- task-pipeline: repository four-stage profile, bounded requirements and fail-first evidence.
+- agent-sync: task/file leases and guarded handoff.
+- ux-scenarios: SCN-028 recovery edge and coverage.
+- orca-cli: read-only terminal inventory and history capability check.
+- project-reports: discovery of earlier project reports; this file is task evidence, not a report.
+
+Router sources: repository AGENTS.md and pipeline.json; no design or user-facing copy changed.
