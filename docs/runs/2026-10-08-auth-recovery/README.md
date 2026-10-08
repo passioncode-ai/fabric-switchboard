@@ -75,8 +75,9 @@ The same predicate governs capture and activation under the existing native lock
 - `npm ci --ignore-scripts`: exit 0; audit reported one existing high-severity dependency
   advisory, not altered as part of account recovery.
 - UX linter: NOT_RUN, `docs/ux/lint.py` does not exist. SCN-028 updated; no visual or copy change.
-- Full gate: pending final receipt below. An initial attempt caught a typo in the new
-  rejection fixture field; corrected before the final gate.
+- Full gate: `./scripts/check.sh` exit 0; 480 Rust tests passed, 3 opt-in tests ignored;
+  build, UI checks, clippy, documentation and script gates passed. Initial attempts caught a
+  typo in the new rejection fixture field and a trailing blank line; both corrected.
 
 ## Remaining scope and exact next task
 
@@ -100,3 +101,10 @@ and runtime provider before closing it. FD-25 can retry its own in-place console
 - project-reports: discovery of earlier project reports; this file is task evidence, not a report.
 
 Router sources: repository AGENTS.md and pipeline.json; no design or user-facing copy changed.
+
+## Source and delivery
+
+Implementation: [282076a](https://github.com/passioncode-ai/fabric-switchboard/commit/282076af5517d257df0f68b74ec7ab0a64fc558d).
+The installed app remains the published 0.6.10; the source fix needs the next approved release.
+Local build cache measured 4.3 GB, below the 10 GB cap. No test owner or native lock remains.
+Hosted nightly CI and Windows/live generation acceptance were not run by this task.

@@ -1,0 +1,17 @@
+{
+  "implementation_commit": "282076af5517d257df0f68b74ec7ab0a64fc558d",
+  "gate": "./scripts/check.sh",
+  "gate_exit": 0,
+  "rust_passed": 480,
+  "rust_ignored": 3,
+  "owner_launch_account_before_http": 400,
+  "owner_launch_account_after_http": 200,
+  "proxy_descriptor_unchanged": true,
+  "claude_logged_in_after": true,
+  "codex_identity_unchanged": true,
+  "shared_mcp_preserved": true,
+  "orca_connected_terminals": 29,
+  "unattributed": "closed terminal provider change",
+  "installed_version": "0.6.10",
+  "published_new_release": false
+}
