@@ -94,7 +94,7 @@ let kimi: KimiAccounts | null = null;
 let kimiError = '';
 let openMenu: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
-let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string } | null = null;
+let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string; cancelError?: string } | null = null;
 const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
 let loginItem: LoginItem | null = null;
@@ -715,13 +715,14 @@ async function loginSaved(text: string) {
 }
 async function cancelLogin() {
   const login = pendingLogin; if (!login) return;
-  busy = true; render();
+  login.cancelError = ''; busy = true; render();
   try { await adapter.cancelLogin(login.id); pendingLogin = null; showNotice(t('Sign-in cancelled. No account was added.')); }
   catch (error) {
     const text = safeError(error);
     // The owner restarted and no longer knows this sign-in: there is nothing left to cancel.
     if (loginOutcome(text) === 'forgotten') { if (pendingLogin === login) pendingLogin = null; showNotice(t('Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.')); }
-    else login.error = text;
+    // A refused cancel is not a failed finish: the poll keeps watching Terminal (SB-83).
+    else login.cancelError = text;
   }
   finally { busy = false; render(); }
 }
@@ -733,6 +734,7 @@ function loginBanner(main: HTMLElement) {
   else if (login.state === 'finishing') text.append(el('strong', '', t('Adding the account…')), el('span', '', t('Reading the new sign-in from its private home.')));
   else text.append(el('strong', '', t('Signing in to {provider}', { provider: providerName(login.provider) })), el('span', '', t('Finish in the Terminal window. If a browser opens, complete that step first. Switchboard adds the account on its own.')));
   if (login.error) text.append(el('span', 'usage-error', t(login.error)));
+  if (login.cancelError) text.append(el('span', 'usage-error', t(login.cancelError)));
   const actions = el('div', 'login-actions');
   if (login.error && login.state === 'pending') actions.append(button(t('Retry'), () => { login.error = ''; render(); void pollLogin(); }, 'button', 'login-retry-finish'));
   if (login.state === 'ended') actions.append(button(t('Try again'), () => { const { provider, label, pool } = login; void adapter.cancelLogin(login.id).then(() => true, (error) => loginOutcome(safeError(error)) === 'forgotten' || (showNotice(safeError(error), true), render(), false)).then((cleared) => { if (!cleared) return; pendingLogin = null; void startLogin(provider, label, pool); }); }, 'button', 'login-retry'));
@@ -853,7 +855,7 @@ function kimiAddDialog() {
       void dialogSave(context, async () => { const { account } = await adapter.kimiLoginFinish(loginId!); loginId = null; await loadKimi(); return account; }, t('Kimi Code account saved.'));
     }, () => { /* the next look retries */ });
   }, 1500);
-  context.beforeCancel(async () => { window.clearInterval(poll); if (loginId) await adapter.kimiLoginCancel(loginId); });
+  context.beforeCancel(async () => { finishing = true; try { if (loginId) await adapter.kimiLoginCancel(loginId); } catch (error) { finishing = false; throw error; } window.clearInterval(poll); });
   context.form.addEventListener('submit', (event) => {
     event.preventDefault(); if (loginId) return;
     context.error.textContent = ''; context.setBusy(true);

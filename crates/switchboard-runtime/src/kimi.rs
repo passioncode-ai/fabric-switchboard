@@ -334,7 +334,8 @@ fn begin_login_with(
 }
 
 /// `pending` while Terminal runs `kimi login`, `complete` once it exited successfully, `ended`
-/// when no such sign-in waits.
+/// when no such sign-in waits — none was started here, or its Terminal session closed without
+/// signing in (SB-83).
 pub fn login_state(root: &Path, id: &str) -> &'static str {
     let Ok(home) = home(root, id) else {
         return "ended";
@@ -343,7 +344,14 @@ pub fn login_state(root: &Path, id: &str) -> &'static str {
         return "ended";
     }
     if home.join(".completed").is_file() {
-        "complete"
+        return "complete";
+    }
+    #[cfg(unix)]
+    let session = home.join(".session-pid");
+    #[cfg(windows)]
+    let session = home.join(".session-process");
+    if session.exists() && ensure_idle(&home).is_ok() {
+        "ended"
     } else {
         "pending"
     }
@@ -391,7 +399,8 @@ async fn finish_login_at(
     Ok(json!({"account": account}))
 }
 
-/// Ends a sign-in that has not been saved: its home goes; a running `kimi login` must close first.
+/// Ends a sign-in that has not been saved: a `kimi login` still waiting in Terminal is ended the
+/// way closing its window would (SB-83), then its home goes.
 pub fn cancel_login(root: &Path, store: &Store, id: &str) -> Result<(), String> {
     if store.kimi_account(id).is_ok() {
         return Err("This sign-in is already saved as an account.".into());
@@ -400,8 +409,8 @@ pub fn cancel_login(root: &Path, store: &Store, id: &str) -> Result<(), String> 
     if !home.exists() {
         return Ok(());
     }
-    if login_state(root, id) == "pending" && ensure_idle(&home).is_err() {
-        return Err("Finish or close the Kimi Code sign-in in Terminal before cancelling.".into());
+    if login_state(root, id) == "pending" {
+        crate::launch::end_sign_in(&home)?;
     }
     fs::remove_dir_all(&home).map_err(|_| "The sign-in folder could not be removed.".into())
 }
@@ -656,6 +665,30 @@ mod tests {
         assert!(script.contains("login") && script.contains("global"));
         assert!(script.contains(".completed"));
         assert_eq!(login_state(root, "not-an-id"), "ended");
+    }
+
+    #[test]
+    fn a_sign_in_whose_terminal_closed_reads_ended_and_cancels_without_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = store(root);
+        let begun = begin_login_with(root, "", "global", Path::new("/opt/kimi"), started).unwrap();
+        let id = begun["login_id"].as_str().unwrap().to_owned();
+        let home = home(root, &id).unwrap();
+        // The script ran (its marker is written) and the session is gone, without `.completed`.
+        let _ = fs::remove_file(home.join(".launch-pending"));
+        #[cfg(unix)]
+        private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+        #[cfg(windows)]
+        private_write(
+            &home.join(".session-process"),
+            br#"{"pid":999999,"created":1}"#,
+            false,
+        )
+        .unwrap();
+        assert_eq!(login_state(root, &id), "ended");
+        cancel_login(root, &store, &id).unwrap();
+        assert!(!home.exists());
     }
 
     #[tokio::test]

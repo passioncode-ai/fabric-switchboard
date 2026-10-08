@@ -695,8 +695,7 @@ pub fn capture_login_profile(login: &Login) -> Result<crate::external::CapturedP
     crate::external::capture_at(login.provider, &login.home)
 }
 pub fn cancel_login(login: &Login) -> Result<(), String> {
-    ensure_idle(&login.home)
-        .map_err(|_| "Finish or close sign-in in Terminal before cancelling.")?;
+    end_sign_in(&login.home)?;
     // A cancelled/failed sign-in may never have created a vault item.
     #[cfg(target_os = "macos")]
     if login.provider == Provider::Claude {
@@ -837,6 +836,145 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+/// Cancel found the sign-in's Terminal session but could not end it, or could not confirm that
+/// the process its marker names is that session (SB-83).
+pub(crate) const SIGN_IN_WOULD_NOT_END: &str =
+    "Switchboard could not end the sign-in in Terminal. Close its Terminal window, then cancel again.";
+/// Terminal was asked to run the sign-in script and has not started it yet (its reservation
+/// holds the home for up to ten minutes); there is no process to end.
+pub(crate) const SIGN_IN_STARTING: &str =
+    "The sign-in is still opening in Terminal. Cancel again in a moment.";
+/// How long each signal gets to end the session before the next one is tried.
+const END_WAIT: Duration = Duration::from_secs(3);
+/// Ends the Terminal session a sign-in runs in `home`, the way closing its window would, so
+/// Cancel never sends the person looking for that window (SB-83). Only Switchboard's own sign-in
+/// script for this home is touched: on Unix the live shell its `.session-pid` names, at least as
+/// old as the marker and with this home's `launch.command` on its command line, together with the
+/// provider CLI in its process group (SIGHUP, then SIGTERM); on Windows the PowerShell process its
+/// `.session-process` names, by pid and creation time, with its children. Ok once the home is idle.
+pub(crate) fn end_sign_in(home: &Path) -> Result<(), String> {
+    end_sign_in_within(home, END_WAIT)
+}
+fn end_sign_in_within(home: &Path, wait: Duration) -> Result<(), String> {
+    if ensure_idle(home).is_ok() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    let marker = home.join(".session-pid");
+    #[cfg(windows)]
+    let marker = home.join(".session-process");
+    if !marker.exists() {
+        return Err(if home.join(".launch-pending").exists() {
+            SIGN_IN_STARTING.into()
+        } else {
+            SIGN_IN_WOULD_NOT_END.into()
+        });
+    }
+    end_session(home, &marker, wait)
+}
+/// Polls until the home is idle or `wait` passes.
+fn idle_within(home: &Path, wait: Duration) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if ensure_idle(home).is_ok() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+#[cfg(unix)]
+fn end_session(home: &Path, marker: &Path, wait: Duration) -> Result<(), String> {
+    let pid = read_regular(marker)
+        .ok()
+        .and_then(|text| text.trim().parse::<libc::pid_t>().ok())
+        .filter(|pid| *pid > 0)
+        .ok_or(SIGN_IN_WOULD_NOT_END)?;
+    for signal in [libc::SIGHUP, libc::SIGTERM] {
+        // Checked before each signal: the pid must still be this home's script.
+        if !runs_script_of(pid, home) {
+            return Err(SIGN_IN_WOULD_NOT_END.into());
+        }
+        signal_session(pid, signal);
+        if idle_within(home, wait) {
+            return Ok(());
+        }
+    }
+    Err(SIGN_IN_WOULD_NOT_END.into())
+}
+/// Whether `pid` is the shell running this home's own launch script.
+#[cfg(unix)]
+fn runs_script_of(pid: libc::pid_t, home: &Path) -> bool {
+    let script = home.join("launch.command");
+    Command::new("/bin/ps")
+        .args(["-ww", "-o", "command=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| {
+            String::from_utf8_lossy(&output.stdout).contains(script.to_string_lossy().as_ref())
+        })
+}
+/// Terminal's shell starts the script as its own job, so its process group holds the script and
+/// the provider CLI; a script that does not lead its group is signalled with its children.
+#[cfg(unix)]
+fn signal_session(pid: libc::pid_t, signal: libc::c_int) {
+    // SAFETY: getpgid and kill take plain integers and touch no memory of this process.
+    if unsafe { libc::getpgid(pid) } == pid {
+        unsafe { libc::kill(-pid, signal) };
+        return;
+    }
+    let children = Command::new("/usr/bin/pgrep")
+        .args(["-P", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .unwrap_or_default();
+    unsafe { libc::kill(pid, signal) };
+    for child in children
+        .lines()
+        .filter_map(|line| line.trim().parse::<libc::pid_t>().ok())
+    {
+        unsafe { libc::kill(child, signal) };
+    }
+}
+#[cfg(windows)]
+fn end_session(home: &Path, marker: &Path, wait: Duration) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let value: serde_json::Value =
+        serde_json::from_str(&read_regular(marker).map_err(|_| SIGN_IN_WOULD_NOT_END)?)
+            .map_err(|_| SIGN_IN_WOULD_NOT_END)?;
+    let pid = value["pid"]
+        .as_u64()
+        .and_then(|x| u32::try_from(x).ok())
+        .filter(|x| *x > 0)
+        .ok_or(SIGN_IN_WOULD_NOT_END)?;
+    let created = value["created"].as_u64().ok_or(SIGN_IN_WOULD_NOT_END)?;
+    if switchboard_core::windows::process_matches(pid, created)
+        .map_err(|_| SIGN_IN_WOULD_NOT_END)?
+    {
+        let system = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        // Closing a console window ends every process attached to it; /T /F does the same for
+        // the PowerShell script and the provider CLI it started. No console window flashes.
+        let _ = Command::new(system.join("System32").join("taskkill.exe"))
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    if idle_within(home, wait + wait) {
+        Ok(())
+    } else {
+        Err(SIGN_IN_WOULD_NOT_END.into())
+    }
 }
 /// Whether a session Switchboard launched for `provider` may be running: an isolated home of one
 /// of `account_ids`, or a managed home of the provider, that is not idle. A state that cannot be
@@ -1877,10 +2015,130 @@ mod tests {
             signed_in_again: false,
             home: home.clone(),
         };
-        assert!(cancel_login(&login).is_err());
+        assert_eq!(cancel_login(&login).unwrap_err(), SIGN_IN_STARTING);
         age(&home.join(".launch-pending"), 11 * 60);
         cancel_login(&login).unwrap();
         assert!(!home.exists());
+    }
+    /// A sign-in home whose `launch.command` runs `body` the way Terminal runs it: a shell leading
+    /// its own process group that records `.session-pid` first. A thread reaps it, as Terminal's
+    /// login shell would, and reports when it exited.
+    #[cfg(unix)]
+    fn terminal_session(
+        root: &Path,
+        body: &str,
+    ) -> (Login, std::sync::mpsc::Receiver<std::process::ExitStatus>) {
+        use std::os::unix::process::CommandExt;
+        let home = root.join("logins").join(Uuid::new_v4().to_string());
+        private_dir(&home).unwrap();
+        let script = write_launch_script(
+            &home,
+            &format!(
+                "cd {} || exit 1\n(umask 077; printf '%s' \"$$\" > .session-pid)\n{body}\n",
+                quote(home.to_string_lossy().as_ref())
+            ),
+        )
+        .unwrap();
+        let mut child = Command::new("/bin/sh")
+            .arg(&script)
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let (sent, exited) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sent.send(child.wait().unwrap());
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !home.join(".session-pid").exists() {
+            assert!(std::time::Instant::now() < deadline, "the script never ran");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let login = Login {
+            id: Uuid::new_v4().to_string(),
+            provider: Provider::Codex,
+            label: "Synthetic".into(),
+            pool: "default".into(),
+            saved: None,
+            signed_in_again: false,
+            home,
+        };
+        (login, exited)
+    }
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_a_waiting_sign_in_ends_its_terminal_session_and_cleans_up() {
+        let root = tempfile::tempdir().unwrap();
+        // The provider CLI waits for a code that never comes, as `claude auth login` does.
+        let (login, exited) = terminal_session(root.path(), "sleep 60 & wait $!");
+        assert_eq!(login_state(&login), "pending");
+        let started = std::time::Instant::now();
+        cancel_login(&login).unwrap();
+        assert!(
+            started.elapsed() < END_WAIT,
+            "closing the window's signal ends it"
+        );
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!login.home.exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_session_that_ignores_the_hang_up_is_terminated() {
+        let root = tempfile::tempdir().unwrap();
+        let (login, exited) =
+            terminal_session(root.path(), "trap '' HUP\nwhile :; do sleep 1; done");
+        end_sign_in_within(&login.home, Duration::from_millis(500)).unwrap();
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(ensure_idle(&login.home).is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_session_that_will_not_end_keeps_its_home_and_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let (login, exited) =
+            terminal_session(root.path(), "trap '' HUP TERM\nwhile :; do sleep 1; done");
+        assert_eq!(
+            end_sign_in_within(&login.home, Duration::from_millis(300)).unwrap_err(),
+            SIGN_IN_WOULD_NOT_END
+        );
+        assert!(login.home.join(".session-pid").exists());
+        let pid: i32 = fs::read_to_string(login.home.join(".session-pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_live_process_that_is_not_this_sign_in_is_never_signalled() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("login");
+        private_dir(&home).unwrap();
+        // The marker names a live process of the same age that is not this home's script.
+        let mut other = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+        private_write(
+            &home.join(".session-pid"),
+            other.id().to_string().as_bytes(),
+            false,
+        )
+        .unwrap();
+        let login = Login {
+            id: Uuid::new_v4().to_string(),
+            provider: Provider::Codex,
+            label: "Synthetic".into(),
+            pool: "default".into(),
+            saved: None,
+            signed_in_again: false,
+            home: home.clone(),
+        };
+        assert_eq!(cancel_login(&login).unwrap_err(), SIGN_IN_WOULD_NOT_END);
+        assert!(
+            other.try_wait().unwrap().is_none(),
+            "another process was signalled"
+        );
+        assert!(home.exists());
+        other.kill().unwrap();
+        other.wait().unwrap();
     }
     #[test]
     fn keychain_user_prefers_a_set_user_then_the_passwd_entry() {
