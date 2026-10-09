@@ -2,6 +2,34 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-09 — Stuck sign-in, Kimi “signed out”, launch with a folder picker (SB-83…SB-87)
+
+Operator reports 2026-10-08/09. Branch `agent/signin-stuck-20261008`.
+
+- **SB-83** — Cancel ends Switchboard's own waiting sign-in in Terminal (identity-checked SIGHUP,
+  then SIGTERM; Windows `taskkill /T /F` after pid + creation-time match) and cleans up; a refused
+  Cancel no longer freezes the banner's poll or offers a finish *Retry*; Kimi's dialog keeps polling
+  and its sign-in reads `ended` once Terminal closes.
+- **SB-84** — the ordinary Kimi sign-in is read from the slot `config.toml` names (as `kimi` 2.1
+  does); a kimi.ai login no longer reads as signed out because of an old kimi.com tombstone or a
+  stale `region` marker.
+- **SB-85** — a failed quota check logs the HTTP status number; the cause of the recurring
+  `http_error` is still to be read from the log after the release.
+- **SB-86** — one *Launch…* per account with an *Isolated session* box; every folder is chosen with
+  the system picker (`pick_folder`, `tauri-plugin-dialog`, called from Rust only); Kimi rows use the
+  account-row layout with small buttons. Rule recorded for all products in the operator's global
+  instructions.
+- **SB-87** filed: start-up cleanup of forgotten sign-in homes.
+
+Checks: `./scripts/check.sh` exit 0; browser demo (Kimi row, launch dialog, picker, required
+folder). Not in a release; Windows paths compiled only.
+
+**Exact next task:** open the PR for this branch, include it in the next operator-approved release,
+then on the installed app: cancel a waiting sign-in, confirm the ordinary Kimi line, pick a folder
+natively, and read `usage_check` `status` in the log for SB-85.
+
+---
+
 ## 2026-10-08 — Provider terms notice (SCN-049)
 
 Operator decision 2026-10-08: a plain notice that Switchboard is used within the terms of Anthropic

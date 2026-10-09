@@ -358,10 +358,19 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
                 );
             }
             // Diagnosis only: a fixed code, never the provider's body or a token.
-            crate::oplog::event(
-                "usage_check",
-                &[("outcome", crate::oplog::Field::Code(failure.kind()))],
-            );
+            match failure.status {
+                Some(status) => crate::oplog::event(
+                    "usage_check",
+                    &[
+                        ("outcome", crate::oplog::Field::Code(failure.kind())),
+                        ("status", crate::oplog::Field::Number(i64::from(status))),
+                    ],
+                ),
+                None => crate::oplog::event(
+                    "usage_check",
+                    &[("outcome", crate::oplog::Field::Code(failure.kind()))],
+                ),
+            }
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
             Err(
                 if failure.message == switchboard_proxy::REJECTED

@@ -11,8 +11,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-002 | Add a credential | validated |
 | SCN-003 | Official sign-in | validated |
 | SCN-004 | Choose account | validated |
-| SCN-005 | Launch isolated | validated |
-| SCN-006 | Launch managed | validated |
+| SCN-005 | Launch an account in a folder, isolated if needed | validated |
+| SCN-006 | Launch managed (the box cleared) | validated |
 | SCN-007 | Switch during stream | validated |
 | SCN-008 | Check usage | validated |
 | SCN-009 | Edit and disable | validated |
@@ -64,7 +64,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Open the app → An empty account list explains how to add an account.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** An empty account list explains how to add an account.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -82,7 +82,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose provider and kind, enter label, pool and secret; submit → One account appears; secret field is cleared.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** One account appears; secret field is cleared.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -101,7 +101,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Choose + Add account → Sign in to another Claude (or Codex) account → Terminal opens the official CLI in an isolated home and a banner says to finish there; no form opens (0.5).
 2. Finish the provider's sign-in → Switchboard notices completion on its own and adds the account, named by its email, in the default pool; no Finish click (0.5).
-**Alt paths:** Cancel in the banner while Terminal is still open → “Finish or close sign-in in Terminal before cancelling.”; after Terminal closed → the staged sign-in is cleaned. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in on a row reuses its label and pool, and Try again in the banner repeats the sign-in it replaces with the same label and pool (0.6.6, SB-62). A sign-in of an identity already saved — from a row, from + Add account or from Try again — updates every saved copy of it where it is, keeps their labels and pools, and reads “{label} is signed in again in {provider} · {pool}.”; it never renames an account to its email and never copies an account (a project's) into another pool (`a_sign_in_without_a_label_updates_the_saved_account_where_it_is`, `a_row_sign_in_updates_its_row_and_every_other_copy_of_the_identity`). CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “A sign-in is already in progress. Finish it in Terminal or cancel it first.” The account was saved but its temporary folder could not be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.” The owner restarted and no longer knows the sign-in → the banner reads ended, and Cancel closes it with “Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.” (0.5.1, `loginOutcome`). A sign-in reservation whose Terminal never ran expires after ten minutes. The account is saved but its temporary sign-in folder cannot be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.”; finishing again returns the same account (SB-42).
+**Alt paths:** Cancel in the banner while Terminal still waits → Switchboard ends that sign-in in Terminal (SIGHUP, then SIGTERM, to its own script only — identified by its pid marker, age and this sign-in's `launch.command`) and cleans the staged sign-in: “Sign-in cancelled. No account was added.” (SB-83); a session that will not end → “Switchboard could not end the sign-in in Terminal. Close its Terminal window, then cancel again.”; a refused Cancel is shown under the banner and the banner keeps watching Terminal — it never turns into a Finish error with *Retry*; after Terminal closed → the staged sign-in is cleaned. Closing Terminal without signing in → the banner reads “Sign-in ended without an account” with Try again and Dismiss. Sign in on a row reuses its label and pool, and Try again in the banner repeats the sign-in it replaces with the same label and pool (0.6.6, SB-62). A sign-in of an identity already saved — from a row, from + Add account or from Try again — updates every saved copy of it where it is, keeps their labels and pools, and reads “{label} is signed in again in {provider} · {pool}.”; it never renames an account to its email and never copies an account (a project's) into another pool (`a_sign_in_without_a_label_updates_the_saved_account_where_it_is`, `a_row_sign_in_updates_its_row_and_every_other_copy_of_the_identity`). CLI: `login begin` (label optional), `login status`, `login finish`. A second sign-in while one is open reads “A sign-in is already in progress. Finish it in Terminal or cancel it first.” The account was saved but its temporary folder could not be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.” The owner restarted and no longer knows the sign-in → the banner reads ended, and Cancel closes it with “Sign-in closed. Switchboard had already ended it; close its Terminal window if it is still open.” (0.5.1, `loginOutcome`). A sign-in reservation whose Terminal never ran expires after ten minutes. The account is saved but its temporary sign-in folder cannot be removed yet → the banner closes with “{label} added to {provider} · {pool}. Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.”; finishing again returns the same account (SB-42).
 **Expected result:** Provider login is captured only from the new home.
 **UI elements:** Add account menu, sign-in banner (pending, adding, ended, error), account list, notice.
 **States covered:** loading, pending, ended, error, success
@@ -119,7 +119,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Select an enabled account → Route shows selected for the next request in its provider and pool.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Route shows selected for the next request in its provider and pool.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -130,14 +130,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-005 — Launch isolated
+## SCN-005 — Launch an account in a folder, isolated if needed
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Choose an account, Launch isolated, and an existing absolute Project directory → Terminal starts the provider with its private home; selection affects new launches.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+1. Row menu → *Launch…* → *Choose folder…* opens the system folder picker (a folder is never typed; it opens at the last folder chosen) → tick *Isolated session* → *Launch* → Terminal starts the provider in that folder with the account's private home; later selections do not move it (operator decision 2026-10-09, SB-86).
+2. The account is not the pool's selected one, or the local proxy is not running → *Isolated session* is ticked and locked, with the reason in one line.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Terminal starts the provider with its private home; selection affects new launches.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -148,14 +149,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-006 — Launch managed
+## SCN-006 — Launch managed (the box cleared)
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Select an account, Launch managed, and an existing absolute Project directory → Terminal starts against the local proxy; UI explains next-request effect.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+1. Select an account, row menu → *Launch…*, pick a folder, leave *Isolated session* cleared → Terminal starts against the local proxy; the dialog explains the next-request effect.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Terminal starts against the local proxy; UI explains next-request effect.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -173,7 +174,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. While one managed response is streaming, select another same-pool account → First stream keeps its identity; next request uses selected account.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** First stream keeps its identity; next request uses selected account.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -191,7 +192,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose Check usage → Timestamped provider usage appears with its source.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Timestamped provider usage appears with its source.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -209,7 +210,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Edit label or disable account → Label updates; disabled account stays visible and is removed from active route.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Label updates; disabled account stays visible and is removed from active route.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -227,7 +228,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Choose Remove, inspect confirmation, confirm → Unselected account and its vault entry are removed.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Unselected account and its vault entry are removed.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -245,7 +246,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Open Activity → Bounded journal shows account IDs and operation outcomes without tokens or prompts.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile.
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Bounded journal shows account IDs and operation outcomes without tokens or prompts.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -263,7 +264,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
 1. Reopen the app → Persisted accounts and routes load; proxy gets new capability.
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile. Opening Switchboard again while it runs focuses the open window (0.5.3). Started in the background by the local lifecycle broker (`--background`), it shows no window and takes no focus; opening it again shows the window, with fresh metadata (SB-30; background smoke measured, the live reveal path is operator acceptance). The store is held by `switchboard serve`, a running command or a window opened with `open -n` → the window opens and reads “Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.”; Retry starts it once the store is free — the app no longer quits unexpectedly (0.5.3).
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.” Opening Switchboard again while it runs focuses the open window (0.5.3). Started in the background by the local lifecycle broker (`--background`), it shows no window and takes no focus; opening it again shows the window, with fresh metadata (SB-30; background smoke measured, the live reveal path is operator acceptance). The store is held by `switchboard serve`, a running command or a window opened with `open -n` → the window opens and reads “Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.”; Retry starts it once the store is free — the app no longer quits unexpectedly (0.5.3).
 **Expected result:** Persisted accounts and routes load; proxy gets new capability.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -283,7 +284,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Navigate with keyboard, open/cancel dialog; resize window → Focus visible and restored; actions remain available.
 2. Leave focus anywhere (navigation, heading, Retry, Stop, a quota disclosure) while the 60-second background refresh runs → focus stays on the same control; when nothing changed the page is not re-rendered at all (0.4, B-15).
 3. From + Add account choose Import from Claude Swap → it runs with no dialog (since 0.5) and focus returns to + Add account; each dialog that does open has its own title and description ids (0.4, B-16).
-**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in while its Terminal is still open reads “Finish or close sign-in in Terminal before cancelling.”; cancelling after Terminal closed cleans the staged profile. A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
+**Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.” A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
 **Expected result:** Focus visible and restored; actions remain available; the shown selection is the latest one the user made.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
@@ -683,7 +684,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** saved accounts; the project's folders exist on this computer.
 **Entry point:** Projects → + New project.
 **Steps:**
-1. + New project → name, folders (one absolute path per line), check the accounts → Create project → “Project “{name}” created. Launch its accounts from its folders.” The accounts move into the project's pool; the Accounts page groups them under “Project · {name}”, and their button is Select, not Switch.
+1. + New project → name, folders (each added with *Add folder…*, the system picker; removable with ×), check the accounts → Create project → “Project “{name}” created. Launch its accounts from its folders.” The accounts move into the project's pool; the Accounts page groups them under “Project · {name}”, and their button is Select, not Switch.
 2. Launch one of them (isolated or managed) from any of its folders or subfolders → the session starts; managed rotation moves only among the project's accounts.
 3. From a folder outside the project → refused: “This account belongs to a project. Launch it from one of the project's folders.”
 4. Inside the project's folders, an account of another pool for a provider the project has → refused: “This folder belongs to a project. Launch one of the project's accounts.”
@@ -961,11 +962,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. *Add Kimi Code account*, optionally a label and the service, *Open sign-in* → Terminal runs `kimi login`; confirm the code in the browser signed in to that account → the dialog saves it on its own when Terminal reports success: “Kimi Code account saved.”
 2. Read the row → the label, tier and service, and “5 hours 64%, resets in 1h 10m · 7 days 31% · Month 42%”, asked of Kimi at each refresh.
-3. *Launch* and a folder → Terminal starts `kimi` on that account in the folder.
-4. The line above the rows names the ordinary `kimi`'s sign-in and its usage; it is never changed.
-**Alt paths:** `kimi` not installed → the section says so and offers no sign-in; the sign-in is closed without success → “This Kimi Code sign-in is no longer waiting. Start it again.”; Escape while it waits → the sign-in folder goes once Terminal closes; Kimi refuses a saved login → the row says so and offers *Sign in again*; the login waits for Kimi to renew it → “Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.”; Kimi unreachable → “Kimi did not answer. Try again in a minute.”, the account stays; *Remove* asks first and deletes the account's login folder.
+3. *Launch…* (a small row button; *Sign in again* and *Remove…* are in the row's ⋯ menu) and a folder from the system picker → Terminal starts `kimi` on that account in the folder (SB-86).
+4. The line above the rows names the ordinary `kimi`'s sign-in and its usage; it is never changed. Its login is the slot `config.toml` names (`[providers."managed:kimi-code".oauth]` `key`, `oauth_host`), read as `kimi` 2.1 reads it — a stale `region` marker or an old kimi.com tombstone no longer reads a kimi.ai login as signed out (SB-84).
+**Alt paths:** `kimi` not installed → the section says so and offers no sign-in; the sign-in's Terminal closes without success → “This Kimi Code sign-in is no longer waiting. Start it again.” (SB-83: a closed Terminal now reads ended instead of waiting forever); Escape or *Cancel* while it waits → Switchboard ends `kimi login` in Terminal and the sign-in folder goes; a failed cancel keeps the dialog watching; Kimi refuses a saved login → the row says so and offers *Sign in again*; the login waits for Kimi to renew it → “Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.”; Kimi unreachable → “Kimi did not answer. Try again in a minute.”, the account stays; *Remove* asks first and deletes the account's login folder.
 **Expected result:** each login exists only in its own folder under Switchboard's data, written and renewed only by the official `kimi`; the store keeps the label, region, nickname and tier; no token, e-mail or phone reaches the store, the window, a backup or a log.
-**UI elements:** the *Kimi Code* group on Accounts (count, ordinary-kimi line, rows with tier · service, windows line, *Launch* / *Sign in again*, *Remove*), *Add Kimi Code account*, *Refresh*, the sign-in, launch and remove dialogs.
+**UI elements:** the *Kimi Code* group on Accounts (count, ordinary-kimi line, rows in the account-row layout: K mark with a state dot, label, tier · service, windows line, small *Launch…* or *Sign in*, ⋯ menu with *Sign in again* and *Remove…*), *Add Kimi Code account*, *Refresh*, the sign-in, launch and remove dialogs.
 **States covered:** reading, read failed (*Retry*), not installed, no accounts, signed in with windows, refused, stale, unreachable, sign-in waiting, sign-in ended, removed.
 **Errors & recovery:** every refusal names the fix; nothing Switchboard does renews or moves a Kimi login.
 **Status:** draft

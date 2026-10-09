@@ -10,10 +10,33 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ### Added
 
+- Launch any account in a folder you pick (operator decision 2026-10-09, SB-86): the row menu's
+  *Launch…* replaces *Launch isolated…* and *Launch managed…*; an *Isolated session* box chooses the
+  mode, ticked and locked when only an isolated session is possible. Every folder Switchboard asks
+  for — launches, Kimi Code, agents, projects, project rules — is chosen with the system folder
+  picker, never typed; the picker opens at the last folder chosen, remembered across restarts.
+
 - A provider terms notice (operator decision 2026-10-08, SCN-049): Accounts shows it from the first
   start, while the first account is added, until you dismiss it; About shows it always. It says to
   use Switchboard in line with the terms of Anthropic and OpenAI, that breaking a provider's terms
   can get the account blocked, and that you are responsible for how you use your accounts.
+
+### Changed
+
+- Kimi Code accounts use the same compact row as Claude Code and Codex: a small *Launch…* (or
+  *Sign in*) and a ⋯ menu with *Sign in again* and *Remove…*; *Add Kimi Code account* and *Refresh*
+  are small buttons (SB-86).
+- A failed quota check logs the provider's HTTP status as a number (`usage_check` `http_error`
+  `status`), so a refusal (403) and an outage (502) are told apart (SB-85).
+
+### Fixed
+
+- Cancel ends a sign-in still waiting in Terminal instead of refusing until its window is closed;
+  a refused Cancel no longer stops the banner from noticing Terminal, nor offers a *Retry* that
+  meant finishing. The same for Kimi Code, whose sign-in now notices a closed Terminal (SB-83).
+- The ordinary Kimi Code sign-in on kimi.ai read as signed out when an older kimi.com login or a
+  stale `region` marker remained: Switchboard now reads the login slot `config.toml` names, as
+  `kimi` does (SB-84).
 
 ## 0.6.14 — 2026-10-08
 

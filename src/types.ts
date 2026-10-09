@@ -49,6 +49,8 @@ export interface Adapter {
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
+  /** A folder chosen with the system picker, opened at `start` when that is a folder; null when the person closed it. */
+  pickFolder(start?: string): Promise<string | null>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */

@@ -614,12 +614,16 @@ pub struct ProbeFailure {
     /// `Some` only for 429: `Some(seconds)` from `Retry-After` (delay-seconds or an HTTP-date,
     /// measured at receipt; a past date is `0`), `Some(None)` when it is absent or malformed.
     pub rate_limited: Option<Option<i64>>,
+    /// The HTTP status of an answer that was neither success, 401 nor 429 (`http_error`): a number
+    /// for the operations log, so a 403 and a 502 are told apart without the provider's text.
+    pub status: Option<u16>,
 }
 impl From<String> for ProbeFailure {
     fn from(message: String) -> Self {
         Self {
             message,
             rate_limited: None,
+            status: None,
         }
     }
 }
@@ -769,10 +773,14 @@ async fn probe_usage_from(
         return Err(ProbeFailure {
             message: USAGE_RATE_LIMITED.into(),
             rate_limited: Some(retry_after_seconds(response.headers(), now())),
+            status: None,
         });
     }
     if !response.status().is_success() {
-        return Err(USAGE_HTTP.into());
+        return Err(ProbeFailure {
+            status: Some(response.status().as_u16()),
+            ..USAGE_HTTP.into()
+        });
     }
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
