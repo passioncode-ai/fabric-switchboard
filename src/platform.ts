@@ -5,6 +5,7 @@ import { t } from './i18n';
 export function platformLabel(platform?: string): string {
   if (platform === 'macos') return 'macOS';
   if (platform === 'windows') return 'Windows';
+  if (platform === 'linux') return 'Linux';
   return t('Platform unavailable');
 }
 
@@ -20,7 +21,7 @@ export function isAbsoluteProjectPath(path: string, platform?: string): boolean 
   // offered by this form; a normal drive or UNC path keeps the hint unambiguous.
   const unc = /^\\\\[^\\/?.][^\\/]*[\\/][^\\/]+(?:[\\/]|$)/.test(path);
   if (platform === 'windows') return drive || unc;
-  if (platform === 'macos') return posix;
+  if (platform === 'macos' || platform === 'linux') return posix;
   // Runtime status can temporarily fail while isolated launch is still usable.
   // Avoid rejecting a valid native path solely because status is unavailable.
   return posix || drive || unc;

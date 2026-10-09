@@ -17,11 +17,18 @@ pub fn bundled_cli() -> Option<PathBuf> {
     let candidate = current.parent()?.join(CLI_NAME);
     (candidate.is_file() && candidate != current && !translocated(&candidate)).then_some(candidate)
 }
-/// macOS App Translocation: an app opened straight from a download runs from a read-only copy
-/// under a random `/AppTranslocation/` folder that is gone after it quits.
+/// A copy that is gone after the app quits. macOS App Translocation: an app opened straight from a
+/// download runs from a read-only copy under a random `/AppTranslocation/` folder. Linux AppImage
+/// (SB-88): the image is mounted under `$APPDIR` only while it runs.
 pub fn translocated(path: &Path) -> bool {
+    translocated_in(path, std::env::var_os("APPDIR"))
+}
+fn translocated_in(path: &Path, appdir: Option<std::ffi::OsString>) -> bool {
     path.components()
         .any(|c| c.as_os_str() == "AppTranslocation")
+        || appdir
+            .filter(|dir| !dir.is_empty())
+            .is_some_and(|dir| path.starts_with(dir))
 }
 /// The running desktop app is a translocated copy.
 pub fn running_translocated() -> bool {
@@ -165,6 +172,20 @@ mod setup_tests {
             r#"'/it'\''s; rm -rf ~/switchboard'"#
         };
         assert_eq!(shell_quote("/it's; rm -rf ~/switchboard"), expected);
+    }
+    #[test]
+    fn an_appimage_mount_is_a_copy_that_goes_when_the_app_quits() {
+        let mount = Some(std::ffi::OsString::from("/tmp/.mount_FabricAbC"));
+        assert!(translocated_in(
+            Path::new("/tmp/.mount_FabricAbC/usr/bin/switchboard"),
+            mount.clone()
+        ));
+        assert!(!translocated_in(Path::new("/usr/bin/switchboard"), mount));
+        assert!(!translocated_in(
+            Path::new("/usr/bin/switchboard"),
+            Some("".into())
+        ));
+        assert!(!translocated_in(Path::new("/usr/bin/switchboard"), None));
     }
     #[test]
     fn a_translocated_copy_is_never_linked_or_offered() {
