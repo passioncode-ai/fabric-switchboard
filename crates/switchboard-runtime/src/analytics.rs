@@ -30,11 +30,19 @@ pub const STATE_FILE: &str = "analytics-state.json";
 const SDK: &str = concat!("switchboard-analytics@", env!("CARGO_PKG_VERSION"));
 /// `production` for a release (a version without a pre-release part, built in release mode);
 /// `sandbox` for a debug build or a pre-release (`-rc.N` rehearsals, betas).
-const ENVIRONMENT: &str = if cfg!(debug_assertions) || has_prerelease(env!("CARGO_PKG_VERSION")) {
-    "sandbox"
-} else {
-    "production"
-};
+const ENVIRONMENT: &str = environment_for(cfg!(debug_assertions), env!("CARGO_PKG_VERSION"));
+const fn environment_for(debug_build: bool, version: &str) -> &'static str {
+    if debug_build || has_prerelease(version) {
+        "sandbox"
+    } else {
+        "production"
+    }
+}
+/// Aptabase's build mode follows the environment (sshlg-analytics client contract, "Build modes", 2026-10-09):
+/// `isDebug` is true exactly when the event is not production, so a pre-release lands in the dashboard's Debug view.
+fn is_debug_event(environment: &str) -> bool {
+    environment != "production"
+}
 const fn has_prerelease(version: &str) -> bool {
     let bytes = version.as_bytes();
     let mut i = 0;
@@ -265,7 +273,7 @@ impl Analytics {
             session_id: self.session(at),
             event_name: name.to_owned(),
             system_props: json!({
-                "isDebug": cfg!(debug_assertions),
+                "isDebug": is_debug_event(ENVIRONMENT),
                 "osName": if cfg!(windows) { "Windows" } else if cfg!(target_os = "macos") { "macOS" } else { "Linux" },
                 "appVersion": env!("CARGO_PKG_VERSION"),
                 "sdkVersion": SDK,
@@ -710,6 +718,9 @@ mod tests {
         assert!(sent
             .iter()
             .all(|e| e["props"]["environment"] == ENVIRONMENT));
+        assert!(sent
+            .iter()
+            .all(|e| e["systemProps"]["isDebug"] == (e["props"]["environment"] != "production")));
         assert_eq!(sent[0]["props"]["first_passioncode_app"], true);
         assert_eq!(sent[1]["props"]["launch"], "background");
         assert_eq!(sent[2]["props"]["accounts"], 1);
@@ -884,5 +895,21 @@ mod tests {
         assert_eq!(rfc3339(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(rfc3339(1_791_165_882), "2026-10-05T02:04:42.000Z");
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00.000Z");
+    }
+
+    #[test]
+    fn a_release_build_of_a_pre_release_is_debug_in_aptabase() {
+        for (debug_build, version, debug) in [
+            (false, "0.9.0", false),
+            (false, "0.9.0-rc.1", true),
+            (false, "0.9.0-beta.2", true),
+            (true, "0.9.0", true),
+        ] {
+            assert_eq!(
+                is_debug_event(environment_for(debug_build, version)),
+                debug,
+                "{version} debug_build={debug_build}"
+            );
+        }
     }
 }
