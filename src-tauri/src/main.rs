@@ -736,7 +736,13 @@ fn main() {
             } else {
                 std::env::current_exe()
                     .map_err(|_| updates::UNAVAILABLE_DEVELOPMENT)
-                    .and_then(|exe| updates::availability(&exe, residency::packaged(&exe)))
+                    .and_then(|exe| {
+                        updates::availability(
+                            &exe,
+                            residency::packaged(&exe),
+                            std::env::var_os("APPIMAGE").as_ref(),
+                        )
+                    })
             };
             let root = if smoke { None } else { default_root().ok() };
             app.manage(updates::Updates::new(available, root));

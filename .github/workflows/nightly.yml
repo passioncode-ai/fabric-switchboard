@@ -53,7 +53,17 @@ jobs:
   windows:
     needs: clock
     if: needs.clock.outputs.run == 'true'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            overlay: ""
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            overlay: --config src-tauri/tauri.windows-arm64.conf.json
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     defaults:
       run:
@@ -68,7 +78,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add x86_64-pc-windows-msvc
+          rustup target add ${{ matrix.target }}
       - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
@@ -81,12 +91,12 @@ jobs:
       - name: Build the CLI, the desktop executable and the installer, unsigned
         run: |
           $env:RUSTFLAGS = '-C target-feature=+crt-static'
-          cargo build --release --locked -p switchboard-cli --target x86_64-pc-windows-msvc
+          cargo build --release --locked -p switchboard-cli --target ${{ matrix.target }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item Env:RUSTFLAGS
-          npm exec tauri build -- --no-bundle --ci -- --locked
+          npm exec tauri build -- --no-bundle --ci ${{ matrix.overlay }} -- --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm exec tauri bundle -- --bundles nsis --ci
+          npm exec tauri bundle -- --bundles nsis --ci ${{ matrix.overlay }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # The release job refuses a receipt for a tree its build changed (package_windows.py).
       - name: The build leaves the source tree as checked out
@@ -100,3 +110,49 @@ jobs:
             Write-Host "--- the diff:"; git diff --stat; git diff -- src-tauri/Cargo.toml
             Write-Host "::error::the build changed the source tree"; exit 1
           }
+  # The release job's Linux path without the release environment (SB-88): tests against a real
+  # Secret Service, clippy, the .deb and AppImage build and the smoke check, on x64 and arm64.
+  linux:
+    needs: clock
+    if: needs.clock.outputs.run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build and check dependencies (WebKitGTK 4.1, Secret Service, Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libdbus-1-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth
+      - name: Rust stable with clippy
+        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      - run: npm ci
+      - name: Tests against a real Secret Service
+        run: |
+          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test --workspace --locked'
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: The CLI, the app, the .deb and the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "1"
+        run: |
+          cargo build --release --locked -p switchboard-cli
+          npm exec tauri build -- --bundles deb,appimage --ci -- --locked
+      - name: Smoke check, ordinary and background launch
+        run: |
+          version=$(node -p "require('./package.json').version")
+          dbus-run-session -- xvfb-run -a python3 scripts/smoke_native.py target/release/fabric-switchboard --version "$version"
+          dbus-run-session -- xvfb-run -a python3 scripts/smoke_native.py target/release/fabric-switchboard --version "$version" --background
+      - name: The build leaves the source tree as checked out
+        run: |
+          changed=$(git status --porcelain --untracked-files=all)
+          if [ -n "$changed" ]; then echo "$changed"; echo "::error::the build changed the source tree"; exit 1; fi

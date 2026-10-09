@@ -1,0 +1,22 @@
+{
+  "bundle": {
+    "targets": [
+      "deb",
+      "appimage"
+    ],
+    "linux": {
+      "deb": {
+        "section": "devel",
+        "files": {
+          "/usr/bin/switchboard": "../target/release/switchboard"
+        }
+      },
+      "appimage": {
+        "bundleMediaFramework": false,
+        "files": {
+          "/usr/bin/switchboard": "../target/release/switchboard"
+        }
+      }
+    }
+  }
+}

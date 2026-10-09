@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-09 — Linux and Windows on ARM (SB-88…SB-91)
+
+Operator decision 2026-10-09: every PassionCode.ai product runs on Apple silicon and Intel Macs,
+Windows and Linux. Branch `agent/linux-port-20261009` (PR #132).
+
+- **Linux works** (SB-88): Secret Service vault and backup key (keyring 3, D-Bus), session scripts
+  in POSIX `sh`, terminal launch (`$TERMINAL`, then the common terminals), XDG log and autostart,
+  AppImage self-update (a .deb copy never checks and says how it updates), `.deb` with
+  `/usr/bin/switchboard`, AppImage, CLI tarball. Verified in Docker (arm64): workspace tests with a
+  real GNOME Keyring, clippy clean, `smoke_native.py` PASS (ordinary + background) on the build,
+  the AppImage, and the .deb installed on a clean Debian 12.
+- **Windows on ARM** (SB-89): release and nightly matrices, arm64 overlay and packaging.
+- **SB-90**: the control client waits for hyper's readiness before the mutation (a Linux-visible race).
+- Release workflow: `linux` job (x64 + arm64), Windows matrix, `latest.json` requires all seven
+  platform keys. Nightly: Linux job (tests, clippy, bundles, smoke) and Windows arm64.
+
+Not measured here: a run on GitHub's Ubuntu and `windows-11-arm` runners (first nightly or
+rehearsal), interactive use on each desktop environment, live providers.
+
+**Exact next task:** merge PR #132, then dispatch a rehearsal (`vX.Y.Z-rc.N`,
+`gh workflow run release.yml -f publish=false`) and read the `linux` and `windows (arm64)` jobs;
+then SB-91 (download page). Local Linux checks: `scripts/linux/check.sh`.
+
+---
+
 ## 2026-10-09 — Stuck sign-in, Kimi “signed out”, launch with a folder picker (SB-83…SB-87)
 
 Operator reports 2026-10-08/09. Branch `agent/signin-stuck-20261008`.

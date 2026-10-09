@@ -747,6 +747,70 @@ fn native_vault_roundtrip_uses_only_random_app_owned_item() {
     vault.delete(&id).unwrap();
 }
 
+/// SB-88: the Linux vault against a real Secret Service. `scripts/linux/check.sh` runs it in a
+/// D-Bus session with an unlocked GNOME Keyring and sets SWITCHBOARD_SECRET_SERVICE_TEST=1;
+/// elsewhere it reports that it did not run.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_vault_roundtrips_through_the_secret_service_and_refuses_without_one() {
+    use switchboard_core::backup::BackupKey;
+    use switchboard_core::NativeVault;
+    if std::env::var("SWITCHBOARD_SECRET_SERVICE_TEST").as_deref() != Ok("1") {
+        eprintln!("not run: needs a Secret Service session (scripts/linux/check.sh)");
+        return;
+    }
+    let vault = NativeVault::new();
+    let id = uuid::Uuid::new_v4().to_string();
+    let expected = token("synthetic-secret-service-test-only");
+    vault.put(&id, &expected).unwrap();
+    assert_eq!(vault.get(&id).unwrap().access_token, expected.access_token);
+    // A second put replaces the item in place.
+    let renewed = token("synthetic-secret-service-renewed");
+    vault.put(&id, &renewed).unwrap();
+    assert_eq!(vault.get(&id).unwrap().access_token, renewed.access_token);
+    vault.delete(&id).unwrap();
+    assert!(vault.get(&id).is_err());
+    vault.delete(&id).unwrap();
+    assert!(vault.get("not-a-uuid").is_err());
+    // The backup key is created once and never replaced.
+    let key = switchboard_core::backup::SecretServiceKey;
+    let first = key.load().unwrap();
+    let candidate = [7u8; 32];
+    let created = key.create(&candidate).unwrap();
+    assert_eq!(created, first.is_none());
+    let stored = key.load().unwrap().unwrap();
+    assert!(!key.create(&[9u8; 32]).unwrap(), "an existing key is kept");
+    assert_eq!(key.load().unwrap().unwrap(), stored);
+    // Without a session bus there is no Secret Service: storage refuses and names the fix.
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "linux_vault_refuses_without_a_session_bus",
+            "--include-ignored",
+            "--nocapture",
+        ])
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/bus")
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stdout)
+    );
+}
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "run by linux_vault_roundtrips_through_the_secret_service_and_refuses_without_one with no session bus"]
+fn linux_vault_refuses_without_a_session_bus() {
+    use switchboard_core::NativeVault;
+    let id = uuid::Uuid::new_v4().to_string();
+    let error = NativeVault::new()
+        .put(&id, &token("never-stored"))
+        .unwrap_err();
+    assert_eq!(error, switchboard_core::secret_service::UNAVAILABLE);
+}
+
 #[test]
 fn a_renewal_goes_only_to_the_owner_the_token_endpoint_named() {
     use switchboard_core::ExternalIdentity;

@@ -180,6 +180,12 @@ pub(crate) fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Resu
     let _ = executable;
     Ok(())
 }
+/// The shell a session script runs in: zsh, macOS's own, on macOS; POSIX `sh` elsewhere, since
+/// many Linux systems have no zsh (SB-88). The script uses only POSIX constructs in either.
+#[cfg(target_os = "macos")]
+pub(crate) const SCRIPT_SHELL: &str = "/bin/zsh";
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) const SCRIPT_SHELL: &str = "/bin/sh";
 #[cfg(unix)]
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -260,7 +266,7 @@ fn script_with(
     login: bool,
     working_directory: &Path,
 ) -> String {
-    let mut result = format!("#!/bin/zsh\nset +x\nunset {}\n", CONFLICTS.join(" "));
+    let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
@@ -271,7 +277,7 @@ fn script_with(
             call.push_str(&quote(argument));
         }
         result.push_str(&format!(
-            "{name}=\"$({call})\" && [ -n \"${name}\" ] || {{ print -u2 {}; exit 1; }}\nexport {name}\n",
+            "{name}=\"$({call})\" && [ -n \"${name}\" ] || {{ printf '%s\\n' {} >&2; exit 1; }}\nexport {name}\n",
             quote(KEY_UNREADABLE)
         ));
     }
@@ -525,11 +531,94 @@ pub(crate) fn start_terminal(path: &Path) -> Result<(), String> {
         command.spawn().map_err(|_| "Terminal could not open.")?;
         Ok(())
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        spawn_linux_terminal(path, std::env::var_os("TERMINAL"), find_program)
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = path;
-        Err("Terminal launch is currently supported on macOS and Windows only.".into())
+        Err("Terminal launch is currently supported on macOS, Windows and Linux only.".into())
     }
+}
+/// Opens `path` in the Linux terminal `linux_terminal` chooses; the seam the Linux test drives.
+#[cfg(target_os = "linux")]
+fn spawn_linux_terminal(
+    path: &Path,
+    preferred: Option<std::ffi::OsString>,
+    find: impl Fn(&str) -> Option<PathBuf>,
+) -> Result<(), String> {
+    {
+        use std::os::unix::process::CommandExt;
+        let (program, arguments) = linux_terminal(preferred, find)?;
+        let mut command = Command::new(program);
+        command
+            .args(arguments)
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            // Its own process group: the Terminal outlives Switchboard, as on macOS.
+            .process_group(0);
+        for variable in CONFLICTS {
+            command.env_remove(variable);
+        }
+        let mut child = command.spawn().map_err(|_| "Terminal could not open.")?;
+        // Reaped when it exits, so no zombie stays behind for a server-style terminal either.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
+}
+/// No terminal emulator could be found on Linux (SB-88). Shown verbatim (src/adapter.ts).
+pub const LINUX_TERMINAL_MISSING: &str = "No terminal app was found. Install one, such as GNOME Terminal, Konsole or xterm, or set TERMINAL to yours, then retry.";
+/// Linux terminal emulators and how each is told to run one program: `$TERMINAL` first (a known
+/// name gets its own arguments, an unknown one the common `-e`), then Debian's
+/// `x-terminal-emulator` alternative, then the common desktops' own terminals.
+#[cfg(any(target_os = "linux", test))]
+const LINUX_TERMINALS: [(&str, &[&str]); 11] = [
+    ("x-terminal-emulator", &["-e"]),
+    ("gnome-terminal", &["--"]),
+    ("konsole", &["-e"]),
+    ("xfce4-terminal", &["-x"]),
+    ("mate-terminal", &["-x"]),
+    ("tilix", &["-e"]),
+    ("kitty", &[]),
+    ("alacritty", &["-e"]),
+    ("wezterm", &["start", "--"]),
+    ("foot", &[]),
+    ("xterm", &["-e"]),
+];
+#[cfg(any(target_os = "linux", test))]
+fn linux_terminal(
+    preferred: Option<std::ffi::OsString>,
+    find: impl Fn(&str) -> Option<PathBuf>,
+) -> Result<(PathBuf, &'static [&'static str]), String> {
+    if let Some(preferred) = preferred.filter(|p| !p.is_empty()) {
+        let preferred = PathBuf::from(preferred);
+        let name = preferred
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        let arguments = LINUX_TERMINALS
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map_or(&["-e"][..], |(_, arguments)| *arguments);
+        let program = if preferred.is_absolute() {
+            preferred.is_file().then_some(preferred)
+        } else {
+            find(&name)
+        };
+        if let Some(program) = program {
+            return Ok((program, arguments));
+        }
+    }
+    LINUX_TERMINALS
+        .iter()
+        .find_map(|(name, arguments)| find(name).map(|program| (program, *arguments)))
+        .ok_or_else(|| LINUX_TERMINAL_MISSING.into())
 }
 /// An empty sign-in label is allowed: the captured email names the account at finish.
 fn validate_fields(label: &str, pool: &str) -> Result<(), String> {
@@ -1953,6 +2042,101 @@ mod tests {
         assert_eq!(login_state(&login), "complete");
     }
     #[test]
+    fn a_linux_terminal_is_chosen_by_terminal_then_by_the_known_list() {
+        let only = |names: &'static [&'static str]| {
+            move |name: &str| {
+                names
+                    .contains(&name)
+                    .then(|| PathBuf::from(format!("/usr/bin/{name}")))
+            }
+        };
+        let none = only(&[]);
+        assert_eq!(
+            linux_terminal(None, none).unwrap_err(),
+            LINUX_TERMINAL_MISSING
+        );
+        // Debian's alternative wins over a desktop's own terminal; each gets its own arguments.
+        let (program, arguments) =
+            linux_terminal(None, only(&["konsole", "x-terminal-emulator"])).unwrap();
+        assert_eq!(
+            (program, arguments),
+            (PathBuf::from("/usr/bin/x-terminal-emulator"), &["-e"][..])
+        );
+        let (program, arguments) =
+            linux_terminal(None, only(&["gnome-terminal", "xterm"])).unwrap();
+        assert_eq!(
+            (program, arguments),
+            (PathBuf::from("/usr/bin/gnome-terminal"), &["--"][..])
+        );
+        // TERMINAL is honoured first: a known name keeps its arguments, an unknown one gets `-e`.
+        let (program, arguments) =
+            linux_terminal(Some("kitty".into()), only(&["kitty", "xterm"])).unwrap();
+        assert_eq!(program, PathBuf::from("/usr/bin/kitty"));
+        assert!(arguments.is_empty());
+        let (_, arguments) = linux_terminal(Some("myterm".into()), only(&["myterm"])).unwrap();
+        assert_eq!(arguments, &["-e"][..]);
+        // A TERMINAL that is not installed falls back to the list instead of failing.
+        let (program, _) = linux_terminal(Some("missing-term".into()), only(&["xterm"])).unwrap();
+        assert_eq!(program, PathBuf::from("/usr/bin/xterm"));
+        assert!(linux_terminal(Some("".into()), only(&["foot"]))
+            .unwrap()
+            .1
+            .is_empty());
+    }
+    /// SB-88: on Linux a sign-in's script runs in the terminal end to end — `/bin/sh`, its session
+    /// marker, the provider program, the completion marker — through a stand-in terminal that runs
+    /// what it is given the way `xterm -e` does.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_linux_terminal_runs_the_generated_script_to_completion() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("login home");
+        private_dir(&home).unwrap();
+        let terminal = temp.path().join("stand-in-term");
+        private_write(
+            &terminal,
+            b"#!/bin/sh\n[ \"$1\" = -e ] || exit 9\nshift\nexec \"$@\"\n",
+            true,
+        )
+        .unwrap();
+        let provider = temp.path().join("provider");
+        private_write(
+            &provider,
+            b"#!/bin/sh\n[ \"$1\" = auth ] && [ \"$2\" = login ] || exit 3\n",
+            true,
+        )
+        .unwrap();
+        let text = script(
+            &home,
+            &provider,
+            &["auth", "login"],
+            &BTreeMap::new(),
+            true,
+            &home,
+        );
+        assert!(text.starts_with("#!/bin/sh\n"));
+        let path = write_launch_script(&home, &text).unwrap();
+        spawn_linux_terminal(&path, Some(terminal.into_os_string()), |_| None).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !home.join(".completed").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the script did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            fs::read_to_string(home.join(".completed")).unwrap(),
+            "complete"
+        );
+        assert!(home.join(".session-pid").exists());
+        // No terminal at all: the person is told what to install.
+        assert_eq!(
+            spawn_linux_terminal(&path, None, |_| None).unwrap_err(),
+            LINUX_TERMINAL_MISSING
+        );
+    }
+    #[test]
     fn rejects_invalid_fields() {
         assert!(validate_fields("x", "../../escape").is_err());
         assert!(validate_fields("\n", "default").is_err());
@@ -2389,7 +2573,7 @@ mod tests {
             );
             let path = home.join("launch.command");
             private_write(&path, text.as_bytes(), true).unwrap();
-            Command::new("/bin/zsh").arg(&path).output().unwrap()
+            Command::new(SCRIPT_SHELL).arg(&path).output().unwrap()
         };
         let answers = tool("cli-ok", "printf 'sk-or-v1-synthetic\\n'");
         assert!(run(&answers).status.success());
@@ -2988,7 +3172,7 @@ mod tests {
         let path = home.join("launch.command");
         let text = script(&home, &provider, &["a b", "c'd"], &env, false, &project);
         private_write(&path, text.as_bytes(), true).unwrap();
-        let mut command = Command::new("/bin/zsh");
+        let mut command = Command::new(SCRIPT_SHELL);
         command.arg(&path).env_clear().env("PATH", "/usr/bin:/bin");
         for variable in CONFLICTS {
             command.env(variable, "synthetic-conflict");

@@ -4,11 +4,12 @@ Operation and recovery as of 0.6.5; version-tagged sections below say when a beh
 
 ## Data locations and ownership
 
-GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passioncode.fabric-switchboard`; Windows uses `%LOCALAPPDATA%/ai.passioncode.fabric-switchboard`. Do not paste its contents into issues: metadata includes account labels/IDs, and managed homes may contain credentials or provider conversation history.
+GUI and CLI resolve macOS app data to `~/Library/Application Support/ai.passioncode.fabric-switchboard`; Windows uses `%LOCALAPPDATA%/ai.passioncode.fabric-switchboard`; Linux `~/.local/share/ai.passioncode.fabric-switchboard` (`$XDG_DATA_HOME`), its log `~/.local/state/fabric-switchboard/` and its backups `~/.local/share/Fabric Switchboard Backups` (SB-88). Do not paste its contents into issues: metadata includes account labels/IDs, and managed homes may contain credentials or provider conversation history.
 
 | Data | Location and protection | Lifetime |
 |---|---|---|
 | Canonical credential (macOS) | login keychain, service `ai.passioncode.fabric-switchboard.shared`, UUID account; access list trusts the app and its bundled CLI by signature ([KEYCHAIN.md](KEYCHAIN.md)). Development builds use `….development`. Items under the 0.4 service `ai.passioncode.fabric-switchboard` are moved on first read | until explicit account removal |
+| Linux canonical credential | Secret Service item (GNOME Keyring, KWallet, KeePassXC), service `ai.passioncode.fabric-switchboard.shared`, account the UUID; the backup key is `ai.passioncode.fabric-switchboard.backup-key` / `v1`. No plaintext fallback: without an unlocked keyring storage refuses (SB-88) | until explicit account removal |
 | Windows canonical credential | `vault/<UUID>.dpapi`, DPAPI CurrentUser encrypted, user-only protected DACL | until explicit account removal; bound to Windows user/machine context |
 | Account metadata/routes/events | atomic JSON beneath app data, private files | persisted; bounded event history |
 | Isolated CLI working copy | `homes/<account UUID>/`, 0700 directory, 0600 auth/settings | retained for history; removed by account removal while idle |

@@ -46,7 +46,9 @@ The macOS receipt states, among the build facts (commit, toolchain, architecture
 
 A receipt is uploaded only after every check above passed; a failed run uploads nothing.
 
-### Windows (`windows` job, `windows-latest`)
+### Windows (`windows` job, `windows-latest` x64 and `windows-11-arm` arm64)
+
+The job runs once per architecture (SB-88). The steps below name x64; on arm64 the CLI target is `aarch64-pc-windows-msvc`, `src-tauri/tauri.windows-arm64.conf.json` points the installer's bundled CLI at it, and every file name says `arm64`.
 
 1. Checks the release notes again, now that the `release` environment's `AZURE_SIGNING_ENABLED` is visible.
 2. Runs the native storage, runtime and CLI fixtures (`cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli`).
@@ -59,9 +61,20 @@ A receipt is uploaded only after every check above passed; a failed run uploads 
 
 **Today `AZURE_SIGNING_ENABLED` is `false`**: steps 2, 3, 6, 7 and 8 below are done, steps 4 and 5 are not (measured read-only with `az` on 2026-10-08): the Artifact Signing account `passioncodesigning` exists (`rg-passioncode-signing`, North Europe, Basic, `https://neu.codesigning.azure.net/`); the app registration `github-release-signing-fabric-switchboard` has the federated credential `repo:passioncode-ai/fabric-switchboard:environment:release` and its service principal holds only *Artifact Signing Certificate Profile Signer* on the account; the operator holds *Identity Verifier*; the `release` variables name all of these. **The account has no certificate profile** — `AZURE_CERTIFICATE_PROFILE` names `passioncode-public-trust`, which does not exist yet — so the identity validation (step 4, read only in the portal: there is no ARM API for it) and the Public Trust profile (step 5) remain; switching the variable on before then fails the release at signing. **Who validates:** Microsoft's verification page refuses a personal Microsoft account (the operator's gmail is a guest in this tenant and signs in through the consumer tenant `9188040d-…`: «you must be logged in as an authorized user of the Entra Azure tenant which was used for the enrollment»). So a member user `signing-verifier@sshlg93gmail.onmicrosoft.com` (object `bf6f481a-9040-49fa-9f61-841223868655`) was created on 2026-10-08 with one role, *Artifact Signing Identity Verifier* on the account, and no directory role; the operator signs in as it (in a private window) to complete step 4. Remove it after the profile exists if it is no longer needed. The job builds and uploads unsigned files, and the receipt and release notes say `windows_authenticode: NOT_SIGNED`. Native fixtures passing is not Windows UI acceptance, and no build here claims live-provider acceptance.
 
+### Linux (`linux` job, `ubuntu-24.04` x64 and `ubuntu-24.04-arm` arm64; SB-88)
+
+1. Installs WebKitGTK 4.1, GTK 3, AppIndicator, D-Bus, GNOME Keyring and Xvfb.
+2. Runs the core, runtime, proxy and CLI tests in a D-Bus session with an unlocked GNOME Keyring and `SWITCHBOARD_SECRET_SERVICE_TEST=1`, so the Secret Service vault and backup key are exercised for real.
+3. Builds the CLI and `tauri build --bundles deb,appimage` (`src-tauri/tauri.linux.conf.json` puts the CLI at `/usr/bin/switchboard` in both).
+4. Runs `scripts/smoke_native.py` on the built app under Xvfb, ordinary and background launch.
+5. `scripts/updater_artifacts.py linux` copies the AppImage as `Fabric-Switchboard-X.Y.Z-linux-<arch>.AppImage` and signs it for the updater (`updater-linux-<arch>`).
+6. `scripts/package_linux.py` checks both executables' ELF architecture and writes `Fabric-Switchboard-X.Y.Z-linux-<arch>.deb`, `…-cli.tar.gz` and `…-receipt.json` (`release-linux-<arch>`).
+
+Nightly runs the same path without the release environment, plus clippy (`.github/workflows/nightly.yml` `linux`). Locally, `scripts/linux/check.sh` runs the workspace tests in Docker with GNOME Keyring.
+
 ### Updater manifest (`updater` job, `ubuntu-latest`)
 
-`scripts/updater_artifacts.py manifest` writes `latest.json` (Tauri's static update format) from the two packages: `darwin-universal`, `darwin-aarch64` and `darwin-x86_64` all name the universal archive, `windows-x86_64` the setup; each entry carries that file's own `.sig` text and a URL under `releases/download/<tag>/`; the notes are the CHANGELOG section. `check` then refuses the run unless every entry names a file of this release under this tag with its own signature and the version equals the tag (`scripts/test_updater_artifacts.py`). The manifest, both packages and both signatures are uploaded as `release-updater`, so the publish workflow attests and sums them with everything else.
+`scripts/updater_artifacts.py manifest` writes `latest.json` (Tauri's static update format) from the packages: `darwin-universal`, `darwin-aarch64` and `darwin-x86_64` all name the universal archive, `windows-x86_64` and `windows-aarch64` their setups, `linux-x86_64` and `linux-aarch64` their AppImages (SB-88; a missing one refuses the run); each entry carries that file's own `.sig` text and a URL under `releases/download/<tag>/`; the notes are the CHANGELOG section. `check` then refuses the run unless every entry names a file of this release under this tag with its own signature and the version equals the tag (`scripts/test_updater_artifacts.py`). The manifest, both packages and both signatures are uploaded as `release-updater`, so the publish workflow attests and sums them with everything else.
 
 ## Automatic updates (SB-55)
 

@@ -4,11 +4,13 @@
 
 Local accounts and quota management for **Claude Code, Codex CLI and Kimi Code**.
 See which account is in use, check its remaining quota and open a session for your project.
-A desktop app, CLI and MCP server for macOS and Windows, built by
+A desktop app, CLI and MCP server for macOS (Apple silicon and Intel), Windows (x64 and ARM)
+and Linux (x64 and ARM), built by
 [PassionCode.ai](https://passioncode.ai/).
 
 **[Download for macOS](https://passioncode.ai/switchboard/download/macos)** ·
 **[Download for Windows](https://passioncode.ai/switchboard/download/windows)** ·
+**[Download for Linux](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)** ·
 [Installation](docs/INSTALL.md) · [Release notes](CHANGELOG.md) ·
 [Product page](https://passioncode.ai/switchboard/)
 
@@ -27,7 +29,8 @@ A desktop app, CLI and MCP server for macOS and Windows, built by
 | Configure other coding agents | Hermes model/provider settings and OpenRouter launch for supported agents |
 | Work from your terminal or agent | `switchboard` CLI, MCP tools and `launch --in-place` |
 
-Saved secrets use macOS Keychain or Windows DPAPI. Automatic switching is opt-in.
+Saved secrets use macOS Keychain, Windows DPAPI or the Linux Secret Service (GNOME Keyring,
+KWallet, KeePassXC). Automatic switching is opt-in.
 Kimi accounts stay in their own sign-in folders; Switchboard does not copy or renew them.
 See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 [agent support](docs/AGENT-SUPPORT.md) for the boundaries of each mode.

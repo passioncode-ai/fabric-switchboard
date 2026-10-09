@@ -624,7 +624,7 @@ impl BackupKey for DpapiKey {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn decode_key(text: &[u8]) -> Option<[u8; 32]> {
     if text.len() != 64 {
         return None;
@@ -648,10 +648,41 @@ pub fn platform_key(dir: &Path) -> Option<std::sync::Arc<dyn BackupKey>> {
     {
         Some(std::sync::Arc::new(DpapiKey(dir.join(".backup-key.dpapi"))))
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = dir;
+        Some(std::sync::Arc::new(SecretServiceKey))
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = dir;
         None
+    }
+}
+
+/// Linux key (SB-88): the Secret Service item `ai.passioncode.fabric-switchboard.backup-key` / `v1`,
+/// hex like the macOS Keychain item; the keyring outlives an uninstall, as the Keychain does.
+#[cfg(target_os = "linux")]
+pub struct SecretServiceKey;
+#[cfg(target_os = "linux")]
+impl BackupKey for SecretServiceKey {
+    fn load(&self) -> Result<Option<[u8; 32]>, String> {
+        crate::secret_service::read(crate::secret_service::BACKUP_SERVICE, "v1")
+            .map_err(|_| UNAVAILABLE.to_string())?
+            .map(|bytes| decode_key(&bytes).ok_or_else(|| UNAVAILABLE.to_string()))
+            .transpose()
+    }
+    fn create(&self, key: &[u8; 32]) -> Result<bool, String> {
+        // Never replaces a key: backups sealed under it would no longer open. The Secret Service
+        // has no add-if-absent, so this is check-then-write; only the store's owner (one process,
+        // held by `instance.lock`) creates the key, so no second writer races it.
+        if self.load()?.is_some() {
+            return Ok(false);
+        }
+        let text: String = key.iter().map(|b| format!("{b:02x}")).collect();
+        crate::secret_service::write(crate::secret_service::BACKUP_SERVICE, "v1", text.as_bytes())
+            .map_err(|_| UNAVAILABLE.to_string())?;
+        Ok(true)
     }
 }
 

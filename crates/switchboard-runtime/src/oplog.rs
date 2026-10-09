@@ -138,7 +138,8 @@ fn line(event: &'static str, fields: &[(&'static str, Field)], at: i64) -> Strin
 
 /// The per-user log folder: `SWITCHBOARD_LOG_DIR` when it is absolute, else
 /// `~/Library/Logs/Fabric Switchboard` on macOS, `%LOCALAPPDATA%\Fabric Switchboard\Logs` on
-/// Windows, and the data folder's `Fabric Switchboard/logs` elsewhere.
+/// Windows, `$XDG_STATE_HOME/fabric-switchboard` (`~/.local/state/…`) on Linux (SB-88), and the
+/// data folder's `Fabric Switchboard/logs` elsewhere.
 pub fn default_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("SWITCHBOARD_LOG_DIR").map(PathBuf::from) {
         return dir.is_absolute().then_some(dir);
@@ -151,7 +152,11 @@ pub fn default_dir() -> Option<PathBuf> {
     {
         dirs::data_local_dir().map(|d| d.join("Fabric Switchboard").join("Logs"))
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        dirs::state_dir().map(|d| d.join("fabric-switchboard"))
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         dirs::data_dir().map(|d| d.join("Fabric Switchboard").join("logs"))
     }

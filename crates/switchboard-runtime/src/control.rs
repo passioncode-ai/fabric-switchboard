@@ -406,6 +406,13 @@ async fn request_on_connection(
         .header("content-type", "application/json")
         .body(Full::new(Bytes::from(bytes)))
         .map_err(|_| "Control request unavailable.")?;
+    // hyper sends on a connection only once it is idle again: the hello response just read leaves
+    // it finishing that exchange, and a request sent before then is cancelled ("connection was not
+    // ready") without leaving this process. Seen on Linux, 12 of 44 CLI-to-owner requests in a
+    // loop (2026-10-09); macOS's timing hid it. Nothing has been sent yet, so this is no mutation.
+    sender.ready().await.map_err(|_| {
+        "Control listener closed its proved connection. No operation was attempted."
+    })?;
     let response = sender
         .send_request(mutation)
         .await

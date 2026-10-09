@@ -4,11 +4,12 @@
 
 Локальный менеджер аккаунтов и квот **Claude Code, Codex CLI и Kimi Code**.
 Показывает текущий аккаунт и его квоту, помогает выбрать другой и открыть сессию в нужном
-проекте. Приложение для macOS и Windows, команда `switchboard` и MCP-сервер от
+проекте. Приложение для macOS (Apple silicon и Intel), Windows (x64 и ARM) и Linux (x64 и ARM), команда `switchboard` и MCP-сервер от
 [PassionCode.ai](https://passioncode.ai/).
 
 **[Скачать для macOS](https://passioncode.ai/switchboard/download/macos)** ·
 **[Скачать для Windows](https://passioncode.ai/switchboard/download/windows)** ·
+**[Скачать для Linux](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)** ·
 [Установка](docs/INSTALL.md) · [Что нового](CHANGELOG.md) ·
 [Сайт](https://passioncode.ai/switchboard/)
 
@@ -27,7 +28,7 @@
 | Настраивать другие агенты | Модель и провайдер Hermes, запуск поддерживаемых агентов через OpenRouter |
 | Работать из терминала или агента | CLI, MCP-инструменты и запуск в текущей консоли через `launch --in-place` |
 
-Секреты защищены macOS Keychain или Windows DPAPI. Автопереключение включается по вашему
+Секреты защищены macOS Keychain, Windows DPAPI или Linux Secret Service (GNOME Keyring, KWallet, KeePassXC). Автопереключение включается по вашему
 выбору. Каждый аккаунт Kimi остаётся в отдельной папке входа: Switchboard не копирует и не
 продлевает его авторизацию. Подробности: [аккаунты и переключение](docs/ACCOUNTS-AND-ROTATION.md),
 [поддержка агентов](docs/AGENT-SUPPORT.md).

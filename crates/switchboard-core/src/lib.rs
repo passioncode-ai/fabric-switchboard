@@ -20,6 +20,8 @@ mod persistence;
 pub mod private_fs;
 mod projects;
 mod rotation;
+#[cfg(target_os = "linux")]
+pub mod secret_service;
 #[cfg(unix)]
 pub mod security_cli;
 mod vault;
