@@ -3,7 +3,11 @@
 itself. Run by the release workflow only; the signing key never leaves its `release` environment.
 
   macos     --app <stapled .app> --out <dir>     the notarized, stapled app as .app.tar.gz + .sig
-  windows   --nsis-dir <dir> --out <dir>          the (Authenticode-signed) NSIS setup + .sig
+  windows   --nsis-dir <dir> --out <dir> [--arch x64|arm64]
+                                                  the (Authenticode-signed) NSIS setup + .sig
+  linux     --appimage-dir <dir> --out <dir> --arch x64|arm64
+                                                  the AppImage + .sig (SB-88; the .deb does not
+                                                  update itself)
   manifest  --tag vX.Y.Z --dir <dir>              latest.json from the packages and signatures there
   check     --tag vX.Y.Z --dir <dir>              every entry of latest.json names a file in <dir>,
                                                   under this tag, with that file's own signature
@@ -35,7 +39,11 @@ TAG = re.compile(r'^v(\d+\.\d+\.\d+)(-(?:rc|beta)\.\d+)?$')
 # The universal app answers both Mac architectures; the app asks for `darwin-universal`
 # (src-tauri/src/updates.rs MACOS_TARGET), the two others serve an app that asks by architecture.
 MACOS_TARGETS = ('darwin-universal', 'darwin-aarch64', 'darwin-x86_64')
-WINDOWS_TARGET = 'windows-x86_64'
+# Our architecture names in file names, and Tauri's in the updater's platform keys.
+ARCHES = {'x64': 'x86_64', 'arm64': 'aarch64'}
+WINDOWS_TARGETS = tuple(f'windows-{a}' for a in ARCHES.values())
+LINUX_TARGETS = tuple(f'linux-{a}' for a in ARCHES.values())
+REQUIRED_TARGETS = (*MACOS_TARGETS, *WINDOWS_TARGETS, *LINUX_TARGETS)
 NOTES_LIMIT = 4000
 
 
@@ -47,8 +55,21 @@ def macos_name(v):
     return f'Fabric-Switchboard-{v}-macos-universal.app.tar.gz'
 
 
-def windows_name(v):
-    return f'Fabric-Switchboard-{v}-windows-x64-setup.exe'
+def windows_name(v, arch='x64'):
+    return f'Fabric-Switchboard-{v}-windows-{arch}-setup.exe'
+
+
+def linux_name(v, arch):
+    return f'Fabric-Switchboard-{v}-linux-{arch}.AppImage'
+
+
+def packages(v):
+    """Every updater package of a release with the platform keys it answers."""
+    found = [(MACOS_TARGETS, macos_name(v))]
+    for arch, tauri in ARCHES.items():
+        found.append(((f'windows-{tauri}',), windows_name(v, arch)))
+        found.append(((f'linux-{tauri}',), linux_name(v, arch)))
+    return found
 
 
 def download_url(tag, name):
@@ -106,14 +127,30 @@ def macos(app, out, v):
     return archive, sign(archive, v)
 
 
-def windows(nsis_dir, out, v):
+def windows(nsis_dir, out, v, arch='x64'):
+    if arch not in ARCHES:
+        raise SystemExit(f'Unknown architecture {arch!r}; expected one of {", ".join(ARCHES)}.')
     setups = sorted(Path(nsis_dir).glob('*-setup.exe'))
     if len(setups) != 1:
         raise SystemExit(f'Expected exactly one NSIS setup in {nsis_dir}, found {len(setups)}.')
     out.mkdir(parents=True, exist_ok=True)
-    setup = out / windows_name(v)
+    setup = out / windows_name(v, arch)
     shutil.copy2(setups[0], setup)
     return setup, sign(setup, v)
+
+
+def linux(appimage_dir, out, v, arch):
+    """The AppImage the installed AppImage replaces itself with (SB-88)."""
+    if arch not in ARCHES:
+        raise SystemExit(f'Unknown architecture {arch!r}; expected one of {", ".join(ARCHES)}.')
+    images = sorted(Path(appimage_dir).glob('*.AppImage'))
+    if len(images) != 1:
+        raise SystemExit(f'Expected exactly one AppImage in {appimage_dir}, found {len(images)}.')
+    out.mkdir(parents=True, exist_ok=True)
+    image = out / linux_name(v, arch)
+    shutil.copy2(images[0], image)
+    image.chmod(0o755)
+    return image, sign(image, v)
 
 
 def manifest(tag, folder, changelog, now=None):
@@ -125,7 +162,7 @@ def manifest(tag, folder, changelog, now=None):
     v = found.group(1)
     folder = Path(folder)
     platforms = {}
-    for targets, name in ((MACOS_TARGETS, macos_name(v)), ((WINDOWS_TARGET,), windows_name(v))):
+    for targets, name in packages(v):
         package, signature = folder / name, folder / (name + '.sig')
         if not package.is_file() or not signature.is_file():
             raise SystemExit(f'{name} or its signature is missing from {folder}; latest.json not written.')
@@ -153,7 +190,7 @@ def check(tag, folder):
     if not found or document.get('version') != found.group(1):
         errors.append(f'{MANIFEST} announces {document.get("version")!r}, the tag is {tag}.')
     platforms = document.get('platforms') or {}
-    for required in (*MACOS_TARGETS, WINDOWS_TARGET):
+    for required in REQUIRED_TARGETS:
         if required not in platforms:
             errors.append(f'{MANIFEST} has no {required} entry.')
     prefix = f'https://github.com/{REPOSITORY}/releases/download/{tag}/'
@@ -182,6 +219,11 @@ def main(argv=None):
     win = sub.add_parser('windows')
     win.add_argument('--nsis-dir', required=True)
     win.add_argument('--out', required=True, type=Path)
+    win.add_argument('--arch', default='x64', choices=sorted(ARCHES))
+    lin = sub.add_parser('linux')
+    lin.add_argument('--appimage-dir', required=True)
+    lin.add_argument('--out', required=True, type=Path)
+    lin.add_argument('--arch', required=True, choices=sorted(ARCHES))
     for name in ('manifest', 'check'):
         command = sub.add_parser(name)
         command.add_argument('--tag', required=True)
@@ -191,7 +233,10 @@ def main(argv=None):
         for path in macos(args.app, args.out, version()):
             print(f'wrote {path.name}')
     elif args.command == 'windows':
-        for path in windows(args.nsis_dir, args.out, version()):
+        for path in windows(args.nsis_dir, args.out, version(), args.arch):
+            print(f'wrote {path.name}')
+    elif args.command == 'linux':
+        for path in linux(args.appimage_dir, args.out, version(), args.arch):
             print(f'wrote {path.name}')
     elif args.command == 'manifest':
         document = manifest(args.tag, args.dir, (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'))

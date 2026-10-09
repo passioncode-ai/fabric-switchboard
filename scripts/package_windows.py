@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Package the natively built Windows x64 release (release.yml, `windows` job): the NSIS installer
+"""Package the natively built Windows release, x64 or arm64 (release.yml, `windows` job): the NSIS installer
 and the portable CLI in one ZIP, with checksums, the license, a README and a receipt that says
 whether the executables carry a valid Authenticode signature.
 
-  python3 scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS
+  python3 scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS [--arch arm64]
   python3 scripts/package_windows.py --authenticode SIGNED --signatures signatures.json --native-tests PASS
 
 `signatures.json` is what the workflow's PowerShell step read with Get-AuthenticodeSignature:
@@ -22,6 +22,9 @@ from build_windows_cross import pe_header, sha
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'x86_64-pc-windows-msvc'
+# Per architecture: the CLI's Rust target and the PE machine of the app and the CLI. The NSIS
+# installer is NSIS's own 32-bit x86 stub on both (0x14c), which Windows on ARM runs emulated.
+ARCHES = {'x64': ('x86_64-pc-windows-msvc', 0x8664), 'arm64': ('aarch64-pc-windows-msvc', 0xAA64)}
 NOT_SIGNED_REASON = ('Windows signing (Azure Artifact Signing) is switched off: the release '
                      'environment variable AZURE_SIGNING_ENABLED is not true.')
 
@@ -39,39 +42,42 @@ def authenticode_record(mode, signatures, required):
     return {'status': 'SIGNED', 'files': {name: by_file[name] for name in required}}
 
 
-def readme(version, mode):
+def readme(version, mode, arch='x64'):
     signed = ('Windows executables are Authenticode signed; see the adjacent receipt.\n' if mode == 'SIGNED'
               else 'Windows binaries are NOT Authenticode signed; SmartScreen may warn. See the adjacent receipt.\n')
-    return (f'Fabric Switchboard {version} Windows x64\n'
+    return (f'Fabric Switchboard {version} Windows {arch}\n'
             'Run the NSIS setup for the desktop, or switchboard.exe --help for CLI.\n'
             'WebView2 is handled by the installer. Keep GUI or switchboard serve running for managed sessions.\n'
             'Built natively on a GitHub-hosted Windows runner by the release workflow.\n' + signed)
 
 
-def package(root, version, commit, mode, signatures, toolchain, native_tests):
+def package(root, version, commit, mode, signatures, toolchain, native_tests, arch='x64'):
+    if arch not in ARCHES:
+        raise SystemExit(f'Unknown architecture {arch!r}; expected one of {", ".join(ARCHES)}.')
+    target, machine = ARCHES[arch]
     artifacts = root / 'artifacts'
-    folder = artifacts / f'Fabric-Switchboard-{version}-windows-x64'
+    folder = artifacts / f'Fabric-Switchboard-{version}-windows-{arch}'
     archive = Path(str(folder) + '.zip')
     receipt_path = artifacts / (folder.name + '-receipt.json')
     if any(path.exists() for path in (folder, archive, receipt_path)):
         raise SystemExit('Output already exists; preserve folder, ZIP and receipt before rebuilding.')
     app = root / 'target/release/fabric-switchboard.exe'
-    cli = root / 'target' / TARGET / 'release/switchboard.exe'
-    installer = root / 'target/release/bundle/nsis' / f'Fabric Switchboard_{version}_x64-setup.exe'
-    headers = {p.name: pe_header(p, 0x14c if p == installer else 0x8664) for p in (app, cli, installer)}
+    cli = root / 'target' / target / 'release/switchboard.exe'
+    installer = root / 'target/release/bundle/nsis' / f'Fabric Switchboard_{version}_{arch}-setup.exe'
+    headers = {p.name: pe_header(p, 0x14c if p == installer else machine) for p in (app, cli, installer)}
     authenticode = authenticode_record(mode, signatures, [cli.name, installer.name, app.name])
     folder.mkdir(parents=True)
     for path in (cli, installer):
         shutil.copy2(path, folder / path.name)
-    (folder / 'README.txt').write_text(readme(version, mode))
+    (folder / 'README.txt').write_text(readme(version, mode, arch))
     # The license and the third-party notices travel with every binary archive.
     for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
         shutil.copy2(root / name, folder / name)
     hashes = {p.name: sha(p) for p in sorted(folder.glob('*.exe'))}
     (folder / 'SHA256SUMS.txt').write_text(''.join(f'{value}  {name}\n' for name, value in hashes.items()))
     receipt = {
-        'version': version, 'commit': commit, 'source_clean': True, 'target': TARGET,
-        'method': 'native build on windows-latest (release workflow)', 'toolchain': toolchain,
+        'version': version, 'commit': commit, 'source_clean': True, 'target': target, 'arch': arch,
+        'method': 'native build on a GitHub-hosted Windows runner (release workflow)', 'toolchain': toolchain,
         'pe_headers': headers, 'sha256': hashes, 'native_windows_tests': native_tests,
         'windows_authenticode': authenticode['status'], 'authenticode': authenticode,
         'provider_live_acceptance': 'NOT_RUN',
@@ -110,6 +116,7 @@ def main():
     parser.add_argument('--authenticode', choices=['SIGNED', 'NOT_SIGNED'], required=True)
     parser.add_argument('--signatures', type=Path, help='Get-AuthenticodeSignature report (JSON), required with SIGNED')
     parser.add_argument('--native-tests', choices=['PASS'], required=True, help='The native fixtures this job ran before packaging')
+    parser.add_argument('--arch', choices=sorted(ARCHES), default='x64', help='x64 (windows-latest) or arm64 (windows-11-arm)')
     args = parser.parse_args()
     changed = capture(['git', 'status', '--porcelain', '--untracked-files=all'])
     if changed:
@@ -118,12 +125,12 @@ def main():
     signatures = json.loads(args.signatures.read_text(encoding='utf-8-sig')) if args.signatures else None
     if isinstance(signatures, dict):  # PowerShell writes a single object for a one-item list
         signatures = [signatures]
-    subprocess.run([str(ROOT / 'target' / TARGET / 'release/switchboard.exe'), '--help'],
+    subprocess.run([str(ROOT / 'target' / ARCHES[args.arch][0] / 'release/switchboard.exe'), '--help'],
                    check=True, stdout=subprocess.DEVNULL)
     toolchain = {'rustc': capture(['rustc', '--version']), 'node': capture(['node', '--version']),
                  'os': platform.platform()}
     receipt = package(ROOT, version, capture(['git', 'rev-parse', 'HEAD']), args.authenticode,
-                      signatures, toolchain, args.native_tests)
+                      signatures, toolchain, args.native_tests, args.arch)
     print(json.dumps(receipt, indent=2))
 
 

@@ -39,7 +39,6 @@ export const RU: Record<string, string> = {
   "Opening at login is available in the installed app only.": "Открытие при входе в систему доступно только в установленном приложении.",
   "Automatic updates work in the installed app only.": "Автоматические обновления работают только в установленном приложении.",
   "Move Fabric Switchboard to the Applications folder to receive updates.": "Переместите Fabric Switchboard в папку «Программы», чтобы получать обновления.",
-  "Automatic updates are available on macOS and Windows.": "Автоматические обновления доступны в macOS и Windows.",
   "No update is ready to install yet.": "Пока нет готового к установке обновления.",
   "Could not check for updates. Switchboard tries again within the hour.": "Не удалось проверить обновления. Switchboard попробует снова в течение часа.",
   "Could not download the update. Switchboard tries again within the hour.": "Не удалось загрузить обновление. Switchboard попробует снова в течение часа.",
@@ -920,4 +919,6 @@ export const RU: Record<string, string> = {
   "The Linux keyring is locked. Unlock it, then retry.": "Связка ключей Linux заблокирована. Разблокируйте её и повторите.",
   "Terminal launch is currently supported on macOS, Windows and Linux only.": "Запуск в терминале сейчас поддерживается только на macOS, Windows и Linux.",
   "This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.": "Этот Switchboard запущен из AppImage, а его файлы существуют только пока он работает. Чтобы подключить агентов, установите пакет .deb — он добавит switchboard в PATH.",
+  "Automatic updates are available on macOS, Windows and Linux.": "Автообновления доступны на macOS, Windows и Linux.",
+  "This copy was installed from the .deb package. Install the newer .deb from the releases page to update it.": "Эта копия установлена из пакета .deb. Чтобы обновить её, установите более новый .deb со страницы релизов.",
 };

@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../target/x86_64-pc-windows-msvc/release/switchboard.exe": null,
+      "../target/aarch64-pc-windows-msvc/release/switchboard.exe": "switchboard.exe"
+    }
+  }
+}

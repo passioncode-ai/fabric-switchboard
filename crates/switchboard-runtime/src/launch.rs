@@ -2052,7 +2052,7 @@ mod tests {
         };
         let none = only(&[]);
         assert_eq!(
-            linux_terminal(None, &none).unwrap_err(),
+            linux_terminal(None, none).unwrap_err(),
             LINUX_TERMINAL_MISSING
         );
         // Debian's alternative wins over a desktop's own terminal; each gets its own arguments.

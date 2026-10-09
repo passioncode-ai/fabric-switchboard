@@ -10,6 +10,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ### Added
 
+- **Linux, x64 and arm64** (SB-88; operator decision 2026-10-09: every PassionCode.ai product runs
+  on Apple silicon and Intel Macs, Windows and Linux). A .deb (app and `switchboard` on `PATH`), an
+  AppImage that updates itself, and the CLI alone. Credentials live in the Secret Service (GNOME
+  Keyring, KWallet, KeePassXC), never in a plain file; sessions open in your terminal app
+  (`$TERMINAL`, then the common ones); the session scripts no longer need zsh. Tested in the release
+  and nightly workflows against a real GNOME Keyring, with the app's smoke check under Xvfb.
+- **Windows on ARM (arm64)**: a native installer and CLI beside the x64 ones (SB-88).
+
 - Launch any account in a folder you pick (operator decision 2026-10-09, SB-86): the row menu's
   *Launch…* replaces *Launch isolated…* and *Launch managed…*; an *Isolated session* box chooses the
   mode, ticked and locked when only an isolated session is possible. Every folder Switchboard asks
@@ -31,6 +39,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ### Fixed
 
+- **A CLI or agent request to the running app could fail as "Control request did not complete"**
+  with nothing sent (SB-90): the second request on the control connection went out before the
+  connection was ready again. Seen on Linux in 12 of 44 requests; macOS's timing mostly hid it.
 - Cancel ends a sign-in still waiting in Terminal instead of refusing until its window is closed;
   a refused Cancel no longer stops the banner from noticing Terminal, nor offers a *Retry* that
   meant finishing. The same for Kimi Code, whose sign-in now notices a closed Terminal (SB-83).

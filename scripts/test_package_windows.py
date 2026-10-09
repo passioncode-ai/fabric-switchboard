@@ -104,6 +104,29 @@ class Package(unittest.TestCase):
         self.assertEqual(receipt['windows_authenticode'], 'SIGNED')
         self.assertEqual(receipt['authenticode']['files']['switchboard.exe']['status'], 'Valid')
 
+    def test_an_arm64_build_is_packaged_under_its_own_names_and_machine(self):
+        release = self.root / 'target/release'
+        (release / 'fabric-switchboard.exe').write_bytes(pe(0xAA64))
+        (release / f'bundle/nsis/Fabric Switchboard_{VERSION}_arm64-setup.exe').write_bytes(pe(0x14c))
+        cli = self.root / 'target/aarch64-pc-windows-msvc/release/switchboard.exe'
+        cli.parent.mkdir(parents=True)
+        cli.write_bytes(pe(0xAA64))
+        receipt = package_windows.package(self.root, VERSION, 'c0ffee', 'NOT_SIGNED', None,
+                                          toolchain={'rustc': 'rustc test'}, native_tests='PASS', arch='arm64')
+        self.assertEqual(receipt['archive'], f'Fabric-Switchboard-{VERSION}-windows-arm64.zip')
+        self.assertEqual((receipt['arch'], receipt['target']), ('arm64', 'aarch64-pc-windows-msvc'))
+        self.assertIn('Windows arm64', package_windows.readme(VERSION, 'NOT_SIGNED', 'arm64'))
+
+    def test_an_x64_binary_is_refused_in_an_arm64_package(self):
+        (self.root / f'target/release/bundle/nsis/Fabric Switchboard_{VERSION}_arm64-setup.exe').write_bytes(pe(0x14c))
+        cli = self.root / 'target/aarch64-pc-windows-msvc/release/switchboard.exe'
+        cli.parent.mkdir(parents=True)
+        cli.write_bytes(pe(0xAA64))
+        # fabric-switchboard.exe is still the x64 one from setUp.
+        with self.assertRaises(SystemExit):
+            package_windows.package(self.root, VERSION, 'c0ffee', 'NOT_SIGNED', None,
+                                    toolchain={'rustc': 'rustc test'}, native_tests='PASS', arch='arm64')
+
     def test_existing_output_is_preserved(self):
         self.build()
         with self.assertRaises(SystemExit):

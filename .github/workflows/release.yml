@@ -1,12 +1,15 @@
 # The release: the macOS universal app and CLI, signed with the organization's CI Developer ID,
-# notarized (the app stapled, the CLI notarized on its own), and the Windows x64 installer and
-# CLI built natively, Authenticode-signed with Azure Artifact Signing once the operator switches
-# it on (AZURE_SIGNING_ENABLED; docs/DISTRIBUTION.md). Then attested (Sigstore), summed,
-# GPG-signed and published by the organization's shared workflow.
+# notarized (the app stapled, the CLI notarized on its own); the Windows x64 and arm64 installers
+# and CLIs built natively, Authenticode-signed with Azure Artifact Signing once the operator
+# switches it on (AZURE_SIGNING_ENABLED; docs/DISTRIBUTION.md); and the Linux x64 and arm64 .deb,
+# AppImage and CLI built natively (SB-88). Then attested (Sigstore), summed, GPG-signed and
+# published by the organization's shared workflow. Every PassionCode.ai product ships for Apple
+# silicon and Intel Macs, Windows and Linux (operator decision 2026-10-09).
 #
 # Automatic updates (SB-55, docs/DISTRIBUTION.md): each platform job also signs its updater
 # package with the updater key (TAURI_SIGNING_PRIVATE_KEY, release environment) — the macOS one
-# made from the stapled app, the Windows one from the final installer — and the `updater` job
+# made from the stapled app, the Windows ones from the final installers, the Linux ones from the
+# AppImages (a .deb does not update itself) — and the `updater` job
 # writes latest.json and refuses it unless every entry names a file of this release with that
 # file's own signature. All of it is published, attested and summed with the rest.
 # The updater key reaches only the two signing steps, as environment variables (GitHub masks
@@ -149,7 +152,20 @@ jobs:
 
   windows:
     needs: [preflight]
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            overlay: ""
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            # Points the installer's bundled CLI at the arm64 build (SB-88).
+            overlay: --config src-tauri/tauri.windows-arm64.conf.json
+    runs-on: ${{ matrix.runner }}
     environment: release
     timeout-minutes: 75
     permissions:
@@ -181,7 +197,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add x86_64-pc-windows-msvc
+          rustup target add ${{ matrix.target }}
       - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
@@ -190,10 +206,10 @@ jobs:
       - name: Build the CLI (static CRT) and the desktop executable
         run: |
           $env:RUSTFLAGS = '-C target-feature=+crt-static'
-          cargo build --release --locked -p switchboard-cli --target x86_64-pc-windows-msvc
+          cargo build --release --locked -p switchboard-cli --target ${{ matrix.target }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item Env:RUSTFLAGS
-          npm exec tauri build -- --no-bundle --ci -- --locked
+          npm exec tauri build -- --no-bundle --ci ${{ matrix.overlay }} -- --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Signing pass 1: the executables, before the installer packs the desktop one.
@@ -213,7 +229,7 @@ jobs:
           certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
           files: |
             ${{ github.workspace }}\target\release\fabric-switchboard.exe
-            ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\switchboard.exe
+            ${{ github.workspace }}\target\${{ matrix.target }}\release\switchboard.exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
@@ -230,7 +246,7 @@ jobs:
 
       - name: Bundle the NSIS installer
         run: |
-          npm exec tauri bundle -- --bundles nsis --ci
+          npm exec tauri bundle -- --bundles nsis --ci ${{ matrix.overlay }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # SB-05: the installer puts switchboard.exe beside the desktop executable, where the app
@@ -278,7 +294,7 @@ jobs:
         run: |
           $files = @(
             'target\release\fabric-switchboard.exe',
-            'target\x86_64-pc-windows-msvc\release\switchboard.exe'
+            'target\${{ matrix.target }}\release\switchboard.exe'
           ) + (Get-ChildItem target\release\bundle\nsis -Filter *-setup.exe).FullName
           $report = foreach ($file in $files) {
             $sig = Get-AuthenticodeSignature -FilePath $file
@@ -299,33 +315,106 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          python scripts/updater_artifacts.py windows --nsis-dir target\release\bundle\nsis --out artifacts\updater
+          python scripts/updater_artifacts.py windows --nsis-dir target\release\bundle\nsis --out artifacts\updater --arch ${{ matrix.arch }}
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: updater-windows
+          name: updater-windows-${{ matrix.arch }}
           path: artifacts/updater/*
           if-no-files-found: error
       - name: Package the archive and its receipt
         run: |
           if ($env:SIGNING -eq 'true') {
-            python scripts/package_windows.py --authenticode SIGNED --signatures "$env:RUNNER_TEMP\signatures.json" --native-tests PASS
+            python scripts/package_windows.py --authenticode SIGNED --signatures "$env:RUNNER_TEMP\signatures.json" --native-tests PASS --arch ${{ matrix.arch }}
           } else {
-            python scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS
+            python scripts/package_windows.py --authenticode NOT_SIGNED --native-tests PASS --arch ${{ matrix.arch }}
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-windows
+          name: release-windows-${{ matrix.arch }}
           path: |
-            artifacts/Fabric-Switchboard-*-windows-x64.zip
-            artifacts/Fabric-Switchboard-*-windows-x64-receipt.json
+            artifacts/Fabric-Switchboard-*-windows-${{ matrix.arch }}.zip
+            artifacts/Fabric-Switchboard-*-windows-${{ matrix.arch }}-receipt.json
           if-no-files-found: error
 
-  # latest.json for both platforms, checked against the files it names, then handed to the
+  # Linux (SB-88): built natively on x64 and arm64 runners. The storage tests run against a real
+  # Secret Service (GNOME Keyring in a D-Bus session), the built app passes the same smoke check
+  # as the other platforms under Xvfb, and the AppImage becomes the signed updater package.
+  linux:
+    needs: [preflight]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    timeout-minutes: 75
+    env:
+      SWITCHBOARD_ANALYTICS_APP_KEY: ${{ secrets.SWITCHBOARD_ANALYTICS_APP_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Build and check dependencies (WebKitGTK 4.1, Secret Service, Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libdbus-1-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            libssl-dev file xdg-utils dbus-x11 gnome-keyring xvfb xauth
+      - name: Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: npm ci
+      - name: Native storage and runtime tests, against a real Secret Service
+        run: |
+          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy --locked'
+      - name: Build the CLI, the app, the .deb and the AppImage
+        env:
+          # linuxdeploy is itself an AppImage: extract-and-run needs no FUSE on the runner; no
+          # strip, as linuxdeploy's bundled strip refuses newer ELF sections (as verified locally).
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "1"
+        run: |
+          cargo build --release --locked -p switchboard-cli
+          npm exec tauri build -- --bundles deb,appimage --ci -- --locked
+      - name: Smoke check, ordinary and background launch
+        run: |
+          version=$(node -p "require('./package.json').version")
+          dbus-run-session -- xvfb-run -a python3 scripts/smoke_native.py target/release/fabric-switchboard --version "$version"
+          dbus-run-session -- xvfb-run -a python3 scripts/smoke_native.py target/release/fabric-switchboard --version "$version" --background
+      - name: Updater package from the AppImage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: python3 scripts/updater_artifacts.py linux --appimage-dir target/release/bundle/appimage --out artifacts/updater --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: updater-linux-${{ matrix.arch }}
+          path: artifacts/updater/*
+          if-no-files-found: error
+      - name: The .deb, the CLI tarball and the receipt
+        run: python3 scripts/package_linux.py --arch ${{ matrix.arch }} --native-tests PASS --smoke PASS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: |
+            artifacts/Fabric-Switchboard-*-linux-${{ matrix.arch }}.deb
+            artifacts/Fabric-Switchboard-*-linux-${{ matrix.arch }}-cli.tar.gz
+            artifacts/Fabric-Switchboard-*-linux-${{ matrix.arch }}-receipt.json
+          if-no-files-found: error
+
+  # latest.json for every platform, checked against the files it names, then handed to the
   # publish workflow as one more release-* artifact.
   updater:
-    needs: [macos, windows]
+    needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -351,7 +440,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [macos, windows, updater]
+    needs: [macos, windows, linux, updater]
     permissions:
       contents: write
       id-token: write

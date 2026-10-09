@@ -1,6 +1,6 @@
 # Install Fabric Switchboard
 
-Fabric Switchboard is a local account workbench for Claude Code, Codex CLI and Kimi Code. The desktop app and optional `switchboard` CLI are included in each platform ZIP. You do not need Rust, Node.js or build tools to use these downloads.
+Fabric Switchboard is a local account workbench for Claude Code, Codex CLI and Kimi Code, for macOS (Apple silicon and Intel), Windows (x64 and ARM) and Linux (x64 and ARM). The desktop app and optional `switchboard` CLI are included in each platform's download. You do not need Rust, Node.js or build tools to use these downloads.
 
 Find the selected release and platform links on the [Switchboard download page](https://passioncode.ai/switchboard/#download), or browse [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases). Release publication is separate from a successful build; see the [release records](evidence/release-0.5.md) for each release's checks.
 
@@ -59,6 +59,17 @@ The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe
 4. Open Fabric Switchboard from the Start menu. The installer also puts `switchboard.exe` beside the app (since 0.6.0); the Agents panel shows its path and the commands that register it. The separate CLI in the ZIP is the same program and can stay in the extracted folder. In PowerShell, change to that folder and run `.\switchboard.exe --help` to inspect commands.
 
 **Windows limit:** the Windows binaries are **not Authenticode signed**. Up to 0.5.3-beta.1 they were cross-built on a Mac; since then they are built natively on a Windows runner, where the storage and runtime tests run, and the release receipt says `windows_authenticode: NOT_SIGNED` until signing is switched on ([DISTRIBUTION.md](DISTRIBUTION.md#windows-windows-job-windows-latest)). The release workflow checks silent installation and runs the installed CLI. Interactive use on a Windows desktop and live-provider acceptance have **not been verified**. SmartScreen or another Windows protection may block them. If blocked, keep the protection in place and wait for a signed, verified release or [report the exact warning](https://github.com/passioncode-ai/fabric-switchboard/issues).
+
+## Linux
+
+From the release after 0.6.14 (SB-88), for x64 and arm64. Three files per architecture: `Fabric-Switchboard-X.Y.Z-linux-<arch>.deb`, `Fabric-Switchboard-X.Y.Z-linux-<arch>.AppImage` and `Fabric-Switchboard-X.Y.Z-linux-<arch>-cli.tar.gz` (the CLI alone, for a machine without a desktop). Check them against `SHA256SUMS` as above (`sha256sum -c SHA256SUMS --ignore-missing`).
+
+- **.deb (Debian, Ubuntu and derivatives; recommended):** `sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb`. It installs the app as `/usr/bin/fabric-switchboard` with its menu entry, and the CLI as `/usr/bin/switchboard`, already on `PATH`; apt pulls WebKitGTK 4.1, GTK 3 and the AppIndicator library. A .deb install does not update itself: install the newer .deb (About says so).
+- **AppImage (any distribution with WebKitGTK's dependencies bundled):** `chmod +x` it and run it. It updates itself like the macOS and Windows apps. Its files exist only while it runs, so to connect agents use the .deb (the Agents screen says so).
+
+Saved credentials live in the **Secret Service** — GNOME Keyring, KWallet or KeePassXC, under the service `ai.passioncode.fabric-switchboard.shared` — never in a plain file. Without a running, unlocked keyring Switchboard refuses to store them and says what to start. Sessions open in your terminal app: `$TERMINAL` when set, otherwise `x-terminal-emulator`, GNOME Terminal, Konsole, Xfce Terminal, MATE Terminal, Tilix, kitty, Alacritty, WezTerm, foot or xterm. The tray icon needs an AppIndicator host (GNOME needs the AppIndicator extension; KDE, Xfce and most others have one).
+
+**Linux limit:** the release workflow runs the storage tests against a real GNOME Keyring and the smoke check of the built app under Xvfb on both architectures, and the .deb was installed and smoke-checked on a clean Debian 12 (SB-88). Interactive use on each desktop environment and live-provider acceptance have **not been verified**.
 
 ## Start a session
 

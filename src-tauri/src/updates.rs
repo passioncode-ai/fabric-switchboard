@@ -13,8 +13,12 @@
 //!   (LC-01), as `/P /UPDATE`: passive, and in update mode, which never uninstalls and never
 //!   deletes the app data (docs/DISTRIBUTION.md → Automatic updates).
 //!
-//! No check runs in a development build, in the smoke check, or from an app macOS is running
-//! from a translocated copy.
+//! - **Linux (SB-88):** only the AppImage updates itself: the verified AppImage replaces the
+//!   running one's file at once (as macOS swaps its bundle) and starts at the next restart. A copy
+//!   installed from the .deb package never checks; the newer .deb updates it.
+//!
+//! No check runs in a development build, in the smoke check, from an app macOS is running
+//! from a translocated copy, or from a Linux copy that is not an AppImage.
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -37,7 +41,7 @@ pub const IDLE_LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// A bundle swap is a few renames and an unpack of ~15 MB; one that has not finished in five
 /// minutes is stuck (a hung volume), and the loop must not wait on it.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 /// The release ships one universal app; `latest.json` names it under this key.
 #[cfg(target_os = "macos")]
@@ -46,7 +50,11 @@ pub const MACOS_TARGET: &str = "darwin-universal";
 pub const UNAVAILABLE_DEVELOPMENT: &str = "Automatic updates work in the installed app only.";
 pub const UNAVAILABLE_TRANSLOCATED: &str =
     "Move Fabric Switchboard to the Applications folder to receive updates.";
-pub const UNAVAILABLE_PLATFORM: &str = "Automatic updates are available on macOS and Windows.";
+pub const UNAVAILABLE_PLATFORM: &str =
+    "Automatic updates are available on macOS, Windows and Linux.";
+/// A Linux copy installed from the .deb package: the package manager owns its files (SB-88).
+pub const UNAVAILABLE_PACKAGE: &str =
+    "This copy was installed from the .deb package. Install the newer .deb from the releases page to update it.";
 pub const CHECK_FAILED: &str =
     "Could not check for updates. Switchboard tries again within the hour.";
 pub const DOWNLOAD_FAILED: &str =
@@ -75,8 +83,13 @@ pub fn enabled(choice: Option<&str>) -> bool {
 /// Whether this copy can update itself: an installed build, on a supported platform, and on
 /// macOS not a translocated copy (Gatekeeper runs a quarantined app from a read-only random
 /// path until it is moved; an update installed there would vanish).
-pub fn availability(exe: &Path, packaged: bool) -> Result<(), &'static str> {
-    if !cfg!(any(target_os = "macos", windows)) {
+/// `appimage` is `$APPIMAGE`, set by the AppImage runtime to the image's own file (Linux).
+pub fn availability(
+    exe: &Path,
+    packaged: bool,
+    appimage: Option<&OsString>,
+) -> Result<(), &'static str> {
+    if !cfg!(any(target_os = "macos", windows, target_os = "linux")) {
         return Err(UNAVAILABLE_PLATFORM);
     }
     if !packaged {
@@ -84,6 +97,9 @@ pub fn availability(exe: &Path, packaged: bool) -> Result<(), &'static str> {
     }
     if cfg!(target_os = "macos") && exe.to_string_lossy().contains("/AppTranslocation/") {
         return Err(UNAVAILABLE_TRANSLOCATED);
+    }
+    if cfg!(target_os = "linux") && appimage.is_none_or(|image| image.is_empty()) {
+        return Err(UNAVAILABLE_PACKAGE);
     }
     Ok(())
 }
@@ -329,6 +345,7 @@ pub fn start(app: &AppHandle) {
         let code = match reason {
             UNAVAILABLE_DEVELOPMENT => "dev_build",
             UNAVAILABLE_TRANSLOCATED => "translocated",
+            UNAVAILABLE_PACKAGE => "deb_package",
             _ => "unsupported_platform",
         };
         event("update_check", &[("outcome", Field::Code(code))]);
@@ -566,6 +583,32 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
             }));
         }
     }
+    // Linux AppImage: the verified image replaces the running one's file now; the running process
+    // keeps its mounted copy until the restart starts the new one (SB-88).
+    #[cfg(target_os = "linux")]
+    {
+        let installing = update.clone();
+        let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
+        let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
+            Ok(Ok(Ok(()))) => "installed",
+            Ok(Ok(Err(_))) => "failed",
+            Ok(Err(_)) => "panicked",
+            Err(_) => {
+                state.lock().stalled = true;
+                "timeout"
+            }
+        };
+        event("update_install", &[("outcome", Field::Code(outcome))]);
+        match outcome {
+            "installed" => Ok(Some(Ready {
+                update,
+                bytes: None,
+            })),
+            "timeout" => Err(INSTALL_STALLED),
+            _ => Err(INSTALL_FAILED),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
     Ok(Some(Ready {
         update,
         bytes: Some(bytes),
@@ -854,11 +897,23 @@ mod tests {
     fn a_development_build_never_checks() {
         let exe =
             Path::new("/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard");
+        let image = OsString::from("/home/u/Applications/Fabric-Switchboard.AppImage");
+        assert_eq!(
+            availability(exe, false, Some(&image)),
+            Err(UNAVAILABLE_DEVELOPMENT)
+        );
         if cfg!(any(target_os = "macos", windows)) {
-            assert_eq!(availability(exe, false), Err(UNAVAILABLE_DEVELOPMENT));
-            assert_eq!(availability(exe, true), Ok(()));
+            assert_eq!(availability(exe, true, None), Ok(()));
+        } else if cfg!(target_os = "linux") {
+            // SB-88: the AppImage updates itself; a .deb install is told how it updates.
+            assert_eq!(availability(exe, true, Some(&image)), Ok(()));
+            assert_eq!(availability(exe, true, None), Err(UNAVAILABLE_PACKAGE));
+            assert_eq!(
+                availability(exe, true, Some(&OsString::new())),
+                Err(UNAVAILABLE_PACKAGE)
+            );
         } else {
-            assert_eq!(availability(exe, true), Err(UNAVAILABLE_PLATFORM));
+            assert_eq!(availability(exe, true, None), Err(UNAVAILABLE_PLATFORM));
         }
     }
 
@@ -866,7 +921,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     fn a_translocated_copy_is_told_to_move_to_applications() {
         let exe = Path::new("/private/var/folders/x/AppTranslocation/1234/d/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard");
-        assert_eq!(availability(exe, true), Err(UNAVAILABLE_TRANSLOCATED));
+        assert_eq!(availability(exe, true, None), Err(UNAVAILABLE_TRANSLOCATED));
     }
 
     #[test]
