@@ -24,5 +24,9 @@ core-foundation = "0.10"
 [dev-dependencies]
 tempfile = "3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# SB-88: the freedesktop Secret Service over D-Bus (libdbus); blocking, so it runs in any context.
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Memory", "Win32_Globalization"] }

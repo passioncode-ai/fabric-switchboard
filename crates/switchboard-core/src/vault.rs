@@ -37,7 +37,8 @@ impl Vault for MemoryVault {
     }
 }
 
-/// The platform vault: Keychain on macOS (see `keychain.rs`), DPAPI on Windows.
+/// The platform vault: Keychain on macOS (see `keychain.rs`), DPAPI on Windows, the Secret
+/// Service on Linux (`secret_service.rs`).
 pub struct NativeVault {
     #[cfg(target_os = "macos")]
     policy: crate::keychain::Policy<crate::keychain_macos::MacKeychain>,
@@ -112,7 +113,37 @@ impl Vault for NativeVault {
         self.policy.delete(id)
     }
 }
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+impl Vault for NativeVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        if !crate::uuid_valid(id) {
+            return Err("Invalid credential identifier".into());
+        }
+        let data = crate::secret_service::read(crate::secret_service::SERVICE, id)?
+            .ok_or("Credential unavailable")?;
+        if data.len() > 64 * 1024 {
+            return Err("Stored credential is invalid".into());
+        }
+        serde_json::from_slice(&data).map_err(|_| "Stored credential is invalid".into())
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        if !crate::uuid_valid(id) {
+            return Err("Invalid credential identifier".into());
+        }
+        let data = serde_json::to_vec(value).map_err(|_| "Credential serialization failed")?;
+        if data.len() > 64 * 1024 {
+            return Err("Stored credential is too large".into());
+        }
+        crate::secret_service::write(crate::secret_service::SERVICE, id, &data)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        if !crate::uuid_valid(id) {
+            return Err("Invalid credential identifier".into());
+        }
+        crate::secret_service::delete(crate::secret_service::SERVICE, id)
+    }
+}
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 impl Vault for NativeVault {
     fn get(&self, _: &str) -> Result<Credential, String> {
         Err("Native vault is not implemented on this platform".into())

@@ -67,6 +67,8 @@ pub struct Places {
 /// the value under the user's `Run` key (`src-tauri/src/residency.rs`).
 pub const LOGIN_ITEM_MACOS: &str = "Library/LaunchAgents/ai.passioncode.fabric-switchboard.plist";
 pub const LOGIN_ITEM_WINDOWS: &str = "Fabric Switchboard";
+/// On Linux the XDG autostart entry the autostart plugin writes, named after the product (SB-88).
+pub const LOGIN_ITEM_LINUX: &str = ".config/autostart/Fabric Switchboard.desktop";
 
 /// The real places: `~/.local/bin` and, on macOS, the login Keychain.
 pub fn places() -> Places {
@@ -109,7 +111,18 @@ fn remove_login_item() -> Result<(), String> {
     }
     Ok(())
 }
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+fn remove_login_item() -> Result<(), String> {
+    let Some(path) = dirs::home_dir().map(|h| h.join(LOGIN_ITEM_LINUX)) else {
+        return Ok(());
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("Could not remove the login item.".into()),
+    }
+}
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 fn remove_login_item() -> Result<(), String> {
     Ok(())
 }
@@ -182,7 +195,13 @@ pub fn uninstall_with(
         "accounts": accounts.len(),
         "cli_link": link,
         "orphan_keychain_item": cfg!(target_os = "macos").then_some(ORPHAN_KEY.0),
-        "login_item": if cfg!(windows) { LOGIN_ITEM_WINDOWS } else { LOGIN_ITEM_MACOS },
+        "login_item": if cfg!(windows) {
+            LOGIN_ITEM_WINDOWS
+        } else if cfg!(target_os = "linux") {
+            LOGIN_ITEM_LINUX
+        } else {
+            LOGIN_ITEM_MACOS
+        },
         "data_entries": if keep_data { json!([]) } else { json!(owned) },
         "kept": {
             "foreign_entries": foreign,
