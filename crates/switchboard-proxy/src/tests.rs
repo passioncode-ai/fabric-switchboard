@@ -1011,7 +1011,8 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
         probe("limited").await.unwrap_err(),
         ProbeFailure {
             message: USAGE_RATE_LIMITED.into(),
-            rate_limited: Some(Some(1200))
+            rate_limited: Some(Some(1200)),
+            status: None,
         }
     );
     // An HTTP-date is a deadline too (RFC 9110 §10.2.3), not a missing value.
@@ -1032,6 +1033,8 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
     assert_eq!(probe("limited").await.unwrap_err().kind(), "rate_limited");
     assert_eq!(rejected.kind(), "rejected");
     assert_eq!(probe("broken").await.unwrap_err().kind(), "http_error");
+    // Its status is kept as a number for the log; the body never is.
+    assert_eq!(probe("broken").await.unwrap_err().status, Some(502));
     assert_eq!(probe("garbage").await.unwrap_err().kind(), "unsupported");
     let unreachable = probe_usage_from(
         store.clone(),

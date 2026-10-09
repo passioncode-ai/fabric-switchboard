@@ -287,6 +287,31 @@ async fn restore_backup(file: String, state: State<'_, Slot>) -> Result<Value, S
         .execute(Operation::RestoreBackup { file })
         .await
 }
+/// The picker could not answer (no window to attach it to, or it closed without a reply).
+const FOLDER_PICKER_FAILED: &str = "The folder picker could not open. Try again.";
+/// A folder chosen with the system picker: every folder Switchboard asks for is picked, never
+/// typed (operator decision 2026-10-09). `start` opens the picker there when it is a folder.
+/// `None` when the person closed the picker without choosing.
+#[tauri::command]
+async fn pick_folder(
+    start: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or(FOLDER_PICKER_FAILED)?;
+    let (sender, picked) = tokio::sync::oneshot::channel();
+    let mut picker = app.dialog().file().set_parent(&window);
+    if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
+        picker = picker.set_directory(start);
+    }
+    picker.pick_folder(move |folder| {
+        let _ = sender.send(folder);
+    });
+    let folder = picked.await.map_err(|_| FOLDER_PICKER_FAILED)?;
+    Ok(folder
+        .and_then(|f| f.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned()))
+}
 #[tauri::command]
 async fn cancel_login(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -632,7 +657,9 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Value, String> {
 
 fn main() {
     let Launch { smoke, background } = launch(std::env::args());
-    let mut builder = tauri::Builder::default();
+    // The folder picker is called from Rust (`pick_folder`); the window holds no dialog or
+    // filesystem permission of its own.
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     // A second launch (double-click on Windows, `open -n` on macOS) focuses this window
     // instead of starting another owner that would find the store locked. The packaged smoke
     // check runs beside an installed app on purpose, with its own temporary store.
@@ -776,6 +803,7 @@ fn main() {
             backup_now,
             restore_backup,
             cancel_login,
+            pick_folder,
             probe_usage,
             set_project_rule,
             remove_project_rule,

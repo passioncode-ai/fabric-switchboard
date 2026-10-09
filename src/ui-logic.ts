@@ -412,3 +412,23 @@ export function termsNoticeOn(page: string, dismissed: boolean): 'banner' | 'pan
   if (page === 'about') return 'panel';
   return page === 'accounts' && !dismissed ? 'banner' : null;
 }
+
+/**
+ * How an account launches (operator decision 2026-10-09): every session starts in a folder chosen
+ * with the picker, and a box makes it isolated — in the account's own home. A managed session, through
+ * the local proxy, is open only to the account selected in its pool while the proxy runs; otherwise
+ * the session is isolated and the box stays ticked.
+ */
+export function launchChoice(selectedInPool: boolean, proxyRunning: boolean): { managed: boolean; isolatedByDefault: boolean } {
+  const managed = selectedInPool && proxyRunning;
+  return { managed, isolatedByDefault: !managed };
+}
+/** A picked folder joins the list once; the order the person picked them in is kept. */
+export function withFolder(folders: string[], folder: string): string[] {
+  return !folder || folders.includes(folder) ? folders : [...folders, folder];
+}
+/** The last launch folder, remembered across restarts as a per-window convenience; anything but a non-empty string reads as none. */
+export const LAST_FOLDER_KEY = 'switchboard.last-folder';
+export function storedFolder(store: Pick<Storage, 'getItem'> | null): string {
+  try { const value = store?.getItem(LAST_FOLDER_KEY); return typeof value === 'string' ? value.trim() : ''; } catch { return ''; }
+}

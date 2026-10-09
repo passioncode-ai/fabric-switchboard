@@ -93,9 +93,61 @@ fn regular_read(path: &Path) -> Option<Vec<u8>> {
         .ok()?;
     (bytes.len() as u64 <= MAX_CREDENTIAL).then_some(bytes)
 }
-/// The managed login file of a region: `credentials/kimi-code.json` for mainland, the
-/// `kimi-code-env-<hash>.json` Kimi derives for the global host (the newest, if several).
+/// What a home's own `config.toml` says about the managed Kimi Code login, as `kimi` (2.1) reads
+/// it: `[providers."managed:kimi-code".oauth]` names the credential slot (`key`) and the sign-in
+/// host (`oauth_host`). Kimi writes both at `kimi login`; they outrank the `region` marker, which
+/// an earlier login can leave behind (SB-84: a home moved to kimi.ai still read mainland's slot).
+#[derive(Default)]
+struct Configured {
+    /// `credentials/<name>.json` of the configured slot.
+    slot: Option<PathBuf>,
+    region: Option<&'static str>,
+}
+fn configured(home: &Path) -> Configured {
+    let Some(text) = regular_read(&home.join("config.toml")) else {
+        return Configured::default();
+    };
+    let Ok(value) = toml::from_str::<toml::Value>(&String::from_utf8_lossy(&text)) else {
+        return Configured::default();
+    };
+    let oauth = &value
+        .get("providers")
+        .and_then(|p| p.get("managed:kimi-code"))
+        .and_then(|p| p.get("oauth"));
+    let key = oauth.and_then(|o| o.get("key")).and_then(|k| k.as_str());
+    let host = oauth
+        .and_then(|o| o.get("oauth_host"))
+        .and_then(|h| h.as_str())
+        .map(|h| h.trim().trim_end_matches('/'));
+    Configured {
+        slot: key
+            .and_then(storage_name)
+            .map(|name| home.join("credentials").join(format!("{name}.json"))),
+        region: match host {
+            Some("https://auth.kimi.ai") => Some("global"),
+            Some("https://auth.kimi.com") => Some("mainland-cn"),
+            _ if key == Some("oauth/kimi-code") => Some("mainland-cn"),
+            _ => None,
+        },
+    }
+}
+/// The file name Kimi stores a slot under (`resolveKimiTokenStorageName`): `oauth/<name>` or a
+/// bare name; anything that could leave `credentials/` is refused.
+fn storage_name(key: &str) -> Option<&str> {
+    let name = key.strip_prefix("oauth/").unwrap_or(key);
+    (!name.is_empty()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\'])
+        && name.chars().all(|c| !c.is_control()))
+    .then_some(name)
+}
+/// The login file a home uses: the slot its `config.toml` names; without one, the managed file of
+/// the region — `credentials/kimi-code.json` for mainland, the `kimi-code-env-<hash>.json` Kimi
+/// derives for the global host (the newest, if several).
 fn credential_file(home: &Path, region: &str) -> Option<PathBuf> {
+    if let Some(slot) = configured(home).slot {
+        return slot.is_file().then_some(slot);
+    }
     let dir = home.join("credentials");
     if region != "global" {
         let path = dir.join("kimi-code.json");
@@ -112,8 +164,20 @@ fn credential_file(home: &Path, region: &str) -> Option<PathBuf> {
         .max_by_key(|(t, _)| *t)
         .map(|(_, p)| p)
 }
-/// The region a home signed in to: mainland when its mainland file exists, global otherwise.
+/// The region a home signed in to, in Kimi's order: the configured sign-in host, then the
+/// `region` marker, then which managed file exists (mainland's, else global).
 fn home_region(home: &Path) -> &'static str {
+    if let Some(region) = configured(home).region {
+        return region;
+    }
+    match regular_read(&home.join("region"))
+        .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
+        .as_deref()
+    {
+        Some("global") => return "global",
+        Some("mainland-cn") => return "mainland-cn",
+        _ => {}
+    }
     if home.join("credentials/kimi-code.json").is_file() {
         "mainland-cn"
     } else {
@@ -637,6 +701,45 @@ mod tests {
         );
         assert!(token(home, "global", NOW).is_ok());
         assert_eq!(home_region(home), "mainland-cn");
+    }
+
+    #[test]
+    fn the_slot_kimi_is_configured_with_outranks_a_stale_marker_and_a_tombstone() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        // Signed in to kimi.com once (marker, then signed out: a tombstone), now to kimi.ai.
+        fs::write(home.join("region"), "mainland-cn\n").unwrap();
+        signed_in(home, "kimi-code.json", "", 0);
+        signed_in(
+            home,
+            "kimi-code-env-0e4f99c69cc27850.json",
+            "synthetic-access",
+            NOW + 3600,
+        );
+        // Another environment's slot, newer, that Kimi is not configured with.
+        signed_in(home, "kimi-code-env-ffffffffffffffff.json", "", 0);
+        assert_eq!(
+            home_region(home),
+            "mainland-cn",
+            "without config the marker decides"
+        );
+        fs::write(
+            home.join("config.toml"),
+            "[providers.\"managed:kimi-code\"]\nbase_url = \"https://api.kimi.ai/coding/v1\"\n\n[providers.\"managed:kimi-code\".oauth]\nstorage = \"file\"\nkey = \"oauth/kimi-code-env-0e4f99c69cc27850\"\noauth_host = \"https://auth.kimi.ai\"\n",
+        )
+        .unwrap();
+        assert_eq!(home_region(home), "global");
+        assert_eq!(
+            token(home, home_region(home), NOW).unwrap().access,
+            "synthetic-access"
+        );
+        // A configured slot whose file is gone is signed out, never another slot's login.
+        fs::remove_file(home.join("credentials/kimi-code-env-0e4f99c69cc27850.json")).unwrap();
+        assert_eq!(token(home, "global", NOW).err(), Some(KIMI_SIGNED_OUT));
+        // A key that would leave credentials/ is ignored.
+        assert_eq!(storage_name("oauth/../x"), None);
+        assert_eq!(storage_name("oauth/.hidden"), None);
+        assert_eq!(storage_name("oauth/kimi-code"), Some("kimi-code"));
     }
 
     #[test]

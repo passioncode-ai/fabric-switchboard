@@ -450,4 +450,29 @@ check(() => {
   assert.match(main, /let termsDismissed = termsNoticeDismissed\(noticeStore\(\)\);/, 'the stored choice is read at start');
 });
 
+// Launch (operator decision 2026-10-09): managed only for the pool's selected account while the
+// proxy runs; every other launch is isolated. Folders come from the picker, each once.
+check(() => {
+  assert.deepEqual(logic.launchChoice(true, true), { managed: true, isolatedByDefault: false });
+  assert.deepEqual(logic.launchChoice(false, true), { managed: false, isolatedByDefault: true });
+  assert.deepEqual(logic.launchChoice(true, false), { managed: false, isolatedByDefault: true });
+  assert.deepEqual(logic.withFolder(['/a'], '/b'), ['/a', '/b']);
+  assert.deepEqual(logic.withFolder(['/a', '/b'], '/a'), ['/a', '/b']);
+  assert.deepEqual(logic.withFolder(['/a'], ''), ['/a']);
+  assert.equal(logic.storedFolder(null), '');
+  assert.equal(logic.storedFolder({ getItem: () => { throw new Error('blocked'); } }), '');
+  assert.equal(logic.storedFolder({ getItem: () => ' /Users/a/p ' }), '/Users/a/p');
+});
+// No folder is typed anywhere: the dialogs use the picker, never a path input or a textarea.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(main, /projectPathExample/, 'a typed-path placeholder is back');
+  assert.doesNotMatch(main, /el\('textarea'\)[^\n]*folders/, 'project folders are typed again');
+  for (const dialog of ['function launchDialog', 'function kimiLaunchDialog', 'function ruleDialog', 'function projectDialog', 'function agentDialog']) {
+    const start = main.indexOf(dialog); assert.ok(start >= 0, `${dialog} exists`);
+    const body = main.slice(start, main.indexOf('\nfunction ', start + 1));
+    assert.match(body, /folderPicker|foldersPicker/, `${dialog} picks its folder`);
+  }
+});
+
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

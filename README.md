@@ -157,11 +157,11 @@ demo has no real accounts, no CLI launch and no network calls to providers.
 2. Set a label and a pool, for example `work` or `personal`. The pool is the routing
    boundary; accounts of different providers are not interchangeable.
 3. **Select** — choose the account for the next managed requests.
-4. **Launch managed** — pick a project folder and open the CLI through the local proxy.
-   The app or `switchboard serve` must stay open. One managed home may run per
-   provider/pool.
-5. **Launch isolated** — a separate home for the selected account and a direct CLI
-   connection to the provider. Later **Select** actions do not affect it.
+4. **Launch…** — pick the project folder with the system folder picker and start the CLI
+   there. Cleared, the **Isolated session** box sends it through the local proxy as a managed
+   session (the pool's selected account; the app or `switchboard serve` must stay open; one
+   managed home per provider/pool). Ticked, it runs in the account's own home with a direct
+   connection to the provider, and later **Select** actions do not affect it.
 6. **Check usage** — quota is checked in the background (every 3 minutes for accounts in use or
    in a rotation pool, every 10 minutes otherwise); **Check usage** asks at once. An API key does
    not report a reliable subscription quota; an unknown quota is never shown as zero.

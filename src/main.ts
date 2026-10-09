@@ -2,13 +2,13 @@ import './tokens.css';
 import './style.css';
 import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
-import { isAbsoluteProjectPath, platformLabel, projectPathExample } from './platform';
+import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -110,7 +110,9 @@ let loadError = '';
 let runtimeError = false;
 let notice = '';
 let noticeError = false;
-let lastWorkingDirectory = '';
+let lastWorkingDirectory = storedFolder(noticeStore());
+/** The folder the next picker opens at; kept for the next start as a convenience only. */
+function rememberFolder(folder: string) { lastWorkingDirectory = folder; try { noticeStore()?.setItem(LAST_FOLDER_KEY, folder); } catch { /* remembered for this window only */ } }
 const usageErrors = new Map<string, string>();
 document.documentElement.lang = locale();
 // The tray menu follows the window's language; it starts in the system's.
@@ -311,7 +313,7 @@ function projectsSection() {
 function projectDialog(existing?: Project) {
   const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New project'), t('Add the project\'s folders and choose the accounts that belong to it. An account belongs to one project at a time.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
-  const folders = el('textarea'); folders.rows = 3; folders.required = true; folders.spellcheck = false; folders.value = (existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : [])).join('\n'); folders.placeholder = projectPathExample(runtime?.platform);
+  const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders');
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the project now and add them later.')));
@@ -321,13 +323,13 @@ function projectDialog(existing?: Project) {
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     option.append(box, el('span', '', `${account.label} · ${providerName(account.provider)}${note}`)); picker.append(option);
   }
-  const grid = el('div', 'form-grid'); grid.append(field(t('Project name'), name), field(t('Folders'), folders, t('One absolute path per line: the repositories and folders of this project. Subfolders are included.')));
+  const grid = el('div', 'form-grid'); grid.append(field(t('Project name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this project. Subfolders are included.')));
   context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default pool.')));
   context.actions.append(submit(existing ? t('Save project') : t('Create project')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
-    const list = folders.value.split('\n').map((line) => line.trim()).filter(Boolean);
+    const list = folders.require(); if (!list) return;
     void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds }), existing ? t('Project “{name}” saved.', { name: name.value.trim() }) : t('Project “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
@@ -363,8 +365,7 @@ function rulesSection() {
 }
 function ruleDialog(existing?: ProjectRule) {
   const context = openDialog(existing ? t('Edit project rule') : t('Add project rule'), t('Sessions in this folder and its subfolders start on the chosen account when the rule is applied. Rotation still runs.'));
-  const path = input(existing?.path ?? lastWorkingDirectory); path.placeholder = projectPathExample(runtime?.platform);
-  if (existing) { path.disabled = true; path.dataset.locked = 'true'; }
+  const path = folderPicker(context, existing?.path ?? lastWorkingDirectory, 'rule-folder', !!existing);
   const usable = snapshot!.accounts.filter((account) => account.enabled);
   const account = select(usable.map((item) => [item.id, `${item.label} · ${providerName(item.provider)} · ${item.pool}`]));
   if (existing) account.value = existing.account_id;
@@ -373,15 +374,14 @@ function ruleDialog(existing?: ProjectRule) {
   const expiry = select(EXPIRY_CHOICES); expiry.value = existing && existing.expires_at === null ? '' : '8';
   const sync = () => { const chosen = usable.find((item) => item.id === account.value); const option = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; option.disabled = !(chosen?.provider === 'claude' && chosen.kind === 'oauth' && chosen.external_identity) || !!snapshot!.projects?.some((project) => project.pool === chosen?.pool); if (option.disabled && target.value === 'claude_cli') target.value = 'managed'; };
   account.addEventListener('change', sync); sync();
-  const grid = el('div', 'form-grid'); grid.append(field(t('Project folder'), path, t('An absolute path to an existing folder.')), field(t('Account'), account), field(t('Applies to'), target), field(t('Keep the rule'), expiry, t('Pause or remove it any time on this screen.')));
+  const grid = el('div', 'form-grid'); grid.append(groupField(t('Project folder'), path.node, t('Sessions in this folder and its subfolders.')), field(t('Account'), account), field(t('Applies to'), target), field(t('Keep the rule'), expiry, t('Pause or remove it any time on this screen.')));
   context.body.append(grid); context.actions.append(submit(existing ? t('Save rule') : t('Add rule')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const folder = path.value.trim();
-    if (!isAbsoluteProjectPath(folder, runtime?.platform)) { path.setCustomValidity(t('Enter an absolute folder, for example {example}.', { example: projectPathExample(runtime?.platform) })); path.reportValidity(); path.addEventListener('input', () => path.setCustomValidity(''), { once: true }); return; }
+    const folder = path.require(); if (!folder) return;
     void dialogSave(context, () => adapter.setProjectRule({ path: folder, accountId: account.value, target: target.value as ProjectRule['target'], enabled: true, expiresAt: expiryFrom(expiry.value, Math.floor(Date.now() / 1000)) }), t('Rule saved and active. It applies when an agent or switchboard project apply asks.'));
   });
-  (existing ? account : path).focus();
+  if (existing) account.focus(); else path.focus();
 }
 function copyable(label: string, command: string, key: string) {
   const row = el('div', 'policy-row'); const content = el('div');
@@ -554,18 +554,13 @@ async function agentDialog(agent: AgentInfo) {
   const grid = el('div', 'form-grid'); grid.append(field(t('Pool'), pool, t('The pool whose selected API-key account this agent will use.')));
   context.body.append(grid, out);
   const launches = agent.level !== 'mcp' && !!agent.binary;
-  const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
-  const folder = () => {
-    const value = dir.value.trim();
-    if (isAbsoluteProjectPath(value, runtime?.platform)) { dir.setCustomValidity(''); lastWorkingDirectory = value; return value; }
-    dir.setCustomValidity(t('Enter an absolute project directory, for example {example}.', { example: projectPathExample(runtime?.platform) })); dir.reportValidity(); return null;
-  };
-  dir.addEventListener('input', () => dir.setCustomValidity(''));
+  const dir = folderPicker(context, lastWorkingDirectory, `agent-folder-${agent.id}`);
+  const folder = () => dir.require();
   const viaKey = agent.openrouter ? openrouterLaunch(agent, context, folder) : null;
   // The operator's choice (2026-10-08): agents with a recipe start on the OpenRouter key by
   // default; one whose recipe says `default: false` (Kimi Code, on its subscription) keeps it second.
   const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
-  if (launches || viaKey) context.body.append(field(t('Launch in folder'), dir, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the pool\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
+  if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the pool\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
   if (viaKey) context.body.append(viaKey.part);
   const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name })); };
   if (keyFirst) {
@@ -819,23 +814,33 @@ function kimiSection() {
   else current.append(kimi.installed ? t('Ordinary kimi: not signed in.') : t('Kimi Code is not installed. Install it from kimi.com/code, then add an account.'));
   section.append(current);
   const list = el('div', 'account-list'); list.setAttribute('role', 'list');
-  for (const { account, status } of kimi.accounts) {
-    const row = el('div', 'kimi-row'); row.setAttribute('role', 'listitem');
-    const name = el('div', 'kimi-name'); name.append(el('strong', '', account.label), el('span', 'muted-text', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
-    const actions = el('div', 'management-actions');
-    const refused = !status.signed_in;
-    if (refused) actions.append(button(t('Sign in again'), () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-relogin-${account.id}`), 'button', `kimi-relogin-${account.id}`));
-    else actions.append(button(t('Launch'), () => kimiLaunchDialog(account.id, account.label), 'button primary', `kimi-launch-${account.id}`));
-    actions.append(button(t('Remove'), () => kimiRemoveDialog(account.id, account.label), 'button quiet', `kimi-remove-${account.id}`));
-    row.append(name, kimiStatusLine(status), actions);
-    list.append(row);
-  }
+  for (const { account, status } of kimi.accounts) list.append(kimiRow(account, status));
   if (kimi.accounts.length) section.append(list);
   const footer = el('div', 'management-actions');
-  if (kimi.installed) footer.append(button(t('Add Kimi Code account'), () => kimiAddDialog(), kimi.accounts.length ? 'button' : 'button primary', 'kimi-add'));
-  footer.append(button(t('Refresh'), () => { kimi = null; render(); void loadKimi(); }, 'button quiet', 'kimi-refresh'));
+  if (kimi.installed) footer.append(button(t('Add Kimi Code account'), () => kimiAddDialog(), 'button row-button', 'kimi-add'));
+  footer.append(button(t('Refresh'), () => { kimi = null; render(); void loadKimi(); }, 'button row-button quiet', 'kimi-refresh'));
   section.append(footer, el('p', 'surface-note', t('Each Kimi Code account signs in with the official kimi in its own folder and stays there; Switchboard never copies or renews its login. Usage comes from Kimi at each refresh.')));
   return section;
+}
+/** A Kimi Code account in the same row as Claude and Codex accounts: a small primary action and a menu. */
+function kimiRow(account: KimiAccount, status: KimiStatus) {
+  const signedOut = !status.signed_in;
+  const row = el('article', `account-row kimi-account ${signedOut ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
+  row.setAttribute('aria-label', t('{label}, Kimi Code', { label: account.label }));
+  row.dataset.state = signedOut ? 'sign_in' : status.error ? 'stale' : 'available';
+  const icon = el('span', 'provider-icon kimi', 'K'); icon.setAttribute('aria-hidden', 'true');
+  const name = el('div', 'row-name'); const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
+  if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
+  name.append(title, el('span', 'row-sub', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
+  const usage = el('div', 'usage-cell kimi-usage'); usage.append(kimiStatusLine(status));
+  const relogin = () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`);
+  const primary = el('div', 'row-primary');
+  primary.append(signedOut ? button(t('Sign in'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
+  const items: ([string, () => void] | [string, () => void, string])[] = [];
+  if (!signedOut) items.push([t('Sign in again'), relogin]);
+  items.push([t('Remove…'), () => kimiRemoveDialog(account.id, account.label), 'danger-text']);
+  row.append(icon, name, usage, primary, menu(`kimi-${account.id}`, t('More actions for {label}', { label: account.label }), items));
+  return row;
 }
 /** Signs a new account in with `kimi login` in Terminal and saves it once Terminal reports success. */
 function kimiAddDialog() {
@@ -866,18 +871,15 @@ function kimiAddDialog() {
   });
 }
 function kimiLaunchDialog(id: string, accountLabel: string) {
-  const context = openDialog(t('Launch {label}', { label: accountLabel }), t('Starts the official kimi on this account in Terminal, in the folder you choose.'));
-  const dir = input(lastWorkingDirectory); dir.placeholder = projectPathExample(runtime?.platform);
-  context.body.append(field(t('Launch in folder'), dir));
+  const context = openDialog(t('Launch {label}', { label: accountLabel }), t('Starts the official kimi on this account in Terminal, in the folder you choose. Kimi Code always runs in this account’s own folder.'));
+  const folder = folderPicker(context, lastWorkingDirectory, `kimi-folder-${id}`);
+  context.body.append(groupField(t('Folder'), folder.node));
   context.actions.append(submit(t('Launch')));
-  dir.addEventListener('input', () => dir.setCustomValidity(''));
   context.form.addEventListener('submit', (event) => {
-    event.preventDefault(); const value = dir.value.trim();
-    if (!isAbsoluteProjectPath(value, runtime?.platform)) { dir.setCustomValidity(t('Enter an absolute project directory, for example {example}.', { example: projectPathExample(runtime?.platform) })); dir.reportValidity(); return; }
-    lastWorkingDirectory = value;
+    event.preventDefault(); const value = folder.require(); if (!value) return;
     void dialogSave(context, () => adapter.kimiLaunch(id, value), t('Terminal launch requested for {agent}.', { agent: accountLabel }));
   });
-  dir.focus();
+  folder.focus();
 }
 function kimiRemoveDialog(id: string, accountLabel: string) {
   const context = openDialog(t('Remove {label}?', { label: accountLabel }), t('Switchboard forgets the account and deletes its login folder. The Kimi membership itself is not touched; sign in again to add it back.'));
@@ -921,8 +923,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   const items: ([string, () => void] | [string, () => void, string])[] = [];
   if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {pool}.', { label: account.label, pool: account.pool }), `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
-  if (account.enabled) items.push([t('Launch isolated…'), () => launchDialog(account, 'isolated')]);
-  if (account.enabled && state.selected && !runtimeError) items.push([t('Launch managed…'), () => launchDialog(account, 'managed')]);
+  if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
@@ -1273,6 +1274,51 @@ function openDialog(title: string, intro: string, returnFocus?: string): DialogC
   const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value || node.dataset.locked === 'true'; }); };
   return { dialog, form, body, actions, error, trigger, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };
 }
+/** A labelled group for a control that is not one form element (a folder picker). */
+function groupField(label: string, control: HTMLElement, help = '') {
+  const wrapper = el('div', 'field'); wrapper.setAttribute('role', 'group');
+  const caption = el('span', 'field-label', label); caption.id = `field-${++dialogSequence}`; wrapper.setAttribute('aria-labelledby', caption.id);
+  wrapper.append(caption, control); if (help) wrapper.append(el('span', 'field-help', help)); return wrapper;
+}
+/** Opens the system folder picker at `start`; reports a failure through `report`, never as a typed path. */
+async function chooseFolder(start: string, report: (text: string) => void): Promise<string | null> {
+  try { const folder = await adapter.pickFolder(start || lastWorkingDirectory || undefined); if (folder) rememberFolder(folder); return folder; }
+  catch (error) { report(t(safeError(error))); return null; }
+}
+/**
+ * One folder, chosen with the system picker and never typed (operator decision 2026-10-09, every
+ * PassionCode.ai product). `value()` is the chosen folder; `require()` returns it or, with none chosen,
+ * says so in the dialog and focuses the button.
+ */
+function folderPicker(context: DialogContext, initial: string, key: string, locked = false) {
+  let value = initial;
+  const node = el('div', 'folder-picker'); const shown = el('span', 'folder-path');
+  const choose = button('', () => void chooseFolder(value, (text) => { context.error.textContent = text; }).then((folder) => { if (folder) { value = folder; context.error.textContent = ''; paint(); } }), 'button row-button', key);
+  const paint = () => { shown.textContent = value || t('No folder chosen'); shown.title = value; node.classList.toggle('is-empty', !value); choose.textContent = value ? t('Change…') : t('Choose folder…'); };
+  if (locked) { choose.disabled = true; choose.dataset.locked = 'true'; choose.hidden = true; }
+  node.append(shown, choose); paint();
+  return {
+    node, focus: () => choose.focus(), value: () => value,
+    require: () => { if (value) return value; context.error.textContent = t('Choose a folder.'); choose.focus(); return null; },
+  };
+}
+/** Several folders, each added with the system picker and removable; never typed. */
+function foldersPicker(context: DialogContext, initial: string[], key: string) {
+  let folders = [...initial];
+  const node = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
+  const add = button(t('Add folder…'), () => void chooseFolder(folders.at(-1) ?? '', (text) => { context.error.textContent = text; }).then((folder) => { if (folder) { folders = withFolder(folders, folder); context.error.textContent = ''; paint(); } }), 'button row-button', `${key}-add`);
+  const paint = () => {
+    list.replaceChildren();
+    if (!folders.length) list.append(el('li', 'folder-path is-empty', t('No folder chosen')));
+    folders.forEach((folder) => {
+      const item = el('li', 'folder-item'); const path = el('span', 'folder-path', folder); path.title = folder;
+      const remove = button('×', () => { folders = folders.filter((entry) => entry !== folder); paint(); add.focus(); }, 'icon-button', '');
+      remove.setAttribute('aria-label', t('Remove {folder}', { folder })); item.append(path, remove); list.append(item);
+    });
+  };
+  node.append(list, add); paint();
+  return { node, focus: () => add.focus(), value: () => folders, require: () => { if (folders.length) return folders; context.error.textContent = t('Choose a folder.'); add.focus(); return null; } };
+}
 function field(label: string, input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, help = '') {
   const wrapper = el('label', 'field'); wrapper.append(el('span', 'field-label', label), input); if (help) wrapper.append(el('span', 'field-help', help)); return wrapper;
 }
@@ -1285,22 +1331,34 @@ async function dialogSave(context: DialogContext, action: () => Promise<unknown>
   catch (error) { context.error.textContent = t(safeError(error)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
-function launchDialog(account: Account, mode: 'isolated' | 'managed') {
-  const context = openDialog(mode === 'managed' ? t('Launch managed') : t('Launch isolated'), t('{label} · {provider} · {pool} pool', { label: account.label, provider: providerName(account.provider), pool: account.pool }));
-  const directory = input(lastWorkingDirectory); directory.placeholder = projectPathExample(runtime?.platform);
-  context.body.append(field(t('Project directory'), directory, t('Enter an absolute path to an existing folder. The native app checks that the folder exists before launching. Account credentials stay in their separate managed home.')));
-  context.body.append(el('p', 'form-note', demo ? t('Synthetic launch only. The demo validates an absolute path but does not inspect your filesystem or open a terminal.') : mode === 'managed' ? t('New requests will use the selected account in this pool. In-progress responses keep their account.') : t('A new official CLI session will use this account’s private home. Existing clients are not changed.')));
+/**
+ * Launch any account in a folder chosen with the picker (operator decision 2026-10-09). The box
+ * runs it isolated, in the account's own home; cleared, it goes through the local proxy as a managed
+ * session — open only to the pool's selected account while the proxy runs (`launchChoice`).
+ */
+function launchDialog(account: Account) {
+  const choice = launchChoice(selected(account), !runtimeError);
+  const context = openDialog(t('Launch {label}', { label: account.label }), t('{provider} · {pool} pool', { provider: providerName(account.provider), pool: account.pool }));
+  const folder = folderPicker(context, lastWorkingDirectory, `launch-folder-${account.id}`);
+  const isolated = input('', 'checkbox'); isolated.required = false; isolated.checked = choice.isolatedByDefault;
+  if (!choice.managed) { isolated.disabled = true; isolated.dataset.locked = 'true'; }
+  const box = el('label', 'checkbox-field'); box.append(isolated, el('span', '', t('Isolated session')));
+  const note = el('p', 'form-note');
+  const explain = () => { note.textContent = demo ? t('Synthetic launch only. The demo does not open a terminal.') : isolated.checked ? t('Runs in this account’s own home and keeps this account; automatic switching does not move it. Existing clients are not changed.') : t('Goes through the local proxy: new requests use the selected account of this pool, and automatic switching can move it. In-progress responses keep their account.'); };
+  isolated.addEventListener('change', explain); explain();
+  context.body.append(groupField(t('Folder'), folder.node), box);
+  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the selected account of {pool} launches through the proxy, so this session is isolated.', { pool: account.pool })));
+  context.body.append(note);
   context.actions.append(submit(t('Launch')));
-  directory.addEventListener('input', () => directory.setCustomValidity(''));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const workingDirectory = directory.value.trim();
-    if (!isAbsoluteProjectPath(workingDirectory, runtime?.platform)) { directory.setCustomValidity(t('Enter an absolute project directory, for example {example}.', { example: projectPathExample(runtime?.platform) })); directory.reportValidity(); return; }
+    const workingDirectory = folder.require(); if (!workingDirectory) return;
+    const mode = isolated.checked ? 'isolated' : 'managed';
     let tools = true;
     const noTools = t(' Agents in this session have no Switchboard tools: link the command-line tool under Agents, then launch again.');
-    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; lastWorkingDirectory = workingDirectory; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.')).then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
+    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.')).then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
   });
-  directory.focus();
+  folder.focus();
 }
 function editDialog(account: Account) {
   const context = openDialog(t('Edit account'), t('{provider} · {pool} pool. To change credentials or pool, add a new account.', { provider: providerName(account.provider), pool: account.pool }));

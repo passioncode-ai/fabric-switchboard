@@ -295,9 +295,13 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .agent-setup > .button { justify-self: start; }
 .agent-setup code.address { white-space: pre-wrap; word-break: break-all; }
 /* SB-81: a Kimi Code account — name, plan windows, actions. */
-.kimi-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr) auto; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
-.kimi-row:last-child { border-bottom: 0; }
-.kimi-name { display: grid; gap: 2px; min-width: 0; }
-.kimi-row .usage-sub, .kimi-row .usage-error { overflow-wrap: anywhere; }
-@media (max-width: 720px) { .kimi-row { grid-template-columns: 1fr; } }
+.account-row .provider-icon.kimi { font-weight: 700; font-size: var(--t-label); }
+.kimi-usage .usage-sub, .kimi-usage .usage-error { overflow-wrap: anywhere; white-space: normal; font-size: var(--t-label); }
+/* Folders are chosen with the system picker, never typed (2026-10-09). */
+.folder-picker { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.folder-path { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-picker.is-empty .folder-path, .folder-path.is-empty { color: var(--muted); font-family: inherit; }
+.folder-picker-list { display: grid; gap: var(--space-2); justify-items: start; }
+.folder-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); width: 100%; }
+.folder-item { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 .terms-notice { background: var(--panel-2); border: 1px solid var(--border); }
