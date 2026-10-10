@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-10 — v0.6.15 published (Linux, Windows on ARM)
+
+[Release run 38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632) published **v0.6.15** from `8448624c` (PR #135): all
+five platform jobs, `updater` and `publish` success after the operator's two approvals. 25 assets:
+macOS universal (zip + updater archive), Windows x64 and arm64 (zip, setup, receipts), Linux x64 and
+arm64 (.deb, AppImage, CLI tarball, receipts), `latest.json` with seven platform keys,
+`SHA256SUMS(.asc)`. Anonymous download verified: GPG good, checksums OK, Sigstore attestation exit 0,
+macOS app `spctl` Notarized Developer ID, universal. Windows still `NOT_SIGNED` (identity validation
+In Progress, SB-03).
+
+**Exact next task:** when the Azure identity validation reads Completed, run the two commands in
+DISTRIBUTION.md (profile + `AZURE_SIGNING_ENABLED=true`) and cut a signed release; SB-91 (Linux and
+Windows ARM on the download page).
+
+---
+
 ## 2026-10-09 — Linux and Windows on ARM (SB-88…SB-91)
 
 Operator decision 2026-10-09: every PassionCode.ai product runs on Apple silicon and Intel Macs,

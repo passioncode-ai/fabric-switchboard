@@ -62,7 +62,7 @@ The ZIP contains a Windows x64 desktop installer and a separate `switchboard.exe
 
 ## Linux
 
-From the release after 0.6.14 (SB-88), for x64 and arm64. Three files per architecture: `Fabric-Switchboard-X.Y.Z-linux-<arch>.deb`, `Fabric-Switchboard-X.Y.Z-linux-<arch>.AppImage` and `Fabric-Switchboard-X.Y.Z-linux-<arch>-cli.tar.gz` (the CLI alone, for a machine without a desktop). Check them against `SHA256SUMS` as above (`sha256sum -c SHA256SUMS --ignore-missing`).
+From 0.6.15 (SB-88), for x64 and arm64. Three files per architecture: `Fabric-Switchboard-X.Y.Z-linux-<arch>.deb`, `Fabric-Switchboard-X.Y.Z-linux-<arch>.AppImage` and `Fabric-Switchboard-X.Y.Z-linux-<arch>-cli.tar.gz` (the CLI alone, for a machine without a desktop). Check them against `SHA256SUMS` as above (`sha256sum -c SHA256SUMS --ignore-missing`).
 
 - **.deb (Debian, Ubuntu and derivatives; recommended):** `sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb`. It installs the app as `/usr/bin/fabric-switchboard` with its menu entry, and the CLI as `/usr/bin/switchboard`, already on `PATH`; apt pulls WebKitGTK 4.1, GTK 3 and the AppIndicator library. A .deb install does not update itself: install the newer .deb (About says so).
 - **AppImage (any distribution with WebKitGTK's dependencies bundled):** `chmod +x` it and run it. It updates itself like the macOS and Windows apps. Its files exist only while it runs, so to connect agents use the .deb (the Agents screen says so).

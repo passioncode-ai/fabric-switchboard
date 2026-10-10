@@ -35,10 +35,10 @@
 
 ## Текущая версия
 
-**Текущий релиз: [v0.6.14](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.14)** · 8 октября 2026.
-Аккаунты Kimi Code, настройка модели и провайдера Hermes, запуск через OpenRouter,
-исправления входа Claude и ошибки после обновления. [Проверка скачиваемых файлов](docs/runs/2026-10-08-release-0612/README.md#published-release).
-Версии 0.6.11–0.6.13 заменены до публикации.
+**Текущий релиз: [v0.6.15](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.15)** · 10 октября 2026.
+К macOS universal и Windows x64 добавились Linux (x64, arm64) и Windows на ARM; сессия запускается
+в папке, выбранной окном выбора, с галочкой «Изолированная сессия»; Cancel завершает вход, ждущий в
+Терминале. Релизная сборка [38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632).
 
 macOS universal подписывается Developer ID и проходит нотариальную проверку Apple.
 Windows x64 собирается нативно; подписи Authenticode пока нет. Начиная с 0.6.1 приложение
