@@ -6,6 +6,13 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.16 — 2026-10-10
+
+**Windows installers and the Windows CLI are Authenticode-signed** (SB-03), x64 and arm64: signed in
+CI through Azure Artifact Signing with the PassionCode.ai Public Trust profile, each signature
+checked `Valid` before the release is published. SmartScreen no longer meets an unknown publisher.
+Nothing else changes from 0.6.15.
+
 ## 0.6.15 — 2026-10-10
 
 Fabric Switchboard on Linux (x64 and arm64) and on Windows on ARM, beside macOS (Apple silicon and
