@@ -59,6 +59,22 @@ The job runs once per architecture (SB-88). The steps below name x64; on arm64 t
 7. `scripts/updater_artifacts.py windows` copies the final installer — after the last Authenticode pass, so these are the bytes the updater checks — as `Fabric-Switchboard-X.Y.Z-windows-x64-setup.exe` and signs it for the updater. Uploaded as `updater-windows`.
 8. `scripts/package_windows.py` packs `Fabric-Switchboard-X.Y.Z-windows-x64.zip` (installer, CLI, README, LICENSE, THIRD_PARTY_NOTICES.md, an inner `SHA256SUMS.txt` and `build-receipt.json`) and writes `Fabric-Switchboard-X.Y.Z-windows-x64-receipt.json`. The receipt says `"windows_authenticode": "SIGNED"` with each file's signer, thumbprint and timestamper, or `"windows_authenticode": "NOT_SIGNED"` with the reason, and the archive's README says the same.
 
+**Identity validation, 2026-10-10.** The operator's validation is submitted: id
+`df420966-493b-4240-a544-51179b2f7030`, organization *Siarhei Sheleh*, type *Public*, Poland, status
+**In Progress** (read in the portal by the operator). Until Microsoft completes it, ARM does not know
+the id — creating the profile answers `BadResourceOperation … could not find identity validation id`
+(tried 2026-10-10). Once the portal shows **Completed**, the remaining steps are, in order:
+
+```sh
+az rest --method put --url "https://management.azure.com/subscriptions/2e70ecad-528f-4a13-aa80-832233e44ba0/resourceGroups/rg-passioncode-signing/providers/Microsoft.CodeSigning/codeSigningAccounts/passioncodesigning/certificateProfiles/passioncode-public-trust?api-version=2025-10-13" \
+  --body '{"properties":{"profileType":"PublicTrust","identityValidationId":"df420966-493b-4240-a544-51179b2f7030","includeStreetAddress":false,"includePostalCode":false}}'
+gh variable set AZURE_SIGNING_ENABLED --env release --body true --repo passioncode-ai/fabric-switchboard
+```
+
+then a rehearsal (`vX.Y.Z-rc.N`, `gh workflow run release.yml -f publish=false`) must show every
+Authenticode status `Valid` before a release ships signed. The other products sign through the same
+account and profile ([platforms PL-03](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/platforms.md#pl-03)).
+
 **Today `AZURE_SIGNING_ENABLED` is `false`**: steps 2, 3, 6, 7 and 8 below are done, steps 4 and 5 are not (measured read-only with `az` on 2026-10-08): the Artifact Signing account `passioncodesigning` exists (`rg-passioncode-signing`, North Europe, Basic, `https://neu.codesigning.azure.net/`); the app registration `github-release-signing-fabric-switchboard` has the federated credential `repo:passioncode-ai/fabric-switchboard:environment:release` and its service principal holds only *Artifact Signing Certificate Profile Signer* on the account; the operator holds *Identity Verifier*; the `release` variables name all of these. **The account has no certificate profile** — `AZURE_CERTIFICATE_PROFILE` names `passioncode-public-trust`, which does not exist yet — so the identity validation (step 4, read only in the portal: there is no ARM API for it) and the Public Trust profile (step 5) remain; switching the variable on before then fails the release at signing. **Who validates:** Microsoft's verification page refuses a personal Microsoft account (the operator's gmail is a guest in this tenant and signs in through the consumer tenant `9188040d-…`: «you must be logged in as an authorized user of the Entra Azure tenant which was used for the enrollment»). So a member user `signing-verifier@sshlg93gmail.onmicrosoft.com` (object `bf6f481a-9040-49fa-9f61-841223868655`) was created on 2026-10-08 with one role, *Artifact Signing Identity Verifier* on the account, and no directory role; the operator signs in as it (in a private window) to complete step 4. Remove it after the profile exists if it is no longer needed. The job builds and uploads unsigned files, and the receipt and release notes say `windows_authenticode: NOT_SIGNED`. Native fixtures passing is not Windows UI acceptance, and no build here claims live-provider acceptance.
 
 ### Linux (`linux` job, `ubuntu-24.04` x64 and `ubuntu-24.04-arm` arm64; SB-88)
