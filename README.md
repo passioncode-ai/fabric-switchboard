@@ -37,13 +37,14 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.15](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.15)** · October 10, 2026.
-Linux (x64, arm64) and Windows on ARM join macOS universal and Windows x64; sessions launch in a
-folder you pick, with an *Isolated session* box; Cancel ends a sign-in waiting in Terminal.
-Release run [38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632).
+**Latest published: [v0.6.16](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.16)** · October 10, 2026.
+Windows installers and CLI are Authenticode-signed from this release. 0.6.15 added Linux (x64,
+arm64) and Windows on ARM, sessions launched in a folder you pick with an *Isolated session* box,
+and Cancel that ends a sign-in waiting in Terminal. Release run [38068045608](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38068045608).
 
-macOS releases are universal, Developer ID signed and notarized by Apple. Windows x64
-releases are built natively and are not yet Authenticode-signed. Installed copies from
+macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,
+arm64) are built natively and Authenticode-signed (Azure Artifact Signing, timestamped). Linux
+releases (x64, arm64) are a .deb, an AppImage and a CLI tarball. Installed copies from
 0.6.1 update automatically. Builds and signatures come from the protected
 [release workflow](docs/DISTRIBUTION.md#how-a-release-happens).
 Live-provider acceptance is tracked separately on the [board](docs/evidence/backlog.md)
@@ -208,8 +209,9 @@ A release is a `vX.Y.Z` tag on the merged release commit. The tag starts
 [`release.yml`](.github/workflows/release.yml) in the protected `release` environment: a member
 of `release-approvers` approves (whoever pushed the tag may; an agent only on the operator's explicit instruction, which the release record names); the macOS app and CLI are signed
 with the organization's CI Developer ID and notarized (the app stapled); Windows is built
-natively (Authenticode signing through Azure Artifact Signing is ready but switched off until
-the account exists, and the receipt says `windows_authenticode: NOT_SIGNED`); then every file
+natively and Authenticode-signed through Azure Artifact Signing, every signature checked `Valid`
+before publishing (the receipt says `windows_authenticode: SIGNED`); Linux is built natively on
+x64 and arm64; then every file
 is attested (Sigstore), summed in `SHA256SUMS`, GPG-signed and published with the notes from
 [CHANGELOG.md](CHANGELOG.md). A rehearsal runs the same path on a `vX.Y.Z-rc.N` tag with
 `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false` and creates no release.

@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-10 — v0.6.16 published: Windows signed
+
+[Release run 38068045608](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38068045608) published **v0.6.16** (PR #137): Windows installers, app
+and CLI Authenticode-signed on x64 and arm64 — every status `Valid`, signer `CN=Siarhei Sheleh, …,
+C=PL` (no street or postal code), timestamped by Microsoft's public TSA; read back from the published
+receipts on an anonymous download, GPG and checksums good. The first attempt failed at `azure/login`
+(AADSTS700213, GitHub's immutable OIDC subject); project-observatory's `setup-windows-signing.py`
+registered both subject forms and the failed jobs were re-run. SB-03 done; SB-92 (adopt the shared
+signing action) filed.
+
+**Exact next task:** SB-92 — move the signing steps to `passioncode-ai/.github/actions/windows-signing@v1`
+and rehearse on an `-rc` tag; then SB-91 (download page).
+
+---
+
 ## 2026-10-10 — v0.6.15 published (Linux, Windows on ARM)
 
 [Release run 38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632) published **v0.6.15** from `8448624c` (PR #135): all

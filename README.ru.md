@@ -35,13 +35,13 @@
 
 ## Текущая версия
 
-**Текущий релиз: [v0.6.15](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.15)** · 10 октября 2026.
-К macOS universal и Windows x64 добавились Linux (x64, arm64) и Windows на ARM; сессия запускается
-в папке, выбранной окном выбора, с галочкой «Изолированная сессия»; Cancel завершает вход, ждущий в
-Терминале. Релизная сборка [38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632).
+**Текущий релиз: [v0.6.16](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.16)** · 10 октября 2026.
+С этого релиза установщики и CLI для Windows подписаны Authenticode. В 0.6.15 добавились Linux (x64,
+arm64) и Windows на ARM, запуск сессии в папке, выбранной окном выбора, с галочкой «Изолированная
+сессия», и Cancel, завершающий вход, ждущий в Терминале. Релизная сборка [38068045608](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38068045608).
 
 macOS universal подписывается Developer ID и проходит нотариальную проверку Apple.
-Windows x64 собирается нативно; подписи Authenticode пока нет. Начиная с 0.6.1 приложение
+Windows (x64, arm64) собирается нативно и подписывается Authenticode (Azure Artifact Signing, с меткой времени). Начиная с 0.6.1 приложение
 обновляется автоматически. Сборку и подписи выполняет защищённый
 [release workflow](docs/DISTRIBUTION.md#how-a-release-happens).
 Проверки с реальными аккаунтами провайдеров отмечаются отдельно на
