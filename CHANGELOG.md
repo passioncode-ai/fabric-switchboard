@@ -6,7 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.15 — 2026-10-10
+
+Fabric Switchboard on Linux (x64 and arm64) and on Windows on ARM, beside macOS (Apple silicon and
+Intel) and Windows x64. Launching a session now picks its folder with the system picker and an
+*Isolated session* box, a sign-in left waiting in Terminal ends with one Cancel, and the ordinary
+Kimi Code sign-in on kimi.ai is read correctly.
+
+**Windows:** windows_authenticode: NOT_SIGNED. Built natively for x64 and arm64; the installers are
+not yet Authenticode-signed (the signing identity validation is in progress), so SmartScreen may warn.
 
 ### Added
 

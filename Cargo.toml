@@ -2,7 +2,7 @@
 members = ["crates/switchboard-core", "crates/switchboard-proxy", "src-tauri", "crates/switchboard-runtime", "crates/switchboard-cli"]
 resolver = "2"
 [workspace.package]
-version = "0.6.14"
+version = "0.6.15"
 edition = "2021"
 license = "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial"
 repository = "https://github.com/passioncode-ai/fabric-switchboard"
