@@ -37,10 +37,10 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.14](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.14)** · October 8, 2026.
-Includes Kimi Code accounts, Hermes model/provider settings, OpenRouter launches and
-the Claude sign-in and update-version fixes. [Download verification](docs/runs/2026-10-08-release-0612/README.md#published-release).
-Versions 0.6.11–0.6.13 were superseded before publication.
+**Latest published: [v0.6.15](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.15)** · October 10, 2026.
+Linux (x64, arm64) and Windows on ARM join macOS universal and Windows x64; sessions launch in a
+folder you pick, with an *Isolated session* box; Cancel ends a sign-in waiting in Terminal.
+Release run [38014753632](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38014753632).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows x64
 releases are built natively and are not yet Authenticode-signed. Installed copies from
