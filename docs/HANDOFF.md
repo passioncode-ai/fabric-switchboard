@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-100: Kimi status quality
+
+Branch `fix/sb-100-kimi-status`: Kimi's 404 / 429 / unreadable / empty answers each read as what
+they are; one client and parallel asks; the home's region; “checked … ago”, background refresh
+every 5 min, a failed refresh shown with the last figures; ordinary-`kimi` wording in the window
+and the CLI. CONTRACTS → Kimi Code accounts.
+
+**Exact next task:** SB-101's remaining part — persist a renewed Claude sign-in before it is used
+(refresh.rs stash; touches the live Claude Code lineage: design first, test with fixtures only),
+then SB-99's rest (Kimi in fallback chains).
+
+---
+
 ## 2026-10-11 — SB-101 first part: switch reliability
 
 Branch `fix/sb-101-switch-reliability`: lock waits off the async workers; a switch carries only

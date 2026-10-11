@@ -116,7 +116,7 @@ export interface HermesModel { installed: boolean; configured: boolean; model?: 
 export type KimiRegion = 'mainland-cn' | 'global';
 export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null }
 /** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
-export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion }
+export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
 export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */

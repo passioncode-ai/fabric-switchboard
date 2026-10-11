@@ -476,3 +476,9 @@ export function kimiLimitUntil(windows: KimiWindow[] | undefined, nowSeconds: nu
   if (!full.length) return null;
   return Math.max(0, ...full.map((w) => w.resets_at ?? 0));
 }
+/** SB-100: the ordinary `kimi` is not an account Switchboard launches or signs in: its own words. */
+export function ordinaryKimiNote(status: { signed_in: boolean; error: string | null }): string | null {
+  if (!status.signed_in) return t('Not signed in. Run kimi login in Terminal.');
+  if (status.error === 'Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.') return t('Run kimi once in Terminal to renew its sign-in, then refresh.');
+  return status.error ? t(status.error) : null;
+}

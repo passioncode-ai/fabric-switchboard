@@ -39,6 +39,12 @@ pub const KIMI_TOKEN_STALE: &str =
     "Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.";
 pub const KIMI_REFUSED: &str = "Kimi refused this sign-in. Sign in to the account again.";
 pub const KIMI_UNREACHABLE: &str = "Kimi did not answer. Try again in a minute.";
+/// SB-100: what Kimi said, not one sentence for every answer.
+pub const KIMI_NO_USAGE_SERVICE: &str = "Kimi offers no usage figures for this account.";
+pub const KIMI_BUSY: &str = "Kimi is limiting requests right now. Switchboard asks again shortly.";
+pub const KIMI_BAD_ANSWER: &str =
+    "Kimi answered with something Switchboard cannot read. Try again later.";
+pub const KIMI_NO_WINDOWS: &str = "Kimi returned no usage figures for this account.";
 /// A `kimi` session Switchboard started still runs in this account's folder (SB-99).
 pub const KIMI_SESSION_RUNNING: &str =
     "A Kimi Code session still runs on this account. Close it in Terminal first.";
@@ -206,14 +212,23 @@ fn token(home: &Path, region: &str, now: i64) -> Result<Token, &'static str> {
     })
 }
 
+/// One client for every Kimi request (SB-100): connections are reused across accounts.
+fn client() -> Result<&'static reqwest::Client, &'static str> {
+    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(TIMEOUT)
+                .user_agent(concat!("FabricSwitchboard/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .ok()
+        })
+        .as_ref()
+        .ok_or(KIMI_UNREACHABLE)
+}
 async fn get(base: &str, path: &str, token: &Token) -> Result<Value, &'static str> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(TIMEOUT)
-        .user_agent(concat!("FabricSwitchboard/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|_| KIMI_UNREACHABLE)?;
-    let response = client
+    let response = client()?
         .get(format!("{base}{path}"))
         .bearer_auth(&token.access)
         .header("Accept", "application/json")
@@ -221,8 +236,10 @@ async fn get(base: &str, path: &str, token: &Token) -> Result<Value, &'static st
         .await
         .map_err(|_| KIMI_UNREACHABLE)?;
     match response.status().as_u16() {
-        200 => response.json().await.map_err(|_| KIMI_UNREACHABLE),
+        200 => response.json().await.map_err(|_| KIMI_BAD_ANSWER),
         401 | 403 => Err(KIMI_REFUSED),
+        404 => Err(KIMI_NO_USAGE_SERVICE),
+        429 => Err(KIMI_BUSY),
         _ => Err(KIMI_UNREACHABLE),
     }
 }
@@ -277,14 +294,17 @@ async fn home_status(home: &Path, region: &str, base: &str, now: i64) -> Value {
         Ok(t) => t,
         Err(state) => return json!({"signed_in": state != KIMI_SIGNED_OUT, "error": state}),
     };
-    let me = get(base, "/me", &token).await;
-    let usages = get(base, "/usages", &token).await;
+    let (me, usages) = tokio::join!(get(base, "/me", &token), get(base, "/usages", &token));
     let (nickname, tier) = me.as_ref().map(profile).unwrap_or((None, None));
     match usages {
-        Ok(u) => json!({
-            "signed_in": true, "nickname": nickname, "tier": tier,
-            "windows": windows(&u), "checked_at": now, "error": null,
-        }),
+        Ok(u) => {
+            let windows = windows(&u);
+            let error = windows.is_empty().then_some(KIMI_NO_WINDOWS);
+            json!({
+                "signed_in": true, "nickname": nickname, "tier": tier,
+                "windows": windows, "checked_at": now, "error": error,
+            })
+        }
         Err(e) => {
             json!({"signed_in": e != KIMI_REFUSED, "nickname": nickname, "tier": tier, "error": e})
         }
@@ -302,15 +322,26 @@ async fn accounts_with(
     base: &(dyn Fn(&str) -> String + Sync),
     now: i64,
 ) -> Result<Value, String> {
+    // SB-100: every account is asked at once — five unreachable accounts no longer take 80 s —
+    // and each with the region its own folder names (a login inside a session may switch it).
+    let accounts = store.snapshot()?.kimi_accounts;
+    let mut asked = tokio::task::JoinSet::new();
+    for (index, account) in accounts.iter().enumerate() {
+        let folder = home(root, &account.id)?;
+        let region = if credential_file(&folder, home_region(&folder)).is_some() {
+            home_region(&folder).to_owned()
+        } else {
+            account.region.clone()
+        };
+        let base = base(&region);
+        asked.spawn(async move { (index, home_status(&folder, &region, &base, now).await) });
+    }
+    let mut statuses = vec![Value::Null; accounts.len()];
+    while let Some(Ok((index, status))) = asked.join_next().await {
+        statuses[index] = status;
+    }
     let mut list = Vec::new();
-    for account in store.snapshot()?.kimi_accounts {
-        let status = home_status(
-            &home(root, &account.id)?,
-            &account.region,
-            &base(&account.region),
-            now,
-        )
-        .await;
+    for (account, status) in accounts.into_iter().zip(statuses) {
         // A refreshed profile is kept, so the list names the account while it is signed out.
         let (nickname, tier) = (
             status["nickname"].as_str().map(str::to_owned),
@@ -590,7 +621,7 @@ pub fn remove(root: &Path, store: &Store, id: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{http::HeaderMap, routing::get as route, Json, Router};
+    use axum::{http::HeaderMap, response::IntoResponse, routing::get as route, Json, Router};
     use std::sync::Arc;
     use switchboard_core::MemoryVault;
 
@@ -610,6 +641,45 @@ mod tests {
             json!({"access_token": token, "refresh_token": "synthetic-refresh", "expires_at": expires_at}).to_string(),
         )
         .unwrap();
+    }
+    #[tokio::test]
+    async fn each_kimi_answer_reads_as_what_it_is() {
+        // SB-100: 404, 429, an unreadable 200 and a 200 with no figures each say so, instead of
+        // one "Kimi did not answer" for all of them.
+        let app = Router::new()
+            .route("/me", route(|| async { Json(json!({"nickname": "n"})) }))
+            .route(
+                "/usages",
+                route(|h: HeaderMap| async move {
+                    let token = h
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    match token {
+                        "Bearer gone" => (axum::http::StatusCode::NOT_FOUND, "").into_response(),
+                        "Bearer busy" => {
+                            (axum::http::StatusCode::TOO_MANY_REQUESTS, "").into_response()
+                        }
+                        "Bearer garbled" => (axum::http::StatusCode::OK, "<html>").into_response(),
+                        _ => Json(json!({"usages": {}})).into_response(),
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        for (token, expected) in [
+            ("gone", KIMI_NO_USAGE_SERVICE),
+            ("busy", KIMI_BUSY),
+            ("garbled", KIMI_BAD_ANSWER),
+            ("empty", KIMI_NO_WINDOWS),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            signed_in(home.path(), "kimi-code.json", token, NOW + 3600);
+            let status = home_status(home.path(), "mainland-cn", &base, NOW).await;
+            assert_eq!(status["error"], expected, "{token}");
+            assert_eq!(status["signed_in"], true, "{token}: still signed in");
+        }
     }
     async fn stand_in() -> String {
         let usages = json!({"usages": {
