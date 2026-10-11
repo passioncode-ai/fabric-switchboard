@@ -158,6 +158,10 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .current-badge { color: var(--info); border-color: var(--info); background: var(--info-weak); }
 .policy-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
 .policy-row strong { font-size: var(--t-label); }
+.session-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+.session-row { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.session-state { font-size: var(--t-label); color: var(--muted); }
+.session-state.is-running { color: var(--ok); }
 .setup-facts { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
 .setup-facts li { color: var(--muted); }
 .setup-facts li::before { content: '–'; display: inline-block; width: 1.4em; }

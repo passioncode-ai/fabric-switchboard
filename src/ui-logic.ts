@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -443,4 +443,12 @@ export function agentSetupFacts(setup: Pick<AgentSetup, 'connected' | 'proved'>)
   const client = setup.proved?.client;
   facts.push(setup.proved ? { text: client ? t('An agent has called Switchboard: {client}.', { client }) : t('An agent has called Switchboard.'), done: true } : { text: t('No agent has called Switchboard yet.'), done: false });
   return facts;
+}
+/** SB-65: a session's state and how it runs, as the Activity page names them. */
+export function sessionStateLabel(state: SessionInfo['state']): string {
+  return state === 'running' ? t('Running') : state === 'starting' ? t('Starting') : state === 'ended' ? t('Ended') : t('State unknown');
+}
+export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'pool'>): string {
+  const mode = session.mode === 'managed' ? t('Managed · follows the {pool} pool', { pool: session.pool }) : t('Isolated');
+  return session.in_place ? t('{mode} · in an embedded terminal', { mode }) : t('{mode} · in Terminal', { mode });
 }

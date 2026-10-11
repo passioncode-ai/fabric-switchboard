@@ -6,9 +6,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, agentSetupFacts, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -169,6 +169,7 @@ async function reload() {
   void loadOpenrouter();
   void loadKimi();
   void loadHermes();
+  void loadSessions();
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -1091,7 +1092,31 @@ function renderPolicies(main: HTMLElement) {
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} · {pool} · {target}…', { provider: providerName(policy.provider), pool: policy.pool, target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New policy…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
 }
+let sessionList: SessionInfo[] | null = null;
+let sessionsError = false;
+async function loadSessions() {
+  try { sessionList = (await adapter.sessions()).sessions; sessionsError = false; } catch { sessionsError = true; }
+  backgroundRender();
+}
+/** SB-65: the sessions Switchboard launched that start or run, read from their records (SB-95). */
+function sessionsPanel() {
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'sessions-heading');
+  const heading = el('h2', '', t('Sessions')); heading.id = 'sessions-heading'; panel.append(heading);
+  if (sessionsError && !sessionList) { panel.append(el('p', 'usage-error', t('Sessions are unavailable. Refresh to retry.'))); return panel; }
+  if (!sessionList) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
+  if (!sessionList.length) { panel.append(el('p', 'form-note', t('No session Switchboard launched is running. Sessions started outside Switchboard are not listed.'))); return panel; }
+  const list = el('ul', 'session-list');
+  for (const session of sessionList) {
+    const row = el('li', 'session-row'); const title = el('div', 'event-title');
+    title.append(el('strong', '', `${providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
+    row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
+  }
+  panel.append(list);
+  return panel;
+}
 function renderActivity(main: HTMLElement) {
+  main.append(sessionsPanel());
   if (!snapshot!.events.length) { main.append(emptyState(t('No activity yet'), t('Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.'))); return; }
   const list = el('ol', 'event-list');
   for (const event of [...snapshot!.events].reverse()) {
@@ -1459,6 +1484,7 @@ function backgroundRefresh() {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
     snapshot = data; applyContext(context); backgroundRender();
+    void loadSessions();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
 }
 setInterval(backgroundRefresh, 60_000);
