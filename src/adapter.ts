@@ -26,6 +26,7 @@ export const nativeAdapter: Adapter = {
   pickFolder: (start) => invoke('pick_folder', { start: start ?? null }),
   beginLogin: (input) => invoke('begin_login', { ...input }),
   loginStatus: (loginId) => readWithDeadline(invoke('login_status', { loginId })),
+  pendingLogins: () => readWithDeadline(invoke('pending_logins')),
   finishLogin: (loginId) => invoke('finish_login', { loginId }),
   cancelLogin: (loginId) => invoke('cancel_login', { loginId }),
   probe: (id) => invoke('probe_usage', { id }),

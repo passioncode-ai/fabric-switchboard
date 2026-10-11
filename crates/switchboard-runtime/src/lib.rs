@@ -137,6 +137,8 @@ pub enum Operation {
     LoginStatus {
         login_id: String,
     },
+    /// The sign-ins this owner holds, including those taken back after a restart (SB-65).
+    PendingLogins,
     CancelLogin {
         login_id: String,
     },
@@ -509,6 +511,7 @@ impl Runtime {
                 | Operation::Sessions { .. }
                 | Operation::CurrentAccounts
                 | Operation::LoginStatus { .. }
+                | Operation::PendingLogins
                 | Operation::Backups
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
@@ -550,7 +553,7 @@ impl Runtime {
             .logins
             .lock()
             .map_err(|_| "Sign-in state unavailable.")?;
-        if logins.len() >= 4 {
+        if logins.len() >= launch::MAX_LOGINS {
             return Err("Finish an existing sign-in before starting another.".into());
         }
         let login = launch::begin_login(&self.root, provider, label, pool)?;
@@ -632,6 +635,40 @@ impl Runtime {
         };
         stale.retain(|login| login.id != id || launch::clean_login(login).is_err());
         !stale.iter().any(|login| login.id == id)
+    }
+    /// The sign-ins in the registry, newest last: enough for a window started after the owner
+    /// (or a restarted owner) to show its banner and finish them.
+    fn pending_logins(&self) -> Value {
+        let logins = self.logins.lock().map(|logins| {
+            logins
+                .values()
+                .map(|login| {
+                    json!({
+                        "login_id": login.id,
+                        "provider": login.provider.as_str(),
+                        "label": login.label,
+                        "pool": login.pool,
+                        "state": launch::login_state(login),
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        json!({ "logins": logins.unwrap_or_default() })
+    }
+    /// Takes back the sign-ins an earlier owner of this data folder left open (SB-65).
+    fn adopt_logins(&self) -> usize {
+        let Ok(mut logins) = self.logins.lock() else {
+            return 0;
+        };
+        let mut adopted = 0;
+        for login in launch::adopt_logins(&self.root) {
+            if logins.len() >= launch::MAX_LOGINS {
+                break;
+            }
+            logins.insert(login.id.clone(), login);
+            adopted += 1;
+        }
+        adopted
     }
     fn login_status(&self, id: &str) -> Result<Value, String> {
         let logins = self
@@ -1055,6 +1092,33 @@ impl Owner {
         // tokens. A `--data-dir` store holding the same accounts would be a second renewer.
         if native_sources && !default_store {
             runtime.refresh.set_grants(false);
+        }
+        // SB-65: sign-ins an earlier owner left open come back, so the window can finish them.
+        let adopted = runtime.adopt_logins();
+        if adopted > 0 {
+            oplog::event(
+                "login_adopted",
+                &[("count", oplog::Field::Number(adopted as i64))],
+            );
+        }
+        // SB-87: sign-in homes an earlier owner forgot; off the start path (it may ask `ps` and
+        // Keychain, each bounded), and only the real owner of its data folder does it.
+        if native_sources {
+            let root = runtime.root.clone();
+            tokio::task::spawn_blocking(move || {
+                let sweep = launch::sweep_logins(&root);
+                if sweep != launch::Sweep::default() {
+                    oplog::event(
+                        "login_leftovers",
+                        &[
+                            ("removed", oplog::Field::Number(sweep.removed as i64)),
+                            ("running", oplog::Field::Number(sweep.running as i64)),
+                            ("finishable", oplog::Field::Number(sweep.finishable as i64)),
+                            ("kept", oplog::Field::Number(sweep.kept as i64)),
+                        ],
+                    );
+                }
+            });
         }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
@@ -1627,6 +1691,10 @@ async fn execute(
         } => needs_owner()?.begin_login(provider, label, pool),
         Operation::FinishLogin { login_id } => needs_owner()?.finish_login(&login_id),
         Operation::LoginStatus { login_id } => needs_owner()?.login_status(&login_id),
+        Operation::PendingLogins => Ok(match runtime {
+            Some(runtime) => runtime.pending_logins(),
+            None => json!({ "logins": [] }),
+        }),
         Operation::CancelLogin { login_id } => {
             needs_owner()?.cancel_login(&login_id)?;
             Ok(Value::Null)

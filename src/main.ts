@@ -170,6 +170,7 @@ async function reload() {
   void loadKimi();
   void loadHermes();
   void loadSessions();
+  void restorePendingLogin();
   void loadBackups();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -677,6 +678,17 @@ async function startLogin(provider: Provider, label = '', pool = 'default') {
     announce(t('Sign in to {provider} in the Terminal window that opened. Switchboard adds the account when you finish.', { provider: providerName(provider) }));
   } catch (error) { showNotice(safeError(error), true); }
   finally { busy = false; render(); restoreFocus('login-cancel'); }
+}
+/** SB-65: a sign-in the owner holds — begun before this window opened, or taken back after a restart — shows its banner again and finishes as usual. */
+async function restorePendingLogin() {
+  if (pendingLogin) return;
+  try {
+    const { logins } = await adapter.pendingLogins();
+    const login = logins.at(-1);
+    if (!login || pendingLogin) return;
+    pendingLogin = { id: login.login_id, provider: login.provider, label: login.label, pool: login.pool, state: login.state === 'ended' ? 'ended' : 'pending', error: '' };
+    render();
+  } catch { /* The banner only returns when the owner can say which sign-in it holds. */ }
 }
 async function pollLogin() {
   const login = pendingLogin;

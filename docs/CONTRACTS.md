@@ -284,6 +284,42 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
+## Sign-ins across a restart (SB-65, 2026-10-11)
+
+Code: `launch::LOGIN_JOURNAL`, `login_journal`, `adopt_logins`, `MAX_LOGINS`; `Runtime::adopt_logins`,
+`pending_logins`; `Operation::PendingLogins`; Tauri `pending_logins`; window `restorePendingLogin`.
+
+- `begin_login` writes `<logins>/<id>/.login.json` (0600: `provider`, `label`, `pool`, `started_at`)
+  before Terminal opens.
+- Every owner start, before the sweep, takes back the sign-ins whose journal is valid (a known
+  provider, a valid label and pool) and that completed in Terminal (`.completed`), hold an
+  unexpired reservation, or still run (`session_running`): newest first, at most four. Log
+  `login_adopted` (count). Their ids are the folder names, so a window's `login_status` for them
+  works again.
+- The sweep keeps a completed sign-in with a valid journal (`Sweep::finishable`); one without a
+  journal (an earlier version's) is removed as before.
+- `Operation::PendingLogins` → `{logins: [{login_id, provider, label, pool, state}]}` (no
+  credential; `[]` without an owner). The window asks once at start and shows the newest as its
+  banner; the usual poll finishes it.
+- Test: `a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep`.
+
+## Forgotten sign-ins at start (SB-87, 2026-10-11)
+
+Code: `launch::sweep_logins` (`sweep_logins_with` for tests), called once from
+`Owner::start_with_sources` for a native owner, on a blocking thread off the start path.
+
+- Considers only folders directly under `logins/` named by a UUID, never a link.
+- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` not expired, or
+  `session_running`); a later start removes it once it ended — an earlier owner's sign-in cannot
+  be finished by this one (its registry was in memory).
+- Otherwise, on macOS, probes the derived Claude Code Keychain item by attributes only
+  (`probe_external` with `/usr/bin/security`): absent → the home is removed; present and trusted
+  by `/usr/bin/security` in an unlocked keychain → deleted silently, then the home; locked,
+  unavailable or an access list that would ask → both kept. A failed delete keeps the home, so an
+  item is never orphaned. Elsewhere the credentials live inside the home and go with it.
+- Log: `login_leftovers` with `removed`, `running`, `kept` (numbers only), only when one is
+  non-zero. Test: `a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask`.
+
 ## Session list (SB-95, 2026-10-11)
 
 Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idle`, reads only),

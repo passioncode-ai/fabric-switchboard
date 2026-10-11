@@ -2,6 +2,42 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-65: sign-ins survive a restart; SB-87 merged with it
+
+`begin_login` writes `.login.json` (provider, label, pool, time); an owner start takes back the
+sign-ins Terminal still runs or that completed meanwhile (`adopt_logins`, at most four), the
+SB-87 sweep removes the rest that ended (with their Claude Keychain item only when deleting it
+shows no dialog) and keeps a completed one with a valid journal, and the window restores its
+banner through `Operation::PendingLogins` / Tauri `pending_logins` (`restorePendingLogin`).
+
+Checks (the machine's disk was at 1–3.7 GB free, so `./scripts/check.sh` ran in parts):
+`cargo fmt --check` ok; `cargo test -p switchboard-runtime -p switchboard-cli` 319 + 22 passed,
+0 failed; `cargo clippy --all-targets -D warnings` clean for switchboard-runtime, switchboard-cli
+and fabric-switchboard (src-tauri); `npm run build`, `check-brand`, `test-read-deadline`,
+`test-ui-logic`, `check-locale`, `check-error-vocabulary` ok. **Not run:** `cargo test -p
+fabric-switchboard` (src-tauri's own unit tests; its change is two commands, compiled by clippy)
+— the nightly run at 23:00 covers it; check that run.
+
+**Exact next task:** read tonight's nightly result for this merge; then SB-65's remaining part
+(acting on a session: open folder, drain, close — never by process name) or SB-07.
+
+---
+
+## 2026-10-11 — SB-87: forgotten sign-ins cleaned at start
+
+Branch `fix/sb-87-login-leftovers`. A native owner's start sweeps `logins/` once, off the start
+path: a sign-in home whose Terminal session ended is removed with its Claude Keychain item when
+deleting the item shows no dialog; one still open, or whose item would ask, is kept
+(`launch::sweep_logins`, log `login_leftovers`). OPERATIONS → recovery now says what stays manual.
+
+**Not merged yet:** `launch::` tests pass (45/45), but the full gate was stopped by the disk guard — the machine had 1.1 GB free (other sessions filling it). Run `./scripts/check.sh` on this branch when there is room, then merge.
+
+**Exact next task:** the rest of SB-65 — a persistent pending-login journal so a sign-in open across
+a restart can still be finished (packet SS-01); or SB-07 (the intermittent `project_rules…` /
+`managed_session…` MCP test failures) if CI shows it again.
+
+---
+
 ## 2026-10-11 — SB-65 first slice: the Sessions view
 
 Branch `feat/sb-65-sessions-view`. Activity → *Sessions* lists the sessions Switchboard launched

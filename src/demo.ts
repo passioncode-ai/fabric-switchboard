@@ -147,6 +147,7 @@ export function createDemoAdapter(): Adapter {
     async pickFolder() { await pause(); return '/Users/demo/Projects/switchboard-demo'; },
     async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, { ...input, started: Date.now() }); return { login_id, message: 'Synthetic sign-in opened; it completes on its own in a few seconds.' }; },
     // A synthetic Terminal "finishes" three seconds after it opened.
+    async pendingLogins() { return { logins: [...logins.entries()].map(([id, login]) => ({ login_id: id, provider: login.provider, label: login.label, pool: login.pool, state: (Date.now() - login.started > 3000 ? 'complete' : 'pending') as 'pending' | 'complete' })) }; },
     async loginStatus(id) { const login = logins.get(id); if (!login) throw new Error('Sign-in not found. Start again.'); return { state: Date.now() - login.started > 3000 ? 'complete' : 'pending' }; },
     // Codex sign-ins save the account, then report a staging cleanup failure as the owner does
     // (runtime lib.rs finish_login), so the demo shows the saved-with-cleanup notice.
