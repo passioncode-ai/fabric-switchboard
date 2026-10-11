@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A coding agent can set Switchboard up** (SB-93). `switchboard onboard` prints the guide an agent
+follows; `switchboard onboard --status` (and the MCP tool `switchboard_onboarding`) says where
+setup stands — the app running, accounts saved, the folder's project, the MCP server registered
+with the agent, a first answered tool call — with the command for each step the agent can take
+and what to ask the person for the rest (opening the app, signing in). It only reads.
+
 **A Claude session continued from another agent starts again** (SB-94). Switchboard passed its
 own MCP config as `--mcp-config <path>`, and Claude Code reads every plain value after that flag
 as one more config file, so the first prompt of a continuation was taken for a file and the

@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use switchboard_core::Provider;
 use switchboard_runtime::{
-    control, execute_offline,
+    control, execute_offline, onboarding,
     projects::{detect_session, Session},
     Operation,
 };
@@ -19,6 +19,10 @@ const INSTRUCTIONS: &str = "Switchboard manages the Claude Code and Codex accoun
 pub struct Server {
     root: PathBuf,
     read_only: bool,
+    /// The client's name from `initialize`, kept for the proving call (SB-93).
+    client: std::sync::Mutex<Option<String>>,
+    /// Whether this server already recorded its proving call.
+    proved: std::sync::atomic::AtomicBool,
 }
 
 pub(crate) fn now() -> i64 {
@@ -47,6 +51,7 @@ fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, and the lowest remaining quota.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own pool for any managed session; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (optional), mcp (this server is registered with the agent) and proving_call. Each step is done, todo (run next.command), needs_person (tell the person next.person) or optional. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove project rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
@@ -73,7 +78,12 @@ fn tools() -> Vec<(bool, Value)> {
 
 impl Server {
     pub fn new(root: PathBuf, read_only: bool) -> Self {
-        Self { root, read_only }
+        Self {
+            root,
+            read_only,
+            client: std::sync::Mutex::new(None),
+            proved: std::sync::atomic::AtomicBool::new(false),
+        }
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
         let body = serde_json::to_vec(&operation).map_err(|_| "Operation unavailable.")?;
@@ -385,6 +395,18 @@ impl Server {
             "switchboard_accounts" => self.accounts(args).await,
             "switchboard_usage" => self.usage(args).await,
             "switchboard_switch" => self.switch(args).await,
+            "switchboard_onboarding" => match self.folder(args) {
+                Ok(folder) => {
+                    let host = match args.get("host").and_then(Value::as_str) {
+                        None => None,
+                        Some("claude") => Some(onboarding::Host::Claude),
+                        Some("codex") => Some(onboarding::Host::Codex),
+                        Some(_) => return Some(Err("host is claude or codex.".into())),
+                    };
+                    crate::onboard_status(&self.root, folder, host).await
+                }
+                Err(error) => Err(error),
+            },
             "switchboard_project_context" => match self.folder(args) {
                 Ok(path) => self.call(Operation::ResolveProject { path }).await,
                 Err(error) => Err(error),
@@ -478,6 +500,11 @@ impl Server {
         let params = message.get("params").cloned().unwrap_or(json!({}));
         Some(match method {
             "initialize" => {
+                if let (Some(name), Ok(mut client)) =
+                    (params["clientInfo"]["name"].as_str(), self.client.lock())
+                {
+                    *client = Some(name.to_owned());
+                }
                 let asked = params["protocolVersion"].as_str().unwrap_or_default();
                 let version = VERSIONS
                     .iter()
@@ -506,10 +533,17 @@ impl Server {
                 };
                 match self.call_tool(name, args).await {
                     None => error(id, -32602, "Unknown tool."),
-                    Some(Ok(value)) => ok(
-                        id,
-                        json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": false}),
-                    ),
+                    Some(Ok(value)) => {
+                        // The first answered call proves the connection (SB-93); once per server.
+                        if !self.proved.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                            let client = self.client.lock().ok().and_then(|c| c.clone());
+                            onboarding::record_proof(&self.root, client.as_deref(), now());
+                        }
+                        ok(
+                            id,
+                            json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": false}),
+                        )
+                    }
                     Some(Err(message)) => ok(
                         id,
                         json!({"content": [{"type": "text", "text": message}], "isError": true}),

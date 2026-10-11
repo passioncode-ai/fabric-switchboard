@@ -57,6 +57,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-047 | Keep several Kimi Code subscription accounts | draft |
 | SCN-048 | See and change Hermes's model and provider | draft |
 | SCN-049 | See the provider terms notice | draft |
+| SCN-050 | A coding agent sets Switchboard up | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1015,3 +1016,28 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `scripts/test-ui-logic.mjs` (where the notice shows, the dismissal remembered across starts and a refusing store, the text in English and Russian, the wiring in `renderAccounts` and `renderAbout`); browser demo 2026-10-08: banner on Accounts, *Dismiss* stores `switchboard.terms-notice` and survives a reload, About panel present, Russian text after switching the language.
 **Product:** unobserved
 **Traces:** SCN-001, SCN-035
+
+## SCN-050 — A coding agent sets Switchboard up
+
+**Persona:** P-01, working with a coding agent (Claude Code or Codex)
+**Goal:** Get Switchboard working by asking the agent, doing only the steps that are the person's.
+**Preconditions:** the `switchboard` CLI is on the agent's `PATH` (or the agent was given its path).
+**Entry point:** the person asks the agent to set Switchboard up; the agent runs `switchboard onboard`, or an embedded console's setup session starts it with that guide.
+**Steps:**
+1. The agent runs `switchboard onboard` and follows the guide; `switchboard onboard --status --json` lists five steps — `owner`, `accounts`, `project`, `mcp`, `proving_call` — each `done`, `todo` (with the command the agent runs), `needs_person` (with what to tell the person) or `optional`.
+2. `owner` not running → the agent asks the person to open the app (or allow `switchboard serve`).
+3. `accounts` empty → the agent may start `switchboard login begin --provider <its provider>`; the person finishes the sign-in in the Terminal window. Keeping the account the ordinary CLI is signed in to (`accounts capture`) only when the person says so.
+4. `project` → offered once: only if the person wants accounts kept for the folder, and with the accounts named.
+5. `mcp` not registered → the agent runs the printed `claude mcp add …` or `codex mcp add …`.
+6. `proving_call` → the agent calls `switchboard_accounts`; a server registered during the session is loaded by the next one, so the agent asks for a new session if the tool is missing.
+7. The agent re-reads the status after every step and, when it is complete, tells the person what is set up.
+**Alt paths:** the agent is not recognised → `mcp` asks for `--host claude|codex`; no data folder yet → no accounts and no project, and nothing is created by reading; a relative `--folder` is refused.
+**Expected result:** a person who never opened the tour has accounts, the MCP server and a proved call, having done only the sign-in and the app start themselves.
+**UI elements:** none in the window yet; the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`. The first-run tour (SCN-035) is to become a view of the same steps (SB-93 slice 2).
+**States covered:** fresh machine, partly set up, complete, unknown agent, server registered but not yet loaded.
+**Errors & recovery:** every step is read again on each run; a half-written agent config reads as not registered and is right on the next run.
+**Status:** draft
+**Meaning:** operator's agents-first strategy, 2026-10-10: the coding agent does every setup step it can; the interface shows the result.
+**Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`).
+**Product:** unobserved
+**Traces:** SCN-035, SCN-001
