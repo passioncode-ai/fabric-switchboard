@@ -51,6 +51,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Approval by checks (passioncode-ai/.github docs/release-signing/DESIGN.md, operator 2026-10-11):
+  # every job that holds the release environment's keys needs this one, which passes a publishing
+  # run only when main contains the tagged commit and CI passed on that exact commit.
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      actions: write   # starts CI on the tag when none ran on the commit
+    steps:
+      - uses: passioncode-ai/.github/actions/release-guard@v1
+        with:
+          workflows: nightly.yml
+          publish: ${{ github.event_name == 'push' || inputs.publish }}
+
   # Before anyone is asked to approve: the tag names the version being built, and a published
   # release has its CHANGELOG section.
   preflight:
@@ -71,7 +86,7 @@ jobs:
           python scripts/release_preflight.py --tag "$TAG" --publish "$PUBLISH"
 
   macos:
-    needs: [preflight]
+    needs: [guard, preflight]
     runs-on: macos-latest
     environment: release
     timeout-minutes: 75
@@ -151,7 +166,7 @@ jobs:
         uses: passioncode-ai/.github/actions/apple-signing/cleanup@v1
 
   windows:
-    needs: [preflight]
+    needs: [guard, preflight]
     strategy:
       fail-fast: false
       matrix:
@@ -342,7 +357,7 @@ jobs:
   # Secret Service (GNOME Keyring in a D-Bus session), the built app passes the same smoke check
   # as the other platforms under Xvfb, and the AppImage becomes the signed updater package.
   linux:
-    needs: [preflight]
+    needs: [guard, preflight]
     strategy:
       fail-fast: false
       matrix:
