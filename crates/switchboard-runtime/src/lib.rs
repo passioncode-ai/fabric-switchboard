@@ -391,6 +391,8 @@ pub struct Runtime {
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
+    /// Candidates whose automatic switch failed, set aside until the time given (SB-98).
+    failed_switches: Mutex<HashMap<String, i64>>,
     native: NativeSources,
     refresh: refresh::RefreshState,
     limits: limits::LimitState,
@@ -475,6 +477,7 @@ impl Runtime {
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
+            failed_switches: Mutex::new(HashMap::new()),
             native,
             refresh,
             limits,

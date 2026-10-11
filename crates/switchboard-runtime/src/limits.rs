@@ -66,6 +66,15 @@ pub(crate) struct Limit {
     pub resets_at: Option<i64>,
     pub until: i64,
     pub confidence: Confidence,
+    /// Why the provider would not let the account go on — Claude Code's
+    /// `quotaLimits.overageDisabledReason` (`org_spend_cap_reached`, `group_zero_credit_limit`,
+    /// `org_level_disabled`…), allowlisted like `limit_type` (SB-98).
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// A hidden limit (SB-98): the provider refused while its own usage figures for the account
+    /// still showed room — a spend or credit cap the usage endpoint does not report.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// Session → the accounts its limits were charged to, and when it was last seen failing.
@@ -116,6 +125,7 @@ pub(crate) struct Marker {
     /// The provider's reset, as reported, even beyond the seven-day hold bound.
     pub reset: Option<i64>,
     pub limit_type: Option<String>,
+    pub reason: Option<String>,
 }
 
 impl LimitState {
@@ -189,6 +199,7 @@ impl LimitState {
             .map(|(id, l)| {
                 serde_json::json!({"account_id": id, "until": l.until, "source": l.source,
                     "kind": l.kind, "limit_type": l.limit_type, "resets_at": l.resets_at, "confidence": l.confidence,
+                    "reason": l.reason, "hidden": l.hidden,
                     "scope": "unknown", "observed_at": l.observed_at, "event_id": l.event_id})
             })
             .collect();
@@ -196,6 +207,61 @@ impl LimitState {
         rows
     }
     /// Keeps the later hold per account. True if anything changed.
+    /// Managed requests the proxy refused and moved to another account (SB-98): each holds its
+    /// account at once — no second refusal is waited for — until the provider's reset when the
+    /// account's own windows say it is full, else for the default hold.
+    pub(crate) fn refused(
+        &self,
+        snapshot: &Snapshot,
+        refusals: &[(String, i64)],
+        now: i64,
+    ) -> bool {
+        let mut changed = false;
+        for (id, at) in refusals {
+            let Some(account) = snapshot.accounts.iter().find(|a| &a.id == id) else {
+                continue;
+            };
+            let reset = account.usage.as_ref().and_then(|usage| {
+                usage
+                    .windows
+                    .iter()
+                    .filter(|w| !w.is_feature() && w.used_percent >= 100.0)
+                    .filter_map(|w| w.resets_at)
+                    .filter(|t| *t > now)
+                    .max()
+            });
+            let until = reset
+                .unwrap_or(at + DEFAULT_HOLD_SECONDS)
+                .min(now + MAX_HOLD_SECONDS);
+            if until <= now {
+                continue;
+            }
+            changed |= self.mark(
+                id,
+                Limit {
+                    event_id: format!("managed:{id}:{at}"),
+                    source: "managed".into(),
+                    session: None,
+                    observed_at: *at,
+                    kind: if reset.is_some() {
+                        LimitKind::Quota
+                    } else {
+                        LimitKind::Unknown
+                    },
+                    limit_type: None,
+                    resets_at: reset.filter(|r| *r >= until),
+                    until,
+                    confidence: Confidence::Attributed,
+                    reason: None,
+                    hidden: reset.is_none() && shows_room(snapshot, id, None),
+                },
+            );
+        }
+        if changed {
+            self.persist();
+        }
+        changed
+    }
     fn mark(&self, id: &str, limit: Limit) -> bool {
         let Ok(mut limited) = self.limited.lock() else {
             return false;
@@ -365,6 +431,8 @@ impl LimitState {
                         resets_at: None,
                         until: event.at + DEFAULT_HOLD_SECONDS,
                         confidence: Confidence::Attributed,
+                        reason: None,
+                        hidden: false,
                     },
                 );
             }
@@ -477,6 +545,8 @@ impl LimitState {
                         resets_at: found.reset,
                         until: found.hold,
                         confidence: Confidence::Inferred,
+                        reason: found.reason.clone(),
+                        hidden: shows_room(snapshot, id, found.limit_type.as_deref()),
                     },
                 );
             }
@@ -493,6 +563,10 @@ fn sane(limit: &Limit, now: i64) -> bool {
         && limit.resets_at.is_none_or(|r| r >= limit.until)
         && limit
             .limit_type
+            .as_deref()
+            .is_none_or(|t| limit_type(t).as_deref() == Some(t))
+        && limit
+            .reason
             .as_deref()
             .is_none_or(|t| limit_type(t).as_deref() == Some(t))
         && limit.event_id.len() <= 160
@@ -622,7 +696,7 @@ impl TranscriptCache {
                 continue;
             };
             for line in scanned.flagged.iter().chain(scanned.pending.as_ref()) {
-                if let Some((at, reset, limit_type)) = marker(line, since, now) {
+                if let Some((at, reset, limit_type, reason)) = marker(line, since, now) {
                     // Bounded from the marker's own time, so the hold is the same on every pass.
                     let hold = reset
                         .unwrap_or(at + DEFAULT_HOLD_SECONDS)
@@ -635,6 +709,7 @@ impl TranscriptCache {
                         reported: reset.is_some(),
                         reset,
                         limit_type,
+                        reason,
                     });
                 }
             }
@@ -764,7 +839,12 @@ fn session_start(path: &Path) -> Option<i64> {
 }
 /// A marker's time, the provider's reported reset (if still ahead) and its allowlisted limit
 /// type. Only flagged API-error lines reach this.
-fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, Option<i64>, Option<String>)> {
+#[allow(clippy::type_complexity)]
+fn marker(
+    line: &[u8],
+    since: i64,
+    now: i64,
+) -> Option<(i64, Option<i64>, Option<String>, Option<String>)> {
     let value: Value = serde_json::from_slice(line).ok()?;
     let limited = value.get("error").and_then(Value::as_str) == Some("rate_limit")
         || value.get("apiErrorStatus").and_then(Value::as_i64) == Some(429);
@@ -788,7 +868,33 @@ fn marker(line: &[u8], since: i64, now: i64) -> Option<(i64, Option<i64>, Option
         .pointer("/quotaLimits/rateLimitType")
         .and_then(Value::as_str)
         .and_then(limit_type);
-    Some((at, reset, limit_type))
+    let reason = value
+        .pointer("/quotaLimits/overageDisabledReason")
+        .and_then(Value::as_str)
+        .and_then(crate::limits::limit_type);
+    Some((at, reset, limit_type, reason))
+}
+/// Whether the provider's own usage figures still showed room for `id` when it refused (SB-98):
+/// the named window below 100 %, or — with none named — every account window below 100 %. An
+/// account never measured shows nothing, so its limit is not called hidden.
+fn shows_room(snapshot: &Snapshot, id: &str, window: Option<&str>) -> bool {
+    let Some(usage) = snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.usage.as_ref())
+    else {
+        return false;
+    };
+    let windows: Vec<_> = usage.windows.iter().filter(|w| !w.is_feature()).collect();
+    match window {
+        Some(name) => windows
+            .iter()
+            .find(|w| w.name == name)
+            .is_none_or(|w| w.used_percent < 100.0),
+        None if windows.is_empty() => usage.used_percent < 100.0,
+        None => windows.iter().all(|w| w.used_percent < 100.0),
+    }
 }
 /// A limit type kept only when it is a short `[a-z0-9_]` name; anything else is dropped.
 fn limit_type(raw: &str) -> Option<String> {
@@ -1052,6 +1158,108 @@ mod tests {
             NOW + 40,
         );
         assert!(state.limited_ids(NOW + 40).is_empty());
+    }
+    #[test]
+    fn a_spend_cap_reason_is_kept_and_a_limit_the_usage_figures_miss_is_hidden() {
+        // SB-98: the shape Claude Code writes on this machine (2026-10-11), fields only.
+        let line = |reason: &str| {
+            serde_json::json!({"type": "assistant", "isApiErrorMessage": true, "error": "rate_limit",
+                "apiErrorStatus": 429, "timestamp": rfc(NOW - 10),
+                "quotaLimits": {"status": "rejected", "resetsAt": NOW + 3600, "rateLimitType": "five_hour",
+                    "overageStatus": "rejected", "overageDisabledReason": reason}})
+            .to_string()
+        };
+        let (_, reset, kind, reason) =
+            marker(line("org_spend_cap_reached").as_bytes(), NOW - 60, NOW).unwrap();
+        assert_eq!(
+            (reset, kind.as_deref(), reason.as_deref()),
+            (
+                Some(NOW + 3600),
+                Some("five_hour"),
+                Some("org_spend_cap_reached")
+            )
+        );
+        let (.., reason) = marker(line("Spend <b>cap</b>").as_bytes(), NOW - 60, NOW).unwrap();
+        assert_eq!(reason, None, "only a short [a-z0-9_] name is kept");
+
+        let account = |used: f64| -> switchboard_core::Account {
+            serde_json::from_value(serde_json::json!({
+                "id": "id-a", "label": "a", "provider": "claude", "kind": "oauth", "pool": "default",
+                "enabled": true, "created_at": 1,
+                "usage": {"used_percent": used, "observed_at": NOW - 5, "resets_at": NOW + 3600,
+                          "source": "claude_oauth",
+                          "windows": [{"name": "five_hour", "used_percent": used, "resets_at": NOW + 3600},
+                                      {"name": "seven_day", "used_percent": 10.0, "resets_at": NOW + 86400}]}
+            }))
+            .unwrap()
+        };
+        let with = |used| Snapshot {
+            accounts: vec![account(used)],
+            ..Default::default()
+        };
+        assert!(
+            shows_room(&with(0.0), "id-a", Some("five_hour")),
+            "usage says 0 %, the provider refused: hidden"
+        );
+        assert!(
+            !shows_room(&with(100.0), "id-a", Some("five_hour")),
+            "a full window is no surprise"
+        );
+        assert!(
+            shows_room(&with(40.0), "id-a", Some("seven_day_opus")),
+            "a window the figures do not carry"
+        );
+        assert!(
+            !shows_room(&Snapshot::default(), "id-a", None),
+            "never measured: not called hidden"
+        );
+    }
+    #[test]
+    fn a_refused_managed_request_holds_its_account_at_once_until_the_reset() {
+        // SB-98: no second refusal is waited for; a full window gives the provider's reset.
+        let account = |id: &str, used: f64, reset: i64| -> switchboard_core::Account {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "label": id, "provider": "claude", "kind": "oauth", "pool": "default",
+                "enabled": true, "created_at": 1,
+                "usage": {"used_percent": used, "observed_at": NOW - 5, "resets_at": reset,
+                          "source": "response_headers",
+                          "windows": [{"name": "five_hour", "used_percent": used, "resets_at": reset}]}
+            }))
+            .unwrap()
+        };
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("id-full", 100.0, NOW + 7200),
+                account("id-room", 40.0, NOW + 7200),
+            ],
+            ..Default::default()
+        };
+        let state = LimitState::default();
+        let refusals = [
+            ("id-full".to_string(), NOW - 2),
+            ("id-room".to_string(), NOW - 1),
+            ("id-gone".to_string(), NOW - 1),
+        ];
+        assert!(state.refused(&snapshot, &refusals, NOW));
+        let report = state.report(NOW);
+        let row = |id: &str| report.iter().find(|r| r["account_id"] == id).cloned();
+        let full = row("id-full").unwrap();
+        assert_eq!(full["until"], NOW + 7200);
+        assert_eq!(full["resets_at"], NOW + 7200);
+        assert_eq!(full["confidence"], "attributed");
+        assert_eq!(full["kind"], "quota");
+        let room = row("id-room").unwrap();
+        assert_eq!(
+            room["until"],
+            NOW - 1 + DEFAULT_HOLD_SECONDS,
+            "no reset known: the default hold"
+        );
+        assert!(room["resets_at"].is_null());
+        assert!(
+            row("id-gone").is_none(),
+            "an account no longer saved is ignored"
+        );
+        assert!(state.limited_ids(NOW).contains("id-full"));
     }
     #[test]
     fn managed_rate_limit_events_mark_their_account() {
@@ -1350,6 +1558,8 @@ mod tests {
             resets_at: None,
             until,
             confidence: Confidence::Attributed,
+            reason: None,
+            hidden: false,
         };
         let evidence = EvidenceFile {
             version: 1,
@@ -1382,6 +1592,8 @@ mod tests {
             resets_at: None,
             until,
             confidence: Confidence::Attributed,
+            reason: None,
+            hidden: false,
         };
         for i in 0..MAX_ENTRIES as i64 {
             assert!(state.mark(&format!("id-{i}"), limit(NOW + 100 + i)));

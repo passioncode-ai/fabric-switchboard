@@ -1266,3 +1266,113 @@ fn a_project_pool_never_drives_the_ordinary_claude_code() {
         switchboard_core::PROJECT_NOT_NATIVE
     );
 }
+
+/// SB-98: an account in use that fails every request never waits for fresh figures. With no
+/// candidate measured lately, the one whose last known usage leaves the most room is taken; an
+/// account whose windows have all reset since counts as empty, one never measured comes last.
+#[test]
+fn a_limited_account_moves_on_last_known_usage_when_nothing_is_fresh() {
+    use std::collections::HashSet;
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    let d = account(&store, "org-d", now);
+    observe(&store, &a, 40., now);
+    // Measured half an hour ago — older than the policy's five minutes.
+    observe(&store, &b, 30., now - 1800);
+    observe(&store, &c, 10., now - 1800);
+    let p = policy();
+    let limited: HashSet<String> = [a.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_reached");
+    assert_eq!(
+        decision.candidate_id.as_deref(),
+        Some(c.as_str()),
+        "least used of the stale"
+    );
+
+    // A full account whose window reset since is empty again, ahead of any other guess.
+    let e = account(&store, "org-e", now);
+    observe(&store, &e, 100., now - 4000);
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(e.as_str()));
+
+    // With b, c and e held too, the account never measured is the last resort.
+    let limited: HashSet<String> = [a.clone(), b.clone(), c.clone(), e.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(d.as_str()));
+
+    // A stale account still known full is never a guess.
+    observe(&store, &d, 100., now - 1800);
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_no_eligible_account");
+
+    // Without a limit, stale figures still hold the account in use: no guessing then.
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &HashSet::new())
+        .unwrap();
+    assert!(decision.candidate_id.is_none());
+}
+
+/// SB-98: a managed request refused for a limit moves the pool at once — automatic switching on
+/// or off — and the refused account is held for everyone reading the store.
+#[test]
+fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    observe(&store, &a, 20., now);
+    observe(&store, &b, 50., now);
+    observe(&store, &c, 10., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    let mut off = policy();
+    off.enabled = false;
+    store.set_policy(off).unwrap();
+
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, c);
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, c);
+    assert!(store.limited().contains(&a));
+    assert!(store
+        .snapshot()
+        .unwrap()
+        .events
+        .iter()
+        .any(|e| e.action == "rotation"
+            && e.detail == "switched"
+            && e.account_id.as_deref() == Some(c.as_str())));
+    let refused: Vec<String> = store
+        .take_refusals()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(refused, std::slice::from_ref(&a));
+    assert!(store.take_refusals().is_empty(), "taken once");
+
+    // c refused too: b is next; then nothing is left and the route stays.
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &c, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, b);
+    assert!(store
+        .failover(Provider::Claude, "default", &b, now)
+        .unwrap()
+        .is_none());
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
+}

@@ -452,3 +452,18 @@ export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'poo
   const mode = session.mode === 'managed' ? t('Managed · follows the {pool} pool', { pool: session.pool }) : t('Isolated');
   return session.in_place ? t('{mode} · in an embedded terminal', { mode }) : t('{mode} · in Terminal', { mode });
 }
+/** SB-98: what a limit row says — a hidden limit (refused while the usage figures showed room) first. */
+export function limitTitle(limit: Pick<AccountLimit, 'source' | 'hidden'>): string {
+  if (limit.hidden) return t('Hidden limit · refused although the usage figures show room');
+  return limit.source === 'managed' ? t('Limit reached · a managed request was refused') : t('Limit reached · reported by Claude Code');
+}
+/** SB-98: the provider's reason for refusing more, in words; null when none was given. */
+export function limitReasonText(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  switch (reason) {
+    case 'org_spend_cap_reached': return t('The organisation\'s spend cap is reached, so extra usage is off until it resets.');
+    case 'group_zero_credit_limit': return t('No credits are left for extra usage.');
+    case 'org_level_disabled': return t('Extra usage is turned off for the organisation.');
+    default: return t('Provider reason: {reason}', { reason });
+  }
+}

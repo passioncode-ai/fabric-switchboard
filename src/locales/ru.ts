@@ -4,6 +4,11 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Hidden limit · refused although the usage figures show room": "Скрытый лимит · отказ, хотя по данным об использовании запас есть",
+  "The organisation's spend cap is reached, so extra usage is off until it resets.": "Достигнут лимит расходов организации: дополнительное использование выключено до сброса.",
+  "No credits are left for extra usage.": "Кредиты на дополнительное использование закончились.",
+  "Extra usage is turned off for the organisation.": "Дополнительное использование выключено для организации.",
+  "Provider reason: {reason}": "Причина у провайдера: {reason}",
   "Sessions": "Сессии",
   "Sessions are unavailable. Refresh to retry.": "Сессии недоступны. Обновите, чтобы повторить.",
   "Reading sessions…": "Читаем сессии…",

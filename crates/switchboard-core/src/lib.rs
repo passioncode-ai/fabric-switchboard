@@ -256,6 +256,12 @@ pub struct Store {
     pending_since: std::sync::atomic::AtomicI64,
     /// Accounts the ordinary CLIs are signed in to, as the monitor last saw (SB-48). Memory only.
     in_use: Mutex<Option<std::collections::BTreeSet<String>>>,
+    /// Accounts a provider limit holds right now, as the runtime's limit evidence last said
+    /// (SB-98). Memory only; the proxy reads it to fail over without asking the runtime.
+    limited: Mutex<std::collections::HashSet<String>>,
+    /// Managed requests the provider refused for a limit since the runtime last looked (SB-98):
+    /// account → when. Memory only; the runtime turns each into limit evidence.
+    refused: Mutex<std::collections::HashMap<String, i64>>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -484,6 +490,8 @@ impl Store {
             writes: Default::default(),
             pending_since: Default::default(),
             in_use: Default::default(),
+            limited: Default::default(),
+            refused: Default::default(),
         })
     }
     /// The private data folder this store owns.
@@ -522,6 +530,77 @@ impl Store {
     /// in use since the last call is due on the active cadence from its last check; the change
     /// stays in memory like any other timestamp (lifecycle LC-08). The first call only learns the
     /// set: a start moves no schedule.
+    /// Replaces the accounts a limit holds (SB-98): the runtime publishes its evidence here.
+    pub fn set_limited(&self, ids: std::collections::HashSet<String>) {
+        if let Ok(mut held) = self.limited.lock() {
+            *held = ids;
+        }
+    }
+    pub fn limited(&self) -> std::collections::HashSet<String> {
+        self.limited
+            .lock()
+            .map(|held| held.clone())
+            .unwrap_or_default()
+    }
+    /// The refusals recorded by `failover` since the last call, oldest first; taking them
+    /// clears them.
+    pub fn take_refusals(&self) -> Vec<(String, i64)> {
+        let mut taken: Vec<_> = self
+            .refused
+            .lock()
+            .map(|mut refused| refused.drain().collect())
+            .unwrap_or_default();
+        taken.sort_by_key(|(_, at)| *at);
+        taken
+    }
+    /// A managed request on `from` was refused for a limit (SB-98): `from` joins the held
+    /// accounts and the pool moves to its next usable account at once — the same choice the
+    /// automatic switch makes for a limited account (`rotation_decision_with`), with the pool's
+    /// managed policy's figures when it has one, whether or not that policy is switched on: a
+    /// limit is an outage, not a preference. Returns the new route, or None when no other
+    /// account can take the request (the caller then answers the provider's refusal).
+    pub fn failover(
+        &self,
+        provider: Provider,
+        pool: &str,
+        from: &str,
+        now: i64,
+    ) -> Result<Option<(Account, Credential)>, String> {
+        let mut held = self.limited();
+        held.insert(from.to_owned());
+        if let Ok(mut shared) = self.limited.lock() {
+            shared.insert(from.to_owned());
+        }
+        if let Ok(mut refused) = self.refused.lock() {
+            refused.insert(from.to_owned(), now);
+        }
+        let mut policy = self
+            .lock()?
+            .policies
+            .iter()
+            .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
+            .cloned()
+            .unwrap_or(RotationPolicy {
+                provider,
+                pool: pool.to_owned(),
+                target: "managed".into(),
+                enabled: true,
+                threshold_percent: 90.0,
+                hysteresis_percent: 10.0,
+                cooldown_seconds: 0,
+                max_age_seconds: 300,
+                last_switched_at: None,
+            });
+        policy.enabled = true;
+        policy.last_switched_at = None;
+        let decision = self.rotation_decision_with(&policy, Some(from), now, &held)?;
+        let Some(id) = decision.candidate_id else {
+            return Ok(None);
+        };
+        self.select_with_cooldown(provider, pool, &id, now)?;
+        let _ = self.record("rotation", Some(&id), "switched");
+        self.route(provider, pool).map(Some)
+    }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {
             let mut set = self

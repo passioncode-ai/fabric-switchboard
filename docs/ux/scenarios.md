@@ -59,6 +59,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-049 | See the provider terms notice | draft |
 | SCN-050 | A coding agent sets Switchboard up | draft |
 | SCN-051 | See which sessions Switchboard launched are running | draft |
+| SCN-052 | An agent keeps working when its account hits a limit | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1062,3 +1063,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `sessionStateLabel`, `sessionHow` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 in English and Russian (two sessions: managed running, isolated starting in place); the list itself: `a_launch_records_its_session_and_the_list_follows_its_process`.
 **Product:** unobserved
 **Traces:** SCN-016, SCN-050
+
+## SCN-052 — An agent keeps working when its account hits a limit
+
+**Persona:** P-01, with several accounts in a pool
+**Goal:** Agents go on working when an account reaches a limit, without pauses, as long as another account has room.
+**Preconditions:** the session runs in managed mode (launched from Switchboard, or through its proxy).
+**Entry point:** none — it happens on its own; Accounts shows the result.
+**Steps:**
+1. The provider refuses a request for a limit → the same request goes once to the pool's next usable account; the agent receives its answer and does not pause. Later requests go to that account.
+2. Accounts: the refused account shows “Limit reached · a managed request was refused” with its reset, or — when the provider's usage figures still showed room — “Hidden limit · refused although the usage figures show room”, and the provider's reason in words when it gave one (“The organisation's spend cap is reached, so extra usage is off until it resets.”, “No credits are left for extra usage.”, “Extra usage is turned off for the organisation.”).
+3. The ordinary Claude Code (automatic switching on): a limit moves it to the next account even when no account was measured lately; a candidate that fails to activate is set aside and the next one tried in the same pass.
+**Alt paths:** every account in the pool refused → the provider's refusal reaches the agent; an agent on an API key keeps the provider's answer (never moved); a native session whose turn already ended does not resume by itself.
+**Expected result:** no agent waits on a limit while another account in its pool has room.
+**UI elements:** the limit row on each account card (title, reset, reason).
+**States covered:** refused and moved, all refused, hidden limit, reason given, no reason.
+**Errors & recovery:** a failed switch is retried with the next candidate; the held account becomes usable again at its reset.
+**Status:** draft
+**Meaning:** operator request 2026-10-11 («агенты должны работать дальше, никаких пауз по лимитам»; «скрытые лимиты … добавлять эту категорию»).
+**Coverage:** CONTRACTS → Agents keep working through a limit (tests named there); `limitTitle`, `limitReasonText` in `scripts/test-ui-logic.mjs`.
+**Product:** unobserved
+**Traces:** SCN-040, SCN-022

@@ -21,6 +21,16 @@ const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
 
+// SB-98: a hidden limit says so first; the provider's reason reads in words.
+check(() => {
+  assert.equal(logic.limitTitle({ source: 'claude_code', hidden: true }), 'Hidden limit · refused although the usage figures show room');
+  assert.equal(logic.limitTitle({ source: 'managed' }), 'Limit reached · a managed request was refused');
+  assert.equal(logic.limitTitle({ source: 'claude_code', hidden: false }), 'Limit reached · reported by Claude Code');
+  assert.match(logic.limitReasonText('org_spend_cap_reached'), /spend cap/);
+  assert.equal(logic.limitReasonText('group_zero_credit_limit'), 'No credits are left for extra usage.');
+  assert.equal(logic.limitReasonText('something_new'), 'Provider reason: something_new');
+  assert.equal(logic.limitReasonText(null), null);
+});
 // SB-65: a session's state and how it runs.
 check(() => {
   assert.equal(logic.sessionStateLabel('running'), 'Running');

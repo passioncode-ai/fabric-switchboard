@@ -412,80 +412,106 @@ async fn relay(
             }
             Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "Request body timed out."),
         };
-    let url = match (provider, account.kind) {
-        (Provider::Claude, _) => format!(
-            "{}/v1/{}{}",
-            g.claude,
-            operation,
-            if query.is_some() { "?beta=true" } else { "" }
-        ),
-        (Provider::Codex, AuthKind::OAuth) => format!("{}/backend-api/codex/responses", g.chatgpt),
-        (Provider::Codex, _) => format!("{}/v1/{}", g.openai, operation),
-    };
-    let mut headers = HeaderMap::new();
-    let request_hop_fields = connection_fields(&parts.headers);
-    for &name in REQUEST_HEADERS {
-        if request_hop_fields.contains(name) {
-            continue;
-        }
-        if let Some(value) = parts.headers.get(name) {
-            headers.insert(name, value.clone());
-        }
-    }
-    headers.insert(
-        "content-type",
-        axum::http::HeaderValue::from_static("application/json"),
-    );
-    // Claude headers are settled in the map: `RequestBuilder::header` appends, and a
-    // second `anthropic-beta` beside the client's would leave the provider two answers.
-    if provider == Provider::Claude && account.kind == AuthKind::OAuth {
-        let existing = headers
-            .get("anthropic-beta")
-            .and_then(|h| h.to_str().ok())
-            .unwrap_or("");
-        let beta = if existing.split(',').any(|v| v.trim() == "oauth-2025-04-20") {
-            existing.to_owned()
-        } else if existing.is_empty() {
-            "oauth-2025-04-20".into()
-        } else {
-            format!("{existing},oauth-2025-04-20")
+    let mut moved = false;
+    let mut account = account;
+    let mut credential = credential;
+    let (upstream, journaled) = loop {
+        let url = match (provider, account.kind) {
+            (Provider::Claude, _) => format!(
+                "{}/v1/{}{}",
+                g.claude,
+                operation,
+                if query.is_some() { "?beta=true" } else { "" }
+            ),
+            (Provider::Codex, AuthKind::OAuth) => {
+                format!("{}/backend-api/codex/responses", g.chatgpt)
+            }
+            (Provider::Codex, _) => format!("{}/v1/{}", g.openai, operation),
         };
-        let beta = axum::http::HeaderValue::from_str(&beta)
-            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("oauth-2025-04-20"));
-        headers.insert("anthropic-beta", beta);
-    }
-    if provider == Provider::Claude && !headers.contains_key("anthropic-version") {
+        let mut headers = HeaderMap::new();
+        let request_hop_fields = connection_fields(&parts.headers);
+        for &name in REQUEST_HEADERS {
+            if request_hop_fields.contains(name) {
+                continue;
+            }
+            if let Some(value) = parts.headers.get(name) {
+                headers.insert(name, value.clone());
+            }
+        }
         headers.insert(
-            "anthropic-version",
-            axum::http::HeaderValue::from_static("2023-06-01"),
+            "content-type",
+            axum::http::HeaderValue::from_static("application/json"),
         );
-    }
-    let mut outgoing = g.client.post(url).headers(headers).body(bytes);
-    if provider == Provider::Claude && account.kind == AuthKind::ApiKey {
-        outgoing = outgoing.header("x-api-key", &credential.access_token);
-    } else {
-        outgoing = outgoing.bearer_auth(&credential.access_token);
-    }
-    if provider == Provider::Codex && account.kind == AuthKind::OAuth {
-        let Some(id) = credential.account_id.as_ref() else {
-            return error(
-                StatusCode::CONFLICT,
-                "Account identity missing. Sign in again.",
-            );
-        };
-        outgoing = outgoing.header("chatgpt-account-id", id);
-    }
-    let upstream = match outgoing.send().await {
-        Ok(r) => r,
-        Err(_) => {
-            let _ = g
-                .store
-                .record("request", Some(&account.id), "network_error");
-            return error(
-                StatusCode::BAD_GATEWAY,
-                "Provider connection failed. Request was not replayed.",
+        // Claude headers are settled in the map: `RequestBuilder::header` appends, and a
+        // second `anthropic-beta` beside the client's would leave the provider two answers.
+        if provider == Provider::Claude && account.kind == AuthKind::OAuth {
+            let existing = headers
+                .get("anthropic-beta")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+            let beta = if existing.split(',').any(|v| v.trim() == "oauth-2025-04-20") {
+                existing.to_owned()
+            } else if existing.is_empty() {
+                "oauth-2025-04-20".into()
+            } else {
+                format!("{existing},oauth-2025-04-20")
+            };
+            let beta = axum::http::HeaderValue::from_str(&beta)
+                .unwrap_or_else(|_| axum::http::HeaderValue::from_static("oauth-2025-04-20"));
+            headers.insert("anthropic-beta", beta);
+        }
+        if provider == Provider::Claude && !headers.contains_key("anthropic-version") {
+            headers.insert(
+                "anthropic-version",
+                axum::http::HeaderValue::from_static("2023-06-01"),
             );
         }
+        let mut outgoing = g.client.post(url).headers(headers).body(bytes.clone());
+        if provider == Provider::Claude && account.kind == AuthKind::ApiKey {
+            outgoing = outgoing.header("x-api-key", &credential.access_token);
+        } else {
+            outgoing = outgoing.bearer_auth(&credential.access_token);
+        }
+        if provider == Provider::Codex && account.kind == AuthKind::OAuth {
+            let Some(id) = credential.account_id.as_ref() else {
+                return error(
+                    StatusCode::CONFLICT,
+                    "Account identity missing. Sign in again.",
+                );
+            };
+            outgoing = outgoing.header("chatgpt-account-id", id);
+        }
+        let upstream = match outgoing.send().await {
+            Ok(r) => r,
+            Err(_) => {
+                let _ = g
+                    .store
+                    .record("request", Some(&account.id), "network_error");
+                return error(
+                    StatusCode::BAD_GATEWAY,
+                    "Provider connection failed. Request was not replayed.",
+                );
+            }
+        };
+        // SB-98 (operator decision 2026-10-11): a session's request the provider refused for
+        // a limit did no work, so it moves — once — to the pool's next usable account, which
+        // also serves the requests after it; the agent never sees the pause. Only Claude Code
+        // and Codex sessions: an agent's API-key request keeps the provider's answer.
+        if upstream.status() == StatusCode::TOO_MANY_REQUESTS && official && !moved {
+            let _ = g.store.record("request", Some(&account.id), "rate_limited");
+            if provider == Provider::Claude {
+                if let Some(usage) = usage_from_headers(upstream.headers()) {
+                    let _ = g.store.observe_credential(&account.id, &credential, usage);
+                }
+            }
+            if let Ok(Some(next)) = g.store.failover(provider, &pool, &account.id, now()) {
+                (account, credential) = next;
+                moved = true;
+                continue;
+            }
+            break (upstream, true);
+        }
+        break (upstream, false);
     };
     let status = upstream.status();
     if status.is_redirection() {
@@ -497,7 +523,7 @@ async fn relay(
         429 => "rate_limited",
         _ => "upstream_error",
     };
-    if !status.is_success() {
+    if !status.is_success() && !journaled {
         let _ = g.store.record("request", Some(&account.id), detail);
     }
     if provider == Provider::Claude {

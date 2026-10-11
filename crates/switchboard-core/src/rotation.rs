@@ -179,6 +179,34 @@ impl Store {
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
             });
+        // SB-98: an account in use that fails every request must not keep an agent waiting for
+        // fresh figures. Without a candidate known fresh, take the one whose last known usage
+        // leaves room — a window whose reset has passed counts as empty — and one never measured
+        // last; a wrong guess costs one refused request, which then holds that account too.
+        let candidate = candidate.or_else(|| {
+            if !current_limited {
+                return None;
+            }
+            state
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.id != current.id
+                        && a.provider == policy.provider
+                        && a.pool == policy.pool
+                        && !limited.contains(&a.id)
+                        && self.rotation_credential_eligible(a, policy, now)
+                })
+                .filter_map(|a| {
+                    let used = last_known_usage(a, now);
+                    (used < 100.0).then_some((a, used))
+                })
+                .min_by(|(a, x), (b, y)| {
+                    x.total_cmp(y)
+                        .then_with(|| a.created_at.cmp(&b.created_at))
+                        .then_with(|| a.id.cmp(&b.id))
+                })
+        });
         Ok(match candidate {
             Some((a, _)) => RotationDecision {
                 candidate_id: Some(a.id.clone()),
@@ -224,6 +252,26 @@ impl Store {
             && live
             && (policy.target != "claude_cli" || credential.native_context.is_some())
     }
+}
+/// The best guess at an account's usage when nothing fresh is known (SB-98): its last
+/// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
+/// still below a full account — when it was never measured.
+fn last_known_usage(account: &Account, now: i64) -> f64 {
+    let Some(usage) = account.usage.as_ref() else {
+        return 99.0;
+    };
+    let windows: Vec<_> = usage.windows.iter().filter(|w| !w.is_feature()).collect();
+    let all_reset = if windows.is_empty() {
+        usage.resets_at.is_some_and(|t| t <= now)
+    } else {
+        windows
+            .iter()
+            .all(|w| w.resets_at.is_some_and(|t| t <= now))
+    };
+    if all_reset {
+        return 0.0;
+    }
+    usage.account_used_percent().unwrap_or(99.0)
 }
 fn fresh_usage(account: &Account, policy: &RotationPolicy, now: i64) -> Option<f64> {
     let usage = account.usage.as_ref()?;

@@ -623,6 +623,13 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         .limits
         .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
     runtime.limits.refresh(&snapshot, native, &files, time);
+    // SB-98: what the proxy refused since the last pass is evidence at once, and the proxy
+    // reads the held accounts back from the store when it next has to move a request.
+    let refusals = runtime.store.take_refusals();
+    if !refusals.is_empty() {
+        runtime.limits.refused(&snapshot, &refusals, time);
+    }
+    runtime.store.set_limited(runtime.limits.limited_ids(time));
 }
 
 fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
@@ -664,71 +671,110 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                 .into_iter()
                 .filter(|id| current.as_deref() != Some(id.as_str())),
         );
-        let decision =
-            runtime
-                .store
-                .rotation_decision_with(policy, current.as_deref(), now(), &excluded)?;
-        let mut reason = decision.reason;
-        if let Some(id) = decision.candidate_id.as_deref() {
-            let result = if policy.target == "managed" {
-                runtime
-                    .store
-                    .select_with_cooldown(policy.provider, &policy.pool, id, now())
-            } else if native_sources {
-                crate::activate_native(
-                    &runtime.store,
-                    id,
-                    current.as_deref(),
-                    runtime.native,
-                    Some(&runtime.refresh),
-                )
-            } else {
-                Err("Native account source unavailable.".into())
-            };
-            if result.is_ok() {
-                runtime.invalidate_current();
-                if policy.target == "claude_cli" {
-                    let identity = snapshot
-                        .accounts
-                        .iter()
-                        .find(|a| a.id == id)
-                        .and_then(|a| a.external_identity.as_ref());
-                    runtime.limits.switched(identity, now());
-                }
-                reason = if reason.starts_with("limit") {
-                    "switched_on_limit"
-                } else {
-                    "switched"
-                }
-                .into();
-                if let Some(client) = runtime.analytics() {
-                    client.switched(
-                        policy.provider.as_str(),
-                        if policy.target == "managed" {
-                            "managed"
-                        } else {
-                            "native"
-                        },
-                        if reason == "switched_on_limit" {
-                            "limit"
-                        } else {
-                            "rotation"
-                        },
-                    );
-                }
-            } else if policy.target == "claude_cli" {
-                reason = "activation_failed".into();
-            } else {
-                reason = "switch_failed".into();
-            }
-            // Journal after the outcome is fixed; a write failure cannot undo a switch.
-            let _ = runtime.store.record(
-                "rotation",
-                Some(id),
-                if result.is_ok() { "switched" } else { "failed" },
+        // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
+        // is tried in the same pass — up to three — instead of the same one every 30 s.
+        if let Ok(failed) = runtime.failed_switches.lock() {
+            excluded.extend(
+                failed
+                    .iter()
+                    .filter(|(_, until)| **until > now())
+                    .map(|(id, _)| id.clone()),
             );
         }
-        decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":decision.candidate_id}));
+        let mut attempt = 0;
+        // The last failed switch: when nothing else can be tried, that failure is the answer.
+        let mut last_failure: Option<(String, String)> = None;
+        let (candidate, reason) = loop {
+            attempt += 1;
+            let decision = runtime.store.rotation_decision_with(
+                policy,
+                current.as_deref(),
+                now(),
+                &excluded,
+            )?;
+            let mut reason = decision.reason;
+            if let Some(id) = decision.candidate_id.as_deref() {
+                let result = if policy.target == "managed" {
+                    runtime
+                        .store
+                        .select_with_cooldown(policy.provider, &policy.pool, id, now())
+                } else if native_sources {
+                    crate::activate_native(
+                        &runtime.store,
+                        id,
+                        current.as_deref(),
+                        runtime.native,
+                        Some(&runtime.refresh),
+                    )
+                } else {
+                    Err("Native account source unavailable.".into())
+                };
+                if result.is_ok() {
+                    runtime.invalidate_current();
+                    if policy.target == "claude_cli" {
+                        let identity = snapshot
+                            .accounts
+                            .iter()
+                            .find(|a| a.id == id)
+                            .and_then(|a| a.external_identity.as_ref());
+                        runtime.limits.switched(identity, now());
+                    }
+                    reason = if reason.starts_with("limit") {
+                        "switched_on_limit"
+                    } else {
+                        "switched"
+                    }
+                    .into();
+                    if let Some(client) = runtime.analytics() {
+                        client.switched(
+                            policy.provider.as_str(),
+                            if policy.target == "managed" {
+                                "managed"
+                            } else {
+                                "native"
+                            },
+                            if reason == "switched_on_limit" {
+                                "limit"
+                            } else {
+                                "rotation"
+                            },
+                        );
+                    }
+                } else if policy.target == "claude_cli" {
+                    reason = "activation_failed".into();
+                } else {
+                    reason = "switch_failed".into();
+                }
+                // Journal after the outcome is fixed; a write failure cannot undo a switch.
+                let _ = runtime.store.record(
+                    "rotation",
+                    Some(id),
+                    if result.is_ok() { "switched" } else { "failed" },
+                );
+            }
+            let failed = reason == "activation_failed" || reason == "switch_failed";
+            match decision.candidate_id.clone() {
+                Some(id) if failed && attempt < 3 => {
+                    if let Ok(mut set_aside) = runtime.failed_switches.lock() {
+                        set_aside.insert(id.clone(), now() + 600);
+                    }
+                    excluded.insert(id.clone());
+                    last_failure = Some((id, reason));
+                }
+                Some(id) if failed => {
+                    if let Ok(mut set_aside) = runtime.failed_switches.lock() {
+                        set_aside.insert(id, now() + 600);
+                    }
+                    break (decision.candidate_id, reason);
+                }
+                None => match last_failure.take() {
+                    Some((id, failure)) => break (Some(id), failure),
+                    None => break (None, reason),
+                },
+                _ => break (decision.candidate_id, reason),
+            }
+        };
+        decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":candidate}));
     }
     *runtime
         .monitor_decisions
@@ -844,6 +890,42 @@ mod tests {
             runtime.store.snapshot().unwrap().routes["claude:default"],
             a.id
         );
+    }
+    /// Fails to activate synthetic-b only; every other account activates.
+    fn fails_for_b(
+        credential: &switchboard_core::Credential,
+        target: &switchboard_core::ExternalIdentity,
+        expected: Option<&switchboard_core::ExternalIdentity>,
+        preserve: &mut dyn FnMut(&crate::external::Outgoing<'_>) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if target.account_id.as_deref() == Some("synthetic-b") {
+            return Err("Claude activation failed; previous account restored.".into());
+        }
+        crate::fixtures::activates(credential, target, expected, preserve)
+    }
+    #[tokio::test]
+    async fn a_candidate_that_fails_to_activate_is_set_aside_and_the_next_one_tried_at_once() {
+        // SB-98: the same failing candidate every 30 s kept Claude Code on a spent account.
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, fails_for_b).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        quota(&runtime.store, &c.id, 20.0);
+        runtime.store.set_policy(policy("claude_cli")).unwrap();
+        rotate(&runtime, true).unwrap();
+        assert_eq!(reason(&runtime), "switched");
+        let decisions = runtime.monitor_decisions.lock().unwrap().clone();
+        assert_eq!(
+            decisions[0]["candidate_id"],
+            c.id.as_str(),
+            "b failed, c took over in the same pass"
+        );
+        let set_aside = runtime.failed_switches.lock().unwrap().clone();
+        assert!(set_aside.get(&b.id).is_some_and(|until| *until > now()));
     }
     #[tokio::test]
     async fn automatic_native_switch_journals_activation_and_rotation() {
