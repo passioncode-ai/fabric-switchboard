@@ -284,6 +284,23 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
+## Forgotten sign-ins at start (SB-87, 2026-10-11)
+
+Code: `launch::sweep_logins` (`sweep_logins_with` for tests), called once from
+`Owner::start_with_sources` for a native owner, on a blocking thread off the start path.
+
+- Considers only folders directly under `logins/` named by a UUID, never a link.
+- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` not expired, or
+  `session_running`); a later start removes it once it ended — an earlier owner's sign-in cannot
+  be finished by this one (its registry was in memory).
+- Otherwise, on macOS, probes the derived Claude Code Keychain item by attributes only
+  (`probe_external` with `/usr/bin/security`): absent → the home is removed; present and trusted
+  by `/usr/bin/security` in an unlocked keychain → deleted silently, then the home; locked,
+  unavailable or an access list that would ask → both kept. A failed delete keeps the home, so an
+  item is never orphaned. Elsewhere the credentials live inside the home and go with it.
+- Log: `login_leftovers` with `removed`, `running`, `kept` (numbers only), only when one is
+  non-zero. Test: `a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask`.
+
 ## Session list (SB-95, 2026-10-11)
 
 Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idle`, reads only),

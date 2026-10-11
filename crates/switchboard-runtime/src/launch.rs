@@ -807,6 +807,113 @@ pub fn clean_login(login: &Login) -> Result<(), String> {
         Err(_) => Err("Account saved; isolated login cleanup needs attention.".into()),
     }
 }
+/// What an owner start did with sign-in homes a previous owner left behind (SB-87).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Sweep {
+    /// Removed: no session ran in them and no Keychain item needed a dialog to delete.
+    pub removed: usize,
+    /// Kept: their sign-in is still open in Terminal; a later start removes them once it ends.
+    pub running: usize,
+    /// Kept: a Keychain item that could not be deleted silently (locked, or not created through
+    /// `/usr/bin/security`), or a marker that could not be read. OPERATIONS → recovery.
+    pub kept: usize,
+}
+/// The Claude Code Keychain item a sign-in home may have left.
+pub(crate) enum LeftoverItem {
+    Absent,
+    /// Present and deletable through `/usr/bin/security` without a dialog.
+    Silent,
+    /// Locked, unavailable, or an access list that would ask.
+    Asks,
+}
+/// Removes the sign-in homes an earlier owner forgot (it crashed or quit with a sign-in open):
+/// only UUID-named folders directly under `logins/`, never a link, never one whose sign-in still
+/// runs in Terminal, and never one whose Keychain item would ask to be deleted. Runs once, at an
+/// owner's start, before any sign-in of this owner exists.
+pub fn sweep_logins(root: &Path) -> Sweep {
+    sweep_logins_with(root, &native_leftover_item, &native_delete_item)
+}
+pub(crate) fn sweep_logins_with(
+    root: &Path,
+    item: &dyn Fn(&Path) -> LeftoverItem,
+    delete: &dyn Fn(&Path) -> Result<(), String>,
+) -> Sweep {
+    let mut sweep = Sweep::default();
+    let Ok(entries) = fs::read_dir(root.join("logins")) else {
+        return sweep;
+    };
+    for entry in entries.flatten() {
+        let home = entry.path();
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| Uuid::parse_str(name).is_ok());
+        if !named || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
+            meta.file_type().is_file()
+                && !meta
+                    .modified()
+                    .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
+        });
+        match session_running(&home) {
+            _ if pending => sweep.running += 1,
+            Ok(true) => sweep.running += 1,
+            Err(_) => sweep.kept += 1,
+            Ok(false) => {
+                let cleared = match item(&home) {
+                    LeftoverItem::Absent => true,
+                    LeftoverItem::Silent => delete(&home).is_ok(),
+                    LeftoverItem::Asks => false,
+                };
+                if cleared && fs::remove_dir_all(&home).is_ok() {
+                    sweep.removed += 1;
+                } else {
+                    sweep.kept += 1;
+                }
+            }
+        }
+    }
+    sweep
+}
+fn native_leftover_item(home: &Path) -> LeftoverItem {
+    #[cfg(target_os = "macos")]
+    {
+        use switchboard_core::external_keychain::{probe_external, ItemProbe};
+        let Ok(user) = login_user() else {
+            return LeftoverItem::Asks;
+        };
+        match probe_external(
+            &keychain_service(home),
+            &user,
+            Some(Path::new("/usr/bin/security")),
+        ) {
+            ItemProbe::Absent => LeftoverItem::Absent,
+            ItemProbe::Present {
+                tool_trusted: true, ..
+            } => LeftoverItem::Silent,
+            _ => LeftoverItem::Asks,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Elsewhere a sign-in's credentials live inside its home and go with it.
+        let _ = home;
+        LeftoverItem::Absent
+    }
+}
+fn native_delete_item(home: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::external_keychain::delete(&keychain_service(home), &login_user()?)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = home;
+        Ok(())
+    }
+}
 /// A session marker is written as its shell starts, so a live process younger than the
 /// marker by more than this margin cannot be that shell: its pid was reused.
 #[cfg(any(unix, test))]
@@ -2362,6 +2469,93 @@ mod tests {
         end_sign_in_within(&login.home, Duration::from_millis(500)).unwrap();
         exited.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(ensure_idle(&login.home).is_ok());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask() {
+        // SB-87: an earlier owner's sign-in homes, as a crash or a quit leaves them.
+        let root = tempfile::tempdir().unwrap();
+        let logins = root.path().join("logins");
+        let home = |name: &str| {
+            let home = logins.join(name);
+            private_dir(&home).unwrap();
+            home
+        };
+        let idle = home(&Uuid::new_v4().to_string());
+        let with_item = home(&Uuid::new_v4().to_string());
+        let asks = home(&Uuid::new_v4().to_string());
+        let starting = home(&Uuid::new_v4().to_string());
+        fs::write(starting.join(".launch-pending"), "").unwrap();
+        let not_ours = home("notes");
+        let (running, exited) = terminal_session(root.path(), "sleep 60 & wait $!");
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), logins.join(Uuid::new_v4().to_string()))
+            .unwrap();
+
+        let deleted = std::cell::RefCell::new(Vec::new());
+        let item = |h: &Path| {
+            if h == with_item {
+                LeftoverItem::Silent
+            } else if h == asks {
+                LeftoverItem::Asks
+            } else {
+                LeftoverItem::Absent
+            }
+        };
+        let delete = |h: &Path| {
+            deleted.borrow_mut().push(h.to_path_buf());
+            Ok(())
+        };
+        let sweep = sweep_logins_with(root.path(), &item, &delete);
+        assert_eq!(
+            sweep,
+            Sweep {
+                removed: 2,
+                running: 2,
+                kept: 1
+            }
+        );
+        assert!(!idle.exists() && !with_item.exists());
+        assert_eq!(
+            *deleted.borrow(),
+            [with_item.clone()],
+            "only the silent item is deleted"
+        );
+        assert!(asks.exists(), "an item that would ask stays, with its home");
+        assert!(
+            starting.exists() && running.home.exists(),
+            "a sign-in still open is kept"
+        );
+        assert!(not_ours.exists(), "only UUID-named homes are Switchboard's");
+        assert!(outside.path().exists(), "a link is never followed");
+
+        // A failed Keychain delete keeps the home, so its item is never orphaned.
+        let failing = home(&Uuid::new_v4().to_string());
+        let sweep = sweep_logins_with(
+            root.path(),
+            &|h| {
+                if h == failing {
+                    LeftoverItem::Silent
+                } else {
+                    item(h)
+                }
+            },
+            &|_| Err("Keychain unavailable.".into()),
+        );
+        assert!(failing.exists());
+        assert_eq!(sweep.removed, 0);
+
+        let pid: i32 = fs::read_to_string(running.home.join(".session-pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(sweep_logins_with(root.path(), &item, &delete).removed >= 1);
+        assert!(
+            !running.home.exists(),
+            "removed by a later start once it ended"
+        );
     }
     #[cfg(unix)]
     #[test]

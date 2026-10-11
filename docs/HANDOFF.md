@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-87: forgotten sign-ins cleaned at start
+
+Branch `fix/sb-87-login-leftovers`. A native owner's start sweeps `logins/` once, off the start
+path: a sign-in home whose Terminal session ended is removed with its Claude Keychain item when
+deleting the item shows no dialog; one still open, or whose item would ask, is kept
+(`launch::sweep_logins`, log `login_leftovers`). OPERATIONS → recovery now says what stays manual.
+
+**Exact next task:** the rest of SB-65 — a persistent pending-login journal so a sign-in open across
+a restart can still be finished (packet SS-01); or SB-07 (the intermittent `project_rules…` /
+`managed_session…` MCP test failures) if CI shows it again.
+
+---
+
 ## 2026-10-11 — SB-65 first slice: the Sessions view
 
 Branch `feat/sb-65-sessions-view`. Activity → *Sessions* lists the sessions Switchboard launched

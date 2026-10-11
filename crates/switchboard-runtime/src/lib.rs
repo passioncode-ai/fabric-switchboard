@@ -1056,6 +1056,24 @@ impl Owner {
         if native_sources && !default_store {
             runtime.refresh.set_grants(false);
         }
+        // SB-87: sign-in homes an earlier owner forgot; off the start path (it may ask `ps` and
+        // Keychain, each bounded), and only the real owner of its data folder does it.
+        if native_sources {
+            let root = runtime.root.clone();
+            tokio::task::spawn_blocking(move || {
+                let sweep = launch::sweep_logins(&root);
+                if sweep != launch::Sweep::default() {
+                    oplog::event(
+                        "login_leftovers",
+                        &[
+                            ("removed", oplog::Field::Number(sweep.removed as i64)),
+                            ("running", oplog::Field::Number(sweep.running as i64)),
+                            ("kept", oplog::Field::Number(sweep.kept as i64)),
+                        ],
+                    );
+                }
+            });
+        }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
             "owner_started",
