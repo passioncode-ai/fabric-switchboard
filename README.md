@@ -55,6 +55,10 @@ Open source under the **GNU AGPL-3.0**, with a commercial license available.
 
 ## Quick start for a new teammate
 
+With a coding agent: once the CLI is on `PATH` (step 3), ask the agent to run `switchboard onboard`
+and follow it — it does every setup step it can and tells you the ones that are yours (opening the
+app, signing in). `switchboard onboard --status` shows where setup stands.
+
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
    (redirects to the [latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)),
    check it against `SHA256SUMS` from the release

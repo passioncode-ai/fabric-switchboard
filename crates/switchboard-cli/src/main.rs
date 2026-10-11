@@ -9,7 +9,7 @@ use std::{
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
-    arm_hard_exit, control, default_root, execute_offline, oplog,
+    arm_hard_exit, control, default_root, execute_offline, onboarding, oplog,
     projects::{detect_session, Session},
     rfc3339, AgentVia, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
@@ -135,6 +135,20 @@ enum Command {
         #[command(subcommand)]
         command: Backup,
     },
+    /// The guide a coding agent follows to set Switchboard up; with --status, where the setup
+    /// stands — each step done, the agent's to do (with its command), the person's, or
+    /// optional. Reads only; safe to repeat.
+    Onboard {
+        /// Report the steps instead of printing the guide.
+        #[arg(long)]
+        status: bool,
+        /// The project folder the agent works in (absolute); default: the current folder.
+        #[arg(long)]
+        folder: Option<PathBuf>,
+        /// The coding agent being set up; default: the one this command runs inside, when known.
+        #[arg(long, value_enum)]
+        host: Option<HostArg>,
+    },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
         /// List only the tools that read: status, accounts, usage, project rules.
@@ -157,6 +171,19 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum HostArg {
+    Claude,
+    Codex,
+}
+impl From<HostArg> for onboarding::Host {
+    fn from(host: HostArg) -> Self {
+        match host {
+            HostArg::Claude => onboarding::Host::Claude,
+            HostArg::Codex => onboarding::Host::Codex,
+        }
+    }
 }
 #[derive(Subcommand)]
 enum Project {
@@ -662,6 +689,24 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             &switchboard_runtime::uninstall::places(),
         );
     }
+    if let Command::Onboard {
+        status,
+        folder,
+        host,
+    } = &cli.command
+    {
+        if !status {
+            return Ok(json!({"guide": onboarding::GUIDE}));
+        }
+        let folder = match folder {
+            Some(path) if path.is_absolute() => path.clone(),
+            Some(_) => return Err("--folder must be an absolute folder.".into()),
+            None => {
+                std::env::current_dir().map_err(|_| "Current folder unavailable. Pass --folder.")?
+            }
+        };
+        return onboard_status(&root, folder, host.map(Into::into)).await;
+    }
     if matches!(cli.command, Command::Serve) {
         if let Some(log) = oplog::Log::default_location() {
             oplog::install(log);
@@ -990,7 +1035,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 }
             }
         },
-        Command::Serve | Command::Mcp { .. } | Command::Uninstall { .. } => unreachable!(),
+        Command::Serve
+        | Command::Mcp { .. }
+        | Command::Uninstall { .. }
+        | Command::Onboard { .. } => unreachable!(),
     };
     let value = call(&root, operation).await?;
     match &cli.command {
@@ -1089,6 +1137,67 @@ fn release_reservation(script: &std::path::Path) {
 fn run_in_place(_: &std::path::Path) -> Result<Value, String> {
     Err("Launching in place runs on macOS and Linux for now.".into())
 }
+/// `switchboard onboard --status` (SB-93): reads the owner, the saved accounts, the folder's
+/// project, the agent's MCP registration and the proving call. Writes nothing: without a data
+/// folder there are no accounts and no project to read, and none is created.
+pub(crate) async fn onboard_status(
+    root: &std::path::Path,
+    folder: PathBuf,
+    host: Option<onboarding::Host>,
+) -> Result<Value, String> {
+    let owner_online = matches!(
+        control::request(root, &Operation::Status).await,
+        Ok(Some(_))
+    );
+    let mut probe = onboarding::Probe {
+        owner_online,
+        host: host.or_else(|| onboarding::Host::detect(|k| std::env::var(k).ok())),
+        cli: switchboard_runtime::launch::agent_cli(),
+        proof: onboarding::proof(root),
+        ..Default::default()
+    };
+    if root.is_dir() {
+        let snapshot = call(root, Operation::Snapshot).await?;
+        for provider in ["claude", "codex"] {
+            let count = snapshot["accounts"].as_array().map_or(0, |accounts| {
+                accounts
+                    .iter()
+                    .filter(|a| a["provider"] == provider && a["enabled"] == true)
+                    .count()
+            });
+            probe.accounts.push((provider.into(), count));
+        }
+        let kimi = snapshot["kimi_accounts"].as_array().map_or(0, Vec::len);
+        probe.accounts.push(("kimi".into(), kimi));
+        let resolved = call(
+            root,
+            Operation::ResolveProject {
+                path: folder.clone(),
+            },
+        )
+        .await?;
+        probe.project = Some(resolved["project"].clone()).filter(|p| !p.is_null());
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let hosts = match probe.host {
+        Some(host) => vec![host],
+        None => vec![onboarding::Host::Claude, onboarding::Host::Codex],
+    };
+    probe.registered = hosts
+        .into_iter()
+        .map(|host| {
+            (
+                host,
+                onboarding::registered(host, &home, Some(&folder), codex_home.as_deref()),
+            )
+        })
+        .collect();
+    probe.folder = Some(folder);
+    Ok(onboarding::steps(&probe))
+}
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
     match control::request(root, &operation).await? {
         Some(value) => Ok(value),
@@ -1108,6 +1217,40 @@ fn print_result(value: &Value, cli: &Cli) {
     }
     let text = |v: &Value| v.as_str().unwrap_or("—").to_string();
     match &cli.command {
+        Command::Onboard { status: false, .. } => print!("{}", text(&value["guide"])),
+        Command::Onboard { status: true, .. } => {
+            for step in value["steps"].as_array().into_iter().flatten() {
+                let mark = match step["state"].as_str() {
+                    Some("done") => "done",
+                    Some("todo") => "to do",
+                    Some("needs_person") => "the person's",
+                    _ => "optional",
+                };
+                println!(
+                    "{:<13} {:<13} {}",
+                    text(&step["id"]),
+                    mark,
+                    text(&step["summary"])
+                );
+                if let Some(command) = step["next"]["command"].as_str() {
+                    println!("{:27}run: {command}", "");
+                }
+                if let Some(tool) = step["next"]["tool"].as_str() {
+                    println!("{:27}call the MCP tool: {tool}", "");
+                }
+                if let Some(person) = step["next"]["person"].as_str() {
+                    println!("{:27}{person}", "");
+                }
+            }
+            println!(
+                "{}",
+                if value["complete"] == true {
+                    "Set up."
+                } else {
+                    "Not set up yet: run this again after each step."
+                }
+            );
+        }
         Command::Backup {
             command: Backup::List,
         } => {

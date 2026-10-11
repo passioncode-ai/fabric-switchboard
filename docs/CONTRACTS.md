@@ -284,6 +284,30 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
+## Agent onboarding (SB-93, 2026-10-11)
+
+Code: `switchboard_runtime::onboarding` (`steps`, `registered`, `proof`, `record_proof`, `GUIDE`),
+CLI `onboard` (`onboard_status`), MCP `switchboard_onboarding`. Scenario SCN-050.
+
+- `switchboard onboard` prints `docs/AGENT-ONBOARDING.md` (`include_str!`, so the binary and the
+  repository say the same); `--status` answers `{complete, host, folder, steps[]}`, steps in a
+  fixed order `owner`, `accounts`, `project`, `mcp`, `proving_call`, states `done`, `todo`,
+  `needs_person`, `optional`. `complete` is true when every step is `done` or `optional`
+  (`project` is never required: a project with no account of a provider cannot start that
+  provider's sessions in its folders, so the guide creates one only when the person asks).
+- Reads only: the owner through `Operation::Status` on the control channel; accounts through
+  `Snapshot` and the folder's project through `ResolveProject`, and only when the data folder
+  exists (no storage is created); the agent's configuration by server name only — Claude Code
+  `~/.claude.json` (`mcpServers`, `projects[<folder>].mcpServers`, read up to 32 MiB, a
+  half-written file reads as absent), `<folder>/.mcp.json`, `~/.claude/settings.json`
+  `enabledPlugins["switchboard@…"]`; Codex `config.toml` in `CODEX_HOME` or `~/.codex`.
+- The proving call: `switchboard mcp` writes `<data>/mcp-proof.json` (0600, `{client, at}`; the
+  client name from `initialize`, ASCII letters, digits, space, `._-`, at most 64) after its first
+  answered tool call, once per server process, and only into a data folder that exists.
+- Commands in `next` use the CLI's absolute path when `agent_cli()` finds it, shell-quoted.
+- Tests: `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage`,
+  `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection`.
+
 ## Interface language (SB-76, 2026-10-07)
 
 Code: `src/i18n.ts`, `src/locales/ru.ts`, `crates/switchboard-core/src/language.rs`,

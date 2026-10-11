@@ -2,6 +2,23 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-93 slice 1: `switchboard onboard` for coding agents
+
+Branch `feat/sb-93-onboard`. The operator's agents-first strategy (2026-10-10): the coding agent
+does every setup step it can. `switchboard onboard` prints [AGENT-ONBOARDING.md](AGENT-ONBOARDING.md);
+`switchboard onboard --status [--json]` and the MCP tool `switchboard_onboarding` read five steps —
+owner, accounts, project (optional), mcp, proving_call — each done / todo (command) /
+needs_person (what to ask) / optional, and create nothing (`onboarding.rs`, SCN-050, CONTRACTS →
+Agent onboarding). `switchboard mcp` writes `mcp-proof.json` after its first answered call. Read
+live on this machine: the switchboard MCP server is **not** registered with Claude Code here
+(`claude mcp get switchboard` agrees) — registering it is the operator's call (machine MCP
+change), not done.
+
+**Exact next task:** SB-93 slice 2 — the first-run tour (SCN-035) shows these steps (a Tauri command
+over `onboarding::steps`), scenario first; then SB-95 with SB-65 (live session list).
+
+---
+
 ## 2026-10-11 — SB-94: a caller's context through `launch --in-place`; continuation launches fixed
 
 Branch `fix/sb-94-in-place-context`. Claude Code's `--mcp-config <configs...>` is variadic; measured

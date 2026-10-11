@@ -6,7 +6,7 @@ MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`). Every result carries
 `isError: true` with one fixed sentence, never a stack trace or a provider body. No tool
 accepts or returns a credential; login and launch are not exposed.
 
-`switchboard mcp --read-only` lists only the five read tools. A session Switchboard
+`switchboard mcp --read-only` lists only the tools that read. A session Switchboard
 launches in isolated mode gets that set.
 
 ## Contents
@@ -71,6 +71,14 @@ The server works out which session asks from its own environment, first match wi
   minute ago; showing that observation." A read-only server (`switchboard mcp --read-only`)
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
+
+### `switchboard_onboarding` — `path?` (absolute folder), `host?` (`claude` or `codex`)
+
+Where setting Switchboard up stands: `{complete, host, folder, steps[]}`, steps in order
+`owner`, `accounts`, `project`, `mcp`, `proving_call`, each `{id, state, summary, next}`.
+`state` is `done`, `todo` (run `next.command`, or call `next.tool`), `needs_person` (tell
+the person `next.person`) or `optional`. Reads only; the same as
+`switchboard onboard --status --json`. The guide is `switchboard onboard`.
 
 ### `switchboard_project_context` — `path?` (absolute folder)
 

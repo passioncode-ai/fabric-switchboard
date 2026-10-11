@@ -15,6 +15,7 @@ pub mod kimi;
 pub mod launch;
 mod limits;
 mod monitor;
+pub mod onboarding;
 pub mod oplog;
 pub mod projects;
 mod refresh;

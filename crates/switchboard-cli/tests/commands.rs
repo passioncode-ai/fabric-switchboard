@@ -511,3 +511,71 @@ fn serve_stops_on_sigterm_and_sigint_within_the_deadline() {
         assert!(log.contains("\"drained\""), "{log}");
     }
 }
+
+#[test]
+fn onboard_prints_the_guide_and_reads_the_setup_without_creating_storage() {
+    // SB-93: the guide is the repository's docs/AGENT-ONBOARDING.md; the status reads only.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("not-created");
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .arg("onboard")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        include_str!("../../../docs/AGENT-ONBOARDING.md")
+    );
+    let output = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args([
+            "--json", "onboard", "--status", "--host", "codex", "--folder",
+        ])
+        .arg(tmp.path())
+        .env("HOME", &home)
+        .env_remove("CODEX_HOME")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let steps = answer["data"]["steps"].as_array().unwrap();
+    let states: Vec<(&str, &str)> = steps
+        .iter()
+        .map(|s| (s["id"].as_str().unwrap(), s["state"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("owner", "needs_person"),
+            ("accounts", "needs_person"),
+            ("project", "optional"),
+            ("mcp", "todo"),
+            ("proving_call", "todo")
+        ]
+    );
+    assert!(steps[1]["next"]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("login begin --provider codex"));
+    assert!(steps[3]["next"]["command"]
+        .as_str()
+        .unwrap()
+        .starts_with("codex mcp add switchboard -- "));
+    assert!(!root.exists(), "reading the setup creates no storage");
+    let output = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args(["onboard", "--status", "--folder", "relative"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+}

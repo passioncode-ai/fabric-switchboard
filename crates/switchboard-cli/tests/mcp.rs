@@ -170,6 +170,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_accounts",
             "switchboard_usage",
             "switchboard_switch",
+            "switchboard_onboarding",
             "switchboard_project_context",
             "switchboard_project_set",
             "switchboard_project_remove",
@@ -254,6 +255,71 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         "{usage}"
     );
     assert_eq!(usage["accounts"][0]["known"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection() {
+    // SB-93: an agent reads where setup stands; its first answered tool call is recorded once
+    // (client name and time only), and a registration in the agent's own config is seen.
+    let (data, projects, _owner, _) = fixture().await;
+    let home = tempfile::tempdir().unwrap();
+    let proof = data.path().join("mcp-proof.json");
+    let mut agent = Agent::start(
+        data.path(),
+        projects.path(),
+        &[("HOME", home.path().to_str().unwrap())],
+        false,
+    );
+    agent.request(
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fixture-agent","version":"1"}}),
+    );
+    assert!(!proof.exists());
+    let path = projects.path().to_str().unwrap();
+    let (error, first) = agent.tool(
+        "switchboard_onboarding",
+        json!({"path": path, "host": "claude"}),
+    );
+    assert!(!error, "{first}");
+    let state = |answer: &Value, id: &str| {
+        answer["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap()["state"]
+            .clone()
+    };
+    assert_eq!(state(&first, "owner"), "done");
+    assert_eq!(state(&first, "accounts"), "done");
+    assert_eq!(state(&first, "mcp"), "todo");
+    assert_eq!(
+        state(&first, "proving_call"),
+        "todo",
+        "answered before it was recorded"
+    );
+    let recorded: Value = serde_json::from_slice(&std::fs::read(&proof).unwrap()).unwrap();
+    assert_eq!(recorded["client"], "fixture-agent");
+    assert_eq!(
+        recorded.as_object().unwrap().len(),
+        2,
+        "client and time only"
+    );
+
+    std::fs::write(
+        home.path().join(".claude.json"),
+        r#"{"mcpServers":{"switchboard":{"command":"switchboard","args":["mcp"]}}}"#,
+    )
+    .unwrap();
+    let (_, second) = agent.tool(
+        "switchboard_onboarding",
+        json!({"path": path, "host": "claude"}),
+    );
+    assert_eq!(state(&second, "mcp"), "done");
+    assert_eq!(state(&second, "proving_call"), "done");
+    assert_eq!(second["complete"], true, "{second}");
+    let (error, refused) = agent.tool("switchboard_onboarding", json!({"host": "cursor"}));
+    assert!(error, "{refused}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

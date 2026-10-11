@@ -117,7 +117,7 @@ switchboard mcp --read-only   # only the five read tools; usage refresh shows th
 switchboard --data-dir /path/to/app-data mcp
 ```
 
-`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` — MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0 — accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists `switchboard_status`, `switchboard_accounts`, `switchboard_usage` and `switchboard_project_context` only. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` — MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0 — accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists the tools that only read (status, accounts, usage, `switchboard_onboarding`, project context, chains, the OpenRouter key's status, Kimi accounts, Hermes's model) and none that writes. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
@@ -146,6 +146,18 @@ Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS th
 | Codex | `codex mcp add switchboard -- switchboard mcp` |
 
 Restart the agent after installing; it loads servers and skills at session start. The plugin is validated by `python3 scripts/check_plugin.py`, `python3 -m unittest scripts/test_check_plugin.py` and `claude plugin validate ./plugins/switchboard --strict` plus `claude plugin validate . --strict`.
+
+### Setting up with a coding agent (SB-93)
+
+`switchboard onboard` prints the guide a coding agent follows ([docs/AGENT-ONBOARDING.md](AGENT-ONBOARDING.md), built into the CLI). `switchboard onboard --status [--folder <absolute dir>] [--host claude|codex] [--json]` reads where setup stands and writes nothing — it creates no data folder:
+
+```sh
+switchboard onboard                         # the guide
+switchboard onboard --status                # one line per step, with the command or the person's part
+switchboard --json onboard --status --host codex --folder /work/app
+```
+
+The answer is `{complete, host, folder, steps[]}`; each step is `{id, state, summary, next}` in this order: `owner` (the app or `serve` answers), `accounts` (claude, codex and kimi accounts that are switched on), `project` (the folder's project; always optional), `mcp` (a `switchboard` server in the agent's config: Claude Code's `~/.claude.json` user or per-folder scope, the folder's `.mcp.json`, or the enabled Switchboard plugin; Codex's `config.toml` under `CODEX_HOME` or `~/.codex`) and `proving_call` (`mcp-proof.json` in the data folder, written by `switchboard mcp` after its first answered tool call: the client's name and the time). `state` is `done`, `todo` (`next.command` for the agent, `next.tool` for the proving call), `needs_person` (`next.person`, sometimes with a `next.command` the agent may run to start it) or `optional`. `--host` defaults to the agent the command runs inside (`CLAUDECODE=1`, or Codex's `CODEX_SANDBOX`/`CODEX_THREAD_ID`); unknown, any registration counts. The MCP tool `switchboard_onboarding` (`path?`, `host?`) answers the same.
 
 ### Fallback chains
 
