@@ -64,7 +64,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - `ProjectRule { path, provider, account_id, target: "managed"|"claude_cli", enabled, created_at, expires_at? }`; `Snapshot.rules` is omitted when empty. `Store::set_rule(path, account_id, target, enabled, expires_at)` derives the provider from the account and upserts per (`path`, `provider`); `remove_rule(path, provider)`; `resolve_rules(path, now) -> [RuleResolution { provider, effective, nearest }]` uses component-wise longest prefix, and `effective` skips paused and expired rules. Removing an account removes its rules in the same write. `accounts.json` is `schema_version` 3 only while a rule exists, otherwise 2; readers accept 1–3. Event `project_rule`: `saved`, `paused`, `removed`, `applied`.
 - Control/Tauri operations: `set_project_rule(path, accountId, target, enabled, expiresAt?)`, `remove_project_rule(path, provider)`, `resolve_project(path)` (read fast path), `apply_project(path, session, global)`. The runtime canonicalizes `path`, requires an existing folder outside app data (removal also accepts a deleted absolute folder). `apply_project` changes state only for the calling session: a managed rule in the session's pool selects with the rotation cooldown; another pool is `other_pool`; an isolated or native session gets `other_session` for managed rules; a `claude_cli` rule in a native session needs `global: true` (`needs_global`) and then activates. Paused, expired or missing rules change nothing.
 - `Session` is `{mode:"managed",provider,pool}`, `{mode:"isolated",provider,account_id}` or `{mode:"native",provider?}`. Launches set `SWITCHBOARD_SESSION=managed:<provider>:<pool>` or `isolated:<provider>:<account id>`; detection falls back to an `ANTHROPIC_BASE_URL` naming the running proxy, then `CODEX_HOME` under `<app data>/runtimes/codex-<pool>`, then native (`CLAUDECODE=1` marks Claude).
-- Launch attaches the tools when a CLI is found (this CLI, the one bundled beside the desktop executable, PATH, `~/.local/bin`): Claude gets `--mcp-config <home>/switchboard-mcp.json`, Codex gets `[mcp_servers.switchboard]` in its private `config.toml`; isolated sessions get `mcp --read-only`. The launch result carries `agent_tools: bool`. No CLI found is not a launch failure.
+- Launch attaches the tools when a CLI is found (this CLI, the one bundled beside the desktop executable, PATH, `~/.local/bin`): Claude gets `--mcp-config=<home>/switchboard-mcp.json` (one argument: the flag is variadic, SB-94), Codex gets `[mcp_servers.switchboard]` in its private `config.toml`; isolated sessions get `mcp --read-only`. The launch result carries `agent_tools: bool`. No CLI found is not a launch failure.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or bad arguments). Offline calls retry a held store lock for up to 1.5 s.
 - Desktop: `agent_setup() -> { cli_path, bundled_cli, linked_cli, can_link, commands }`; `link_cli()` creates `~/.local/bin/switchboard` → bundled CLI and never replaces a file or a foreign link. The macOS build embeds the signed CLI at `Contents/MacOS/switchboard`, byte-identical to the archived CLI.
@@ -268,6 +268,21 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
 - Tests: `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`,
   `the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection`,
   `an_in_place_launch_is_refused_where_it_cannot_run`. Not observed live with a real agent yet.
+- **A caller's context (SB-94, 2026-10-11).** A console hands its own context in `args`, as
+  files, so every argument stays inside the limit — no `--context` option; the per-runtime mapping
+  is the caller's. Claude Code's `--mcp-config <configs...>` is variadic: a plain value after a
+  separate `--mcp-config <path>` is read as one more config file (measured on Claude Code
+  2.1.296: `MCP config file not found: …/<the prompt>`). Switchboard therefore passes its own as
+  one argument, `--mcp-config=<path>`, and a caller should do the same; repeated flags, joined or
+  not, add up (both configs are read). Fabric Dashboards' shape (fabric-dashboards 47e5aa6,
+  `src/core/handoff.ts`): Claude `--mcp-config=<consoles/<key>/mcp.json> --append-system-prompt
+  <brief> [--continue] [<first prompt>]`; Codex `-c mcp_servers.fabric-dashboards.command=… -c
+  …args=[…] -c …env.ELECTRON_RUN_AS_NODE="1" [resume --last] <first prompt>` — Codex gets
+  Switchboard's server from its private `config.toml`, so the `-c` entries add to it. The session
+  script unsets only the provider variables in `CONFLICTS`, so the caller's own environment
+  (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. Test
+  `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
+  recording agent and compares the exact argv and environment.
 
 ## Interface language (SB-76, 2026-10-07)
 
