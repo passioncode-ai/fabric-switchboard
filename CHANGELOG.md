@@ -6,12 +6,14 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.17 — 2026-10-12
 
-**Kimi Code says exactly what it knows** (SB-100). Each answer from Kimi reads as what it is —
-no usage service, too many requests, an unreadable answer, no figures — instead of one “did not
-answer”; figures show how old they are and refresh in the background; a failed refresh is said
-while the last figures stay; several accounts are read at once.
+**Agents keep working when an account hits a limit** (SB-98). A managed session's request the
+provider refuses for a limit goes once to the pool's next account, so the agent does not pause;
+the refused account is held at once until its reset. The automatic switch of the ordinary Claude
+Code no longer waits for fresh figures when the account in use is limited, and tries the next
+account when one fails to activate. Limits the provider's usage figures do not show — spend and
+credit caps — appear on the account as a hidden limit, with the reason in words.
 
 **Switching is steadier** (SB-101). A switch no longer overwrites what Claude Code wrote into its
 config in the same moment; waiting for Claude Code's lock no longer slows other requests; a
@@ -24,27 +26,10 @@ again or a removal on an account whose session still runs is refused instead of 
 deleting its login; Kimi sessions appear in Sessions; a plan window at 100 % marks the account
 as limited until its reset, and a window past its reset no longer shows its old share.
 
-**Agents keep working when an account hits a limit** (SB-98). A managed session's request the
-provider refuses for a limit goes once to the pool's next account, so the agent does not pause;
-the refused account is held at once until its reset. The automatic switch of the ordinary Claude
-Code no longer waits for fresh figures when the account in use is limited, and tries the next
-account when one fails to activate. Limits the provider's usage figures do not show — spend and
-credit caps — appear on the account as a hidden limit, with the reason in words.
-
-**A sign-in open when Switchboard quit or restarted is no longer lost** (SB-65). Each sign-in keeps a
-small journal (provider, label, pool); the next start takes it back when Terminal still runs it
-or it finished meanwhile, the banner returns, and the account is added as usual.
-
-**A sign-in left open when Switchboard quit or crashed is cleaned up at the next start** (SB-87),
-when its Terminal session has ended: its staging folder and, for Claude, its Keychain item —
-the item only when deleting it shows no dialog. A sign-in still open in Terminal is left for a
-later start.
-
-**See which sessions run** (SB-95). `switchboard sessions` and the MCP tool `switchboard_sessions`
-list the Claude Code and Codex sessions Switchboard launched — account, provider, pool, mode,
-folder, when it started — and whether each is starting, running or ended, so another product or
-agent can read them; Activity stays the journal. In the window, Activity → *Sessions* shows the same
-list above the journal.
+**Kimi Code says exactly what it knows** (SB-100). Each answer from Kimi reads as what it is —
+no usage service, too many requests, an unreadable answer, no figures — instead of one “did not
+answer”; figures show how old they are and refresh in the background; a failed refresh is said
+while the last figures stay; several accounts are read at once.
 
 **A coding agent can set Switchboard up** (SB-93). `switchboard onboard` prints the guide an agent
 follows; `switchboard onboard --status` (and the MCP tool `switchboard_onboarding`) says where
@@ -54,6 +39,21 @@ and what to ask the person for the rest (opening the app, signing in). It only r
 In the window, Agents → *Set up with your coding agent* gives the one-line prompt to copy into
 Claude Code or Codex and shows whether each agent has Switchboard's tools registered and whether an
 agent has called them; the tour's last step points at it.
+
+**See which sessions run** (SB-95). `switchboard sessions` and the MCP tool `switchboard_sessions`
+list the Claude Code and Codex sessions Switchboard launched — account, provider, pool, mode,
+folder, when it started — and whether each is starting, running or ended, so another product or
+agent can read them; Activity stays the journal. In the window, Activity → *Sessions* shows the same
+list above the journal.
+
+**A sign-in open when Switchboard quit or restarted is no longer lost** (SB-65). Each sign-in keeps a
+small journal (provider, label, pool); the next start takes it back when Terminal still runs it
+or it finished meanwhile, the banner returns, and the account is added as usual.
+
+**A sign-in left open when Switchboard quit or crashed is cleaned up at the next start** (SB-87),
+when its Terminal session has ended: its staging folder and, for Claude, its Keychain item —
+the item only when deleting it shows no dialog. A sign-in still open in Terminal is left for a
+later start.
 
 **A Claude session continued from another agent starts again** (SB-94). Switchboard passed its
 own MCP config as `--mcp-config <path>`, and Claude Code reads every plain value after that flag
