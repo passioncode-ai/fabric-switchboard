@@ -225,6 +225,25 @@ and closed here:
 - Not changed: an ordinary (native) Claude Code session whose turn already ended on a limit does
   not resume by itself — run agents in managed mode for no pauses.
 
+## Switch reliability (SB-101, 2026-10-11)
+
+From the switch audit of 2026-10-11:
+
+- **Lock waits leave the async workers.** `external::acquire_lock` (up to 9 s per lock, three
+  locks per activation) runs through `blocking::run`, so a native switch or an idle renewal
+  waiting for Claude Code's lock no longer stalls proxy streams and UI, CLI or MCP requests.
+- **Claude Code's own writes survive a switch.** Just before writing `~/.claude.json`, the file
+  is read again; when Claude Code wrote it meanwhile, only the sign-in's keys (`oauthAccount`,
+  `primaryApiKey`) are carried into the current content (`with_account_of`). A rollback puts
+  back only those keys when the file changed, and the old bytes unchanged otherwise. Test
+  `a_switch_keeps_what_claude_code_wrote_into_its_config_meanwhile`.
+- **No 409 while the pool has a usable account.** A session's request whose selected account
+  cannot serve it — its token expired, or it is gone — moves the pool to its next usable account
+  (`Store::failover_unusable`); the account is not held as limited. Tests
+  `an_unusable_selection_moves_the_pool_without_holding_the_account`,
+  `a_session_never_meets_409_while_the_pool_has_a_usable_account`.
+- Open (SB-101): a renewed sign-in persisted before it is used; an overall proxy deadline.
+
 ## Fallback chains (SB-71, 2026-10-06)
 
 Design: [XA-01](packets/cross-agent-continuation.md). Code: `crates/switchboard-core/src/chains.rs`,

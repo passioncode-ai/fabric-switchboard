@@ -382,14 +382,22 @@ async fn relay(
             )
         }
     };
-    let (account, credential) = match g.store.route(provider, &pool) {
-        Ok(route) => route,
-        Err(_) => {
-            return error(
-                StatusCode::CONFLICT,
-                "Select a usable account in this pool first.",
-            )
-        }
+    // SB-101: a selected account whose credential expired, or that is gone, no longer answers
+    // a session with 409 while the pool has another usable account.
+    let route = match g.store.route(provider, &pool) {
+        Ok(route) => Some(route),
+        Err(_) if official => g
+            .store
+            .failover_unusable(provider, &pool, now())
+            .ok()
+            .flatten(),
+        Err(_) => None,
+    };
+    let Some((account, credential)) = route else {
+        return error(
+            StatusCode::CONFLICT,
+            "Select a usable account in this pool first.",
+        );
     };
     if agent && account.kind != AuthKind::ApiKey {
         return error(StatusCode::FORBIDDEN, AGENT_SUBSCRIPTION_REFUSED);

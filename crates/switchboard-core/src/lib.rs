@@ -593,7 +593,50 @@ impl Store {
             });
         policy.enabled = true;
         policy.last_switched_at = None;
-        let decision = self.rotation_decision_with(&policy, Some(from), now, &held)?;
+        self.move_route(provider, pool, from, &policy, &held, now)
+    }
+    /// The pool's selected account cannot serve a request — its credential expired or it is
+    /// gone (SB-101): the pool moves to its next usable account, as for a limit, but the account
+    /// is not held — an expired token is not a limit. None when no other account can serve.
+    pub fn failover_unusable(
+        &self,
+        provider: Provider,
+        pool: &str,
+        now: i64,
+    ) -> Result<Option<(Account, Credential)>, String> {
+        let Some(from) = self
+            .lock()?
+            .routes
+            .get(&format!("{}:{}", provider.as_str(), pool))
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let mut held = self.limited();
+        held.insert(from.clone());
+        let policy = RotationPolicy {
+            provider,
+            pool: pool.to_owned(),
+            target: "managed".into(),
+            enabled: true,
+            threshold_percent: 90.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 0,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        };
+        self.move_route(provider, pool, &from, &policy, &held, now)
+    }
+    fn move_route(
+        &self,
+        provider: Provider,
+        pool: &str,
+        from: &str,
+        policy: &RotationPolicy,
+        held: &std::collections::HashSet<String>,
+        now: i64,
+    ) -> Result<Option<(Account, Credential)>, String> {
+        let decision = self.rotation_decision_with(policy, Some(from), now, held)?;
         let Some(id) = decision.candidate_id else {
             return Ok(None);
         };

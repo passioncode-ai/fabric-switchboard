@@ -1619,3 +1619,46 @@ async fn a_session_refused_for_a_limit_continues_on_the_next_account_without_see
     p.shutdown().await;
     up.abort();
 }
+
+#[tokio::test]
+async fn a_session_never_meets_409_while_the_pool_has_a_usable_account() {
+    // SB-101: the selected account's token expired while it stayed selected; a session's
+    // request goes to the pool's next account instead of failing with 409.
+    let (_r, s) = store();
+    let a = s
+        .add(
+            "a".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential {
+                access_token: "token-a".into(),
+                refresh_token: None,
+                id_token: None,
+                native_context: None,
+                expires_at: Some(now() + 1),
+                account_id: Some("identity-a".into()),
+            },
+        )
+        .unwrap();
+    let _b = add(&s, Provider::Claude, AuthKind::OAuth, "b", "token-b");
+    s.select(Provider::Claude, "default", &a.id).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    assert!(
+        s.route(Provider::Claude, "default").is_err(),
+        "a has expired"
+    );
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(|headers: HeaderMap| async move {
+            assert_eq!(headers["authorization"], "Bearer token-b");
+            "ok"
+        }),
+    ))
+    .await;
+    let p = start(s.clone(), url).await;
+    assert_eq!(request(&p, "claude").await.status(), 200);
+    assert_eq!(s.snapshot().unwrap().routes["claude:default"], _b.id);
+    p.shutdown().await;
+    up.abort();
+}

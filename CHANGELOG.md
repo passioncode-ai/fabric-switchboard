@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Switching is steadier** (SB-101). A switch no longer overwrites what Claude Code wrote into its
+config in the same moment; waiting for Claude Code's lock no longer slows other requests; a
+managed session whose selected account's token expired moves to the next account instead of
+failing.
+
 **Kimi Code accounts are safer and say when they are spent** (SB-99). A second `kimi`, a sign-in
 again or a removal on an account whose session still runs is refused instead of sharing or
 deleting its login; Kimi sessions appear in Sessions; a plan window at 100 % marks the account

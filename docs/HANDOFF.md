@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-101 first part: switch reliability
+
+Branch `fix/sb-101-switch-reliability`: lock waits off the async workers; a switch carries only
+the sign-in's keys into a `~/.claude.json` Claude Code wrote meanwhile, and a rollback restores
+only them; a managed session's unusable selected route fails over instead of 409. CONTRACTS →
+Switch reliability. Also today, outside this repo: LC-17…LC-22 merged in fabric-workspace
+`knowledge/lifecycle.md` (#136); the contract took CT-23/CT-24, the adapter FAA-22/FAA-23; the
+MCP gateway got `health.py`, a watchdog and `docs/AGENTS.md` (`sshlg/agentgateway-setup`,
+branch `feat/health-watchdog`).
+
+**Exact next task:** the rest of SB-101 (persist a renewed sign-in before it is used; a proxy
+deadline), then SB-99's rest (Kimi in fallback chains, pending Kimi sign-ins swept at start).
+
+---
+
 ## 2026-10-11 — SB-99 first part: Kimi safe homes and visible limits
 
 Branch `feat/sb-99-kimi-limits`. Kimi *Launch*, *Sign in again* and *Remove* respect a running
