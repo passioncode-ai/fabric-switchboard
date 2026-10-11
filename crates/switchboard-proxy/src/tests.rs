@@ -249,7 +249,7 @@ async fn unauthorized_origin_and_unknown_paths_never_contact_upstream() {
     up.abort();
 }
 #[tokio::test]
-async fn rejection_is_never_replayed_and_events_contain_no_secrets() {
+async fn a_refusal_moves_once_to_the_next_account_and_events_contain_no_secrets() {
     let (_r, s) = store();
     let a = add(
         &s,
@@ -280,12 +280,15 @@ async fn rejection_is_never_replayed_and_events_contain_no_secrets() {
     ))
     .await;
     let p = start(s.clone(), url).await;
+    // SB-98: refused on a, tried once on b, refused there too: the provider's 429 comes back
+    // and no third attempt is made.
     assert_eq!(request(&p, "claude").await.status(), 429);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     let json = serde_json::to_string(&s.snapshot().unwrap()).unwrap();
     assert!(!json.contains("SYNTHETIC_SECRET"));
     assert!(!json.contains("provider error body"));
-    assert_eq!(s.snapshot().unwrap().routes["claude:default"], a.id);
+    assert_eq!(s.snapshot().unwrap().routes["claude:default"], _b.id);
+    assert!(s.limited().contains(&a.id));
     p.shutdown().await;
     up.abort();
 }
@@ -1563,4 +1566,56 @@ async fn in_flight_counts_the_requests_holding_a_slot() {
     assert_eq!(proxy.in_flight(), 1);
     drop(held);
     assert_eq!(proxy.in_flight(), 0);
+}
+
+#[tokio::test]
+async fn a_session_refused_for_a_limit_continues_on_the_next_account_without_seeing_it() {
+    // SB-98: the agent's request succeeds on the pool's next account; the refused one is
+    // held and handed to the runtime as limit evidence; later requests stay on the new one.
+    let (_r, s) = store();
+    let a = add(&s, Provider::Claude, AuthKind::OAuth, "a", "token-a");
+    let b = add(&s, Provider::Claude, AuthKind::OAuth, "b", "token-b");
+    s.select(Provider::Claude, "default", &a.id).unwrap();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = seen.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap, body: Bytes| {
+            let log = log.clone();
+            async move {
+                let token = headers["authorization"].to_str().unwrap().to_owned();
+                log.lock().unwrap().push((token.clone(), body.len()));
+                if token == "Bearer token-a" {
+                    (StatusCode::TOO_MANY_REQUESTS, "limit").into_response()
+                } else {
+                    (StatusCode::OK, "ok").into_response()
+                }
+            }
+        }),
+    ))
+    .await;
+    let p = start(s.clone(), url).await;
+    let response = request(&p, "claude").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), "ok");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [
+            ("Bearer token-a".to_string(), 2),
+            ("Bearer token-b".to_string(), 2)
+        ],
+        "the same body, once on each"
+    );
+    assert_eq!(s.snapshot().unwrap().routes["claude:default"], b.id);
+    let refused: Vec<String> = s.take_refusals().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(refused, [a.id.clone()]);
+    assert_eq!(request(&p, "claude").await.status(), 200);
+    assert_eq!(
+        seen.lock().unwrap().len(),
+        3,
+        "the next request goes straight to b"
+    );
+
+    p.shutdown().await;
+    up.abort();
 }
