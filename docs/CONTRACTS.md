@@ -242,7 +242,15 @@ From the switch audit of 2026-10-11:
   (`Store::failover_unusable`); the account is not held as limited. Tests
   `an_unusable_selection_moves_the_pool_without_holding_the_account`,
   `a_session_never_meets_409_while_the_pool_has_a_usable_account`.
-- Open (SB-101): a renewed sign-in persisted before it is used; an overall proxy deadline.
+- **A renewed sign-in is on disk before anything can lose it** (2026-10-12). When the idle
+  renewal of the ordinary Claude Code's account got a successor but could not write Claude Code's
+  item, the successor went only to memory; a quit or crash then left the account with a spent
+  token. It is now filed into the owner's vault copies at once (`file_with_owner`), and the kept
+  copy still makes the next pass write Claude Code's item first. Test
+  `an_idle_renewal_that_cannot_be_written_is_stashed` (extended).
+- **No overall proxy deadline — decided.** A hung provider is already cut by the read timeout
+  (600 s of silence, journaled `aborted`); a cap on a whole response would cut legitimate long
+  streams of a working model.
 
 ## Fallback chains (SB-71, 2026-10-06)
 

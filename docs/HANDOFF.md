@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-101 done: a renewed sign-in is never only in memory
+
+Branch `fix/sb-101-keep-renewed`: the idle renewal files the successor into the vault when Claude
+Code's item cannot be written (the kept copy still drives the next write); no overall proxy
+deadline, by decision. SB-101 closed.
+
+**Exact next task:** SB-99's rest — Kimi accounts in fallback chains (`provider_of`, chain pins, a
+fallback step launching `kimi` with `KIMI_CODE_HOME`) with SB-73 phase 2; pending Kimi sign-ins
+capped and swept at start.
+
+---
+
 ## 2026-10-12 — SB-100: Kimi status quality
 
 Branch `fix/sb-100-kimi-status`: Kimi's 404 / 429 / unreadable / empty answers each read as what
