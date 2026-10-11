@@ -210,8 +210,9 @@ passed.
 ## Releases
 
 A release is a `vX.Y.Z` tag on the merged release commit. The tag starts
-[`release.yml`](.github/workflows/release.yml) in the protected `release` environment: a member
-of `release-approvers` approves (whoever pushed the tag may; an agent only on the operator's explicit instruction, which the release record names); the macOS app and CLI are signed
+[`release.yml`](.github/workflows/release.yml) in the protected `release` environment, approved by checks (operator, 2026-10-11): its `guard`
+job lets the signing jobs start only when `main` contains the tagged commit and `nightly.yml` passed on it
+(started on the tag when it did not run), and only `release-approvers` can push a `v*` tag; the macOS app and CLI are signed
 with the organization's CI Developer ID and notarized (the app stapled); Windows is built
 natively and Authenticode-signed through Azure Artifact Signing, every signature checked `Valid`
 before publishing (the receipt says `windows_authenticode: SIGNED`); Linux is built natively on
