@@ -1608,7 +1608,7 @@ async fn a_session_refused_for_a_limit_continues_on_the_next_account_without_see
     );
     assert_eq!(s.snapshot().unwrap().routes["claude:default"], b.id);
     let refused: Vec<String> = s.take_refusals().into_iter().map(|(id, _)| id).collect();
-    assert_eq!(refused, [a.id.clone()]);
+    assert_eq!(refused, std::slice::from_ref(&a.id));
     assert_eq!(request(&p, "claude").await.status(), 200);
     assert_eq!(
         seen.lock().unwrap().len(),

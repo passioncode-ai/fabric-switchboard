@@ -1361,7 +1361,7 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
         .into_iter()
         .map(|(id, _)| id)
         .collect();
-    assert_eq!(refused, [a.clone()]);
+    assert_eq!(refused, std::slice::from_ref(&a));
     assert!(store.take_refusals().is_empty(), "taken once");
 
     // c refused too: b is next; then nothing is left and the route stays.
