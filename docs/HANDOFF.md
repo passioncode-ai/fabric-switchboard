@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-65 first slice: the Sessions view
+
+Branch `feat/sb-65-sessions-view`. Activity → *Sessions* lists the sessions Switchboard launched
+that start or run (SB-95's list through the Tauri command `sessions`), refreshed with the metadata;
+SCN-051; checked in a WebKit demo in English and Russian.
+
+**Exact next task:** SB-87 — clean a forgotten sign-in's staging home at owner start when no session
+holds it (`session_running`), keep it when one does; then the rest of SB-65 (pending-login journal).
+
+---
+
 ## 2026-10-11 — SB-95: the session list for other products
 
 Branch `feat/sb-95-sessions`. Each Claude Code / Codex launch writes `<home>/.session.json`

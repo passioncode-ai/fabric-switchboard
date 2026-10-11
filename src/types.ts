@@ -16,6 +16,8 @@ export interface AccountLimit { account_id: string; until: number; source: 'mana
 export interface BackupInfo { file: string; created_at: number; accounts: number; missing?: number; own?: boolean; openable?: boolean }
 export interface Restored { added: number; skipped: number; failed: number; projects?: number; rules?: number; routes?: number; settings?: number }
 export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null; restored_at_start?: { file: string; created_at: number; restored: Restored } | null }
+/** A session Switchboard launched (SB-95): its launch record and its state now. */
+export interface SessionInfo { account_id: string; label: string | null; provider: Provider; pool: string; mode: 'managed' | 'isolated'; working_directory: string; in_place: boolean; launched_at: number; started_at: number | null; continues: string | null; state: 'starting' | 'running' | 'ended' | 'unknown' }
 export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; claude_swap_accounts?: number; renewal_blocked?: boolean; claude_swap_switching?: boolean; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number; claude_swap_running?: boolean }
@@ -43,6 +45,7 @@ export interface Adapter {
   activateNative(id: string): Promise<void>;
   setPolicy(policy: RotationPolicy): Promise<void>;
   monitorStatus(): Promise<MonitorStatus>;
+  sessions(): Promise<{ sessions: SessionInfo[] }>;
   runtime(): Promise<RuntimeStatus>;
   add(input: AddInput): Promise<Account>;
   update(id: string, label: string, enabled: boolean): Promise<void>;

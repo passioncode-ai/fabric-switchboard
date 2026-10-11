@@ -16,6 +16,7 @@ export const nativeAdapter: Adapter = {
   activateNative: (id) => invoke('activate_native', { id }),
   setPolicy: (policy) => invoke('set_policy', { policy }),
   monitorStatus: () => readWithDeadline(invoke('monitor_status')),
+  sessions: () => readWithDeadline(invoke('sessions')),
   runtime: () => readWithDeadline(invoke('runtime_status')),
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),

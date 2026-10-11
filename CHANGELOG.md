@@ -11,7 +11,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 **See which sessions run** (SB-95). `switchboard sessions` and the MCP tool `switchboard_sessions`
 list the Claude Code and Codex sessions Switchboard launched — account, provider, pool, mode,
 folder, when it started — and whether each is starting, running or ended, so another product or
-agent can read them; Activity stays the journal.
+agent can read them; Activity stays the journal. In the window, Activity → *Sessions* shows the same
+list above the journal.
 
 **A coding agent can set Switchboard up** (SB-93). `switchboard onboard` prints the guide an agent
 follows; `switchboard onboard --status` (and the MCP tool `switchboard_onboarding`) says where

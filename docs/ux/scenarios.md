@@ -58,6 +58,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-048 | See and change Hermes's model and provider | draft |
 | SCN-049 | See the provider terms notice | draft |
 | SCN-050 | A coding agent sets Switchboard up | draft |
+| SCN-051 | See which sessions Switchboard launched are running | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1041,3 +1042,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`); `agentSetupFacts` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 (Agents panel and tour step 5 with the prompt's *Copy* outlined).
 **Product:** unobserved
 **Traces:** SCN-035, SCN-001
+
+## SCN-051 — See which sessions Switchboard launched are running
+
+**Persona:** P-01
+**Goal:** Know which Claude Code and Codex sessions Switchboard started are still running, on which account and in which folder.
+**Preconditions:** the app runs (it owns the list); sessions launched by Switchboard 0.6.17 or later (earlier launches wrote no record).
+**Entry point:** Activity → *Sessions*, above the journal; for agents and other products, `switchboard sessions` and the MCP tool `switchboard_sessions` (SB-95).
+**Steps:**
+1. Open Activity → *Sessions* lists each session that is starting or running: “{provider} · {account}”, its state (*Running*, *Starting*), its folder, and how it runs — “Managed · follows the {pool} pool” or “Isolated”, “in Terminal” or “in an embedded terminal” — with “started {date}” once its script has run.
+2. A session ends (its window closed, the agent quit) → it leaves the list at the next refresh (once a minute, or Refresh).
+**Alt paths:** none running → “No session Switchboard launched is running. Sessions started outside Switchboard are not listed.”; the read fails → “Sessions are unavailable. Refresh to retry.”; while reading → “Reading sessions…”. Russian: «Сессии», «Работает», «Запускается», «Управляемая · следует за пулом {pool}», «Изолированная», «в Terminal», «во встроенном терминале».
+**Expected result:** a person sees at a glance what Switchboard has running, without opening Terminal windows to find out.
+**UI elements:** the *Sessions* panel on Activity (rows with provider, account, state, folder, how it runs, start time).
+**States covered:** loading, empty, error, starting, running.
+**Errors & recovery:** a failed read keeps the last list and says to refresh.
+**Status:** draft
+**Meaning:** fabric-dashboards' agents-first request item 3 (2026-10-10) and packet SS-01's Sessions view; acting on a session (open its folder, drain, close) is the rest of SB-65.
+**Coverage:** `sessionStateLabel`, `sessionHow` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 in English and Russian (two sessions: managed running, isolated starting in place); the list itself: `a_launch_records_its_session_and_the_list_follows_its_process`.
+**Product:** unobserved
+**Traces:** SCN-016, SCN-050

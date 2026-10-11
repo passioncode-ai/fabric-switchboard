@@ -297,6 +297,7 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   homes with a record. State comes from the same markers that keep one session per home:
   `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
+- The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
 - Not covered yet (packet SS-01, SB-65): agents launched through `switchboard agents launch` and
   Kimi Code sessions, active requests per session, and acting on a session (open, drain, close).
 - Test: `a_launch_records_its_session_and_the_list_follows_its_process`; MCP

@@ -4,6 +4,19 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Sessions": "Сессии",
+  "Sessions are unavailable. Refresh to retry.": "Сессии недоступны. Обновите, чтобы повторить.",
+  "Reading sessions…": "Читаем сессии…",
+  "No session Switchboard launched is running. Sessions started outside Switchboard are not listed.": "Ни одна сессия, запущенная Switchboard, сейчас не работает. Сессии, запущенные не через Switchboard, здесь не показываются.",
+  "{how} · started {date}": "{how} · запущена {date}",
+  "Running": "Работает",
+  "Starting": "Запускается",
+  "Ended": "Завершена",
+  "State unknown": "Состояние неизвестно",
+  "Managed · follows the {pool} pool": "Управляемая · следует за пулом {pool}",
+  "Isolated": "Изолированная",
+  "{mode} · in an embedded terminal": "{mode} · во встроенном терминале",
+  "{mode} · in Terminal": "{mode} · в Terminal",
   "{agent}: Switchboard tools registered.": "{agent}: инструменты Switchboard зарегистрированы.",
   "{agent}: Switchboard tools not registered.": "{agent}: инструменты Switchboard не зарегистрированы.",
   "An agent has called Switchboard: {client}.": "Агент уже обращался к Switchboard: {client}.",

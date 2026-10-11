@@ -21,6 +21,15 @@ const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
 
+// SB-65: a session's state and how it runs.
+check(() => {
+  assert.equal(logic.sessionStateLabel('running'), 'Running');
+  assert.equal(logic.sessionStateLabel('starting'), 'Starting');
+  assert.equal(logic.sessionStateLabel('ended'), 'Ended');
+  assert.equal(logic.sessionStateLabel('unknown'), 'State unknown');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows the work pool · in Terminal');
+  assert.equal(logic.sessionHow({ mode: 'isolated', in_place: true, pool: 'default' }), 'Isolated · in an embedded terminal');
+});
 // SB-93: the Agents panel's setup facts — registration per agent, then whether an agent has called.
 check(() => {
   const facts = logic.agentSetupFacts({ connected: { claude_code: true, codex: false }, proved: { client: 'claude-code', at: 1 } });

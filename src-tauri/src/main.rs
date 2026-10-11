@@ -143,6 +143,15 @@ async fn set_policy(policy: RotationPolicy, state: State<'_, Slot>) -> Result<Va
         .execute(Operation::SetPolicy { policy })
         .await
 }
+/// The sessions Switchboard launched that start or run (SB-65 over SB-95's list).
+#[tauri::command]
+async fn sessions(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Sessions { all: false })
+        .await
+}
 #[tauri::command]
 async fn monitor_status(state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -802,6 +811,7 @@ fn main() {
             activate_native,
             set_policy,
             monitor_status,
+            sessions,
             add_account,
             update_account,
             remove_account,
