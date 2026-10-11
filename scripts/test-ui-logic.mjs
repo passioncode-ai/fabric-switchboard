@@ -30,6 +30,12 @@ check(() => {
   assert.equal(logic.kimiLimitUntil([{ name: 'month', used_percent: 100, resets_at: null }], now), 0);
   assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 100, resets_at: now - 5 }], now), '5 hours reset, refresh to see it');
 });
+// SB-100: the ordinary kimi gets its own words, never an account's.
+check(() => {
+  assert.equal(logic.ordinaryKimiNote({ signed_in: false, error: 'This account is signed out. Sign in to it again.' }), 'Not signed in. Run kimi login in Terminal.');
+  assert.equal(logic.ordinaryKimiNote({ signed_in: true, error: 'Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.' }), 'Run kimi once in Terminal to renew its sign-in, then refresh.');
+  assert.equal(logic.ordinaryKimiNote({ signed_in: true, error: null }), null);
+});
 // SB-98: a hidden limit says so first; the provider's reason reads in words.
 check(() => {
   assert.equal(logic.limitTitle({ source: 'claude_code', hidden: true }), 'Hidden limit · refused although the usage figures show room');

@@ -522,6 +522,17 @@ list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_ac
 - The token is never handed to another agent or the proxy (A-7); chains name Kimi Code by agent
   (`kimi-code`), and handing a workflow to a saved Kimi account is SB-73 phase 2.
 
+- **Status quality (SB-100, 2026-10-12).** Kimi's answers read as what they are: 404 → “Kimi
+  offers no usage figures for this account.”, 429 → “Kimi is limiting requests right now.
+  Switchboard asks again shortly.”, an unreadable 200 → “Kimi answered with something Switchboard
+  cannot read. Try again later.”, a 200 without figures → “Kimi returned no usage figures for this
+  account.”; 5xx and network failures stay “Kimi did not answer…”. One HTTP client serves every
+  request; `/me` and `/usages` are asked together and all accounts at once (`JoinSet`, order
+  kept); a saved account is asked in the region its own folder names. The window shows “checked
+  {time} ago”, says a failed refresh while keeping the last figures, refreshes Kimi in the
+  background every five minutes, and gives the ordinary `kimi` its own words (“Not signed in. Run
+  kimi login in Terminal.”); `switchboard kimi` no longer prints “signed in” for a signed-out
+  ordinary `kimi`. Tests `each_kimi_answer_reads_as_what_it_is`, `ordinaryKimiNote`.
 - **Safe homes and limits (SB-99, 2026-10-11).** *Launch* and *Sign in again* reserve the
   account's session folder `kimi/sessions/<id>/` (`Reservation`): a second `kimi` or a `kimi login`
   beside a running one is refused with “A Kimi Code session still runs on this account. Close it in

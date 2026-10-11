@@ -1522,11 +1522,13 @@ fn print_result(value: &Value, cli: &Cli) {
             }
             let current = &value["current"];
             if current.is_object() {
-                println!(
-                    "In use now (ordinary kimi): {} · {}",
-                    current["nickname"].as_str().unwrap_or("signed in"),
-                    windows(current)
-                );
+                // SB-100: the line says signed out when it is, never "signed in" by default.
+                let who = if current["signed_in"] == true {
+                    current["nickname"].as_str().unwrap_or("signed in")
+                } else {
+                    "not signed in (run kimi login)"
+                };
+                println!("In use now (ordinary kimi): {who} · {}", windows(current));
             }
         }
         Command::Kimi {

@@ -4,6 +4,14 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Not signed in. Run kimi login in Terminal.": "Вход не выполнен. Запустите kimi login в Terminal.",
+  "Run kimi once in Terminal to renew its sign-in, then refresh.": "Запустите kimi один раз в Terminal, чтобы он обновил вход, затем обновите.",
+  "checked {time} ago": "проверено {time} назад",
+  "Kimi Code could not be refreshed: {error}": "Не удалось обновить Kimi Code: {error}",
+  "Kimi offers no usage figures for this account.": "Kimi не даёт данных об использовании для этого аккаунта.",
+  "Kimi is limiting requests right now. Switchboard asks again shortly.": "Kimi сейчас ограничивает запросы. Switchboard спросит снова чуть позже.",
+  "Kimi answered with something Switchboard cannot read. Try again later.": "Kimi ответил так, что Switchboard не может прочитать ответ. Попробуйте позже.",
+  "Kimi returned no usage figures for this account.": "Kimi не вернул данных об использовании для этого аккаунта.",
   "Kimi Code": "Kimi Code",
   "A Kimi Code session still runs on this account. Close it in Terminal first.": "На этом аккаунте ещё работает сессия Kimi Code. Сначала закройте её в Terminal.",
   "reset, refresh to see it": "сброшено, обновите, чтобы увидеть",

@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Kimi Code says exactly what it knows** (SB-100). Each answer from Kimi reads as what it is —
+no usage service, too many requests, an unreadable answer, no figures — instead of one “did not
+answer”; figures show how old they are and refresh in the background; a failed refresh is said
+while the last figures stay; several accounts are read at once.
+
 **Switching is steadier** (SB-101). A switch no longer overwrites what Claude Code wrote into its
 config in the same moment; waiting for Claude Code's lock no longer slows other requests; a
 managed session whose selected account's token expired moves to the next account instead of

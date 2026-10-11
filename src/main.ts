@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -809,15 +809,20 @@ function renderAccounts(main: HTMLElement) {
   main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
   main.append(kimiSection());
 }
+let kimiLoadedAt = 0;
 async function loadKimi() {
+  kimiLoadedAt = Date.now();
   try { kimi = await adapter.kimiAccounts(); kimiError = ''; } catch (error) { kimiError = safeError(error); }
   backgroundRender();
 }
 /** The state line of a Kimi Code home: its plan windows, or why there are none. */
 function kimiStatusLine(status: KimiStatus) {
   if (status.error) return el('span', status.signed_in ? 'usage-sub is-stale' : 'usage-error', t(status.error));
-  const line = kimiWindowsLine(status.windows ?? [], Date.now() / 1000);
-  return el('span', 'usage-sub', line || t('Usage unknown'));
+  const now = Math.floor(Date.now() / 1000);
+  const line = kimiWindowsLine(status.windows ?? [], now);
+  // SB-100: how old the figures are, so a figure from an hour ago never reads as current.
+  const checked = status.checked_at ? ` · ${t('checked {time} ago', { time: compactCountdown(now, Math.min(status.checked_at, now)) })}` : '';
+  return el('span', 'usage-sub', (line || t('Usage unknown')) + checked);
 }
 /** SB-81: Kimi Code subscription accounts, each signed in by the official kimi in its own folder. */
 function kimiSection() {
@@ -828,9 +833,11 @@ function kimiSection() {
   section.append(heading);
   if (kimiError && !kimi) { section.append(el('p', 'usage-error', t(kimiError)), button(t('Retry'), () => void loadKimi(), 'text-button', 'kimi-retry')); return section; }
   if (!kimi) { section.append(el('p', 'form-note', t('Reading Kimi Code accounts…'))); return section; }
+  // SB-100: a failed refresh is said even while the last figures stay on screen.
+  if (kimiError) section.append(el('p', 'usage-error', t('Kimi Code could not be refreshed: {error}', { error: t(kimiError) })));
   const current = el('p', 'form-note');
   if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), ' · ', kimiStatusLine(kimi.current));
-  else if (kimi.current) { current.append(t('Ordinary kimi: '), kimiStatusLine(kimi.current)); }
+  else if (kimi.current) { current.append(t('Ordinary kimi: '), el('span', kimi.current.signed_in ? 'usage-sub is-stale' : 'usage-error', ordinaryKimiNote(kimi.current) ?? '')); }
   else current.append(kimi.installed ? t('Ordinary kimi: not signed in.') : t('Kimi Code is not installed. Install it from kimi.com/code, then add an account.'));
   section.append(current);
   const list = el('div', 'account-list'); list.setAttribute('role', 'list');
@@ -1500,6 +1507,8 @@ function backgroundRefresh() {
     if (!clock.accepts(stamp)) return;
     snapshot = data; applyContext(context); backgroundRender();
     void loadSessions();
+    // SB-100: Kimi's figures refresh in the background too, every five minutes.
+    if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
 }
 setInterval(backgroundRefresh, 60_000);
