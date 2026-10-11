@@ -2,24 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-10-11 — SB-65: sign-ins survive a restart (branch, not merged)
+## 2026-10-11 — SB-65: sign-ins survive a restart; SB-87 merged with it
 
-Branch `feat/sb-65-pending-logins`, stacked on `fix/sb-87-login-leftovers`; neither is merged.
 `begin_login` writes `.login.json` (provider, label, pool, time); an owner start takes back the
 sign-ins Terminal still runs or that completed meanwhile (`adopt_logins`, at most four), the
-sweep keeps a completed one with a valid journal, and the window restores its banner through
-`Operation::PendingLogins` / Tauri `pending_logins` (`restorePendingLogin`).
+SB-87 sweep removes the rest that ended (with their Claude Keychain item only when deleting it
+shows no dialog) and keeps a completed one with a valid journal, and the window restores its
+banner through `Operation::PendingLogins` / Tauri `pending_logins` (`restorePendingLogin`).
 
-Checks run on this branch (the machine had 1–2.5 GB free, so the full gate could not run):
-`cargo fmt --check` ok; `cargo test -p switchboard-runtime -p switchboard-cli` — 319 + 22 passed,
-0 failed; `cargo clippy -p switchboard-runtime -p switchboard-cli --all-targets -D warnings` clean
-(after fixing one SB-87 test lint, `std::slice::from_ref`); `tsc --noEmit`, `test-ui-logic`,
-`check-locale` ok. **Not run:** the `src-tauri` build and clippy, `npm run build`, the brand and
-error-vocabulary checks.
+Checks (the machine's disk was at 1–3.7 GB free, so `./scripts/check.sh` ran in parts):
+`cargo fmt --check` ok; `cargo test -p switchboard-runtime -p switchboard-cli` 319 + 22 passed,
+0 failed; `cargo clippy --all-targets -D warnings` clean for switchboard-runtime, switchboard-cli
+and fabric-switchboard (src-tauri); `npm run build`, `check-brand`, `test-read-deadline`,
+`test-ui-logic`, `check-locale`, `check-error-vocabulary` ok. **Not run:** `cargo test -p
+fabric-switchboard` (src-tauri's own unit tests; its change is two commands, compiled by clippy)
+— the nightly run at 23:00 covers it; check that run.
 
-**Exact next task:** with ≥ 5 GB free, run `./scripts/check.sh` on `feat/sb-65-pending-logins`
-(it contains SB-87); if green, merge `fix/sb-87-login-leftovers` then this branch (or this one,
-which includes it), and delete both worktrees.
+**Exact next task:** read tonight's nightly result for this merge; then SB-65's remaining part
+(acting on a session: open folder, drain, close — never by process name) or SB-07.
 
 ---
 
