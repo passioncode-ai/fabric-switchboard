@@ -833,7 +833,17 @@ pub(crate) async fn renew_idle_live(
         return Outcome::Transient;
     };
     // A failed write leaves the successor kept; the next pass writes it before anything else.
+    // SB-101: the provider has already spent the old token, so the successor goes into the
+    // vault now — a quit or crash before the next pass must not leave it only in memory. The
+    // kept copy stays, and the next pass still writes Claude Code's item first.
     if lock.write(&item).is_err() {
+        let owner = kept
+            .owner
+            .clone()
+            .or_else(|| live.identity.account_id.clone());
+        if let Some(owner) = owner {
+            let _ = file_with_owner(store, &owner, &kept.refreshed);
+        }
         return Outcome::Transient;
     }
     drop(lock);
@@ -2441,6 +2451,13 @@ mod tests {
             Outcome::Transient
         );
         assert!(has_stash(&state, "synthetic-a-refresh"));
+        // SB-101: already on disk, so a quit or crash now loses nothing.
+        for pool in ["default", "work"] {
+            let c = store
+                .stored_credential(&id_of(&store, "synthetic-a", pool))
+                .unwrap();
+            assert_eq!(c.refresh_token.as_deref(), Some("fresh-refresh"), "{pool}");
+        }
         // The next pass writes the kept successor before anything else — no second grant —
         // and every copy holding the spent token gets it, not just the first.
         WRITE_FAILS.with(|f| f.set(false));
