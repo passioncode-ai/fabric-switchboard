@@ -1659,10 +1659,11 @@ fn launch_full(
         .as_ref()
         .map(|p| p.to_string_lossy().into_owned());
     let first = continuation.map(crate::continuation::prompt);
-    let mut args: Vec<&str> = match &config {
-        Some(path) => vec!["--mcp-config", path.as_str()],
-        None => Vec::new(),
-    };
+    // One argument, `--mcp-config=<path>`: Claude's `--mcp-config <configs...>` is variadic and
+    // would read the first prompt or a caller's plain value after a separate flag as another
+    // config file; a caller's own `--mcp-config` still adds to it (SB-94, measured on 2.1.296).
+    let config = config.map(|path| format!("--mcp-config={path}"));
+    let mut args: Vec<&str> = config.iter().map(String::as_str).collect();
     // Both CLIs start an interactive session with a positional first message.
     if let Some(first) = &first {
         args.push(first.as_str());
@@ -2206,7 +2207,9 @@ mod tests {
     }
     /// A sign-in home whose `launch.command` runs `body` the way Terminal runs it: a shell leading
     /// its own process group that records `.session-pid` first. A thread reaps it, as Terminal's
-    /// login shell would, and reports when it exited.
+    /// login shell would, and reports when it exited. Returns once the script reached the last
+    /// line of `body` (a `.ready` mark before it): every `trap` is set and the pid is written in
+    /// full, so a signal never lands in the gap — that gap made these tests fail under load.
     #[cfg(unix)]
     fn terminal_session(
         root: &Path,
@@ -2215,10 +2218,11 @@ mod tests {
         use std::os::unix::process::CommandExt;
         let home = root.join("logins").join(Uuid::new_v4().to_string());
         private_dir(&home).unwrap();
+        let (setup, run) = body.rsplit_once('\n').unwrap_or(("", body));
         let script = write_launch_script(
             &home,
             &format!(
-                "cd {} || exit 1\n(umask 077; printf '%s' \"$$\" > .session-pid)\n{body}\n",
+                "cd {} || exit 1\n(umask 077; printf '%s' \"$$\" > .session-pid)\n{setup}\n: > .ready\n{run}\n",
                 quote(home.to_string_lossy().as_ref())
             ),
         )
@@ -2233,7 +2237,7 @@ mod tests {
             let _ = sent.send(child.wait().unwrap());
         });
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !home.join(".session-pid").exists() {
+        while !home.join(".ready").exists() {
             assert!(std::time::Instant::now() < deadline, "the script never ran");
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -2769,6 +2773,165 @@ mod tests {
             );
         }
     }
+    /// Runs an in-place session script with the provider program replaced by a recorder, and
+    /// returns the arguments and environment the agent would have started with.
+    #[cfg(not(windows))]
+    fn run_as_the_agent(script: &Path, extra_env: &[(&str, &str)]) -> (Vec<String>, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let args = temp.path().join("args");
+        let env = temp.path().join("env");
+        let recorder = temp.path().join("agent");
+        private_write(
+            &recorder,
+            format!(
+                "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\0' \"$a\"; done > {}\nenv > {}\n",
+                quote(&args.to_string_lossy()),
+                quote(&env.to_string_lossy())
+            )
+            .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let text = fs::read_to_string(script).unwrap();
+        let program = quote(
+            &synthetic_program(Provider::Claude)
+                .unwrap()
+                .to_string_lossy(),
+        );
+        assert!(text.contains(&program), "{text}");
+        let runnable = temp.path().join("launch.command");
+        private_write(
+            &runnable,
+            text.replace(&program, &quote(&recorder.to_string_lossy()))
+                .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let status = std::process::Command::new(SCRIPT_SHELL)
+            .arg(&runnable)
+            .envs(extra_env.iter().copied())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let args = fs::read(&args).unwrap();
+        let args = args
+            .split(|b| *b == 0)
+            .filter(|a| !a.is_empty())
+            .map(|a| String::from_utf8(a.to_vec()).unwrap())
+            .collect();
+        (args, fs::read_to_string(&env).unwrap())
+    }
+    /// Claude's `--mcp-config <configs...>` is variadic (measured on Claude Code 2.1.296: a
+    /// plain value after it is read as one more config file). A bare value may follow a
+    /// separate `--mcp-config` flag only as its one config, then an option must come next.
+    #[cfg(not(windows))]
+    fn no_value_is_read_as_a_config(args: &[String]) {
+        for (i, arg) in args.iter().enumerate() {
+            if arg == "--mcp-config" {
+                if let Some(next) = args.get(i + 2) {
+                    assert!(
+                        next.starts_with('-'),
+                        "{next:?} would be read as a config: {args:?}"
+                    );
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_dashboards_console_launch_reaches_the_agent_as_sent() {
+        // SB-94: Fabric Dashboards' console (FD-39) hands its context through `launch --in-place
+        // --` — its own MCP config and brief for Claude, `-c` overrides and a first prompt for
+        // Codex. Both must reach the agent unchanged after Switchboard's own arguments, both MCP
+        // configs must load, and its context variables must survive the environment scrub.
+        fn terminal_must_not_open(_: &Path) -> Result<(), String> {
+            panic!("an in-place launch opened Terminal");
+        }
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            start_terminal: terminal_must_not_open,
+        };
+        let context = [
+            (
+                "FABRIC_DASHBOARDS_CONTEXT",
+                "/Users/x/Library/Application Support/fabric-dashboards/consoles/svc-1",
+            ),
+            ("FABRIC_DASHBOARDS_TASK", "fix"),
+        ];
+
+        let claude = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        f.store
+            .select(Provider::Claude, "default", &claude)
+            .unwrap();
+        let theirs =
+            "/Users/x/Library/Application Support/fabric-dashboards/consoles/svc-1/mcp.json";
+        let brief = format!("You are the console of 'svc-1'. {}", "b".repeat(960));
+        // fabric-dashboards 47e5aa6 (`src/core/handoff.ts`): the joined form, as Switchboard's.
+        let theirs = format!("--mcp-config={theirs}");
+        let sent: Vec<String> = [
+            theirs.as_str(),
+            "--append-system-prompt",
+            &brief,
+            "--continue",
+            "Fix the failing health check",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let (_, script) = launch_full(
+            &f.root, &f.store, &proxy, &claude, "managed", &f.project, &host, None, &sent, true,
+        )
+        .unwrap();
+        let (args, env) = run_as_the_agent(&script.unwrap(), &context);
+        let ours = f
+            .root
+            .join("runtimes")
+            .join("claude-default")
+            .join("switchboard-mcp.json");
+        let mut expected = vec![format!("--mcp-config={}", ours.to_string_lossy())];
+        expected.extend(sent.iter().cloned());
+        assert_eq!(args, expected);
+        no_value_is_read_as_a_config(&args);
+        for (key, value) in context {
+            assert!(
+                env.contains(&format!("{key}={value}\n")),
+                "{key} was scrubbed"
+            );
+        }
+
+        let codex = f.add(
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "team",
+            "synthetic-api-key",
+        );
+        f.store.select(Provider::Codex, "team", &codex).unwrap();
+        let sent: Vec<String> = [
+            "-c",
+            "mcp_servers.fabric-dashboards.command=\"/Applications/Fabric Dashboards.app/Contents/MacOS/Fabric Dashboards\"",
+            "-c",
+            "mcp_servers.fabric-dashboards.args=[\"/Applications/Fabric Dashboards.app/Contents/Resources/app/mcp/server.js\"]",
+            "-c",
+            "mcp_servers.fabric-dashboards.env.ELECTRON_RUN_AS_NODE=\"1\"",
+            "resume",
+            "--last",
+            "Read $FABRIC_DASHBOARDS_CONTEXT/context.md, then fix it",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        let (_, script) = launch_full(
+            &f.root, &f.store, &proxy, &codex, "managed", &f.project, &host, None, &sent, true,
+        )
+        .unwrap();
+        let (args, env) = run_as_the_agent(&script.unwrap(), &context);
+        assert_eq!(
+            args, sent,
+            "Codex gets Switchboard's server from its config.toml"
+        );
+        assert!(env.contains("FABRIC_DASHBOARDS_TASK=fix\n"));
+    }
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt() {
@@ -2806,6 +2969,17 @@ mod tests {
         assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
         assert!(text.contains("export OBSERVATORY_HANDOFF_ID='handoff:fedcba9876543210'\n"));
         assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
+        // The first prompt follows Switchboard's MCP config: with a separate `--mcp-config` flag
+        // Claude would read it as a second config file and never start.
+        assert!(!text.contains("'--mcp-config' "), "{text}");
+        assert!(text.contains(&format!(
+            "{} {}",
+            quote(&format!(
+                "--mcp-config={}",
+                home.join("switchboard-mcp.json").to_string_lossy()
+            )),
+            quote(&crate::continuation::prompt(&resumed))
+        )));
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(home.join("switchboard-mcp.json")).unwrap()).unwrap();
         assert_eq!(
@@ -2977,7 +3151,10 @@ mod tests {
                 proxy.token()
             )));
             assert!(text.contains("export ANTHROPIC_API_KEY=''\n"));
-            assert!(text.contains("'--mcp-config'"));
+            assert!(text.contains(&quote(&format!(
+                "--mcp-config={}",
+                home.join("switchboard-mcp.json").to_string_lossy()
+            ))));
         }
     }
     #[tokio::test]

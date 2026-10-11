@@ -2,6 +2,26 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-94: a caller's context through `launch --in-place`; continuation launches fixed
+
+Branch `fix/sb-94-in-place-context`. Claude Code's `--mcp-config <configs...>` is variadic; measured
+on 2.1.296 with the API pointed at a closed port (nothing spent): a plain value after
+`--mcp-config <path>` is read as another config (`MCP config file not found: …/<prompt>`), so every
+continuation launch with Switchboard's tools stopped before its first turn. Switchboard now passes
+`--mcp-config=<path>` as one argument (launch.rs); joined or not, repeated flags add up (both read).
+Fabric Dashboards switched to the same form (fabric-dashboards 47e5aa6). New test
+`a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a recording
+agent: Dashboards' exact Claude and Codex argv arrive unchanged after Switchboard's,
+`FABRIC_DASHBOARDS_CONTEXT`/`_TASK` survive the scrub. The continuation and managed-launch tests
+now assert the joined form. Three sign-in-ending tests raced under load (pid file present but
+empty; a signal before `trap`): `terminal_session` now waits for a `.ready` mark — `launch::` 43/43,
+three runs in a row. CONTRACTS → Launch in place, CHANGELOG *Unreleased*.
+
+**Exact next task:** SB-93 — `switchboard onboard`, scenario first (the first-run tour changes);
+then SB-95 with SB-65 (live session list).
+
+---
+
 ## 2026-10-10 — v0.6.16 published: Windows signed
 
 [Release run 38068045608](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38068045608) published **v0.6.16** (PR #137): Windows installers, app

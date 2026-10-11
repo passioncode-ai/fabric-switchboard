@@ -6,6 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+**A Claude session continued from another agent starts again** (SB-94). Switchboard passed its
+own MCP config as `--mcp-config <path>`, and Claude Code reads every plain value after that flag
+as one more config file, so the first prompt of a continuation was taken for a file and the
+session stopped with *MCP config file not found*. The config now goes as one argument,
+`--mcp-config=<path>`. Fabric Dashboards' console hands its own MCP config, brief and first
+prompt through `launch --in-place` the same way; a test runs that exact shape.
+
 ## 0.6.16 — 2026-10-10
 
 **Windows installers and the Windows CLI are Authenticode-signed** (SB-03), x64 and arm64: signed in
