@@ -9,6 +9,8 @@ path: a sign-in home whose Terminal session ended is removed with its Claude Key
 deleting the item shows no dialog; one still open, or whose item would ask, is kept
 (`launch::sweep_logins`, log `login_leftovers`). OPERATIONS → recovery now says what stays manual.
 
+**Not merged yet:** `launch::` tests pass (45/45), but the full gate was stopped by the disk guard — the machine had 1.1 GB free (other sessions filling it). Run `./scripts/check.sh` on this branch when there is room, then merge.
+
 **Exact next task:** the rest of SB-65 — a persistent pending-login journal so a sign-in open across
 a restart can still be finished (packet SS-01); or SB-07 (the intermittent `project_rules…` /
 `managed_session…` MCP test failures) if CI shows it again.
