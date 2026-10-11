@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, OpenrouterCredit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -431,4 +431,16 @@ export function withFolder(folders: string[], folder: string): string[] {
 export const LAST_FOLDER_KEY = 'switchboard.last-folder';
 export function storedFolder(store: Pick<Storage, 'getItem'> | null): string {
   try { const value = store?.getItem(LAST_FOLDER_KEY); return typeof value === 'string' ? value.trim() : ''; } catch { return ''; }
+}
+/** SB-93: what the Agents panel says about setup — each agent's tools registered or not, and whether any agent has called Switchboard yet. */
+export function agentSetupFacts(setup: Pick<AgentSetup, 'connected' | 'proved'>): { text: string; done: boolean }[] {
+  const facts: { text: string; done: boolean }[] = [];
+  if (setup.connected) {
+    for (const [agent, on] of [[t('Claude Code'), setup.connected.claude_code], [t('Codex CLI'), setup.connected.codex]] as const) {
+      facts.push({ text: on ? t('{agent}: Switchboard tools registered.', { agent }) : t('{agent}: Switchboard tools not registered.', { agent }), done: on });
+    }
+  }
+  const client = setup.proved?.client;
+  facts.push(setup.proved ? { text: client ? t('An agent has called Switchboard: {client}.', { client }) : t('An agent has called Switchboard.'), done: true } : { text: t('No agent has called Switchboard yet.'), done: false });
+  return facts;
 }

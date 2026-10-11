@@ -21,6 +21,17 @@ const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
 
+// SB-93: the Agents panel's setup facts — registration per agent, then whether an agent has called.
+check(() => {
+  const facts = logic.agentSetupFacts({ connected: { claude_code: true, codex: false }, proved: { client: 'claude-code', at: 1 } });
+  assert.deepEqual(facts, [
+    { text: 'Claude Code: Switchboard tools registered.', done: true },
+    { text: 'Codex CLI: Switchboard tools not registered.', done: false },
+    { text: 'An agent has called Switchboard: claude-code.', done: true },
+  ]);
+  assert.deepEqual(logic.agentSetupFacts({ proved: null }), [{ text: 'No agent has called Switchboard yet.', done: false }]);
+  assert.equal(logic.agentSetupFacts({ connected: { claude_code: false, codex: false }, proved: { client: null, at: 1 } })[2].text, 'An agent has called Switchboard.');
+});
 // Appearance: unknown or missing storage falls back to System; System follows the OS.
 check(() => { for (const value of [null, undefined, '', 'sepia', 42]) assert.equal(logic.parseAppearance(value), 'system'); });
 check(() => { for (const value of ['system', 'dark', 'light']) assert.equal(logic.parseAppearance(value), value); });

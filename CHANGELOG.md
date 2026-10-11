@@ -13,6 +13,9 @@ follows; `switchboard onboard --status` (and the MCP tool `switchboard_onboardin
 setup stands — the app running, accounts saved, the folder's project, the MCP server registered
 with the agent, a first answered tool call — with the command for each step the agent can take
 and what to ask the person for the rest (opening the app, signing in). It only reads.
+In the window, Agents → *Set up with your coding agent* gives the one-line prompt to copy into
+Claude Code or Codex and shows whether each agent has Switchboard's tools registered and whether an
+agent has called them; the tour's last step points at it.
 
 **A Claude session continued from another agent starts again** (SB-94). Switchboard passed its
 own MCP config as `--mcp-config <path>`, and Claude Code reads every plain value after that flag

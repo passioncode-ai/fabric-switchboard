@@ -4,6 +4,17 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "{agent}: Switchboard tools registered.": "{agent}: инструменты Switchboard зарегистрированы.",
+  "{agent}: Switchboard tools not registered.": "{agent}: инструменты Switchboard не зарегистрированы.",
+  "An agent has called Switchboard: {client}.": "Агент уже обращался к Switchboard: {client}.",
+  "An agent has called Switchboard.": "Агент уже обращался к Switchboard.",
+  "No agent has called Switchboard yet.": "Ни один агент ещё не обращался к Switchboard.",
+  "Set up with your coding agent": "Настройка через вашего агента",
+  "Give this to Claude Code or Codex. It does every setup step it can and tells you the ones that are yours: opening Switchboard and signing in.": "Передайте это Claude Code или Codex. Агент сам выполнит все шаги настройки, какие может, и скажет, какие остались за вами: открыть Switchboard и войти в аккаунт.",
+  "Prompt for your agent": "Задание для агента",
+  "Or register the tools yourself": "Или зарегистрируйте инструменты сами",
+  "Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.": "Здесь передайте агенту задание на настройку: он зарегистрирует инструменты и настроит остальное, вам останется только войти в аккаунт. Если закрыть окно, Switchboard продолжит работать; открыть или завершить его можно через значок в области уведомлений.",
+  "Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.": "Здесь передайте агенту задание на настройку: он зарегистрирует инструменты и настроит остальное, вам останется только войти в аккаунт. Если закрыть окно, Switchboard продолжит работать; открыть или завершить его можно через значок в строке меню.",
   "Name the agent by its catalog id (switchboard agents list).": "Укажите агента по его id в каталоге (switchboard agents list).",
   "Give an executor an account or a key, not both.": "Укажите для исполнителя аккаунт или ключ, но не то и другое.",
   "Name the key as its Observatory vault name: project/env/NAME.": "Укажите ключ по его имени в хранилище Observatory: project/env/NAME.",
@@ -232,7 +243,6 @@ export const RU: Record<string, string> = {
   "Give a project its own accounts": "Дайте проекту свои аккаунты",
   "Press + New project, add the project's folders and choose its accounts. Sessions launched from those folders use only them, and other projects never switch to them.": "Нажмите «+ Новый проект», добавьте папки проекта и выберите его аккаунты. Сессии, запущенные из этих папок, используют только их, а другие проекты на них не переключаются.",
   "Agents, and it keeps running": "Агенты — и работа в фоне",
-  "Here, connect Claude Code and Codex agents so they can read usage and switch accounts. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.": "Здесь подключите агентов Claude Code и Codex, чтобы они видели использование и переключали аккаунты. Если закрыть окно, Switchboard продолжит работать; открыть или завершить его можно через значок в строке меню.",
   "Step {step} of {total}": "Шаг {step} из {total}",
   "Skip tour": "Пропустить",
   "Back": "Назад",
@@ -744,7 +754,6 @@ export const RU: Record<string, string> = {
   "HTTP {status}": "HTTP {status}",
   "Same as system": "Как в системе",
   "Same as system follows the language of your operating system. Changing the language reloads the window.": "«Как в системе» — язык вашей операционной системы. При смене языка окно перезагрузится.",
-  "Here, connect Claude Code and Codex agents so they can read usage and switch accounts. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.": "Здесь подключите агентов Claude Code и Codex, чтобы они видели использование и переключали аккаунты. Если закрыть окно, Switchboard продолжит работать; открыть или завершить его можно через значок в области уведомлений.",
   "Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.": "«Переключить» меняет аккаунт обычного Claude Code на этом компьютере. «Выбрать» задаёт аккаунт для управляемых сессий, запущенных из Switchboard; ответ, который уже идёт, сохраняет свой аккаунт.",
   "Make this the Claude Code account on this computer": "Использовать этот аккаунт в Claude Code на этом компьютере",
   "Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its icon in the notification area.": "Если закрыть окно, Switchboard продолжит работать: проверки квоты, автопереключение, продление входов и резервные копии не прекращаются. Чтобы остановить его, выберите «Завершить Switchboard» через значок в области уведомлений.",
