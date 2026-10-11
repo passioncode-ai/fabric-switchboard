@@ -84,6 +84,7 @@ const safeErrors = new Set([
   'Region is mainland-cn (kimi.com) or global (kimi.ai).',
   'Kimi Code account not found. Refresh the list and choose another.',
   'This account is signed out. Sign in to it again.',
+  'A Kimi Code session still runs on this account. Close it in Terminal first.',
   'Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.',
   'Kimi did not answer. Try again in a minute.',
   'Kimi refused this sign-in. Sign in to the account again.',

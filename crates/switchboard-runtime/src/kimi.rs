@@ -9,7 +9,7 @@
 //! never writes the ordinary `~/.kimi-code` (shown, not switched — A-6).
 use crate::launch::{
     agent_folder, ensure_idle, find_program, private_dir, private_write, script,
-    write_launch_script,
+    write_launch_script, Reservation, SESSION_RECORD,
 };
 use serde_json::{json, Value};
 use std::{
@@ -39,6 +39,9 @@ pub const KIMI_TOKEN_STALE: &str =
     "Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.";
 pub const KIMI_REFUSED: &str = "Kimi refused this sign-in. Sign in to the account again.";
 pub const KIMI_UNREACHABLE: &str = "Kimi did not answer. Try again in a minute.";
+/// A `kimi` session Switchboard started still runs in this account's folder (SB-99).
+pub const KIMI_SESSION_RUNNING: &str =
+    "A Kimi Code session still runs on this account. Close it in Terminal first.";
 
 fn pick_base(configured: Option<String>, region: &str) -> String {
     configured
@@ -513,11 +516,24 @@ fn launch_with(
     private_dir(&sessions)?;
     let session = sessions.join(id);
     private_dir(&session)?;
+    // SB-99: one `kimi` per account folder — a second one would share its rotating login.
+    let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
     let path = write_launch_script(
         &session,
         &script(&session, program, &[], &env, false, &folder),
     )?;
+    let record = json!({
+        "account_id": id, "provider": "kimi", "pool": "default", "mode": "isolated",
+        "working_directory": folder, "in_place": false,
+        "launched_at": switchboard_proxy::now(), "continues": null,
+    });
+    private_write(
+        &session.join(SESSION_RECORD),
+        record.to_string().as_bytes(),
+        false,
+    )?;
     start(&path)?;
+    reservation.committed = true;
     Ok(json!({"launched": true, "account": account.label}))
 }
 
@@ -539,6 +555,8 @@ pub fn sign_in_again(
     private_dir(&sessions)?;
     let session = sessions.join(id);
     private_dir(&session)?;
+    // SB-99: never `kimi login` beside a running `kimi` on the same folder.
+    let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
     let path = write_launch_script(
         &session,
         &script(
@@ -551,12 +569,18 @@ pub fn sign_in_again(
         ),
     )?;
     start(&path)?;
+    reservation.committed = true;
     Ok(json!({"started": true}))
 }
 
 /// Forgets an account and deletes its home (and with it the only copy of its login).
 pub fn remove(root: &Path, store: &Store, id: &str) -> Result<bool, String> {
     let home = home(root, id)?;
+    // SB-99: a running `kimi` would write its login back into a folder no account names.
+    let session = homes(root).join("sessions").join(id);
+    if session.is_dir() && ensure_idle(&session).is_err() {
+        return Err(KIMI_SESSION_RUNNING.into());
+    }
     let removed = store.remove_kimi_account(id)?;
     let _ = fs::remove_dir_all(&home);
     let _ = fs::remove_dir_all(homes(root).join("sessions").join(id));
@@ -921,5 +945,33 @@ mod tests {
             started
         )
         .is_err());
+
+        // SB-99: the launched session holds its folder — no second `kimi`, no `kimi login`
+        // beside it, no removal under it — and the session list shows it.
+        assert_eq!(
+            launch_with(&root, &store, &id, folder.path(), program, started).unwrap_err(),
+            KIMI_SESSION_RUNNING
+        );
+        assert_eq!(
+            remove(&root, &store, &id).unwrap_err(),
+            KIMI_SESSION_RUNNING
+        );
+        assert!(home.exists(), "the login stays while its session runs");
+        let listed = crate::launch::sessions(&root, false);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["provider"], "kimi");
+        assert_eq!(listed[0]["state"], "starting");
+        assert!(
+            !fs::read_to_string(session.join(crate::launch::SESSION_RECORD))
+                .unwrap()
+                .contains("synthetic-access")
+        );
+
+        // The session ended (its script ran and exited): the folder is free again.
+        fs::remove_file(session.join(".launch-pending")).unwrap();
+        launch_with(&root, &store, &id, folder.path(), program, started).unwrap();
+        fs::remove_file(session.join(".launch-pending")).unwrap();
+        assert!(remove(&root, &store, &id).unwrap());
+        assert!(!home.exists());
     }
 }

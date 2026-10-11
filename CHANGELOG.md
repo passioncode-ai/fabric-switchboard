@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Kimi Code accounts are safer and say when they are spent** (SB-99). A second `kimi`, a sign-in
+again or a removal on an account whose session still runs is refused instead of sharing or
+deleting its login; Kimi sessions appear in Sessions; a plan window at 100 % marks the account
+as limited until its reset, and a window past its reset no longer shows its old share.
+
 **Agents keep working when an account hits a limit** (SB-98). A managed session's request the
 provider refuses for a limit goes once to the pool's next account, so the agent does not pause;
 the refused account is held at once until its reset. The automatic switch of the ordinary Claude

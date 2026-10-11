@@ -21,6 +21,15 @@ const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
 
+// SB-99/100: a Kimi window at 100 % stops the account until its reset; a passed reset no longer shows the old percent.
+check(() => {
+  const now = 1_000_000;
+  assert.equal(logic.kimiLimitUntil([{ name: '5h', used_percent: 40, resets_at: now + 60 }], now), null);
+  assert.equal(logic.kimiLimitUntil([{ name: '5h', used_percent: 100, resets_at: now + 600 }, { name: '7d', used_percent: 100, resets_at: now + 9000 }], now), now + 9000);
+  assert.equal(logic.kimiLimitUntil([{ name: '5h', used_percent: 100, resets_at: now - 5 }], now), null, 'reset already');
+  assert.equal(logic.kimiLimitUntil([{ name: 'month', used_percent: 100, resets_at: null }], now), 0);
+  assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 100, resets_at: now - 5 }], now), '5 hours reset, refresh to see it');
+});
 // SB-98: a hidden limit says so first; the provider's reason reads in words.
 check(() => {
   assert.equal(logic.limitTitle({ source: 'claude_code', hidden: true }), 'Hidden limit · refused although the usage figures show room');
@@ -434,7 +443,7 @@ check(() => {
 // SB-81: Kimi Code plan windows read as named shares with the time to their reset.
 check(() => {
   const now = 1_800_000_000;
-  assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 25.4, resets_at: now + 3 * 3600 + 600 }, { name: '7d', used_percent: 50, resets_at: null }, { name: 'month', used_percent: 100, resets_at: now - 5 }], now), '5 hours 25%, resets in 3h 10m · 7 days 50% · Month 100%');
+  assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 25.4, resets_at: now + 3 * 3600 + 600 }, { name: '7d', used_percent: 50, resets_at: null }, { name: 'month', used_percent: 100, resets_at: now - 5 }], now), '5 hours 25%, resets in 3h 10m · 7 days 50% · Month reset, refresh to see it', 'a passed reset never shows the old share (SB-100)');
   assert.equal(logic.kimiWindowsLine([], now), '');
   i18n.setLocale('ru');
   assert.equal(logic.kimiWindowsLine([{ name: '5h', used_percent: 10, resets_at: now + 1800 }], now), '5 часов 10%, сброс через 30 мин');
