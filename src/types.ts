@@ -56,6 +56,7 @@ export interface Adapter {
   pickFolder(start?: string): Promise<string | null>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
+  pendingLogins(): Promise<{ logins: { login_id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'complete' | 'ended' }[] }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
   finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean }>;
   cancelLogin(loginId: string): Promise<void>;

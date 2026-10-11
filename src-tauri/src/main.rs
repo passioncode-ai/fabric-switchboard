@@ -272,6 +272,15 @@ async fn finish_login(login_id: String, state: State<'_, Slot>) -> Result<Value,
         .execute(Operation::FinishLogin { login_id })
         .await
 }
+/// Sign-ins the owner holds, so a window opened after a restart shows their banner (SB-65).
+#[tauri::command]
+async fn pending_logins(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::PendingLogins)
+        .await
+}
 #[tauri::command]
 async fn login_status(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -821,6 +830,7 @@ fn main() {
             begin_login,
             finish_login,
             login_status,
+            pending_logins,
             backups,
             backup_now,
             restore_backup,

@@ -668,6 +668,19 @@ pub fn begin_login(
             vec!["login"]
         }
     };
+    // SB-65: what this sign-in is for, so an owner started after a quit or crash can take it
+    // back (`adopt_logins`) — the provider, label and pool only.
+    let journal = json!({
+        "provider": provider.as_str(),
+        "label": label,
+        "pool": pool,
+        "started_at": switchboard_proxy::now(),
+    });
+    private_write(
+        &home.join(LOGIN_JOURNAL),
+        journal.to_string().as_bytes(),
+        false,
+    )?;
     open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
     reservation.committed = true;
     Ok(Login {
@@ -807,6 +820,89 @@ pub fn clean_login(login: &Login) -> Result<(), String> {
         Err(_) => Err("Account saved; isolated login cleanup needs attention.".into()),
     }
 }
+/// Written into a sign-in's home before Terminal opens (SB-65): provider, label, pool, time.
+pub(crate) const LOGIN_JOURNAL: &str = ".login.json";
+/// How many sign-ins one owner holds at once (`begin_login` refuses a fifth).
+pub(crate) const MAX_LOGINS: usize = 4;
+fn login_completed(home: &Path) -> bool {
+    read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
+}
+fn reservation_open(home: &Path) -> bool {
+    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
+        meta.file_type().is_file()
+            && !meta
+                .modified()
+                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
+    })
+}
+/// A sign-in's journal, when it names a known provider and a valid label and pool.
+fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
+    let journal: Value =
+        serde_json::from_str(&read_regular(&home.join(LOGIN_JOURNAL)).ok()?).ok()?;
+    let provider = match journal["provider"].as_str()? {
+        "claude" => Provider::Claude,
+        "codex" => Provider::Codex,
+        _ => return None,
+    };
+    let (label, pool) = (journal["label"].as_str()?, journal["pool"].as_str()?);
+    validate_fields(label, pool).ok()?;
+    Some((
+        provider,
+        label.to_owned(),
+        pool.to_owned(),
+        journal["started_at"].as_i64().unwrap_or(0),
+    ))
+}
+/// The sign-ins an earlier owner started that can still be finished: their journal is readable
+/// and the sign-in either completed in Terminal or is still open there. Newest first, at most
+/// `MAX_LOGINS`. The rest stay for `sweep_logins`.
+pub fn adopt_logins(root: &Path) -> Vec<Login> {
+    let Ok(entries) = fs::read_dir(root.join("logins")) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(i64, Login)> = Vec::new();
+    for entry in entries.flatten() {
+        let Some(id) = entry
+            .file_name()
+            .to_str()
+            .filter(|name| Uuid::parse_str(name).is_ok())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let home = entry.path();
+        let Some((provider, label, pool, started_at)) = login_journal(&home) else {
+            continue;
+        };
+        let open = login_completed(&home)
+            || reservation_open(&home)
+            || matches!(session_running(&home), Ok(true));
+        if !open {
+            continue;
+        }
+        found.push((
+            started_at,
+            Login {
+                id,
+                provider,
+                label,
+                pool,
+                saved: None,
+                signed_in_again: false,
+                home,
+            },
+        ));
+    }
+    found.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+    found
+        .into_iter()
+        .take(MAX_LOGINS)
+        .map(|(_, login)| login)
+        .collect()
+}
 /// What an owner start did with sign-in homes a previous owner left behind (SB-87).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Sweep {
@@ -814,6 +910,8 @@ pub struct Sweep {
     pub removed: usize,
     /// Kept: their sign-in is still open in Terminal; a later start removes them once it ends.
     pub running: usize,
+    /// Kept: the sign-in completed in Terminal and its journal lets this owner finish it (SB-65).
+    pub finishable: usize,
     /// Kept: a Keychain item that could not be deleted silently (locked, or not created through
     /// `/usr/bin/security`), or a marker that could not be read. OPERATIONS → recovery.
     pub kept: usize,
@@ -851,16 +949,14 @@ pub(crate) fn sweep_logins_with(
         if !named || !entry.file_type().is_ok_and(|t| t.is_dir()) {
             continue;
         }
-        let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-            meta.file_type().is_file()
-                && !meta
-                    .modified()
-                    .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-        });
+        let pending = reservation_open(&home);
         match session_running(&home) {
             _ if pending => sweep.running += 1,
             Ok(true) => sweep.running += 1,
             Err(_) => sweep.kept += 1,
+            Ok(false) if login_completed(&home) && login_journal(&home).is_some() => {
+                sweep.finishable += 1
+            }
             Ok(false) => {
                 let cleared = match item(&home) {
                     LeftoverItem::Absent => true,
@@ -2512,13 +2608,14 @@ mod tests {
             Sweep {
                 removed: 2,
                 running: 2,
+                finishable: 0,
                 kept: 1
             }
         );
         assert!(!idle.exists() && !with_item.exists());
         assert_eq!(
             *deleted.borrow(),
-            [with_item.clone()],
+            std::slice::from_ref(&with_item),
             "only the silent item is deleted"
         );
         assert!(asks.exists(), "an item that would ask stays, with its home");
@@ -2556,6 +2653,70 @@ mod tests {
             !running.home.exists(),
             "removed by a later start once it ended"
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep() {
+        // SB-65: an earlier owner's sign-ins, with the journal begin_login writes.
+        let root = tempfile::tempdir().unwrap();
+        let journal = |home: &Path, provider: &str, label: &str, at: i64| {
+            fs::write(
+                home.join(LOGIN_JOURNAL),
+                json!({"provider": provider, "label": label, "pool": "work", "started_at": at})
+                    .to_string(),
+            )
+            .unwrap();
+        };
+        let home = |name: String| {
+            let home = root.path().join("logins").join(name);
+            private_dir(&home).unwrap();
+            home
+        };
+        let completed = home(Uuid::new_v4().to_string());
+        journal(&completed, "codex", "Team", 10);
+        fs::write(completed.join(".completed"), "complete").unwrap();
+        let (running, exited) = terminal_session(root.path(), "sleep 60 & wait $!");
+        journal(&running.home, "claude", "Studio", 20);
+        let ended = home(Uuid::new_v4().to_string());
+        journal(&ended, "claude", "Gone", 30);
+        let no_journal = home(Uuid::new_v4().to_string());
+        fs::write(no_journal.join(".completed"), "complete").unwrap();
+        let bad = home(Uuid::new_v4().to_string());
+        fs::write(
+            bad.join(LOGIN_JOURNAL),
+            r#"{"provider":"gemini","label":"x","pool":"work"}"#,
+        )
+        .unwrap();
+        fs::write(bad.join(".completed"), "complete").unwrap();
+
+        let adopted = adopt_logins(root.path());
+        let names: Vec<(&str, Provider, &str)> = adopted
+            .iter()
+            .map(|l| (l.label.as_str(), l.provider, l.pool.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            [("Studio", Provider::Claude, "work"), ("Team", Provider::Codex, "work")],
+            "newest first; an ended one, one without a journal and an unknown provider are not taken"
+        );
+        assert_eq!(login_state(&adopted[1]), "complete");
+        assert_eq!(login_state(&adopted[0]), "pending");
+
+        let sweep = sweep_logins_with(root.path(), &|_| LeftoverItem::Absent, &|_| Ok(()));
+        assert!(
+            completed.exists(),
+            "a completed sign-in with its journal waits for Finish"
+        );
+        assert!(running.home.exists());
+        assert!(!ended.exists() && !no_journal.exists() && !bad.exists());
+        assert_eq!((sweep.finishable, sweep.running, sweep.removed), (1, 1, 3));
+
+        let pid: i32 = fs::read_to_string(running.home.join(".session-pid"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+        exited.recv_timeout(Duration::from_secs(5)).unwrap();
     }
     #[cfg(unix)]
     #[test]

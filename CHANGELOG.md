@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A sign-in open when Switchboard quit or restarted is no longer lost** (SB-65). Each sign-in keeps a
+small journal (provider, label, pool); the next start takes it back when Terminal still runs it
+or it finished meanwhile, the banner returns, and the account is added as usual.
+
 **A sign-in left open when Switchboard quit or crashed is cleaned up at the next start** (SB-87),
 when its Terminal session has ended: its staging folder and, for Claude, its Keychain item —
 the item only when deleting it shows no dialog. A sign-in still open in Terminal is left for a

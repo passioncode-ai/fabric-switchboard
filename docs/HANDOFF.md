@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-65: sign-ins survive a restart (branch, not merged)
+
+Branch `feat/sb-65-pending-logins`, stacked on `fix/sb-87-login-leftovers`; neither is merged.
+`begin_login` writes `.login.json` (provider, label, pool, time); an owner start takes back the
+sign-ins Terminal still runs or that completed meanwhile (`adopt_logins`, at most four), the
+sweep keeps a completed one with a valid journal, and the window restores its banner through
+`Operation::PendingLogins` / Tauri `pending_logins` (`restorePendingLogin`).
+
+Checks run on this branch (the machine had 1–2.5 GB free, so the full gate could not run):
+`cargo fmt --check` ok; `cargo test -p switchboard-runtime -p switchboard-cli` — 319 + 22 passed,
+0 failed; `cargo clippy -p switchboard-runtime -p switchboard-cli --all-targets -D warnings` clean
+(after fixing one SB-87 test lint, `std::slice::from_ref`); `tsc --noEmit`, `test-ui-logic`,
+`check-locale` ok. **Not run:** the `src-tauri` build and clippy, `npm run build`, the brand and
+error-vocabulary checks.
+
+**Exact next task:** with ≥ 5 GB free, run `./scripts/check.sh` on `feat/sb-65-pending-logins`
+(it contains SB-87); if green, merge `fix/sb-87-login-leftovers` then this branch (or this one,
+which includes it), and delete both worktrees.
+
+---
+
 ## 2026-10-11 — SB-87: forgotten sign-ins cleaned at start
 
 Branch `fix/sb-87-login-leftovers`. A native owner's start sweeps `logins/` once, off the start
