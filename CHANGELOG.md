@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Agents keep working when an account hits a limit** (SB-98). A managed session's request the
+provider refuses for a limit goes once to the pool's next account, so the agent does not pause;
+the refused account is held at once until its reset. The automatic switch of the ordinary Claude
+Code no longer waits for fresh figures when the account in use is limited, and tries the next
+account when one fails to activate. Limits the provider's usage figures do not show — spend and
+credit caps — appear on the account as a hidden limit, with the reason in words.
+
 **A sign-in open when Switchboard quit or restarted is no longer lost** (SB-65). Each sign-in keeps a
 small journal (provider, label, pool); the next start takes it back when Terminal still runs it
 or it finished meanwhile, the banner returns, and the account is added as usual.

@@ -187,6 +187,44 @@ Account list order is display-only; it never selects/activates. Within provider/
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
+## Agents keep working through a limit (SB-98, 2026-10-11)
+
+Measured on the operator's machine (Claude Code transcripts, 3 days): 264 sessions hit a limit;
+a session that went on did so after a median 77 min (p90 8 h), 156 never went on. Causes found
+and closed here:
+
+- **A limited account in use never waits for fresh figures.** `rotation_decision_with`, with the
+  current account limited and no candidate measured within `max_age_seconds`, takes the one whose
+  last known usage leaves room (`last_known_usage`: windows all reset since → 0; never measured →
+  99, last in line; still full → never). Without a limit nothing is guessed. Test
+  `a_limited_account_moves_on_last_known_usage_when_nothing_is_fresh`.
+- **Managed failover** (operator decision 2026-10-11; AGENTS.md rule amended). A Claude Code or
+  Codex session's request answered 429 is journaled `rate_limited` on its account, its usage
+  headers kept, and `Store::failover` holds the account (`limited`, `take_refusals`) and moves
+  the pool's route to the next usable account — the managed policy's figures when the pool has
+  one, on or off, else 90 / 10 / 300 s — then the same buffered body is sent **once** there.
+  A second refusal comes back to the session as is. An agent's API-key request is never moved.
+  Tests `a_session_refused_for_a_limit_continues_on_the_next_account_without_seeing_it`,
+  `a_refusal_moves_once_to_the_next_account_and_events_contain_no_secrets`,
+  `failover_moves_the_pool_off_a_refused_account_and_holds_it`.
+- **A refusal is evidence at once.** Each monitor pass takes the proxy's refusals and holds the
+  account (`LimitState::refused`, `Attributed`) until the provider's reset when a window is full,
+  else 900 s; then publishes the held accounts to the store for the proxy (`set_limited`). Test
+  `a_refused_managed_request_holds_its_account_at_once_until_the_reset`.
+- **A failed switch tries the next candidate.** A candidate whose activation or selection fails is
+  set aside for 10 min (`Runtime::failed_switches`) and the next one is tried in the same pass,
+  up to three; with none left the decision reports the failure. Test
+  `a_candidate_that_fails_to_activate_is_set_aside_and_the_next_one_tried_at_once`.
+- **Hidden limits.** A Claude Code marker's `quotaLimits.overageDisabledReason`
+  (`org_spend_cap_reached`, `group_zero_credit_limit`, `org_level_disabled`) is kept as the
+  limit's `reason`, allowlisted; `hidden` is set when the provider refused while its own usage
+  figures for that window (or, for a managed refusal, every window) still showed room. `limited`
+  rows carry `reason` and `hidden`; the account row says “Hidden limit · refused although the
+  usage figures show room” and the reason in words. Test
+  `a_spend_cap_reason_is_kept_and_a_limit_the_usage_figures_miss_is_hidden`.
+- Not changed: an ordinary (native) Claude Code session whose turn already ended on a limit does
+  not resume by itself — run agents in managed mode for no pauses.
+
 ## Fallback chains (SB-71, 2026-10-06)
 
 Design: [XA-01](packets/cross-agent-continuation.md). Code: `crates/switchboard-core/src/chains.rs`,

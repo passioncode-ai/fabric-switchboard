@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-98: agents keep working through a limit
+
+Branch `fix/sb-98-no-stalls`. Measured first (3 days of this machine's Claude Code transcripts):
+264 sessions hit a limit, median stall 77 min. Fixed: a limited account moves on last known usage;
+managed failover moves a refused session request once to the pool's next account (operator
+decision; AGENTS.md rule amended); refusals are held at once; a failed switch tries the next
+candidate; hidden limits (spend/credit caps) carry their reason and show on the account. Tests
+and decisions: CONTRACTS → Agents keep working through a limit; SCN-052. Filed from the same
+audits: SB-99 (Kimi limits and safe homes), SB-100 (Kimi status quality), SB-101 (switch
+reliability).
+
+**Exact next task:** SB-99 — Kimi limits and safe homes; then SB-101.
+
+---
+
 ## 2026-10-11 — SB-65: sign-ins survive a restart; SB-87 merged with it
 
 `begin_login` writes `.login.json` (provider, label, pool, time); an owner start takes back the
