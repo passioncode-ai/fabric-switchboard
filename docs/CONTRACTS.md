@@ -503,6 +503,17 @@ list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_ac
 - The token is never handed to another agent or the proxy (A-7); chains name Kimi Code by agent
   (`kimi-code`), and handing a workflow to a saved Kimi account is SB-73 phase 2.
 
+- **Safe homes and limits (SB-99, 2026-10-11).** *Launch* and *Sign in again* reserve the
+  account's session folder `kimi/sessions/<id>/` (`Reservation`): a second `kimi` or a `kimi login`
+  beside a running one is refused with “A Kimi Code session still runs on this account. Close it in
+  Terminal first.”, and *Remove* is refused while it runs. A launch writes the session record, so
+  `switchboard sessions` and Activity → *Sessions* list Kimi sessions (`provider: "kimi"`). In the
+  window a plan window at 100 % marks the row as limited (“Limit reached · resets in {time}”, red
+  dot) until its reset, and a window whose reset has passed reads “reset, refresh to see it”
+  instead of its old share. Tests: `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`
+  (extended), `kimiLimitUntil` / `kimiWindowsLine` in `scripts/test-ui-logic.mjs`. Not yet: Kimi in
+  automatic fallback chains, pending Kimi sign-ins swept at start (SB-99 left).
+
 ## Agent keys (SB-79, slice 1, 2026-10-07)
 
 Design: [XA-02](packets/agent-keys-and-kimi.md). Code: `crates/switchboard-core/src/agent_keys.rs`,

@@ -411,12 +411,12 @@ fn reservation_expired(written: SystemTime, now: SystemTime) -> bool {
         Err(ahead) => ahead.duration() > RESERVATION_TTL,
     }
 }
-struct Reservation {
+pub(crate) struct Reservation {
     path: PathBuf,
-    committed: bool,
+    pub(crate) committed: bool,
 }
 impl Reservation {
-    fn new(home: &Path) -> Result<Self, String> {
+    pub(crate) fn new(home: &Path) -> Result<Self, String> {
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
         switchboard_core::private_fs::create_new(&path)
@@ -1917,7 +1917,7 @@ pub(crate) const SESSION_RECORD: &str = ".session.json";
 /// only sessions that start or run. Reads only; follows no link out of the owned folders.
 pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
     let mut found = Vec::new();
-    for folder in ["homes", "runtimes"] {
+    for folder in ["homes", "runtimes", "kimi/sessions"] {
         let Ok(entries) = fs::read_dir(root.join(folder)) else {
             continue;
         };

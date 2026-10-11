@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -847,10 +847,12 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   const signedOut = !status.signed_in;
   const row = el('article', `account-row kimi-account ${signedOut ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
   row.setAttribute('aria-label', t('{label}, Kimi Code', { label: account.label }));
-  row.dataset.state = signedOut ? 'sign_in' : status.error ? 'stale' : 'available';
+  const limitedUntil = signedOut ? null : kimiLimitUntil(status.windows, Math.floor(Date.now() / 1000));
+  row.dataset.state = signedOut ? 'sign_in' : limitedUntil !== null ? 'blocked' : status.error ? 'stale' : 'available';
   const icon = el('span', 'provider-icon kimi', 'K'); icon.setAttribute('aria-hidden', 'true');
   const name = el('div', 'row-name'); const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
   if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
+  else if (limitedUntil !== null) title.append(el('span', 'badge danger-badge', limitedUntil > 0 ? t('Limit reached · resets in {time}', { time: compactCountdown(limitedUntil, Math.floor(Date.now() / 1000)) }) : t('Limit reached')));
   name.append(title, el('span', 'row-sub', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
   const usage = el('div', 'usage-cell kimi-usage'); usage.append(kimiStatusLine(status));
   const relogin = () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`);
@@ -1121,7 +1123,7 @@ function sessionsPanel() {
   const list = el('ul', 'session-list');
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
-    title.append(el('strong', '', `${providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
     const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }

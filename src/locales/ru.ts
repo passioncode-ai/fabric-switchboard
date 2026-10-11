@@ -4,6 +4,10 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Kimi Code": "Kimi Code",
+  "A Kimi Code session still runs on this account. Close it in Terminal first.": "На этом аккаунте ещё работает сессия Kimi Code. Сначала закройте её в Terminal.",
+  "reset, refresh to see it": "сброшено, обновите, чтобы увидеть",
+  "Limit reached · resets in {time}": "Лимит исчерпан · сброс через {time}",
   "Hidden limit · refused although the usage figures show room": "Скрытый лимит · отказ, хотя по данным об использовании запас есть",
   "The organisation's spend cap is reached, so extra usage is off until it resets.": "Достигнут лимит расходов организации: дополнительное использование выключено до сброса.",
   "No credits are left for extra usage.": "Кредиты на дополнительное использование закончились.",

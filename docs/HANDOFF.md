@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-99 first part: Kimi safe homes and visible limits
+
+Branch `feat/sb-99-kimi-limits`. Kimi *Launch*, *Sign in again* and *Remove* respect a running
+session in the account's folder (`Reservation` on `kimi/sessions/<id>/`, `KIMI_SESSION_RUNNING`);
+launches write the session record, so Kimi sessions are listed; the row shows a 100 % window as a
+limit until its reset; a passed reset no longer shows the old share. CONTRACTS → Kimi Code
+accounts, SCN-047.
+
+**Exact next task:** SB-101 — switch reliability (lock waits off the async workers, `~/.claude.json`
+re-read before writing, renewed sign-in persisted first, expired managed route fails over); then
+the rest of SB-99 (Kimi in fallback chains, pending sign-in sweep).
+
+---
+
 ## 2026-10-11 — SB-98: agents keep working through a limit
 
 Branch `fix/sb-98-no-stalls`. Measured first (3 days of this machine's Claude Code transcripts):

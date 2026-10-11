@@ -384,8 +384,11 @@ export interface KimiWindow { name: string; used_percent: number; resets_at: num
 export function kimiWindowsLine(windows: KimiWindow[], nowSeconds: number): string {
   const names: Record<string, string> = { '5h': t('5 hours'), '7d': t('7 days'), month: t('Month'), month_code: t('Month · code') };
   return windows.map((w) => {
-    const part = `${names[w.name] ?? w.name} ${Math.round(w.used_percent)}%`;
-    return w.resets_at && w.resets_at > nowSeconds ? `${part}, ${t('resets in {time}', { time: compactCountdown(w.resets_at, nowSeconds) })}` : part;
+    const name = names[w.name] ?? w.name;
+    // A window whose reset has passed no longer holds the percent it showed (SB-100).
+    if (w.resets_at && w.resets_at <= nowSeconds) return `${name} ${t('reset, refresh to see it')}`;
+    const part = `${name} ${Math.round(w.used_percent)}%`;
+    return w.resets_at ? `${part}, ${t('resets in {time}', { time: compactCountdown(w.resets_at, nowSeconds) })}` : part;
   }).join(' · ');
 }
 /**
@@ -466,4 +469,10 @@ export function limitReasonText(reason: string | null | undefined): string | nul
     case 'org_level_disabled': return t('Extra usage is turned off for the organisation.');
     default: return t('Provider reason: {reason}', { reason });
   }
+}
+/** SB-99: a Kimi plan window at 100 % stops the account until it resets — the latest such reset, or 0 when one names none. */
+export function kimiLimitUntil(windows: KimiWindow[] | undefined, nowSeconds: number): number | null {
+  const full = (windows ?? []).filter((w) => w.used_percent >= 100 && !(w.resets_at && w.resets_at <= nowSeconds));
+  if (!full.length) return null;
+  return Math.max(0, ...full.map((w) => w.resets_at ?? 0));
 }
