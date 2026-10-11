@@ -72,6 +72,14 @@ The server works out which session asks from its own environment, first match wi
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
+### `switchboard_sessions` — `all?` (boolean)
+
+`{sessions[]}`: the Claude Code and Codex sessions Switchboard launched — `account_id`,
+`label`, `provider`, `pool`, `mode`, `working_directory`, `in_place`, `launched_at`,
+`started_at`, `continues`, `home` and `state` (`starting`, `running`, `ended`, `unknown`).
+Without `all`, only starting and running ones. A session started outside Switchboard is not
+listed.
+
 ### `switchboard_onboarding` — `path?` (absolute folder), `host?` (`claude` or `codex`)
 
 Where setting Switchboard up stands: `{complete, host, folder, steps[]}`, steps in order

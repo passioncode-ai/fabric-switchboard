@@ -43,6 +43,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_accounts` | no | list accounts (no credentials), optional `provider` |
 | `switchboard_usage` | no | remaining quota per window; `refresh` asks the provider |
 | `switchboard_switch` | yes | choose the account for the next request |
+| `switchboard_sessions` | no | the sessions Switchboard launched, and whether each is starting, running or ended |
 | `switchboard_onboarding` | no | setup steps: what is done, what to run, what is the person's (`switchboard onboard` is the guide) |
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |

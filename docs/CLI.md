@@ -147,6 +147,16 @@ Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS th
 
 Restart the agent after installing; it loads servers and skills at session start. The plugin is validated by `python3 scripts/check_plugin.py`, `python3 -m unittest scripts/test_check_plugin.py` and `claude plugin validate ./plugins/switchboard --strict` plus `claude plugin validate . --strict`.
 
+### Sessions (SB-95)
+
+```sh
+switchboard sessions          # Claude Code and Codex sessions Switchboard launched that are starting or running
+switchboard sessions --all    # also the ended ones (each home keeps its last launch's record)
+switchboard --json sessions   # {sessions: [...]}
+```
+
+Each launch writes `.session.json` beside its `launch.command` (0600): `account_id`, `provider`, `pool`, `mode` (`managed`/`isolated`), `working_directory`, `in_place`, `launched_at` and `continues` (the workflow id a continuation picks up, or null) — no credential. The list adds `label`, `home` (`homes` or `runtimes`), `started_at` (when the script recorded its process) and `state`: `starting` (Terminal has not run the script yet), `running` (the recorded process is still that session — the pid alive and at least as old as its marker; on Windows, the pid with its creation time), `ended`, or `unknown` (the marker cannot be read). Only Switchboard's own homes are read and no link is followed; a session started outside Switchboard is not listed. The MCP tool `switchboard_sessions` (`all?`) answers the same. A managed session follows its pool's selected account from the next request, so `account_id` is the account selected at launch.
+
 ### Setting up with a coding agent (SB-93)
 
 `switchboard onboard` prints the guide a coding agent follows ([docs/AGENT-ONBOARDING.md](AGENT-ONBOARDING.md), built into the CLI). `switchboard onboard --status [--folder <absolute dir>] [--host claude|codex] [--json]` reads where setup stands and writes nothing — it creates no data folder:

@@ -874,6 +874,15 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
     }
+    if session_running(home)? {
+        return Err("Close the existing session before changing its home.".into());
+    }
+    Ok(())
+}
+/// Whether a live session holds `home`: its marker names a process that is still the session
+/// (the pid alive and at least as old as the marker; on Windows, the pid with its creation
+/// time). Reads only. An unreadable or invalid marker is an error, never "not running".
+pub(crate) fn session_running(home: &Path) -> Result<bool, String> {
     #[cfg(windows)]
     {
         let marker = home.join(".session-process");
@@ -887,7 +896,7 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
                 .ok_or("Session state invalid.")?;
             let created = value["created"].as_u64().ok_or("Session state invalid.")?;
             if switchboard_core::windows::process_matches(pid, created)? {
-                return Err("Close the existing session before changing its home.".into());
+                return Ok(true);
             }
         }
     }
@@ -920,11 +929,11 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
                 .zip(process_age(pid))
                 .is_some_and(|(marker_age, age)| pid_reused(marker_age, age));
             if !reused {
-                return Err("Close the existing session before changing its home.".into());
+                return Ok(true);
             }
         }
     }
-    Ok(())
+    Ok(false)
 }
 /// Cancel found the sign-in's Terminal session but could not end it, or could not confirm that
 /// the process its marker names is that session (SB-83).
@@ -1673,6 +1682,22 @@ fn launch_full(
         &home,
         &script(&home, &program, &args, &env, false, &working_directory),
     )?;
+    // SB-95: what this home's session is, for the session list — ids, folder and times only.
+    let record = json!({
+        "account_id": account.id,
+        "provider": account.provider.as_str(),
+        "pool": account.pool,
+        "mode": mode,
+        "working_directory": working_directory,
+        "in_place": in_place,
+        "launched_at": switchboard_proxy::now(),
+        "continues": continuation.map(|c| c.workflow_id.clone()),
+    });
+    private_write(
+        &home.join(SESSION_RECORD),
+        record.to_string().as_bytes(),
+        false,
+    )?;
     // In place the caller runs the script now; the reservation lapses if it never does.
     if !in_place {
         (host.start_terminal)(&path)?;
@@ -1680,6 +1705,66 @@ fn launch_full(
     reservation.committed = true;
     journal_launch(store, id, mode);
     Ok((cli.is_some(), in_place.then_some(path)))
+}
+/// Written beside `launch.command` by every Claude Code or Codex launch (SB-95).
+pub(crate) const SESSION_RECORD: &str = ".session.json";
+/// The sessions Switchboard launched, from the homes it owns (`homes/`, `runtimes/`): each
+/// launch's record plus its state now — `starting` (the script has not run yet), `running` (its
+/// process is the session) or `ended`; `unknown` when the marker cannot be read. Without `all`,
+/// only sessions that start or run. Reads only; follows no link out of the owned folders.
+pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
+    let mut found = Vec::new();
+    for folder in ["homes", "runtimes"] {
+        let Ok(entries) = fs::read_dir(root.join(folder)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let home = entry.path();
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let Some(mut record) = read_regular(&home.join(SESSION_RECORD))
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .filter(serde_json::Value::is_object)
+            else {
+                continue;
+            };
+            let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
+                meta.file_type().is_file()
+                    && !meta
+                        .modified()
+                        .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
+            });
+            let state = if pending {
+                "starting"
+            } else {
+                match session_running(&home) {
+                    Ok(true) => "running",
+                    Ok(false) => "ended",
+                    Err(_) => "unknown",
+                }
+            };
+            if !all && !matches!(state, "starting" | "running") {
+                continue;
+            }
+            #[cfg(unix)]
+            let marker = home.join(".session-pid");
+            #[cfg(windows)]
+            let marker = home.join(".session-process");
+            let started = fs::symlink_metadata(&marker)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64);
+            record["state"] = state.into();
+            record["started_at"] = started.into();
+            record["home"] = folder.into();
+            found.push(record);
+        }
+    }
+    found.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
+    found
 }
 /// Terminal is already open: a journal failure must not report the launch as failed.
 fn journal_launch(store: &Store, id: &str, mode: &str) {
@@ -2931,6 +3016,79 @@ mod tests {
             "Codex gets Switchboard's server from its config.toml"
         );
         assert!(env.contains("FABRIC_DASHBOARDS_TASK=fix\n"));
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_launch_records_its_session_and_the_list_follows_its_process() {
+        // SB-95: the list reads each owned home's record and asks the process, never a name.
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        assert!(sessions(&f.root, true).is_empty());
+        launch_with(
+            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &TEST_HOST, None,
+        )
+        .unwrap();
+        let home = f.root.join("homes").join(&id);
+        let record = fs::read_to_string(home.join(SESSION_RECORD)).unwrap();
+        assert!(
+            !record.contains("synthetic"),
+            "no credential in the record: {record}"
+        );
+        let listed = sessions(&f.root, false);
+        assert_eq!(listed.len(), 1);
+        let session = &listed[0];
+        assert_eq!(
+            session["state"], "starting",
+            "Terminal has not run the script yet"
+        );
+        assert_eq!(session["account_id"], id.as_str());
+        assert_eq!(session["provider"], "claude");
+        assert_eq!(session["mode"], "isolated");
+        assert_eq!(session["home"], "homes");
+        assert_eq!(session["in_place"], false);
+        assert_eq!(
+            session["working_directory"],
+            f.project.canonicalize().unwrap().to_string_lossy().as_ref()
+        );
+        assert!(session["started_at"].is_null());
+
+        // The script runs: it clears the reservation and records its own pid.
+        fs::remove_file(home.join(".launch-pending")).unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "printf '%s' \"$$\" > .session-pid; exec sleep 30"])
+            .current_dir(&home)
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while fs::read_to_string(home.join(".session-pid")).map_or(true, |t| t.is_empty()) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let listed = sessions(&f.root, false);
+        assert_eq!(listed[0]["state"], "running");
+        assert!(listed[0]["started_at"].as_i64().unwrap() > 0);
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(
+            sessions(&f.root, false).is_empty(),
+            "an ended session leaves the default list"
+        );
+        assert_eq!(sessions(&f.root, true)[0]["state"], "ended");
+
+        // A link inside the owned folders is never followed, and a home without a record is
+        // not a session.
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(
+            outside.path().join(SESSION_RECORD),
+            r#"{"account_id":"planted"}"#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), f.root.join("homes").join("planted")).unwrap();
+        fs::create_dir(f.root.join("homes").join("no-record")).unwrap();
+        let all = sessions(&f.root, true);
+        assert_eq!(all.len(), 1, "{all:?}");
     }
     #[cfg(not(windows))]
     #[tokio::test]

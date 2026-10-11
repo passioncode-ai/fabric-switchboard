@@ -170,6 +170,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_accounts",
             "switchboard_usage",
             "switchboard_switch",
+            "switchboard_sessions",
             "switchboard_onboarding",
             "switchboard_project_context",
             "switchboard_project_set",
@@ -184,6 +185,10 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_openrouter_model"
         ]
     );
+    // SB-95: the session list reads; nothing was launched here.
+    let (error, sessions) = agent.tool("switchboard_sessions", json!({"all": true}));
+    assert!(!error, "{sessions}");
+    assert_eq!(sessions["sessions"], json!([]));
     // SB-71: chains over MCP — set from a preset, read back, an agent that cannot take over refused.
     let (error, set) = agent.tool(
         "switchboard_chain_set",

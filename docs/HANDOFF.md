@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-95: the session list for other products
+
+Branch `feat/sb-95-sessions`. Each Claude Code / Codex launch writes `<home>/.session.json`
+(account, provider, pool, mode, folder, in place, launch time, continued workflow; no
+credential). `switchboard sessions [--all]` and MCP `switchboard_sessions` list them with their
+state from the markers that keep one session per home (`session_running`, factored out of
+`ensure_idle` — reads only). CONTRACTS → Session list. Fabric Dashboards asked for it (agents-first
+brief, item 3).
+
+**Exact next task:** SB-65 — the Sessions view in the window over `Operation::Sessions` (scenario
+first), then `agents launch` and Kimi sessions in the same list; or SB-92 (shared Windows signing
+action) if a release is near.
+
+---
+
 ## 2026-10-11 — SB-93 slice 2: setup in the window
 
 Branch `feat/sb-93-window`. Agents → *Connect an agent* opens with *Set up with your coding agent*:
