@@ -284,6 +284,24 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
+## Session list (SB-95, 2026-10-11)
+
+Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idle`, reads only),
+`SESSION_RECORD`, `Operation::Sessions { all }`, CLI `sessions`, MCP `switchboard_sessions`.
+
+- Every Claude Code or Codex launch (Terminal or in place, managed or isolated, continuation
+  included) writes `<home>/.session.json` (0600) before the session starts: `account_id`,
+  `provider`, `pool`, `mode`, `working_directory` (canonical), `in_place`, `launched_at`,
+  `continues`. A failed write fails the launch before Terminal opens.
+- The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
+  homes with a record. State comes from the same markers that keep one session per home:
+  `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
+  unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
+- Not covered yet (packet SS-01, SB-65): agents launched through `switchboard agents launch` and
+  Kimi Code sessions, active requests per session, and acting on a session (open, drain, close).
+- Test: `a_launch_records_its_session_and_the_list_follows_its_process`; MCP
+  `handshake_lists_tools_and_rejects_malformed_messages` (`switchboard_sessions`).
+
 ## Agent onboarding (SB-93, 2026-10-11)
 
 Code: `switchboard_runtime::onboarding` (`steps`, `registered`, `proof`, `record_proof`, `GUIDE`),

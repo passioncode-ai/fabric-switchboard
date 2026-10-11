@@ -49,6 +49,13 @@ enum Command {
     Events,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
+    /// Sessions Switchboard launched (Claude Code, Codex) that are starting or running: account,
+    /// provider, pool, mode, folder and times. Reads only.
+    Sessions {
+        /// Also list sessions that ended (their homes keep the last launch's record).
+        #[arg(long)]
+        all: bool,
+    },
     /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
     Current,
     /// Configure quota-based switching while the desktop or serve is running.
@@ -768,6 +775,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
+        Command::Sessions { all } => Operation::Sessions { all: *all },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
             Backup::List => Operation::Backups,
@@ -1217,6 +1225,26 @@ fn print_result(value: &Value, cli: &Cli) {
     }
     let text = |v: &Value| v.as_str().unwrap_or("—").to_string();
     match &cli.command {
+        Command::Sessions { .. } => {
+            let sessions = value["sessions"].as_array().cloned().unwrap_or_default();
+            if sessions.is_empty() {
+                println!("No session Switchboard launched is running.");
+            }
+            for s in sessions {
+                println!(
+                    "{:<9} {:<7} {:<9} {} · {} · {}",
+                    text(&s["state"]),
+                    text(&s["provider"]),
+                    text(&s["mode"]),
+                    s["label"]
+                        .as_str()
+                        .or(s["account_id"].as_str())
+                        .unwrap_or("—"),
+                    text(&s["working_directory"]),
+                    utc(&s["started_at"]).replace('—', "not started"),
+                );
+            }
+        }
         Command::Onboard { status: false, .. } => print!("{}", text(&value["guide"])),
         Command::Onboard { status: true, .. } => {
             for step in value["steps"].as_array().into_iter().flatten() {

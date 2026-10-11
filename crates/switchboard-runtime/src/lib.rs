@@ -154,6 +154,11 @@ pub enum Operation {
     ResolveProject {
         path: PathBuf,
     },
+    /// The sessions Switchboard launched and their state (SB-95); `all` adds ended ones.
+    Sessions {
+        #[serde(default)]
+        all: bool,
+    },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
         pool: Option<String>,
@@ -501,6 +506,7 @@ impl Runtime {
                 | Operation::Status
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
+                | Operation::Sessions { .. }
                 | Operation::CurrentAccounts
                 | Operation::LoginStatus { .. }
                 | Operation::Backups
@@ -1729,6 +1735,21 @@ async fn execute(
                 runtime.invalidate_current();
             }
             Ok(json!(restored))
+        }
+        Operation::Sessions { all } => {
+            let snapshot = store.snapshot()?;
+            let sessions: Vec<Value> = launch::sessions(root, all)
+                .into_iter()
+                .map(|mut session| {
+                    let account = snapshot
+                        .accounts
+                        .iter()
+                        .find(|a| Some(a.id.as_str()) == session["account_id"].as_str());
+                    session["label"] = account.map(|a| a.label.clone()).into();
+                    session
+                })
+                .collect();
+            Ok(json!({ "sessions": sessions }))
         }
         Operation::ResolveProject { path } => {
             projects::resolve(&store, &projects::project_dir(root, &path)?, monitor::now())
