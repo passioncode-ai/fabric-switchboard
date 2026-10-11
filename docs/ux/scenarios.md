@@ -711,7 +711,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. “Add your accounts” — + Add account is outlined.
 3. “Switch, by hand or automatically” — the automatic switching bar is outlined.
 4. “Give a project its own accounts” — Projects opens, + New project is outlined.
-5. “Agents, and it keeps running” — Agents opens; the menu-bar icon is named. Start using Switchboard ends it.
+5. “Agents, and it keeps running” — Agents opens with *Copy* beside the prompt for a coding agent outlined (SB-93: the agent sets Switchboard up, SCN-050); the menu-bar icon is named. Start using Switchboard ends it.
 **Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never.
 **Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains.
 **UI elements:** tour card (non-modal), outlined target, step dots.
@@ -1033,11 +1033,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 7. The agent re-reads the status after every step and, when it is complete, tells the person what is set up.
 **Alt paths:** the agent is not recognised → `mcp` asks for `--host claude|codex`; no data folder yet → no accounts and no project, and nothing is created by reading; a relative `--folder` is refused.
 **Expected result:** a person who never opened the tour has accounts, the MCP server and a proved call, having done only the sign-in and the app start themselves.
-**UI elements:** none in the window yet; the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`. The first-run tour (SCN-035) is to become a view of the same steps (SB-93 slice 2).
+**UI elements:** the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`; in the window, Agents → *Connect an agent* → *Set up with your coding agent*: the prompt (“Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.”) with *Copy*, then one line per agent — “Claude Code: Switchboard tools registered.” / “… not registered.”, the same for Codex CLI — and “An agent has called Switchboard: {client}.” or “No agent has called Switchboard yet.”; *Or register the tools yourself* keeps the commands. The tour's last step outlines the prompt's *Copy* (SCN-035).
 **States covered:** fresh machine, partly set up, complete, unknown agent, server registered but not yet loaded.
 **Errors & recovery:** every step is read again on each run; a half-written agent config reads as not registered and is right on the next run.
 **Status:** draft
 **Meaning:** operator's agents-first strategy, 2026-10-10: the coding agent does every setup step it can; the interface shows the result.
-**Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`).
+**Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`); `agentSetupFacts` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 (Agents panel and tour step 5 with the prompt's *Copy* outlined).
 **Product:** unobserved
 **Traces:** SCN-035, SCN-001

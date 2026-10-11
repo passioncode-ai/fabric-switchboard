@@ -51,6 +51,10 @@ fn shell_quote(value: &str) -> String {
 }
 
 pub fn setup() -> Value {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
     let cli = agent_cli();
     let bundled = bundled_cli();
     let linked = user_bin()
@@ -66,6 +70,13 @@ pub fn setup() -> Value {
         "linked_cli": linked,
         "can_link": cfg!(unix) && bundled.is_some(),
         "translocated": running_translocated(),
+        // SB-93: whether each agent's own configuration names the switchboard server, and the
+        // one line a person gives their coding agent to have it set Switchboard up.
+        "connected": {
+            "claude_code": crate::onboarding::registered(crate::onboarding::Host::Claude, &home, None, None),
+            "codex": crate::onboarding::registered(crate::onboarding::Host::Codex, &home, None, codex_home.as_deref()),
+        },
+        "agent_prompt": format!("Set up Fabric Switchboard on this computer: run `{command} onboard` and follow it."),
         "commands": {
             "claude_code": format!("claude mcp add --scope user switchboard -- {command} mcp"),
             "codex": format!("codex mcp add switchboard -- {command} mcp"),
@@ -226,5 +237,10 @@ mod setup_tests {
         }
         // A test binary is never a bundled desktop CLI, so nothing can be linked.
         assert_eq!(setup["can_link"], false);
+        // SB-93: registration is read per agent, and the prompt names the onboard guide.
+        assert!(setup["connected"]["claude_code"].is_boolean());
+        assert!(setup["connected"]["codex"].is_boolean());
+        let prompt = setup["agent_prompt"].as_str().unwrap();
+        assert!(prompt.ends_with(" onboard` and follow it."), "{prompt}");
     }
 }

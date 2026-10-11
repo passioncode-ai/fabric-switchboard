@@ -27,7 +27,7 @@ export interface Account {
 export interface Event { at: number; action: string; account_id: string | null; detail: string }
 export interface ProjectRule { path: string; provider: Provider; account_id: string; target: 'managed' | 'claude_cli'; enabled: boolean; created_at: number; expires_at: number | null }
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
-export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string } }
+export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
 /** A project's folders and the pool of accounts reserved for them (0.6). */
 export interface Project { pool: string; name: string; folders: string[]; created_at: number }
 export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[] }

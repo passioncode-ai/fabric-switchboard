@@ -567,9 +567,15 @@ async fn launch_agent(
         })
         .await
 }
+/// The Agents panel's setup facts, plus the proving call this app's data folder recorded (SB-93).
 #[tauri::command]
-fn agent_setup() -> Value {
-    switchboard_runtime::agents::setup()
+async fn agent_setup(state: State<'_, Slot>) -> Result<Value, String> {
+    let mut setup = switchboard_runtime::agents::setup();
+    if let Ok(runtime) = state.runtime().await {
+        setup["proved"] =
+            switchboard_runtime::onboarding::proof(&runtime.root).unwrap_or(Value::Null);
+    }
+    Ok(setup)
 }
 #[tauri::command]
 fn link_cli() -> Result<Value, String> {

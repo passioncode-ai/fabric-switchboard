@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-11 — SB-93 slice 2: setup in the window
+
+Branch `feat/sb-93-window`. Agents → *Connect an agent* opens with *Set up with your coding agent*:
+the prompt “Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.”
+with *Copy*, a line per agent (Claude Code, Codex CLI) saying whether its config registers the
+switchboard server, and whether an agent has called it (`mcp-proof.json`). The tour's step 5
+outlines that *Copy*. Backend: `agents::setup()` adds `connected` and `agent_prompt`; Tauri
+`agent_setup` adds `proved`. Checked in a WebKit demo (Playwright 1.63, `?demo=1`). SB-93 done.
+
+**Exact next task:** SB-95 with SB-65 — a live session list over CLI and MCP, then the Sessions view;
+design it from packets/session-supervisor.md first.
+
+---
+
 ## 2026-10-11 — SB-93 slice 1: `switchboard onboard` for coding agents
 
 Branch `feat/sb-93-onboard`. The operator's agents-first strategy (2026-10-10): the coding agent
