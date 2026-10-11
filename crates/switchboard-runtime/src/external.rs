@@ -1576,6 +1576,11 @@ const LOCK_WAIT: Duration = if cfg!(test) {
 /// Creates one lock directory, waiting up to `wait` for a live holder and taking over one whose
 /// last heartbeat is older than `stale`. Only one process can win the re-creation.
 fn acquire_lock(path: &Path, stale: Duration, wait: Duration) -> Result<(), String> {
+    // SB-101: waiting up to `wait` for Claude Code's lock blocks; on an async worker it would
+    // stall every task queued behind it (proxy streams, UI and CLI requests).
+    crate::blocking::run(|| acquire_lock_waiting(path, stale, wait))
+}
+fn acquire_lock_waiting(path: &Path, stale: Duration, wait: Duration) -> Result<(), String> {
     let deadline = std::time::Instant::now() + wait;
     loop {
         match fs::create_dir(path) {
@@ -1802,9 +1807,17 @@ fn activate(
         let shadow = old_shadow
             .as_deref()
             .is_none_or(|bytes| writer.config_write(&shadow, Some(bytes)).is_ok());
-        let config = writer
-            .config_write(&c.config, old_config.as_deref())
-            .is_ok();
+        // SB-101: only the sign-in's own keys go back; what Claude Code wrote meanwhile stays.
+        let restored = match (
+            old_config.as_deref(),
+            writer.read(&c.config, CAP).ok().flatten(),
+        ) {
+            (Some(old), Some(current)) if current != old => parse(old)
+                .and_then(|old| with_account_of(&current, &old))
+                .ok(),
+            _ => old_config.clone(),
+        };
+        let config = writer.config_write(&c.config, restored.as_deref()).is_ok();
         auth && shadow && config
     };
     if writer.auth_write(c, Some(&new_auth)).is_err() {
@@ -1822,6 +1835,14 @@ fn activate(
     ensure_lock().map_err(|_|"Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
     let shadow_written =
         old_shadow.is_none() || writer.config_write(&shadow, Some(&new_auth)).is_ok();
+    // SB-101: Claude Code may have written the file since it was read (project history, MCP
+    // settings): the switch then carries only the sign-in's keys into the current content.
+    let new_config = match writer.read(&c.config, CAP) {
+        Ok(Some(current)) if Some(&current) != old_config.as_ref() => {
+            with_account_of(&current, &config).unwrap_or(new_config)
+        }
+        _ => new_config,
+    };
     if !shadow_written || writer.config_write(&c.config, Some(&new_config)).is_err() {
         ensure_lock().map_err(|_| "Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
         let restored = rollback(writer);
@@ -1829,6 +1850,27 @@ fn activate(
         return Err(if restored { "Claude activation failed; previous account restored." } else { "Claude activation failed and rollback needs attention. Sign in through Claude before retrying." }.into());
     }
     Ok(())
+}
+/// `onto` with the sign-in's own keys of `from` — `oauthAccount` set, `primaryApiKey` set or
+/// removed as `from` has it — and everything else in `onto` kept (SB-101).
+fn with_account_of(onto: &[u8], from: &Value) -> Result<Vec<u8>, String> {
+    let mut target = parse(onto)?;
+    let object = target.as_object_mut().ok_or(UNAVAILABLE)?;
+    for key in ["oauthAccount", "primaryApiKey"] {
+        match from.get(key) {
+            Some(value) => {
+                object.insert(key.into(), value.clone());
+            }
+            None => {
+                object.remove(key);
+            }
+        }
+    }
+    let bytes = serde_json::to_vec_pretty(&target).map_err(|_| UNAVAILABLE)?;
+    if bytes.len() > CAP {
+        return Err("Claude config exceeds size limit.".into());
+    }
+    Ok(bytes)
 }
 /// Switchboard's own homes are never the ordinary Claude Code (Claude Swap
 /// `switcher.py:6661-6690`): a session Switchboard launched must not switch "the" account.
@@ -2075,6 +2117,70 @@ mod tests {
             }
             Ok(())
         }
+    }
+    #[test]
+    fn a_switch_keeps_what_claude_code_wrote_into_its_config_meanwhile() {
+        // SB-101: Claude Code rewrites ~/.claude.json between the read and the write (project
+        // history, MCP settings); the switch moves only the sign-in and loses none of it, and a
+        // rollback puts back only the sign-in too.
+        let f = Fixture::new();
+        let c = ctx();
+        f.put(&c.config, &config("old@example.test"));
+        f.put(&c.home.join(".credentials.json"), &auth("old-token"));
+        let old = capture(&f, Provider::Claude, &c).unwrap();
+        let new = claude_profile(&auth("new-token"), &config("new@example.test"), None).unwrap();
+        let meanwhile = |f: &Fixture| {
+            let mut written: Value = serde_json::from_slice(&f.files.borrow()[&c.config]).unwrap();
+            written["projects"]["written-meanwhile"] = json!(true);
+            f.put(&c.config, &serde_json::to_vec(&written).unwrap());
+        };
+        activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old.identity),
+            &mut |_| {
+                meanwhile(&f);
+                Ok(())
+            },
+            || Ok(()),
+        )
+        .unwrap();
+        let after: Value = serde_json::from_slice(&f.files.borrow()[&c.config]).unwrap();
+        assert_eq!(after["oauthAccount"]["emailAddress"], "new@example.test");
+        assert_eq!(
+            after["projects"]["written-meanwhile"], true,
+            "Claude Code's write survives"
+        );
+        assert_eq!(after["projects"]["keep"], true);
+
+        // Back to old, with a failing config write: the rollback restores the sign-in only.
+        let back = claude_profile(&auth("old-token"), &config("old@example.test"), None).unwrap();
+        f.fail_config.set(true);
+        assert!(activate(
+            &f,
+            &c,
+            &back.credential,
+            &back.identity,
+            Some(&new.identity),
+            &mut |_| {
+                let mut written: Value =
+                    serde_json::from_slice(&f.files.borrow()[&c.config]).unwrap();
+                written["projects"]["second-write"] = json!(true);
+                f.put(&c.config, &serde_json::to_vec(&written).unwrap());
+                Ok(())
+            },
+            || Ok(())
+        )
+        .unwrap_err()
+        .contains("restored"));
+        let rolled: Value = serde_json::from_slice(&f.files.borrow()[&c.config]).unwrap();
+        assert_eq!(rolled["oauthAccount"]["emailAddress"], "new@example.test");
+        assert_eq!(
+            rolled["projects"]["second-write"], true,
+            "kept through the rollback"
+        );
     }
     fn config(email: &str) -> Vec<u8> {
         serde_json::to_vec(&json!({"oauthAccount":{"emailAddress":email,"accountUuid":email,"organizationUuid":"org"},"projects":{"keep":true}})).unwrap()

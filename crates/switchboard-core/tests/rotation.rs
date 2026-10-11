@@ -1376,3 +1376,38 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
         .is_none());
     assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
 }
+
+/// SB-101: a selected account whose credential expired no longer stops the pool: it moves to the
+/// next usable account, and — unlike a limit — the expired account is not held.
+#[test]
+fn an_unusable_selection_moves_the_pool_without_holding_the_account() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    observe(&store, &a, 10., now);
+    observe(&store, &b, 30., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    // The same identity signs in again with a token that has already expired.
+    store
+        .upsert(
+            "org-a".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            credential("org-a", now - 10),
+            Some(identity("org-a")),
+        )
+        .unwrap();
+    assert!(store.route(Provider::Claude, "default").is_err());
+    let (moved, _) = store
+        .failover_unusable(Provider::Claude, "default", now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, b);
+    assert!(
+        !store.limited().contains(&a),
+        "an expired token is not a limit"
+    );
+    assert!(store.take_refusals().is_empty());
+}
