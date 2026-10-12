@@ -15,6 +15,13 @@ log now says why a waiting update has not started (`update_waiting`: the window 
 or a sign-in is running, updates are off), at once and then at most hourly. *Restart to update*
 waits for an install in progress instead of quitting in the middle of it.
 
+**Kimi Code in fallback chains** (SB-99). A chain step `kimi-code` now takes a workflow on a
+saved Kimi Code account — the pinned one, else the least used that is signed in, not limited and
+not busy: Terminal runs the first turn with `kimi -p` (Kimi asks for no approvals in that mode)
+and then resumes the same session interactively with `kimi -c`. A workflow Kimi Code runs on a
+saved account is handed on when that account reaches its limit: while a chain is set, Switchboard
+checks each saved Kimi account's usage every ten minutes.
+
 **Kimi sign-ins without loose ends** (SB-99). At most four Kimi Code sign-ins wait at once, as
 for Claude and Codex, and a start removes the sign-in folders whose `kimi login` ended without
 signing in; a completed sign-in stays until it is saved.

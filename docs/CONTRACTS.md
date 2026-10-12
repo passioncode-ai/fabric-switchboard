@@ -360,7 +360,8 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   the workflow's checkouts that exists here — every refusal of `switchboard continue` applies, and
   the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
   chain; a failed launch after an offer stops (the offer lapses).
-- **Phase 1** runs Claude Code and Codex. Other agents are skipped (`agent_not_automatic_yet`)
+- **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
+  (SB-99, below). Other agents, and Kimi Code on a paid key, are skipped (`agent_not_automatic_yet`)
   until their launch recipes and paid-key ceilings exist (SB-72, SB-73 phase 2).
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
@@ -634,7 +635,7 @@ list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_ac
   dot) until its reset, and a window whose reset has passed reads “reset, refresh to see it”
   instead of its old share. Tests: `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`
   (extended), `kimiLimitUntil` / `kimiWindowsLine` in `scripts/test-ui-logic.mjs`. Not yet: Kimi in
-  automatic fallback chains (SB-99 left, with SB-73 phase 2).
+  automatic fallback chains (SB-99 left, with SB-73 phase 2) — done below.
 - **Waiting Kimi sign-ins (SB-99, 2026-10-12).** At most four Kimi sign-ins wait at once
   (`launch::MAX_LOGINS`, as for Claude and Codex): open in Terminal, or completed and not yet
   saved; a fifth is refused with “Finish an existing sign-in before starting another.”. An owner's
@@ -644,6 +645,44 @@ list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_ac
   or a folder younger than a minute; log `kimi_login_leftovers {removed}`. Test
   `waiting_sign_ins_are_capped_and_a_start_sweeps_only_the_ended_ones` (fails with the ended-state
   check removed).
+
+- **Kimi Code in fallback chains (SB-99, 2026-10-12; operator decisions the same day).**
+  - *Background view.* While a fallback chain is set, the monitor asks each saved Kimi account's
+    `GET /usages` every 10 minutes (`WATCH_SECONDS`), at most 4 a pass (`WATCH_PER_PASS`): the
+    access token read from the account's own home in-process, never `/me`, never a refresh. A
+    window at 100 % whose reset has not passed limits the account until the latest such reset — the
+    window's rule (`kimiLimitUntil`), here `kimi::limited_until`; a full window with no reset time,
+    until the next look. In memory only (`KimiWatch`). No chain: no file read, nothing sent.
+  - *A Kimi executor at its limit.* A workflow whose executor is Kimi Code (`kimi`, `kimi-code`,
+    `moonshot`) and whose `accountRef` names a saved Kimi account the view finds limited is handed
+    on along its chain (`fallback::kimi_executor_limited`); the ordinary `kimi` is not watched and
+    decides nothing.
+  - *A Kimi step.* `kimi-code` with no pin, or pinned (`@ID`) to a saved Kimi Code account, runs on
+    the pinned one when usable, else on the usable one with the lowest window use; usable = not the
+    executor's, not limited, signed in, no `kimi` running in its folder
+    (`continuation_preflight`). Only Kimi Code may pin a Kimi account (“A Kimi Code account runs
+    only Kimi Code.”); removing the account drops the step that pinned it.
+  - *The continuation* (`Operation::Continue` on a Kimi account id; also `switchboard continue`):
+    the engine is read and planned with the harness name `kimi` (`continuation::plan_named`), the
+    account is checked, then the offer; after it, Terminal runs `kimi -p <first prompt>` — Kimi
+    2.1.1 asks for no approval in prompt mode (measured 2026-10-12: a shell command ran without a
+    question) — and then `exec kimi -c`, the same session, interactive, in the same folder
+    (`launch::script_then`). Project Observatory is added to the account home's own `mcp.json`
+    (`mcpServers.observatory`; other servers kept; a file that is not a JSON object is never
+    overwritten — “This account's Kimi MCP settings (mcp.json) cannot be read…”). The session
+    record carries `continues`.
+  - Tests: `a_kimi_account_takes_a_workflow_by_its_harness_name`,
+    `kimi_code_pins_a_saved_kimi_account_and_loses_the_pin_when_it_goes`,
+    `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`,
+    `a_kimi_executor_is_limited_only_by_its_named_saved_account`,
+    `a_full_window_limits_until_its_latest_reset_as_the_window_shows_it`,
+    `the_background_view_asks_each_account_every_ten_minutes_four_at_a_time` (an hour on a fake
+    clock), `the_background_view_runs_only_while_a_chain_is_set`,
+    `observatory_joins_the_accounts_mcp_servers_and_an_unreadable_file_is_left_alone`,
+    `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`. Watched failing:
+    the chain gate removed; the most-used account chosen. Not done: a live run against a real
+    workflow and a signed-in Kimi account; `kimi -c` resuming the `-p` session is read from
+    `kimi --help`, not measured.
 
 ## Agent keys (SB-79, slice 1, 2026-10-07)
 

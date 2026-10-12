@@ -799,7 +799,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. For one project or one task, `switchboard chain set --scope project:<pool>|workflow:<wf_id> <agent>[@account|#key] …` → `chain list --workflow <wf_id>` shows that chain under “applies”.
 3. `switchboard chain clear --scope …` → the next wider chain applies again; with none set, nothing applies.
 **Alt paths:** an agent that loads no MCP server or takes no prompt without a person (Aider) → “aider cannot take over a workflow …”, nothing saved; another agent pinned to a Claude or ChatGPT sign-in → “Another agent runs on an API-key account or a paid key, never on a subscription sign-in.”; a key value instead of a vault name → refused; a removed account or project → the executors and chains that named it are dropped.
-**Expected result:** the order is stored and shown; when an executor hits its limit, the automatic fallback walks it (SCN-040, SB-73 — Claude Code and Codex so far).
+**Expected result:** the order is stored and shown; when an executor hits its limit, the automatic fallback walks it (SCN-040, SB-73 — Claude Code, Codex and, since SB-99, Kimi Code on saved Kimi accounts).
 **UI elements:** CLI output (`machine  claude-code → codex → …`, `applies: …`, presets); MCP results `{chains, effective, presets}`, `{chain}`.
 **States covered:** none set, machine only, project and task chains over it, cleared, pruned after a removal, refused (agent, pin, key, scope).
 **Errors & recovery:** every refusal names the fix and saves nothing; a wrong chain is replaced by setting it again or cleared.
@@ -819,14 +819,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. The executor hits its limit (Claude Code writes a limit marker, or a managed request is refused) → within a minute Switchboard reads the open workflows and finds it.
 2. Switchboard walks the chain: the first agent with a usable account (not the executor's, not limited, not needing a new sign-in) gets the workflow, offered with reason `limit` once the executor has been silent for two minutes.
 3. Terminal opens that agent's session in the workflow's checkout → it accepts the handoff and continues from the checkpoint (SCN-038).
-**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code or Hermes in the chain → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes.
+**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code in the chain → a saved Kimi Code account takes it (the pinned one, else the least used; never a limited, signed-out or busy one); Terminal runs its first turn as `kimi -p` without approvals, then `kimi -c` resumes it interactively (SB-99); the executor is Kimi Code on a saved account → handed on once Switchboard's background view (every 10 minutes while a chain is set) finds that account at 100 %; Hermes, or Kimi Code on a paid key → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes.
 **Expected result:** the task continues on another agent from where it stopped; the old session is left alone and, if it writes again, Observatory refuses it (`LeaseLost`).
 **UI elements:** the launched Terminal session; log event `fallback` and the store event `fallback` (Activity).
 **States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account).
 **Errors & recovery:** every outcome is logged with a fixed code; a lapsed offer is retried after the window or by hand with `switchboard continue`.
 **Status:** draft
 **Meaning:** XA-01 decision D-1 (automatic), operator 2026-10-06.
-**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`).
+**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`); Kimi Code (SB-99): `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`, `a_kimi_executor_is_limited_only_by_its_named_saved_account`, `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`.
 **Product:** unobserved
 **Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md)
 

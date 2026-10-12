@@ -398,6 +398,8 @@ pub struct Runtime {
     limits: limits::LimitState,
     /// Automatic fallback along the operator's chains (SB-73).
     fallback: fallback::FallbackState,
+    /// Saved Kimi Code accounts seen in the background while a chain is set (SB-99).
+    kimi_watch: kimi::KimiWatch,
     /// Provider not-before per account, and one quota request per account at a time (SB-39).
     usage_gate: usage_gate::UsageGate,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
@@ -492,6 +494,7 @@ impl Runtime {
             refresh,
             limits,
             fallback: fallback::FallbackState::default(),
+            kimi_watch: kimi::KimiWatch::default(),
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -1663,15 +1666,52 @@ async fn execute(
                 return Err(continuation::BAD_WORKFLOW_ID.into());
             }
             let bin = continuation::observatory()?;
+            let directory = working_directory
+                .canonicalize()
+                .map_err(|_| "Choose an existing project directory.")?;
+            // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —
+            // every refusal before the offer, a failed launch after it left to lapse.
+            if store.kimi_account(&id).is_ok() {
+                let shown = continuation::show(&bin, &workflow_id)?;
+                let plan = continuation::plan_named(
+                    &shown,
+                    &workflow_id,
+                    continuation::KIMI,
+                    &id,
+                    true,
+                    &directory,
+                )?;
+                kimi::continuation_preflight(root, &store, &id)?;
+                let observatory = continuation::observatory_mcp(&bin)?;
+                let offer = continuation::offer(&bin, &plan, &id)?;
+                let resumed = continuation::Continuation {
+                    workflow_id: workflow_id.clone(),
+                    handoff_id: offer.handoff_id.clone(),
+                    observatory,
+                    previous_provider: plan.from_provider.clone(),
+                };
+                kimi::launch_continuation(
+                    root,
+                    &store,
+                    &id,
+                    &directory,
+                    &resumed,
+                    launch::start_terminal,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                return Ok(json!({
+                    "message": "Terminal launch requested; the Kimi Code session accepts the handoff itself. Provider response is not yet verified.",
+                    "workflow": workflow_id,
+                    "handoff": offer.handoff_id,
+                    "offeredUntil": offer.expires_at,
+                }));
+            }
             let account = store
                 .snapshot()?
                 .accounts
                 .into_iter()
                 .find(|a| a.id == id)
                 .ok_or("Account not found.")?;
-            let directory = working_directory
-                .canonicalize()
-                .map_err(|_| "Choose an existing project directory.")?;
             let shown = continuation::show(&bin, &workflow_id)?;
             let plan = continuation::plan(&shown, &workflow_id, &account, &directory)?;
             if mode == "isolated" {

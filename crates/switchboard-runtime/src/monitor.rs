@@ -161,6 +161,8 @@ impl Pass {
         }
         // A workflow whose executor hit its limit goes to the next agent of its chain (SB-73);
         // nothing happens without a chain. Outside the lock: the hand-over takes it itself.
+        // SB-99: saved Kimi accounts, seen only while a chain is set (every 10 min, at most 4).
+        crate::kimi::watch(&runtime.root, &runtime.store, &runtime.kimi_watch, time).await;
         crate::fallback::pass(runtime, time).await;
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {

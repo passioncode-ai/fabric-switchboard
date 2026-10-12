@@ -2,6 +2,28 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-99 done: Kimi Code in fallback chains
+
+Branch `feat/sb-99-kimi-chains`, on the operator's two answers (background usage checks: yes,
+every 10 min; a Kimi step: `kimi -p`, then resume). While a chain is set, `kimi::watch` asks each
+saved Kimi account's `/usages` every 10 min, at most 4 a pass (`KimiWatch`, `limited_until` = the
+window's rule); a workflow whose Kimi executor names a saved account found limited is handed on
+(`fallback::kimi_executor_limited`); a `kimi-code` step runs on the pinned or least-used usable Kimi
+account (`resolve_with`, `KimiChoice`) through `Operation::Continue`'s Kimi branch: plan with the
+harness name `kimi` (`plan_named`), preflight, offer, then Terminal runs `kimi -p <prompt>` and
+`exec kimi -c` (`launch::script_then`), Observatory added to the home's `mcp.json`. Core: a Kimi
+account may be pinned by `kimi-code` only; removing it drops the step. Docs: CONTRACTS, CLI,
+SCN-039/040, AGENTS.md (monitor row, idle budget), CHANGELOG; two errors added to the window with
+Russian text. Gate `./scripts/check.sh` exit 0 (532 tests, lean flags; ~6.5 GB free).
+
+**Exact next task:** a live run of the Kimi path — a test workflow in Observatory whose executor
+is limited, a chain `claude-code → kimi-code`, a signed-in saved Kimi account — to confirm the
+`-p` turn accepts the handoff and `kimi -c` resumes that session (read from `kimi --help`, not
+measured); then release 0.6.19 (SB-105 + SB-99). Still open: the operator's one restart by hand
+(the running app predates SB-105) and the Russian copy read.
+
+---
+
 ## 2026-10-12 — SB-99 second part: Kimi sign-ins capped and swept
 
 Branch `feat/sb-99-kimi-sign-ins`: at most four waiting Kimi sign-ins; an owner start removes the

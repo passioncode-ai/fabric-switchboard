@@ -153,6 +153,8 @@ impl Store {
             return Ok(false);
         };
         candidate.kimi_accounts.remove(i);
+        // A chain step pinned to it goes with it, as for any account (SB-99).
+        crate::chains::prune(&mut candidate);
         append_event(&mut candidate, "kimi_account", None, "removed");
         self.publish(&mut state, candidate)?;
         Ok(true)
