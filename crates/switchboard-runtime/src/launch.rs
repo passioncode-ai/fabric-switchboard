@@ -916,7 +916,9 @@ pub struct Sweep {
     /// `/usr/bin/security`), or a marker that could not be read. OPERATIONS → recovery.
     pub kept: usize,
 }
-/// The Claude Code Keychain item a sign-in home may have left.
+/// The Claude Code Keychain item a sign-in home may have left. Only macOS finds one; elsewhere
+/// the item lives inside the home, so `Silent` and `Asks` are built by tests alone.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) enum LeftoverItem {
     Absent,
     /// Present and deletable through `/usr/bin/security` without a dialog.

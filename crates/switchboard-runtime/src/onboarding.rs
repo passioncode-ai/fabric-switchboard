@@ -268,7 +268,13 @@ pub fn registered(
                     return true;
                 }
                 if let Some(folder) = folder {
-                    if has(&user["projects"][folder.to_string_lossy().as_ref()]["mcpServers"]) {
+                    // Claude Code keys a folder by its path; on Windows it writes forward slashes.
+                    let native = folder.to_string_lossy();
+                    let forward = native.replace('\\', "/");
+                    if [native.as_ref(), forward.as_str()]
+                        .iter()
+                        .any(|key| has(&user["projects"][*key]["mcpServers"]))
+                    {
                         return true;
                     }
                 }
@@ -473,16 +479,21 @@ mod tests {
         )
         .unwrap();
         assert!(registered(Host::Claude, &home, None, None));
+        // The key is written through serde: a Windows path's backslashes need escaping.
+        let local = |key: String| {
+            serde_json::json!({"projects": {key: {"mcpServers": {"switchboard": {"command": "switchboard"}}}}})
+                .to_string()
+        };
+        std::fs::write(home.join(".claude.json"), local(folder.display().to_string())).unwrap();
+        assert!(registered(Host::Claude, &home, Some(&folder), None));
+        assert!(!registered(Host::Claude, &home, None, None));
+        // Claude Code on Windows writes the folder with forward slashes.
         std::fs::write(
             home.join(".claude.json"),
-            format!(
-                r#"{{"projects":{{"{}":{{"mcpServers":{{"switchboard":{{"command":"switchboard"}}}}}}}}}}"#,
-                folder.display()
-            ),
+            local(folder.display().to_string().replace('\\', "/")),
         )
         .unwrap();
         assert!(registered(Host::Claude, &home, Some(&folder), None));
-        assert!(!registered(Host::Claude, &home, None, None));
         std::fs::write(home.join(".claude.json"), "{\"mcpServ").unwrap();
         assert!(
             !registered(Host::Claude, &home, None, None),
