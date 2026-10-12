@@ -38,6 +38,9 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// While an update waits to start (and only then), how often the app looks for an idle moment to
 /// start it (LC-16 activation). No other timer runs while nothing is ready.
 pub const IDLE_LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often the idle watch says, at most, what keeps a ready update from starting (SB-105): the
+/// first look that finds a reason logs it, later ones only once this much time has passed.
+pub const IDLE_REPORT_EVERY: i64 = 60 * 60;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// A bundle swap is a few renames and an unpack of ~15 MB; one that has not finished in five
 /// minutes is stuck (a hung volume), and the loop must not wait on it.
@@ -129,6 +132,60 @@ pub fn idle_moment(
     (idle, idle && idle_before)
 }
 
+/// What keeps a ready update from starting on its own, as a log code (SB-105), in the order the
+/// idle watch looks: `updates_off`, `needs_person` (a bundle that needs a password), `window_visible`,
+/// `checking` (a newer release is being fetched), then the runtime's own (`request_in_flight`,
+/// `sign_in_waiting`, or `owner_unavailable`). None exactly when `idle_moment` finds it idle.
+pub fn idle_blocker(
+    enabled: bool,
+    starts_alone: bool,
+    window_hidden: bool,
+    checking: bool,
+    busy: Option<&'static str>,
+) -> Option<&'static str> {
+    if !enabled {
+        Some("updates_off")
+    } else if !starts_alone {
+        Some("needs_person")
+    } else if !window_hidden {
+        Some("window_visible")
+    } else if checking {
+        Some("checking")
+    } else {
+        busy
+    }
+}
+
+/// When the idle watch logs its reason (SB-105): the first time it has one, then at most once per
+/// `IDLE_REPORT_EVERY`. Seconds come from the caller, so a test drives it with a fake clock.
+#[derive(Default)]
+pub struct IdleReport {
+    last: Option<i64>,
+}
+
+impl IdleReport {
+    pub fn due(&mut self, now: i64) -> bool {
+        match self.last {
+            Some(at) if now - at < IDLE_REPORT_EVERY => false,
+            _ => {
+                self.last = Some(now);
+                true
+            }
+        }
+    }
+}
+
+/// Whether a release replaces what this copy has (SB-105): newer than the running version and,
+/// while an update already waits, newer than that one too — so a release published while an
+/// update waits is still taken, and the waiting one is never fetched twice.
+pub fn replaces(
+    current: &semver::Version,
+    waiting: Option<&semver::Version>,
+    announced: &semver::Version,
+) -> bool {
+    offered(current, announced) && waiting.is_none_or(|waiting| announced > waiting)
+}
+
 /// The arguments a relaunch after an update starts with: the program, and `--background` when
 /// the window was hidden, so an app that was working in the background stays there.
 #[cfg_attr(windows, allow(dead_code))]
@@ -207,6 +264,9 @@ struct Inner {
     stalled: bool,
     /// The idle-moment watch for a ready update is running (at most one).
     watching: bool,
+    /// A check runs while an update already waits (SB-105): the idle watch does not start the
+    /// waiting one under it, so a newer release is not fetched only to be dropped by the restart.
+    rechecking: bool,
 }
 
 pub struct Updates {
@@ -214,6 +274,10 @@ pub struct Updates {
     root: Option<PathBuf>,
     inner: Mutex<Inner>,
     wake: tokio::sync::Notify,
+    /// Held across a bundle swap (macOS, Linux) and across *Restart to update* until the exit is
+    /// committed (SB-105): a restart never exits in the middle of a swap, and a swap never starts
+    /// once a restart is under way.
+    swap: tokio::sync::Mutex<()>,
 }
 
 impl Updates {
@@ -231,8 +295,10 @@ impl Updates {
                 signal: false,
                 stalled: false,
                 watching: false,
+                rechecking: false,
             }),
             wake: tokio::sync::Notify::new(),
+            swap: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -371,7 +437,8 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-/// One check: nothing while switched off or once an update waits to be installed.
+/// One check: nothing while switched off. While an update waits it still runs (SB-105), so a later
+/// release replaces the waiting one.
 async fn check_once(app: &AppHandle) -> Phase {
     check(app, false).await
 }
@@ -383,17 +450,31 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
     if !manual && !state.is_enabled() {
         return Phase::Idle;
     }
-    {
+    let waiting = {
         let mut inner = state.lock();
-        if inner.ready.is_some() || inner.restart.is_some() || inner.stalled {
+        if inner.restart.is_some() || inner.stalled || inner.rechecking {
             return inner.phase;
         }
-        inner.phase = Phase::Checking;
-        inner.error = None;
-    }
-    let outcome = fetch(app, &state).await;
+        let waiting = inner
+            .ready
+            .as_ref()
+            .and_then(|ready| semver::Version::parse(&ready.update.version).ok());
+        if inner.ready.is_some() {
+            // The About panel keeps showing the waiting update while the check runs.
+            inner.rechecking = true;
+        } else {
+            inner.phase = Phase::Checking;
+            inner.error = None;
+        }
+        waiting
+    };
+    let outcome = fetch(app, &state, waiting).await;
     let mut inner = state.lock();
     inner.checked_at = Some(now());
+    if inner.rechecking {
+        inner.rechecking = false;
+        return recheck_done(app, inner, outcome);
+    }
     let code = match outcome {
         Ok(None) => {
             inner.phase = Phase::Idle;
@@ -430,6 +511,52 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
     phase
 }
 
+/// The end of a check that ran while an update waited (SB-105). Nothing newer, or a check or
+/// download that failed, leaves the waiting update as it was; a newer verified release takes its
+/// place. A swap that failed or stalled leaves the bundle in an unknown state, so the waiting
+/// update is dropped and the failure shown, as for a first install.
+fn recheck_done(
+    app: &AppHandle,
+    mut inner: MutexGuard<'_, Inner>,
+    outcome: Result<Option<Ready>, &'static str>,
+) -> Phase {
+    let (code, phase) = match outcome {
+        Ok(None) => ("current", Phase::Ready),
+        Ok(Some(newer)) => {
+            let version = newer.update.version.clone();
+            inner.version = Some(version.clone());
+            inner.ready = Some(newer);
+            inner.phase = Phase::Ready;
+            drop(inner);
+            crate::residency::show_update(app, &version);
+            event("update_check", &[("outcome", Field::Code("replaced"))]);
+            watch_for_idle(app);
+            return Phase::Ready;
+        }
+        Err(message @ (INSTALL_FAILED | INSTALL_STALLED)) => {
+            inner.ready = None;
+            inner.phase = Phase::Failed;
+            inner.version = None;
+            inner.error = Some(message);
+            ("install_failed", Phase::Failed)
+        }
+        Err(SIGNATURE_FAILED) => ("signature_failed", Phase::Failed),
+        Err(DOWNLOAD_FAILED) => ("download_failed", Phase::Failed),
+        Err(NEEDS_MIGRATION) => ("needs_migration", Phase::Ready),
+        Err(_) => ("check_failed", Phase::Failed),
+    };
+    drop(inner);
+    event(
+        "update_check",
+        &[
+            ("outcome", Field::Code(code)),
+            ("waiting", Field::Code("yes")),
+        ],
+    );
+    // Failed: the loop retries within the hour; the waiting update (if kept) still starts.
+    phase
+}
+
 /// The feed's mark for a release that needs a person first: `"needs_migration": true` or a
 /// non-empty runbook string in `latest.json`.
 pub fn needs_migration(feed: &Value) -> bool {
@@ -462,28 +589,40 @@ fn watch_for_idle(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut idle_before = false;
+        let mut report = IdleReport::default();
         loop {
             tokio::time::sleep(IDLE_LOOK_EVERY).await;
             let state = app.state::<Updates>();
-            let starts_alone = {
+            let (starts_alone, checking) = {
                 let inner = state.lock();
                 if inner.restart.is_some() {
                     break;
                 }
                 match inner.ready.as_ref() {
                     None => break,
-                    Some(ready) => ready_starts_alone(ready),
+                    Some(ready) => (ready_starts_alone(ready), inner.rechecking),
                 }
             };
             let busy = match app.try_state::<crate::Slot>() {
-                Some(slot) => slot.runtime().await.map_or(true, |runtime| runtime.busy()),
-                None => true,
+                Some(slot) => slot
+                    .runtime()
+                    .await
+                    .map_or(Some("owner_unavailable"), |runtime| runtime.busy_reason()),
+                None => Some("owner_unavailable"),
             };
+            let enabled = state.is_enabled();
+            let hidden = window_hidden(&app);
+            // SB-105: a watch that never starts the update says why, at most hourly.
+            if let Some(reason) = idle_blocker(enabled, starts_alone, hidden, checking, busy) {
+                if report.due(now()) {
+                    event("update_waiting", &[("reason", Field::Code(reason))]);
+                }
+            }
             let (idle, start) = idle_moment(
-                state.is_enabled(),
+                enabled,
                 starts_alone,
-                window_hidden(&app),
-                busy,
+                hidden,
+                busy.is_some() || checking,
                 idle_before,
             );
             idle_before = idle;
@@ -522,11 +661,17 @@ fn classify(error: tauri_plugin_updater::Error) -> &'static str {
     }
 }
 
-async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'static str> {
+async fn fetch(
+    app: &AppHandle,
+    state: &Updates,
+    waiting: Option<semver::Version>,
+) -> Result<Option<Ready>, &'static str> {
     let builder = app
         .updater_builder()
         .timeout(CHECK_TIMEOUT)
-        .version_comparator(|current, release| offered(&current, &release.version));
+        .version_comparator(move |current, release| {
+            replaces(&current, waiting.as_ref(), &release.version)
+        });
     #[cfg(target_os = "macos")]
     let builder = builder.target(MACOS_TARGET);
     #[cfg(windows)]
@@ -540,8 +685,10 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
     }
     {
         let mut inner = state.lock();
-        inner.phase = Phase::Downloading;
-        inner.version = Some(update.version.clone());
+        if inner.ready.is_none() {
+            inner.phase = Phase::Downloading;
+            inner.version = Some(update.version.clone());
+        }
     }
     update.timeout = Some(DOWNLOAD_TIMEOUT);
     event("update_download", &[("outcome", Field::Code("started"))]);
@@ -560,6 +707,12 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
             );
         }
         if bundle.as_deref().is_some_and(replaceable_without_password) {
+            let _swap = state.swap.lock().await;
+            if state.lock().restart.is_some() {
+                // A restart into the waiting update is under way; this release waits for the
+                // next start's check.
+                return Ok(None);
+            }
             let installing = update.clone();
             let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
             let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
@@ -587,6 +740,10 @@ async fn fetch(app: &AppHandle, state: &Updates) -> Result<Option<Ready>, &'stat
     // keeps its mounted copy until the restart starts the new one (SB-88).
     #[cfg(target_os = "linux")]
     {
+        let _swap = state.swap.lock().await;
+        if state.lock().restart.is_some() {
+            return Ok(None);
+        }
         let installing = update.clone();
         let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
         let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
@@ -675,6 +832,9 @@ fn window_hidden(app: &AppHandle) -> bool {
 pub async fn restart(app: AppHandle) -> Result<Value, String> {
     let state = app.state::<Updates>();
     state.available.map_err(str::to_string)?;
+    // Waits out a swap in progress (SB-105), then reads the waiting update, which that swap may
+    // just have replaced; held until the restart is recorded, so no swap starts after it.
+    let swap = state.swap.lock().await;
     let (update, bytes) = {
         let inner = state.lock();
         let ready = inner.ready.as_ref().ok_or(NOT_READY)?;
@@ -752,6 +912,7 @@ pub async fn restart(app: AppHandle) -> Result<Value, String> {
         #[cfg(windows)]
         relaunching,
     });
+    drop(swap);
     event(
         "update_restart",
         &[(
@@ -835,6 +996,84 @@ mod tests {
                 "{enabled} {alone} {hidden} {busy}"
             );
         }
+    }
+
+    #[test]
+    fn the_idle_watch_names_its_reason_exactly_when_it_is_not_idle() {
+        // SB-105: every input that stops an idle start has a code, and none is invented.
+        for bits in 0..32u8 {
+            let [enabled, alone, hidden, checking, busy] =
+                [0, 1, 2, 3, 4].map(|bit| bits & (1 << bit) != 0);
+            let busy = busy.then_some("request_in_flight");
+            let blocker = idle_blocker(enabled, alone, hidden, checking, busy);
+            let (idle, _) = idle_moment(enabled, alone, hidden, busy.is_some() || checking, false);
+            assert_eq!(blocker.is_none(), idle, "{bits:05b}");
+        }
+        assert_eq!(
+            idle_blocker(false, false, false, true, Some("x")),
+            Some("updates_off")
+        );
+        assert_eq!(
+            idle_blocker(true, false, false, true, Some("x")),
+            Some("needs_person")
+        );
+        assert_eq!(
+            idle_blocker(true, true, false, true, Some("x")),
+            Some("window_visible")
+        );
+        assert_eq!(
+            idle_blocker(true, true, true, true, Some("x")),
+            Some("checking")
+        );
+        assert_eq!(
+            idle_blocker(true, true, true, false, Some("sign_in_waiting")),
+            Some("sign_in_waiting")
+        );
+    }
+
+    #[test]
+    fn the_idle_watch_reports_its_reason_at_once_then_at_most_hourly() {
+        // SB-105 on a fake clock: one look every five minutes for a day.
+        let mut report = IdleReport::default();
+        let look = IDLE_LOOK_EVERY.as_secs() as i64;
+        let start = 1_791_800_000;
+        let logged: Vec<i64> = (0..24 * 12)
+            .map(|n| start + n * look)
+            .filter(|&at| report.due(at))
+            .collect();
+        assert_eq!(
+            logged.first(),
+            Some(&start),
+            "the first reason is logged at once"
+        );
+        assert_eq!(logged.len(), 24, "once an hour over a day: {logged:?}");
+        assert!(logged.windows(2).all(|w| w[1] - w[0] >= IDLE_REPORT_EVERY));
+        // A clock that steps back (a corrected wall clock) never logs twice in a row.
+        let mut report = IdleReport::default();
+        assert!(report.due(start));
+        assert!(!report.due(start - 10));
+    }
+
+    #[test]
+    fn a_newer_release_replaces_a_waiting_update_and_the_same_one_is_not_fetched_again() {
+        // SB-105: running 0.6.15 with 0.6.16 waiting (the operator's Mac, 2026-10-12).
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        let (running, waiting) = (v("0.6.15"), v("0.6.16"));
+        assert!(replaces(&running, Some(&waiting), &v("0.6.18")));
+        assert!(
+            !replaces(&running, Some(&waiting), &v("0.6.16")),
+            "already waiting"
+        );
+        assert!(!replaces(&running, Some(&waiting), &v("0.6.15")));
+        assert!(
+            replaces(&running, None, &v("0.6.16")),
+            "nothing waits: the plain rule"
+        );
+        assert!(!replaces(&running, None, &v("0.6.15")));
+        assert!(
+            !replaces(&v("0.7.0"), Some(&waiting), &v("0.6.18")),
+            "never a downgrade"
+        );
     }
 
     #[test]

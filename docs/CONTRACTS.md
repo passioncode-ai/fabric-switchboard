@@ -523,6 +523,34 @@ updates](DISTRIBUTION.md#automatic-updates-sb-55).
   Refusal of tampered, unsigned or other-key packages is the updater plugin's minisign check with
   `requireSignedVersion` (DISTRIBUTION → Trust); no test here feeds it a forged package yet.
 
+## A waiting update never waits forever (SB-105, 2026-10-12)
+
+Code: `src-tauri/src/updates.rs` (`replaces`, `idle_blocker`, `IdleReport`, `recheck_done`,
+`Updates::swap`), `Runtime::busy_reason`. Behaviour and events: [DISTRIBUTION → Automatic
+updates](DISTRIBUTION.md#automatic-updates-sb-55).
+
+- The check loop runs every 6 h while an update waits. Offered: newer than the running version and
+  than the waiting one. A newer verified release replaces the waiting one; nothing newer, a failed
+  check, download or signature, or a held release keeps it; a failed or stalled swap drops it.
+- `Updates::swap` (an async mutex) is held across each bundle swap and across *Restart to update*
+  until the restart is recorded. Waiters: the idle watch and both *Restart to update* entries
+  (tray, About) reach `restart`, so all wait out a swap; a swap that finds a restart recorded
+  installs nothing. Not covered, unchanged from SB-55: an ordinary Quit during a first or
+  replacing swap (the drain does not wait for it) — the swap runs outside the quit path only by
+  timing.
+- `Runtime::busy_reason() -> Option<&'static str>`: `request_in_flight` or `sign_in_waiting`;
+  `busy()` is `busy_reason().is_some()`.
+- Log: `update_waiting {reason}` at the first look with a reason, then at most hourly;
+  `update_check replaced`; a check while an update waits adds `waiting=yes` to its outcome.
+- Tests: `the_idle_watch_names_its_reason_exactly_when_it_is_not_idle`,
+  `the_idle_watch_reports_its_reason_at_once_then_at_most_hourly` (a day on a fake clock),
+  `a_newer_release_replaces_a_waiting_update_and_the_same_one_is_not_fetched_again`,
+  `failed_login_cleanup_releases_the_slot_after_the_account_is_saved` (`busy_reason`),
+  `a_sign_in_home_from_before_its_journal_is_swept_once_its_terminal_ended`. The second and
+  third fail against planted defects (a five-minute report interval; the waiting version ignored).
+  Not tested: the replacement and the swap guard end to end — they need a running app and a
+  signed feed; the release smoke check does not cover them.
+
 ## Hermes's model and provider (SB-80, 2026-10-08)
 
 Design: [XA-02](packets/agent-keys-and-kimi.md) A-4; facts:

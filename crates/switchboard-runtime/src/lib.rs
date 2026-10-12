@@ -450,7 +450,17 @@ impl Runtime {
     /// Something a restart would cut short: a managed request in flight (streams included) or a
     /// sign-in waiting to finish. An update activates only when this is false (LC-16).
     pub fn busy(&self) -> bool {
-        self.proxy.in_flight() > 0 || self.logins.lock().map_or(true, |l| !l.is_empty())
+        self.busy_reason().is_some()
+    }
+    /// What `busy` found, as a log code (SB-105): `request_in_flight` or `sign_in_waiting`.
+    pub fn busy_reason(&self) -> Option<&'static str> {
+        if self.proxy.in_flight() > 0 {
+            Some("request_in_flight")
+        } else if self.logins.lock().map_or(true, |l| !l.is_empty()) {
+            Some("sign_in_waiting")
+        } else {
+            None
+        }
     }
     pub async fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Arc<Self>, String> {
         Self::open_with(root, vault, NATIVE).await
@@ -2410,7 +2420,10 @@ mod owner_tests {
         let account_id = account.id.clone();
         let login = launch::fixture_login(home.clone(), account);
         let id = login.id.clone();
+        assert_eq!(runtime.busy_reason(), None);
         runtime.logins.lock().unwrap().insert(id.clone(), login);
+        // SB-105: the idle watch is told why it waits.
+        assert_eq!(runtime.busy_reason(), Some("sign_in_waiting"));
         // The staging home cannot be removed from a read-only parent.
         std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
         let result = runtime
@@ -2423,6 +2436,7 @@ mod owner_tests {
         assert_eq!(first["login_cleanup"], "pending");
         assert_eq!(first["id"], json!(account_id));
         assert!(runtime.logins.lock().unwrap().is_empty(), "no slot is held");
+        assert_eq!(runtime.busy_reason(), None);
         assert!(home.exists());
         // A repeated Finish (another window, a retry) returns the same account, captures
         // nothing, and the sign-in still reads as complete; the cleanup is still pending.

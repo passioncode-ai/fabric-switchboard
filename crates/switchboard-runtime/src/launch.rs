@@ -2610,6 +2610,29 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
+    fn a_sign_in_home_from_before_its_journal_is_swept_once_its_terminal_ended() {
+        // SB-105 (4): the leftover found on the operator's Mac, 2026-10-12 — a sign-in begun on
+        // 2026-10-08 by a build without `.login.json` (pre-SB-65), its Terminal shell gone.
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("logins").join(Uuid::new_v4().to_string());
+        private_dir(&home).unwrap();
+        private_dir(&home.join("backups")).unwrap();
+        private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+        private_write(&home.join("launch.command"), b"#!/bin/sh\n", false).unwrap();
+        private_write(&home.join(".claude.json"), b"{}", false).unwrap();
+        assert!(login_journal(&home).is_none());
+        assert!(adopt_logins(root.path()).is_empty(), "nothing to take back");
+        let sweep = sweep_logins_with(
+            root.path(),
+            &|_| LeftoverItem::Absent,
+            &|_| Ok(()),
+            Duration::ZERO,
+        );
+        assert_eq!(sweep.removed, 1);
+        assert!(!home.exists());
+    }
+    #[cfg(unix)]
+    #[test]
     fn a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask() {
         // SB-87: an earlier owner's sign-in homes, as a crash or a quit leaves them.
         let root = tempfile::tempdir().unwrap();
