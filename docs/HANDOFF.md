@@ -26,7 +26,10 @@ write it reads back. Released as 0.6.24. Disk was down to 0 at 22:05 machine-wid
 projects); this checkout's `target/` and scratchpad were cleared (~2.9 GB). The Kimi rehearsal
 workflow `wf_5473b99f80221c4f` was closed by its creator.
 
-**Exact next task:** watch the 0.6.24 release to publication; when the installed app runs 0.6.22
+**Published:** v0.6.24, release run 38313811475, 2026-10-12T22:34:29Z, 25 files, first attempt;
+`latest.json` → 0.6.24.
+
+**Exact next task:** when the installed app runs 0.6.24 (it runs 0.6.20 since 19:56 UTC; its next check is about 6 h after 19:58 UTC)
 (it checks every 6 h, then restarts at an idle moment, or *Restart to update*), rerun the Kimi
 rehearsal with a new workflow (`switchboard continue <wf> --account <kimi id>`) and a Claude
 account hand-over, and record both; then SB-108.
