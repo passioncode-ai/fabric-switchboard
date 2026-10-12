@@ -303,8 +303,10 @@ fn script_with(
     }
     result
 }
-/// A launch script that runs `program first…` to its end, then hands the shell to
-/// `program then…` (SB-99: a Kimi continuation's `kimi -p <prompt>`, then `kimi -c`).
+/// A launch script that runs `program first…` to its end, then — only when it succeeded — hands
+/// the shell to `program then…` (SB-99: a Kimi continuation's `kimi -p <prompt>`, then `kimi -c`).
+/// A first turn that failed resumes nothing: `kimi -c` would open the folder's previous session,
+/// which may belong to other work.
 #[cfg(not(windows))]
 pub(crate) fn script_then(
     home: &Path,
@@ -315,16 +317,18 @@ pub(crate) fn script_then(
     working_directory: &Path,
 ) -> String {
     let script = script(home, program, then, env, false, working_directory);
-    let at = script.rfind("exec ").unwrap_or(script.len());
+    // The final `exec` begins a line; a path or argument cannot hide a line start inside quotes
+    // that the search would take for it.
+    let at = script.rfind("\nexec ").map_or(script.len(), |at| at + 1);
     let mut call = quote(program.to_string_lossy().as_ref());
     for arg in first {
         call.push(' ');
         call.push_str(&quote(arg));
     }
     format!(
-        "{}{call}
-{}",
+        "{}if ! {call}; then\n  printf '%s\\n' {} >&2\n  exit 1\nfi\n{}",
         &script[..at],
+        quote(FIRST_TURN_FAILED),
         &script[at..]
     )
 }
@@ -1535,6 +1539,150 @@ pub fn launch_agent_openrouter(
 }
 pub const OPENROUTER_CLI_MISSING: &str =
     "The switchboard command was not found. Install it from Agents, then launch again.";
+/// Printed when a continuation's first turn ended in an error: nothing was resumed.
+#[cfg(not(windows))]
+const FIRST_TURN_FAILED: &str = "The first turn did not finish, so the handoff may not have been accepted. Nothing was resumed; run switchboard continue again or open the workflow by hand.";
+/// What refuses a Hermes continuation before anything is offered (SB-107): Hermes not installed,
+/// no saved OpenRouter key or no model for it, no `switchboard` command for the session script.
+pub(crate) fn hermes_continuation_preflight(store: &Store) -> Result<(), String> {
+    if cfg!(windows) {
+        return Err(crate::continuation::UNIX_ONLY.into());
+    }
+    find_program("hermes").ok_or(crate::hermes::HERMES_NOT_INSTALLED)?;
+    let saved = store
+        .agent_key("openrouter")?
+        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+    saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
+    agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    Ok(())
+}
+/// Continues an Observatory workflow on Hermes Agent with the saved OpenRouter key and its model
+/// (SB-107). Hermes runs in a home Switchboard owns (`runtimes/hermes-continue/agent-home`, its
+/// `HERMES_HOME`): its `config.yaml` is Switchboard's — Observatory's MCP server, so the session
+/// can accept the handoff, and no adoption of other tools' logins. Terminal runs
+/// `hermes chat --pass-session-id --query-file <prompt>`, which on a terminal seeds an interactive session with the
+/// handoff prompt as its first turn (Hermes 0.21.4). The key is read when the session starts,
+/// never written (as `launch_agent_openrouter`).
+pub(crate) fn hermes_continuation(
+    root: &Path,
+    store: &Store,
+    working_directory: &Path,
+    continuation: &crate::continuation::Continuation,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
+    hermes_continuation_preflight(store)?;
+    let program = find_program("hermes").ok_or(crate::hermes::HERMES_NOT_INSTALLED)?;
+    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let (path, result) =
+        hermes_continuation_session(root, store, &program, &cli, working_directory, continuation)?;
+    start(&path)?;
+    Ok(result)
+}
+#[cfg_attr(windows, allow(unused_variables))]
+fn hermes_continuation_session(
+    root: &Path,
+    store: &Store,
+    program: &Path,
+    cli: &Path,
+    working_directory: &Path,
+    continuation: &crate::continuation::Continuation,
+) -> Result<(PathBuf, Value), String> {
+    #[cfg(windows)]
+    {
+        Err(crate::continuation::UNIX_ONLY.into())
+    }
+    #[cfg(not(windows))]
+    {
+        let working_directory = agent_folder(root, working_directory)?;
+        if !crate::continuation::valid_workflow_id(&continuation.workflow_id) {
+            return Err(crate::continuation::BAD_WORKFLOW_ID.into());
+        }
+        let saved = store
+            .agent_key("openrouter")?
+            .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+        let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
+        let recipe = crate::agent_catalog::openrouter("hermes")?;
+        let base = root.join("runtimes").join("hermes-continue");
+        private_dir(&root.join("runtimes"))?;
+        private_dir(&base)?;
+        let own = base.join("agent-home");
+        private_dir(&own)?;
+        private_write(
+            &own.join("config.yaml"),
+            hermes_config(&continuation.observatory).as_bytes(),
+            false,
+        )?;
+        // One folder per workflow: two hand-overs never share a script or a prompt.
+        let session = base.join(&continuation.workflow_id);
+        private_dir(&session)?;
+        let prompt = session.join("handoff-prompt.txt");
+        private_write(
+            &prompt,
+            crate::continuation::prompt(continuation).as_bytes(),
+            false,
+        )?;
+        let mut env = BTreeMap::new();
+        if let Some(isolate) = &recipe.isolate_env {
+            env.insert(isolate.clone(), own.to_string_lossy().into_owned());
+        }
+        env.extend(recipe.extra_env.clone());
+        let prompt = prompt.to_string_lossy().into_owned();
+        // `--pass-session-id`: the prompt asks for this session's own id at acceptance.
+        let mut args = vec![
+            "chat".to_string(),
+            "--pass-session-id".into(),
+            "--query-file".into(),
+            prompt,
+        ];
+        args.extend(
+            recipe
+                .model_flag
+                .iter()
+                .map(|a| a.replace("{model}", &model)),
+        );
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let key_command = [
+            "--data-dir".to_string(),
+            root.to_string_lossy().into_owned(),
+            "agents".into(),
+            "key".into(),
+            "--service".into(),
+            "openrouter".into(),
+        ];
+        let content = script_with(
+            &session,
+            program,
+            &args,
+            &env,
+            Some((&recipe.key_env, cli, &key_command)),
+            false,
+            &working_directory,
+        );
+        let path = write_launch_script(&session, &content)?;
+        Ok((
+            path,
+            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model}),
+        ))
+    }
+}
+#[cfg_attr(windows, allow(dead_code))]
+/// Hermes's `config.yaml` in the home Switchboard owns: JSON strings are YAML double-quoted
+/// scalars, so every value is written escaped.
+fn hermes_config(server: &crate::continuation::McpServer) -> String {
+    let string = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
+    let args = server
+        .args
+        .iter()
+        .map(|a| string(a))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "# Written by Fabric Switchboard for workflow continuations; rewritten at each one.\n\
+auth:\n  adopt_external_logins: false\n\
+mcp_servers:\n  observatory:\n    command: {}\n    args: [{args}]\n",
+        string(&server.command)
+    )
+}
 /// Writes the session of an OpenRouter launch and returns its script and the answer. Separate
 /// from starting Terminal so tests read the script a real launch would run.
 fn openrouter_session(
@@ -2976,6 +3124,99 @@ mod tests {
             model,
             &f.project,
         )
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key() {
+        // SB-107: Hermes takes a workflow on the saved OpenRouter key and its model.
+        let f = fixture();
+        let continuation = crate::continuation::Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "ho_synthetic".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/opt/Engine \"Tools\"/python".into(),
+                args: vec![
+                    "/opt/engine/mcp/server.py".into(),
+                    "--home".into(),
+                    "/opt/h".into(),
+                ],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        let session = |f: &Fixture| {
+            hermes_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/hermes"),
+                Path::new("/opt/Switchboard Tools/switch'board"),
+                &f.project,
+                &continuation,
+            )
+        };
+        assert_eq!(
+            session(&f).unwrap_err(),
+            switchboard_core::agent_keys::NO_AGENT_KEY
+        );
+        openrouter_key(&f, None);
+        assert_eq!(session(&f).unwrap_err(), OPENROUTER_MODEL_NEEDED);
+        openrouter_key(&f, Some("moonshotai/kimi-k2"));
+        let (path, answer) = session(&f).unwrap();
+        assert_eq!(answer["model"], "moonshotai/kimi-k2");
+        let base = f.root.join("runtimes/hermes-continue");
+        assert!(path.starts_with(base.join("wf_0123456789abcdef")));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("sk-or-"), "the key reached the script");
+        let prompt = base.join("wf_0123456789abcdef/handoff-prompt.txt");
+        assert!(text.contains(&format!(
+            "exec '/opt/Agent Tools/hermes' 'chat' '--pass-session-id' '--query-file' {} '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'",
+            quote(prompt.to_string_lossy().as_ref())
+        )));
+        assert!(text.contains(&format!(
+            "export HERMES_HOME={}",
+            quote(base.join("agent-home").to_string_lossy().as_ref())
+        )));
+        assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+        let shell = text.lines().next().unwrap().trim_start_matches("#!");
+        assert!(std::process::Command::new(shell)
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let first = fs::read_to_string(&prompt).unwrap();
+        assert!(first.contains("ho_synthetic") && first.contains("wf_0123456789abcdef"));
+        let config = fs::read_to_string(base.join("agent-home/config.yaml")).unwrap();
+        assert!(config.contains("adopt_external_logins: false"));
+        assert!(config.contains("command: \"/opt/Engine \\\"Tools\\\"/python\""));
+        assert!(config.contains("args: [\"/opt/engine/mcp/server.py\", \"--home\", \"/opt/h\"]"));
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for file in [&prompt, &base.join("agent-home/config.yaml")] {
+                let mode = fs::metadata(file).unwrap().permissions().mode() & 0o777;
+                assert_eq!(mode, 0o600, "{}", file.display());
+            }
+        }
+        // Never in Switchboard's own data, never a malformed workflow id.
+        let mut bad = continuation.clone();
+        bad.workflow_id = "../../etc".into();
+        assert!(hermes_continuation_session(
+            &f.root,
+            &f.store,
+            Path::new("/bin/true"),
+            Path::new("/bin/true"),
+            &f.project,
+            &bad
+        )
+        .is_err());
+        assert!(hermes_continuation_session(
+            &f.root,
+            &f.store,
+            Path::new("/bin/true"),
+            Path::new("/bin/true"),
+            &f.root,
+            &continuation
+        )
+        .is_err());
     }
     #[test]
     fn an_openrouter_launch_needs_a_saved_key_and_a_valid_model() {

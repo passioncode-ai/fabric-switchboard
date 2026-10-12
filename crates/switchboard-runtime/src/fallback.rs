@@ -8,9 +8,10 @@
 //! silent for 120 s, one offer a minute, one executor by lease) stay the authority.
 //!
 //! Phase 1 hands over to Claude Code and Codex; SB-99 adds Kimi Code on a saved Kimi Code account,
-//! both ways — a Kimi executor at its limit is handed on, and a Kimi step takes a workflow. Another
-//! agent (Hermes, …, or Kimi Code on a paid key) is skipped with its reason until its launch recipe
-//! and paid-key ceilings exist (SB-72, SB-73 phase 2).
+//! both ways — a Kimi executor at its limit is handed on, and a Kimi step takes a workflow; SB-107
+//! adds Hermes Agent on the saved OpenRouter key (its own credit ceiling). Another agent, a step
+//! pinned to a project's paid key, or Kimi Code on a paid key is skipped with its reason until
+//! its launch recipe and paid-key ceilings exist (SB-72, SB-96, SB-73 phase 2).
 use crate::{continuation, oplog, Operation, Runtime};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -61,6 +62,9 @@ pub(crate) struct KimiChoice<'a> {
     pub ids: Vec<String>,
     pub usable: &'a (dyn Fn(&str) -> bool + Sync),
     pub used: &'a (dyn Fn(&str) -> f64 + Sync),
+    /// Whether a `hermes` step can run now (SB-107): Hermes installed, an OpenRouter key and its
+    /// model saved, the `switchboard` command present for the session script.
+    pub hermes_ready: bool,
 }
 
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
@@ -81,6 +85,7 @@ pub(crate) fn resolve(
         ids: Vec::new(),
         usable: &|_| false,
         used: &|_| 0.0,
+        hermes_ready: false,
     };
     resolve_with(
         snapshot,
@@ -156,6 +161,28 @@ pub(crate) fn resolve_with(
                         agent: e.agent.clone(),
                         reason: "no_usable_account",
                     },
+                };
+            }
+            // SB-107: Hermes runs on the saved OpenRouter key; a step that pins an account or a
+            // project's key waits for SB-72/SB-96.
+            if e.agent == crate::hermes::HERMES_TARGET {
+                return if e.account_id.is_some() || e.key.is_some() {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "agent_not_automatic_yet",
+                    }
+                } else if kimi.hermes_ready
+                    && executor_account != Some(crate::hermes::HERMES_TARGET)
+                {
+                    Step::Run {
+                        agent: e.agent.clone(),
+                        account_id: crate::hermes::HERMES_TARGET.into(),
+                    }
+                } else {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "no_usable_account",
+                    }
                 };
             }
             let Some(provider) = provider_of_agent(&e.agent) else {
@@ -329,6 +356,7 @@ where
         ids: kimi_ids.clone(),
         usable: &kimi_usable,
         used: &kimi_used,
+        hermes_ready: crate::launch::hermes_continuation_preflight(&runtime.store).is_ok(),
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
@@ -559,6 +587,68 @@ mod tests {
         );
     }
     #[test]
+    fn a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out() {
+        // SB-107: claude-code → kimi-code → hermes; every Claude account limited, no Kimi usable.
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("claude-a", Provider::Claude, Some(100.0)),
+                account("claude-b", Provider::Claude, Some(99.0)),
+            ],
+            ..Default::default()
+        };
+        let limited: HashSet<String> = ["claude-b".to_string()].into();
+        let chained = chain(&[("claude-code", None), ("kimi-code", None), ("hermes", None)]);
+        let with = |ready: bool, executor: Option<&str>, chain: &Chain| {
+            let kimi = KimiChoice {
+                ids: vec!["kimi-a".into()],
+                usable: &|_| false,
+                used: &|_| 0.0,
+                hermes_ready: ready,
+            };
+            resolve_with(
+                &snapshot,
+                chain,
+                executor,
+                &limited,
+                &HashSet::new(),
+                None,
+                &kimi,
+            )
+        };
+        let skip = |agent: &str, reason: &'static str| Step::Skip {
+            agent: agent.into(),
+            reason,
+        };
+        assert_eq!(
+            with(true, Some("claude-a"), &chained),
+            [
+                skip("claude-code", "no_usable_account"),
+                skip("kimi-code", "no_usable_account"),
+                Step::Run {
+                    agent: "hermes".into(),
+                    account_id: "hermes".into()
+                }
+            ]
+        );
+        // No key, no model or no Hermes: passed over, never launched half-ready.
+        assert_eq!(
+            with(false, Some("claude-a"), &chained)[2],
+            skip("hermes", "no_usable_account")
+        );
+        // A Hermes executor is not handed to Hermes again.
+        assert_eq!(
+            with(true, Some("hermes"), &chained)[2],
+            skip("hermes", "no_usable_account")
+        );
+        // A step pinned to a project's paid key waits for its ceilings (SB-72, SB-96).
+        let mut keyed = chain(&[("hermes", None)]);
+        keyed.executors[0].key = Some("proj/prod/OPENROUTER_API_KEY".into());
+        assert_eq!(
+            with(true, Some("claude-a"), &keyed),
+            [skip("hermes", "agent_not_automatic_yet")]
+        );
+    }
+    #[test]
     fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {
         // SB-99: no Kimi account saved reads as no usable account; then the pin, then the choice.
         let snapshot = Snapshot::default();
@@ -569,6 +659,7 @@ mod tests {
             ids: vec![a.into(), b.into(), c.into()],
             usable: &usable,
             used: &used,
+            hermes_ready: false,
         };
         let run = |id: &str| Step::Run {
             agent: "kimi-code".into(),

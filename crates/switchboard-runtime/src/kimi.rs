@@ -801,19 +801,25 @@ pub const KIMI_MCP_UNREADABLE: &str = "This account's Kimi MCP settings (mcp.jso
 /// keeping every other server: `kimi` 2.1.1 takes no MCP file on its command line, and a
 /// continuation's session must reach Observatory (SB-99). A file that is not a JSON object is
 /// never overwritten.
-pub(crate) fn add_observatory(
-    home: &Path,
-    server: &crate::continuation::McpServer,
-) -> Result<(), String> {
+/// The home's `mcp.json` as an object (empty when absent); refused when it is not a regular file
+/// or not a JSON object — checked before an offer too, so a broken file never costs one.
+fn read_mcp(home: &Path) -> Result<Value, String> {
     let path = home.join("mcp.json");
-    let mut config = match fs::symlink_metadata(&path) {
+    Ok(match fs::symlink_metadata(&path) {
         Err(_) => json!({}),
         Ok(meta) if !meta.file_type().is_file() => return Err(KIMI_MCP_UNREADABLE.into()),
         Ok(_) => regular_read(&path)
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .filter(Value::is_object)
             .ok_or(KIMI_MCP_UNREADABLE)?,
-    };
+    })
+}
+pub(crate) fn add_observatory(
+    home: &Path,
+    server: &crate::continuation::McpServer,
+) -> Result<(), String> {
+    let path = home.join("mcp.json");
+    let mut config = read_mcp(home)?;
     let servers = config
         .as_object_mut()
         .ok_or(KIMI_MCP_UNREADABLE)?
@@ -832,13 +838,17 @@ pub(crate) fn add_observatory(
     )
 }
 
-/// What refuses a continuation on a Kimi account before anything is offered: a signed-out home,
-/// or a `kimi` already running in it.
+/// What refuses a continuation on a Kimi account before anything is offered: no `kimi`, a
+/// signed-out home, an `mcp.json` the launch could not extend, or a `kimi` already running in it.
+/// Everything the launch would refuse for the account is checked here, so a refusal moves a
+/// chain on instead of spending an offer that then lapses.
 pub fn continuation_preflight(root: &Path, store: &Store, id: &str) -> Result<(), String> {
     store.kimi_account(id)?;
+    find_program("kimi").ok_or(KIMI_NOT_INSTALLED)?;
     if !signed_in(root, store, id) {
         return Err(KIMI_SIGNED_OUT.into());
     }
+    read_mcp(&home(root, id)?)?;
     let session = homes(root).join("sessions").join(id);
     if crate::launch::reservation_open(&session)
         || matches!(crate::launch::session_running(&session), Ok(true))
@@ -1554,8 +1564,19 @@ mod tests {
         let first = script
             .find("'/opt/kimi' '-p' 'Continue Observatory workflow wf_0123456789abcdef")
             .unwrap();
-        let then = script.find("exec '/opt/kimi' '-c'").unwrap();
+        let then = script.find("\nexec '/opt/kimi' '-c'").unwrap();
         assert!(first < then, "{script}");
+        // `-c` only after a first turn that succeeded: a failed one resumes nothing.
+        assert!(script[..first].ends_with("if ! "), "{script}");
+        assert!(script[first..then].contains("exit 1\nfi"), "{script}");
+        // The shell Terminal runs it with accepts it.
+        let shell = script.lines().next().unwrap().trim_start_matches("#!");
+        let checked = std::process::Command::new(shell)
+            .arg("-n")
+            .arg(session.join("launch.command"))
+            .status()
+            .unwrap();
+        assert!(checked.success(), "{script}");
         assert!(!script.contains("synthetic-access"));
         assert!(home.join("mcp.json").is_file());
         let record: Value =

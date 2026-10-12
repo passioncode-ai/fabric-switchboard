@@ -157,6 +157,10 @@ pub const NEAR_LIMIT_PERCENT: f64 = 95.0;
 pub const AT_LIMIT_PERCENT: f64 = 98.0;
 pub const CHECK_NEAR_LIMIT_SECONDS: i64 = 60;
 pub const CHECK_AT_LIMIT_SECONDS: i64 = 30;
+/// A check is stamped when its answer arrives, a few seconds after its pass began; a near-limit
+/// schedule is set this much earlier so it falls due on the pass it names, not the one after
+/// (a 30-second schedule measured from the answer would otherwise run every minute).
+pub const NEAR_LIMIT_SLACK_SECONDS: i64 = 10;
 /// The near-limit cadence for the account a session works on, from its account-wide usage:
 /// None below 95 % and at 100 % (full until a reset; the switch has happened or nothing is
 /// left), and when the usage names no account-wide figure.
@@ -171,7 +175,7 @@ pub fn near_limit_check(usage: &Usage, observed: i64) -> Option<i64> {
     } else {
         return None;
     };
-    Some(observed.saturating_add(delay))
+    Some(observed.saturating_add(delay - NEAR_LIMIT_SLACK_SECONDS))
 }
 /// The schedule after a successful quota check observed at `observed`.
 pub fn next_quota_check(active: bool, usage: &Usage, observed: i64) -> i64 {
@@ -591,7 +595,8 @@ impl Store {
     /// the pool's next account — the one a switch or a failover would take — is due a minute
     /// after its last check, so the switch acts on a fresh figure. Only pools that can switch:
     /// a managed route, or an enabled policy with the ordinary CLI signed in to one of its
-    /// accounts. In memory, like any schedule (LC-08). Returns how many schedules moved.
+    /// accounts. Chosen from metadata (`next_to_check`), no credential read. In memory, like any
+    /// schedule (LC-08). Returns how many schedules moved.
     pub fn pull_in_next_accounts(&self, now: i64) -> Result<usize, String> {
         let in_use = self
             .in_use
@@ -640,12 +645,8 @@ impl Store {
             let policy = self.failover_policy(provider, &pool)?;
             let mut held = limited.clone();
             held.extend(current);
-            // Only an OAuth account has a usage check to bring forward.
-            let fits = Fits {
-                kind: Some(AuthKind::OAuth),
-                api_key_only: false,
-            };
-            if let Some(id) = self.failover_candidate(&policy, &held, fits, now)? {
+            // Chosen from the metadata alone: no credential is read for a schedule.
+            if let Some(id) = self.next_to_check(&policy, &held, now)? {
                 if !paced.contains(&id) {
                     next.push(id);
                 }
@@ -663,7 +664,9 @@ impl Store {
             .filter(|a| next.contains(&a.id))
         {
             if let Some(health) = a.usage_health.as_mut().filter(|h| h.status == "ok") {
-                let sooner = health.checked_at.saturating_add(CHECK_NEAR_LIMIT_SECONDS);
+                let sooner = health
+                    .checked_at
+                    .saturating_add(CHECK_NEAR_LIMIT_SECONDS - NEAR_LIMIT_SLACK_SECONDS);
                 if sooner < health.next_check_at {
                     health.next_check_at = sooner;
                     moved += 1;

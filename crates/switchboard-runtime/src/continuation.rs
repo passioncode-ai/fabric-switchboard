@@ -45,6 +45,7 @@ pub const FOREIGN_FOLDER: &str =
 pub const DISABLED: &str = "Enable the account before continuing a workflow.";
 
 /// The ids a launched session needs, and the Observatory server it reaches them through.
+#[derive(Clone)]
 pub struct Continuation {
     pub workflow_id: String,
     pub handoff_id: String,

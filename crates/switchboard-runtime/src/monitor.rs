@@ -98,7 +98,7 @@ pub(crate) struct Pass {
     swap_last_signature: Option<(u64, u64, u128)>,
     renew: RenewSchedule,
     /// When the pool's next accounts were last brought forward (SB-106): at most once a minute,
-    /// as choosing one reads the pool's credentials.
+    /// the cadence it sets.
     last_pull_in: i64,
 }
 /// When each inactive Claude account's token comes due, learned from the vault only when the

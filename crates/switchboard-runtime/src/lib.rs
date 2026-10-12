@@ -1669,6 +1669,44 @@ async fn execute(
             let directory = working_directory
                 .canonicalize()
                 .map_err(|_| "Choose an existing project directory.")?;
+            // SB-107: Hermes Agent on the saved OpenRouter key, with the same order — every
+            // refusal before the offer, a failed launch after it left to lapse.
+            if id == hermes::HERMES_TARGET {
+                let shown = continuation::show(&bin, &workflow_id)?;
+                let plan = continuation::plan_named(
+                    &shown,
+                    &workflow_id,
+                    hermes::HERMES_TARGET,
+                    &id,
+                    true,
+                    &directory,
+                )?;
+                launch::hermes_continuation_preflight(&store)?;
+                launch::agent_folder(root, &directory)?;
+                let observatory = continuation::observatory_mcp(&bin)?;
+                let offer = continuation::offer(&bin, &plan, &id)?;
+                let resumed = continuation::Continuation {
+                    workflow_id: workflow_id.clone(),
+                    handoff_id: offer.handoff_id.clone(),
+                    observatory,
+                    previous_provider: plan.from_provider.clone(),
+                };
+                let launched = launch::hermes_continuation(
+                    root,
+                    &store,
+                    &directory,
+                    &resumed,
+                    launch::start_terminal,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                return Ok(json!({
+                    "message": "Terminal launch requested; the Hermes session accepts the handoff itself. Provider response is not yet verified.",
+                    "workflow": workflow_id,
+                    "handoff": offer.handoff_id,
+                    "offeredUntil": offer.expires_at,
+                    "model": launched["model"],
+                }));
+            }
             // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —
             // every refusal before the offer, a failed launch after it left to lapse.
             if store.kimi_account(&id).is_ok() {
@@ -1682,6 +1720,7 @@ async fn execute(
                     &directory,
                 )?;
                 kimi::continuation_preflight(root, &store, &id)?;
+                launch::agent_folder(root, &directory)?;
                 let observatory = continuation::observatory_mcp(&bin)?;
                 let offer = continuation::offer(&bin, &plan, &id)?;
                 let resumed = continuation::Continuation {

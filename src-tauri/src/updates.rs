@@ -513,7 +513,7 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
 
 /// The end of a check that ran while an update waited (SB-105). Nothing newer, or a check or
 /// download that failed, leaves the waiting update as it was; a newer verified release takes its
-/// place. A swap that failed or stalled leaves the bundle in an unknown state, so the waiting
+/// place — unless a restart into the waiting one is already under way. A swap that failed or stalled leaves the bundle in an unknown state, so the waiting
 /// update is dropped and the failure shown, as for a first install.
 fn recheck_done(
     app: &AppHandle,
@@ -522,6 +522,9 @@ fn recheck_done(
 ) -> Phase {
     let (code, phase) = match outcome {
         Ok(None) => ("current", Phase::Ready),
+        // A restart into the waiting update is already recorded with that update's installer
+        // (Windows `relaunching`): the newer one waits for the next start's check.
+        Ok(Some(_)) if inner.restart.is_some() => ("deferred", Phase::Ready),
         Ok(Some(newer)) => {
             let version = newer.update.version.clone();
             inner.version = Some(version.clone());
