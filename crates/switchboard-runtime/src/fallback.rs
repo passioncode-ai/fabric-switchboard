@@ -62,8 +62,9 @@ pub(crate) struct KimiChoice<'a> {
     pub ids: Vec<String>,
     pub usable: &'a (dyn Fn(&str) -> bool + Sync),
     pub used: &'a (dyn Fn(&str) -> f64 + Sync),
-    /// Whether a `hermes` step can run now (SB-107): Hermes installed, an OpenRouter key and its
-    /// model saved, the `switchboard` command present for the session script.
+    /// Whether a `hermes` step can be tried now (SB-107): Hermes installed, an OpenRouter key
+    /// saved, the `switchboard` command present for the session script. Its model is settled at
+    /// the hand-over, which refuses before the offer when there is none.
     pub hermes_ready: bool,
 }
 

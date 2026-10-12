@@ -43,6 +43,10 @@ pub const ACCOUNT_REF_INVALID: &str = "This account's id cannot be named in a ha
 pub const FOREIGN_FOLDER: &str =
     "This folder is not one of the workflow's checkouts; choose the repository the workflow works in.";
 pub const DISABLED: &str = "Enable the account before continuing a workflow.";
+/// `--mode managed` routes Claude Code or Codex through the proxy; Hermes and Kimi Code run in
+/// their own sessions.
+pub const MANAGED_NOT_FOR_AGENT: &str =
+    "Hermes and Kimi Code continue in their own sessions; --mode managed is for Claude Code and Codex.";
 
 /// The ids a launched session needs, and the Observatory server it reaches them through.
 #[derive(Clone)]

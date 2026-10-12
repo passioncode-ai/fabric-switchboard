@@ -62,35 +62,56 @@ pub fn model_valid(model: &str) -> bool {
 
 /// Runs Hermes with fixed arguments and a deadline; stdout only, bounded. Never through a shell.
 fn run(program: &Path, args: &[&str]) -> Result<String, &'static str> {
-    let mut child = Command::new(program)
+    run_within(program, args, TIMEOUT)
+}
+/// `run` with its own deadline. Hermes runs in its own process group: at the deadline the group is
+/// killed (a plugin or helper it started dies with it, LC-02) and reaped; stdout is read on its own
+/// thread, so a full pipe cannot hold the deadline up.
+fn run_within(program: &Path, args: &[&str], timeout: Duration) -> Result<String, &'static str> {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|_| HERMES_FAILED)?;
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().map_err(|_| HERMES_FAILED)?;
+    let stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Some(stdout) = stdout {
+            let _ = stdout.take(MAX_OUTPUT as u64 + 1).read_to_end(&mut out);
+        }
+        out
+    });
     let started = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut out = Vec::new();
-                if let Some(stdout) = child.stdout.take() {
-                    let _ = stdout.take(MAX_OUTPUT as u64 + 1).read_to_end(&mut out);
-                }
-                if !status.success() || out.len() > MAX_OUTPUT {
-                    return Err(HERMES_FAILED);
-                }
-                return String::from_utf8(out).map_err(|_| HERMES_FAILED);
-            }
-            Ok(None) if started.elapsed() < TIMEOUT => {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if started.elapsed() < timeout => {
                 std::thread::sleep(Duration::from_millis(50))
             }
             _ => {
+                #[cfg(unix)]
+                if let Ok(group) = libc::pid_t::try_from(child.id()) {
+                    // SAFETY: killpg only signals the group this call created.
+                    unsafe {
+                        libc::killpg(group, libc::SIGKILL);
+                    }
+                }
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(HERMES_FAILED);
+                break None;
             }
         }
+    };
+    let out = reader.join().unwrap_or_default();
+    match status {
+        Some(status) if status.success() && out.len() <= MAX_OUTPUT => {
+            String::from_utf8(out).map_err(|_| HERMES_FAILED)
+        }
+        _ => Err(HERMES_FAILED),
     }
 }
 
@@ -154,9 +175,20 @@ fn status_with(program: Option<&Path>) -> Value {
 /// The model the ordinary Hermes is set to when it runs on OpenRouter (SB-107, operator
 /// 2026-10-12): a continuation on the saved OpenRouter key keeps the person's own choice, and only
 /// a Hermes on another provider (or none) falls back to the key's default model.
+///
+/// Read at a hand-over, so it waits `MODEL_TIMEOUT` at most: a Hermes that does not answer gives
+/// no model, and the key's default model is used.
 pub fn openrouter_model() -> Option<String> {
-    own_openrouter_model(&status())
+    let program = find_program("hermes")?;
+    let text = run_within(
+        &program,
+        &["config", "get", "model", "--json"],
+        MODEL_TIMEOUT,
+    )
+    .ok()?;
+    own_openrouter_model(&parse_model(&text))
 }
+const MODEL_TIMEOUT: Duration = Duration::from_secs(5);
 fn own_openrouter_model(status: &Value) -> Option<String> {
     (status.get("provider").and_then(Value::as_str) == Some("openrouter"))
         .then(|| status.get("model").and_then(Value::as_str))
@@ -200,6 +232,27 @@ fn set_with(program: &Path, provider: Option<&str>, model: Option<&str>) -> Resu
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn a_hermes_that_hangs_is_cut_off_with_everything_it_started() {
+        // A helper still holding stdout would keep the reader waiting without the group kill.
+        let started = Instant::now();
+        let answer = run_within(
+            Path::new("/bin/sh"),
+            &["-c", "sleep 30 & echo partial; sleep 30"],
+            Duration::from_millis(300),
+        );
+        assert_eq!(answer, Err(HERMES_FAILED));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            run_within(Path::new("/bin/sh"), &["-c", "echo '{}'"], TIMEOUT).as_deref(),
+            Ok("{}\n")
+        );
+    }
     #[test]
     fn a_continuation_keeps_the_model_hermes_runs_on_openrouter() {
         let own = |text: &str| own_openrouter_model(&parse_model(text));
