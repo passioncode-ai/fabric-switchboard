@@ -6,6 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+**A waiting update never waits forever** (SB-105). While an update waits to start, Switchboard
+keeps checking every six hours, and a newer release takes the waiting one's place — before, a copy
+that never found an idle moment stayed on the waiting version and never saw a later release. The
+log now says why a waiting update has not started (`update_waiting`: the window is open, a request
+or a sign-in is running, updates are off), at once and then at most hourly. *Restart to update*
+waits for an install in progress instead of quitting in the middle of it.
+
 ## 0.6.18 — 2026-10-12
 
 The first published release since 0.6.16: 0.6.17 was tagged but never published — the release

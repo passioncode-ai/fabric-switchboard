@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-105 done: a waiting update never waits forever
+
+Branch `fix/sb-105-update-waits`. While an update waits, the 6-hour checks go on and a newer
+release replaces it; the idle watch logs `update_waiting {reason}` at once and then hourly; a
+restart waits out a bundle swap (`Updates::swap`); a pre-SB-65 sign-in leftover is swept (test).
+CONTRACTS → A waiting update never waits forever; DISTRIBUTION, OPERATIONS, AGENTS.md,
+SCN (automatic updates), CHANGELOG Unreleased. Gate `./scripts/check.sh` exit 0, run with
+`CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`: the data volume had 4.7 GB free, and the first
+full run filled it (a storage test failed on a write); `cargo clean --profile dev` freed 5.1 GB
+of this checkout's own cache. Not run: the Windows cross-check (retro #8, before a release).
+
+**Exact next task:** the operator restarts the app once by hand (*Restart to update*, or Quit and
+open) — the running copy predates SB-105; the version must read 0.6.18 and, on a 0.6.19+ build,
+`update_waiting` must appear in the log while an update waits with the window open. Then SB-99's
+rest (Kimi Code in fallback chains with SB-73 phase 2). The Russian copy pass still awaits a
+native speaker's read of the window.
+
+---
+
 ## 2026-10-12 — SB-105 filed: the installed app never left 0.6.16
 
 Status check on the operator's Mac: `main` = `a5c1948`, v0.6.18 published, no open PRs. The
