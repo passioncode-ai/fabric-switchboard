@@ -12,6 +12,20 @@ use tempfile::TempDir;
 fn token(value: &str) -> Credential {
     Credential::parse(Provider::Claude, AuthKind::ApiKey, value).unwrap()
 }
+/// Opens a store another handle of this test just dropped. Tests running beside it start this
+/// binary again as a child process; a child forked at that moment shares the lock's open file
+/// until it execs, so the exclusive lock can stay taken for a few milliseconds after the drop
+/// (seen once on the Linux arm64 nightly, 2026-10-12).
+fn reopen(root: &std::path::Path, vault: Arc<MemoryVault>) -> Store {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match Store::open(root.into(), vault.clone()) {
+            Ok(store) => return store,
+            Err(error) if std::time::Instant::now() >= deadline => panic!("{error}"),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+}
 fn setup() -> (TempDir, Arc<MemoryVault>, Store) {
     let root = TempDir::new().unwrap();
     let vault = Arc::new(MemoryVault::default());
@@ -150,7 +164,7 @@ fn lifecycle_routes_are_scoped_and_survive_restart_without_secret_metadata() {
     store.select(Provider::Claude, "default", &a.id).unwrap();
     let before = serde_json::to_value(store.snapshot().unwrap()).unwrap();
     drop(store);
-    let store = Store::open(root.path().into(), vault).unwrap();
+    let store = reopen(root.path(), vault);
     assert_eq!(
         before,
         serde_json::to_value(store.snapshot().unwrap()).unwrap()
@@ -254,7 +268,7 @@ fn lock_contends_and_releases_on_drop() {
     let (root, vault, store) = setup();
     assert!(Store::open(root.path().into(), vault.clone()).is_err());
     drop(store);
-    assert!(Store::open(root.path().into(), vault).is_ok());
+    reopen(root.path(), vault);
 }
 
 #[test]
@@ -499,7 +513,7 @@ fn clock_set_back_after_observation_keeps_store_open_and_writable() {
     disk["snapshot"]["policies"][0]["last_switched_at"] = ahead.into();
     fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
 
-    let store = Store::open(root.path().into(), vault).unwrap();
+    let store = reopen(root.path(), vault);
     store.select(Provider::Claude, "default", &b.id).unwrap();
     store
         .select_with_cooldown(Provider::Claude, "default", &a.id, now())
@@ -617,12 +631,7 @@ fn events_are_allowlisted_bounded_and_persisted() {
     assert_eq!(store.snapshot().unwrap().events.len(), 256);
     drop(store);
     assert_eq!(
-        Store::open(root.path().into(), vault)
-            .unwrap()
-            .snapshot()
-            .unwrap()
-            .events
-            .len(),
+        reopen(root.path(), vault).snapshot().unwrap().events.len(),
         256
     );
 }
@@ -941,7 +950,7 @@ fn an_unchanged_quota_check_is_not_written_until_something_changes() {
         .unwrap();
     assert_eq!(store.metadata_writes(), writes + 3);
     drop(store);
-    let reopened = Store::open(root.path().into(), vault).unwrap();
+    let reopened = reopen(root.path(), vault);
     let health = reopened.snapshot().unwrap().accounts[0]
         .usage_health
         .clone()
@@ -1169,7 +1178,7 @@ fn an_agent_key_lives_in_the_vault_and_its_metadata_names_only_the_service() {
     );
     // Survives a restart of the store.
     drop(store);
-    let reopened = Store::open(root.path().into(), vault.clone()).unwrap();
+    let reopened = reopen(root.path(), vault.clone());
     assert_eq!(
         reopened.agent_key_value("openrouter").unwrap(),
         "sk-or-v1-synthetic-two"
