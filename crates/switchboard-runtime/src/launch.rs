@@ -1708,8 +1708,8 @@ fn hermes_continuation_session(
             false,
         )?;
         Ok((
-            path,
-            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from}),
+            path.clone(),
+            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from, "script": path}),
         ))
     }
 }
@@ -1898,6 +1898,56 @@ pub fn launch_continuation(
         &NATIVE,
         Some(continuation),
     )
+}
+/// `launch_continuation` prepared for the caller's own terminal (SB-108): the same session, home
+/// and first prompt, its script returned instead of Terminal opened.
+pub fn continuation_here(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    continuation: &Continuation,
+) -> Result<(bool, PathBuf), String> {
+    continuation_here_with(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        &NATIVE,
+        continuation,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn continuation_here_with(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    host: &Host,
+    continuation: &Continuation,
+) -> Result<(bool, PathBuf), String> {
+    if cfg!(windows) {
+        return Err(IN_PLACE_UNSUPPORTED.into());
+    }
+    let (tools, script) = launch_full(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        host,
+        Some(continuation),
+        &[],
+        true,
+    )?;
+    Ok((tools, script.ok_or(IN_PLACE_UNSUPPORTED)?))
 }
 /// Everything `launch` refuses before it touches a home: the folder, the mode, the account, its
 /// project and, for an isolated session, a credential that has not expired. A continuation runs
@@ -3332,6 +3382,11 @@ mod tests {
         let (path, answer) = session(&f).unwrap();
         assert_eq!(answer["model"], "moonshotai/kimi-k2");
         assert_eq!(answer["model_from"], "key");
+        assert_eq!(
+            answer["script"],
+            json!(path),
+            "for a continuation in place (SB-108)"
+        );
         let base = f.root.join("runtimes/hermes-continue");
         assert!(path.starts_with(base.join("wf_0123456789abcdef")));
         let text = fs::read_to_string(&path).unwrap();
@@ -4000,6 +4055,42 @@ mod tests {
         fs::create_dir(f.root.join("homes").join("no-record")).unwrap();
         let all = sessions(&f.root, true);
         assert_eq!(all.len(), 1, "{all:?}");
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn a_continuation_in_place_returns_its_script_and_opens_no_terminal() {
+        // SB-108: an embedded console (Fabric) runs the continuing session itself.
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        fn never(_: &Path) -> Result<(), String> {
+            panic!("Terminal was opened for an in-place continuation")
+        }
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            start_terminal: never,
+        };
+        let resumed = Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "handoff:fedcba9876543210".into(),
+            observatory: McpServer {
+                command: "/opt/Observatory/bin/python".into(),
+                args: vec!["/opt/Observatory/engine/mcp/server.py".into()],
+            },
+            previous_provider: None,
+        };
+        let (_, script) = continuation_here_with(
+            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, &resumed,
+        )
+        .unwrap();
+        assert_eq!(
+            script,
+            f.root.join("homes").join(&id).join("launch.command")
+        );
+        let text = fs::read_to_string(&script).unwrap();
+        assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
+        assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
     }
     #[cfg(not(windows))]
     #[tokio::test]

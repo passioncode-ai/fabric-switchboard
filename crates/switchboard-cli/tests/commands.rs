@@ -32,6 +32,33 @@ fn help_and_invalid_arguments_do_not_create_storage_or_echo_values() {
     assert!(!root.exists());
 }
 #[test]
+fn continuing_in_place_without_a_terminal_is_refused_before_anything_is_offered() {
+    // SB-108: an offer nobody can accept is never made; no owner is even asked.
+    let tmp = tempfile::tempdir().unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args([
+            "--json",
+            "continue",
+            "wf_0123456789abcdef",
+            "--account",
+            "hermes",
+            "--dir",
+        ])
+        .arg(tmp.path())
+        .arg("--in-place")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("needs a terminal"));
+    assert!(
+        std::fs::read_dir(tmp.path()).unwrap().next().is_none(),
+        "nothing written"
+    );
+}
+#[test]
 fn offline_list_and_status_are_json_and_launch_requires_owner() {
     let tmp = tempfile::tempdir().unwrap();
     let output = binary()

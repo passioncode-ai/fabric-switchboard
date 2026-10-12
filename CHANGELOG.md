@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.25 — 2026-10-13
+
+**Continue a workflow inside another app's console** (SB-108, first half). `switchboard continue
+--in-place` runs the continuing session in the terminal that called it — an embedded console such
+as Fabric Dashboards' — instead of opening a new Terminal window; Claude Code, Codex, Kimi Code and
+Hermes alike. Automatic hand-overs still open Terminal until Fabric can take them.
+
 ## 0.6.24 — 2026-10-12
 
 0.6.22 and 0.6.23 were tagged but refused by the release guard and never published, each for a
