@@ -3675,10 +3675,19 @@ mod lifecycle_tests {
     use std::time::Duration;
     use switchboard_core::MemoryVault;
 
+    /// Starts an owner, also on a store another owner of this test just released. Tests beside it
+    /// start child processes; a child forked at that moment shares the store lock's open file
+    /// until it execs, so the lock can stay taken for a few milliseconds after the release (seen
+    /// on the Linux arm64 release build of 0.6.20, as #161 saw for the storage tests).
     async fn owner(root: &Path) -> Owner {
-        Owner::start(root.to_owned(), Arc::new(MemoryVault::default()))
-            .await
-            .unwrap()
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match Owner::start(root.to_owned(), Arc::new(MemoryVault::default())).await {
+                Ok(owner) => return owner,
+                Err(error) if std::time::Instant::now() >= deadline => panic!("{error}"),
+                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
     }
     /// A managed session holds the proxy's address and token in its environment.
     async fn status_as_holder(address: std::net::SocketAddr, token: &str) -> reqwest::StatusCode {
