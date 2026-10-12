@@ -111,6 +111,10 @@ enum Command {
         /// The workflow's checkout to run in.
         #[arg(long)]
         dir: PathBuf,
+        /// Run the continuing session in this terminal instead of opening Terminal (needs a
+        /// terminal on stdin and stdout) — for an embedded console such as Fabric's (SB-108).
+        #[arg(long)]
+        in_place: bool,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -881,16 +885,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             account,
             mode,
             dir,
-        } => Operation::Continue {
-            workflow_id: workflow_id.clone(),
-            id: account.clone(),
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: dir.clone(),
-        },
+            in_place,
+        } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
         Command::Chain { command } => match command {
             ChainCommand::List { workflow, pool } => Operation::Chains {
                 workflow: workflow.clone(),
@@ -1113,6 +1109,44 @@ async fn launch(
             working_directory: working_directory.to_owned(),
             in_place,
             args: args.to_vec(),
+        },
+    )
+    .await?;
+    if !in_place {
+        return Ok(value);
+    }
+    let script = value["script"]
+        .as_str()
+        .ok_or("The session script is missing.")?;
+    run_in_place(std::path::Path::new(script))
+}
+/// `switchboard continue`: the hand-over, and with `--in-place` its session in this terminal.
+async fn continue_workflow(
+    root: &std::path::Path,
+    workflow_id: &str,
+    account: &str,
+    mode: Mode,
+    dir: &std::path::Path,
+    in_place: bool,
+) -> Result<Value, String> {
+    use std::io::IsTerminal;
+    // Checked before anything is offered: a hand-over without a terminal to run in would leave
+    // an offer nobody accepts.
+    if in_place && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Err("Continuing in place needs a terminal on stdin and stdout.".into());
+    }
+    let value = call(
+        root,
+        Operation::Continue {
+            workflow_id: workflow_id.to_owned(),
+            id: account.to_owned(),
+            mode: match mode {
+                Mode::Isolated => "isolated",
+                Mode::Managed => "managed",
+            }
+            .into(),
+            working_directory: dir.to_owned(),
+            in_place,
         },
     )
     .await?;

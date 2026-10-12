@@ -326,6 +326,7 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
                 id: account,
                 mode: "isolated".into(),
                 working_directory: dir,
+                in_place: false,
             })
             .await
             .map(|_| ())

@@ -946,7 +946,7 @@ fn launch_continuation_with(
         )?;
         start(&path)?;
         reservation.committed = true;
-        Ok(json!({"launched": true, "account": account.label}))
+        Ok(json!({"launched": true, "account": account.label, "script": path}))
     }
 }
 
@@ -1570,7 +1570,7 @@ mod tests {
             KIMI_MCP_UNREADABLE
         );
         fs::remove_file(home.join("mcp.json")).unwrap();
-        launch_continuation_with(
+        let launched = launch_continuation_with(
             &root,
             &store,
             &id,
@@ -1581,6 +1581,8 @@ mod tests {
         )
         .unwrap();
         let session = homes(&root).join("sessions").join(&id);
+        // The answer names the script, for a continuation in place (SB-108).
+        assert_eq!(launched["script"], json!(session.join("launch.command")));
         let script = fs::read_to_string(session.join("launch.command")).unwrap();
         let first = script
             .find("'/opt/kimi' '-p' 'Continue Observatory workflow wf_0123456789abcdef")

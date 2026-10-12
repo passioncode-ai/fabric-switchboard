@@ -125,6 +125,10 @@ pub enum Operation {
         id: String,
         mode: String,
         working_directory: PathBuf,
+        /// Prepare the continuing session and return its script for the caller to run in its own
+        /// terminal (an embedded console, SB-108), instead of opening Terminal.
+        #[serde(default)]
+        in_place: bool,
     },
     BeginLogin {
         provider: Provider,
@@ -1658,7 +1662,17 @@ async fn execute(
             id,
             mode,
             working_directory,
+            in_place,
         } => {
+            if in_place && cfg!(windows) {
+                return Err(launch::IN_PLACE_UNSUPPORTED.into());
+            }
+            // In place, the session script is prepared and returned; nothing opens Terminal.
+            let start: fn(&Path) -> Result<(), String> = if in_place {
+                |_| Ok(())
+            } else {
+                launch::start_terminal
+            };
             let runtime = needs_owner()?;
             // Everything that can refuse runs before the offer, so a refusal leaves the workflow
             // exactly as it was; after the offer, a failed launch leaves it to lapse.
@@ -1708,10 +1722,11 @@ async fn execute(
                     &directory,
                     &resumed,
                     own_model.as_deref(),
-                    launch::start_terminal,
+                    start,
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 return Ok(json!({
+                    "script": if in_place { launched["script"].clone() } else { Value::Null },
                     "message": "Terminal launch requested; the Hermes session accepts the handoff itself. Provider response is not yet verified.",
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
@@ -1742,16 +1757,11 @@ async fn execute(
                     observatory,
                     previous_provider: plan.from_provider.clone(),
                 };
-                kimi::launch_continuation(
-                    root,
-                    &store,
-                    &id,
-                    &directory,
-                    &resumed,
-                    launch::start_terminal,
-                )
-                .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                let launched =
+                    kimi::launch_continuation(root, &store, &id, &directory, &resumed, start)
+                        .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 return Ok(json!({
+                    "script": if in_place { launched["script"].clone() } else { Value::Null },
                     "message": "Terminal launch requested; the Kimi Code session accepts the handoff itself. Provider response is not yet verified.",
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
@@ -1786,17 +1796,33 @@ async fn execute(
                 observatory,
                 previous_provider: plan.from_provider.clone(),
             };
-            let agent_tools = launch::launch_continuation(
-                root,
-                &store,
-                &runtime.proxy,
-                &id,
-                &mode,
-                &directory,
-                &resumed,
-            )
-            .map_err(|e| continuation::launch_failed(&offer, &e))?;
+            let (agent_tools, script) = if in_place {
+                let (tools, script) = launch::continuation_here(
+                    root,
+                    &store,
+                    &runtime.proxy,
+                    &id,
+                    &mode,
+                    &directory,
+                    &resumed,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                (tools, Some(script))
+            } else {
+                let tools = launch::launch_continuation(
+                    root,
+                    &store,
+                    &runtime.proxy,
+                    &id,
+                    &mode,
+                    &directory,
+                    &resumed,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                (tools, None)
+            };
             Ok(json!({
+                "script": script,
                 "message": "Terminal launch requested; the session accepts the handoff itself. Provider response is not yet verified.",
                 "workflow": workflow_id,
                 "handoff": offer.handoff_id,
