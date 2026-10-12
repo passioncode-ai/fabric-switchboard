@@ -97,6 +97,14 @@ fn validate_executor(s: &Snapshot, e: &Executor) -> Result<(), String> {
         }
     }
     if let Some(id) = &e.account_id {
+        // SB-99: Kimi Code runs on a saved Kimi Code account (its own sign-in folder).
+        if s.kimi_accounts.iter().any(|k| &k.id == id) {
+            return if e.agent == "kimi-code" {
+                Ok(())
+            } else {
+                Err("A Kimi Code account runs only Kimi Code.".into())
+            };
+        }
         let account = s
             .accounts
             .iter()
@@ -159,8 +167,12 @@ pub(crate) fn validate_chains(s: &Snapshot) -> Result<(), String> {
 /// Drops what a removed account or project leaves behind: executors that pinned the account, and
 /// chains left empty or scoped to a project that no longer exists.
 pub(crate) fn prune(s: &mut Snapshot) {
-    let accounts: std::collections::HashSet<String> =
-        s.accounts.iter().map(|a| a.id.clone()).collect();
+    let accounts: std::collections::HashSet<String> = s
+        .accounts
+        .iter()
+        .map(|a| a.id.clone())
+        .chain(s.kimi_accounts.iter().map(|k| k.id.clone()))
+        .collect();
     let pools: std::collections::HashSet<String> =
         s.projects.iter().map(|p| p.pool.clone()).collect();
     for c in s.chains.iter_mut() {
@@ -347,6 +359,43 @@ mod tests {
         assert!(set(pinned("claude-code", "no-such-account"))
             .unwrap_err()
             .contains("Account not found"));
+    }
+
+    #[test]
+    fn kimi_code_pins_a_saved_kimi_account_and_loses_the_pin_when_it_goes() {
+        // SB-99: a Kimi Code step may name a saved Kimi Code account, and only Kimi Code may.
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path());
+        let kimi = "3e7b8cf7-0000-4000-8000-000000000001";
+        store
+            .add_kimi_account(kimi, "Kimi", "global", None, None)
+            .unwrap();
+        let codex = add(&store, Provider::Codex, AuthKind::OAuth, "gpt");
+        let pinned = |agent: &str, id: &str| Executor {
+            agent: agent.into(),
+            account_id: Some(id.into()),
+            key: None,
+        };
+        assert_eq!(
+            store
+                .set_chain(ChainScope::Machine, vec![pinned("hermes", kimi)])
+                .unwrap_err(),
+            "A Kimi Code account runs only Kimi Code."
+        );
+        store
+            .set_chain(
+                ChainScope::Machine,
+                vec![pinned("codex", &codex), pinned("kimi-code", kimi)],
+            )
+            .unwrap();
+        assert!(store.remove_kimi_account(kimi).unwrap());
+        let chain = store.chain_for(None, None).unwrap().unwrap();
+        assert_eq!(
+            chain.executors.len(),
+            1,
+            "the Kimi step went with its account"
+        );
+        assert_eq!(chain.executors[0].agent, "codex");
     }
 
     #[test]

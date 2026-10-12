@@ -380,7 +380,9 @@ impl KimiWatch {
         let used = windows
             .iter()
             .filter_map(|w| w["used_percent"].as_f64())
-            .fold(None, |max: Option<f64>, p| Some(max.map_or(p, |m| m.max(p))));
+            .fold(None, |max: Option<f64>, p| {
+                Some(max.map_or(p, |m| m.max(p)))
+            });
         if let Some(used) = used {
             inner.used.insert(id.to_owned(), used);
         }
@@ -428,7 +430,11 @@ pub(crate) async fn watch_with(
     if snapshot.chains.is_empty() || snapshot.kimi_accounts.is_empty() {
         return;
     }
-    let ids: Vec<String> = snapshot.kimi_accounts.iter().map(|a| a.id.clone()).collect();
+    let ids: Vec<String> = snapshot
+        .kimi_accounts
+        .iter()
+        .map(|a| a.id.clone())
+        .collect();
     let mut asked = tokio::task::JoinSet::new();
     for id in watch.due(&ids, now) {
         let Some(account) = snapshot.kimi_accounts.iter().find(|a| a.id == id) else {
@@ -447,7 +453,13 @@ pub(crate) async fn watch_with(
             let Ok(token) = token(&folder, &region, now) else {
                 return (id, None);
             };
-            (id, get(&base, "/usages", &token).await.ok().map(|u| windows(&u)))
+            (
+                id,
+                get(&base, "/usages", &token)
+                    .await
+                    .ok()
+                    .map(|u| windows(&u)),
+            )
         });
     }
     while let Some(done) = asked.join_next().await {
@@ -789,7 +801,10 @@ pub const KIMI_MCP_UNREADABLE: &str = "This account's Kimi MCP settings (mcp.jso
 /// keeping every other server: `kimi` 2.1.1 takes no MCP file on its command line, and a
 /// continuation's session must reach Observatory (SB-99). A file that is not a JSON object is
 /// never overwritten.
-pub(crate) fn add_observatory(home: &Path, server: &crate::continuation::McpServer) -> Result<(), String> {
+pub(crate) fn add_observatory(
+    home: &Path,
+    server: &crate::continuation::McpServer,
+) -> Result<(), String> {
     let path = home.join("mcp.json");
     let mut config = match fs::symlink_metadata(&path) {
         Err(_) => json!({}),
@@ -804,13 +819,10 @@ pub(crate) fn add_observatory(home: &Path, server: &crate::continuation::McpServ
         .ok_or(KIMI_MCP_UNREADABLE)?
         .entry("mcpServers")
         .or_insert_with(|| json!({}));
-    servers
-        .as_object_mut()
-        .ok_or(KIMI_MCP_UNREADABLE)?
-        .insert(
-            "observatory".into(),
-            json!({"command": server.command, "args": server.args}),
-        );
+    servers.as_object_mut().ok_or(KIMI_MCP_UNREADABLE)?.insert(
+        "observatory".into(),
+        json!({"command": server.command, "args": server.args}),
+    );
     private_write(
         &path,
         serde_json::to_vec_pretty(&config)
@@ -849,7 +861,15 @@ pub fn launch_continuation(
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let program = find_program("kimi").ok_or(KIMI_NOT_INSTALLED)?;
-    launch_continuation_with(root, store, id, working_directory, continuation, &program, start)
+    launch_continuation_with(
+        root,
+        store,
+        id,
+        working_directory,
+        continuation,
+        &program,
+        start,
+    )
 }
 #[cfg_attr(windows, allow(unused_variables))]
 fn launch_continuation_with(
@@ -1371,6 +1391,181 @@ mod tests {
         assert!(remove(root, &store, &id).unwrap());
         assert!(!home.exists());
         assert!(store.snapshot().unwrap().kimi_accounts.is_empty());
+    }
+
+    #[test]
+    fn a_full_window_limits_until_its_latest_reset_as_the_window_shows_it() {
+        // SB-99: the same rule as `kimiLimitUntil` in the window.
+        let w = |used: f64, reset: Option<i64>| json!({"used_percent": used, "resets_at": reset});
+        assert_eq!(limited_until(&[w(99.9, Some(NOW + 60))], NOW), None);
+        assert_eq!(
+            limited_until(&[w(100.0, Some(NOW + 60)), w(100.0, Some(NOW + 600))], NOW),
+            Some(NOW + 600)
+        );
+        assert_eq!(
+            limited_until(&[w(100.0, Some(NOW - 1))], NOW),
+            None,
+            "reset passed"
+        );
+        assert_eq!(
+            limited_until(&[w(100.0, None)], NOW),
+            Some(NOW + WATCH_SECONDS),
+            "no reset time: until the next look"
+        );
+    }
+
+    #[test]
+    fn the_background_view_asks_each_account_every_ten_minutes_four_at_a_time() {
+        // SB-99 on a fake clock: six accounts, a pass every 30 s for an hour.
+        let watch = KimiWatch::default();
+        let ids: Vec<String> = (0..6).map(|n| format!("k{n}")).collect();
+        let mut asked = std::collections::HashMap::<String, Vec<i64>>::new();
+        for pass in 0..120 {
+            let now = NOW + pass * 30;
+            let due = watch.due(&ids, now);
+            assert!(due.len() <= WATCH_PER_PASS);
+            for id in due {
+                asked.entry(id).or_default().push(now);
+            }
+        }
+        for id in &ids {
+            let times = &asked[id];
+            assert!(
+                times.windows(2).all(|t| t[1] - t[0] >= WATCH_SECONDS),
+                "{id}: {times:?}"
+            );
+            assert!((5..=7).contains(&times.len()), "{id}: {times:?}");
+        }
+        // A full window marks the account limited until its reset; an answer below 100 % clears it.
+        let full = [json!({"used_percent": 100.0, "resets_at": NOW + 900})];
+        watch.record("k0", &full, NOW);
+        assert!(watch.limited(NOW).contains("k0"));
+        assert!(!watch.limited(NOW + 900).contains("k0"));
+        assert_eq!(watch.used("k0"), 100.0);
+        watch.record(
+            "k0",
+            &[json!({"used_percent": 12.5, "resets_at": null})],
+            NOW,
+        );
+        assert!(watch.limited(NOW).is_empty());
+        assert_eq!(watch.used("never-seen"), 1000.0);
+        // A removed account is forgotten.
+        watch.due(&["k1".to_string()], NOW);
+        assert_eq!(watch.used("k0"), 1000.0);
+    }
+
+    #[tokio::test]
+    async fn the_background_view_runs_only_while_a_chain_is_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = store(root);
+        let id = Uuid::new_v4().to_string();
+        store
+            .add_kimi_account(&id, "Work", "global", None, None)
+            .unwrap();
+        let watch = KimiWatch::default();
+        // No chain: nothing is due-marked, so nothing was asked.
+        watch_with(root, &store, &watch, &|_| "http://127.0.0.1:9".into(), NOW).await;
+        assert_eq!(watch.due(std::slice::from_ref(&id), NOW), vec![id.clone()]);
+    }
+
+    #[test]
+    fn observatory_joins_the_accounts_mcp_servers_and_an_unreadable_file_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        let server = crate::continuation::McpServer {
+            command: "/usr/bin/python3".into(),
+            args: vec!["/opt/observatory/mcp/server.py".into()],
+        };
+        add_observatory(home, &server).unwrap();
+        let read =
+            || serde_json::from_slice::<Value>(&fs::read(home.join("mcp.json")).unwrap()).unwrap();
+        assert_eq!(
+            read()["mcpServers"]["observatory"]["command"],
+            "/usr/bin/python3"
+        );
+        fs::write(
+            home.join("mcp.json"),
+            r#"{"mcpServers":{"context7":{"url":"https://example.invalid"}},"other":1}"#,
+        )
+        .unwrap();
+        add_observatory(home, &server).unwrap();
+        let config = read();
+        assert_eq!(
+            config["mcpServers"]["context7"]["url"],
+            "https://example.invalid"
+        );
+        assert_eq!(config["other"], 1);
+        assert!(config["mcpServers"]["observatory"].is_object());
+        fs::write(home.join("mcp.json"), "not json").unwrap();
+        assert_eq!(
+            add_observatory(home, &server).unwrap_err(),
+            KIMI_MCP_UNREADABLE
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("mcp.json")).unwrap(),
+            "not json"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_continuation_runs_its_first_turn_then_resumes_the_session_interactively() {
+        // SB-99 (operator decision 2026-10-12): `kimi -p <prompt>`, then `kimi -c`, one Terminal.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("data");
+        fs::create_dir(&root).unwrap();
+        let store = store(&root);
+        let folder = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4().to_string();
+        store
+            .add_kimi_account(&id, "Work", "global", None, None)
+            .unwrap();
+        let home = home(&root, &id).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let resumed = crate::continuation::Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "hf_0123456789abcdef".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/usr/bin/python3".into(),
+                args: vec!["/opt/observatory/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        let program = Path::new("/opt/kimi");
+        assert_eq!(
+            continuation_preflight(&root, &store, &id).unwrap_err(),
+            KIMI_SIGNED_OUT
+        );
+        signed_in(&home, "kimi-code.json", "synthetic-access", NOW);
+        continuation_preflight(&root, &store, &id).unwrap();
+        launch_continuation_with(
+            &root,
+            &store,
+            &id,
+            folder.path(),
+            &resumed,
+            program,
+            started,
+        )
+        .unwrap();
+        let session = homes(&root).join("sessions").join(&id);
+        let script = fs::read_to_string(session.join("launch.command")).unwrap();
+        let first = script
+            .find("'/opt/kimi' '-p' 'Continue Observatory workflow wf_0123456789abcdef")
+            .unwrap();
+        let then = script.find("exec '/opt/kimi' '-c'").unwrap();
+        assert!(first < then, "{script}");
+        assert!(!script.contains("synthetic-access"));
+        assert!(home.join("mcp.json").is_file());
+        let record: Value =
+            serde_json::from_slice(&fs::read(session.join(SESSION_RECORD)).unwrap()).unwrap();
+        assert_eq!(record["continues"], "wf_0123456789abcdef");
+        assert_eq!(
+            continuation_preflight(&root, &store, &id).unwrap_err(),
+            KIMI_SESSION_RUNNING,
+            "one kimi per account folder"
+        );
     }
 
     #[test]

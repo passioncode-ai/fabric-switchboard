@@ -308,12 +308,50 @@ pub fn executor_provider(name: &str) -> Option<Provider> {
     provider_of(name)
 }
 
+/// The harness name the engine knows a Kimi Code session by (SB-99).
+pub const KIMI: &str = "kimi";
+
+/// One name per harness, for deciding whether a handoff stays with the same one: Claude's three
+/// names, Codex's two, Kimi Code's three. Anything else is its own harness.
+fn harness(name: &str) -> &str {
+    match provider_of(name) {
+        Some(provider) => provider_name(provider),
+        None if matches!(name, "kimi" | "kimi-code" | "moonshot") => KIMI,
+        None => name,
+    }
+}
+
+/// Whether a workflow's executor runs on Kimi Code (SB-99).
+pub fn executor_is_kimi(name: &str) -> bool {
+    harness(name) == KIMI
+}
+
 /// Decides from the read alone whether `account` may continue the workflow in `dir`. Nothing is
 /// offered or launched yet, so every refusal here leaves the workflow as it was.
 pub fn plan(
     show: &Value,
     workflow_id: &str,
     account: &Account,
+    dir: &Path,
+) -> Result<Plan, String> {
+    plan_named(
+        show,
+        workflow_id,
+        provider_name(account.provider),
+        &account.id,
+        account.enabled,
+        dir,
+    )
+}
+
+/// `plan` for a target named by its harness (`claude-code`, `codex`, `kimi`), so a saved Kimi
+/// account — not a Switchboard provider — can take a workflow too (SB-99).
+pub fn plan_named(
+    show: &Value,
+    workflow_id: &str,
+    to: &str,
+    account_id: &str,
+    enabled: bool,
     dir: &Path,
 ) -> Result<Plan, String> {
     if show.get("workflowId").and_then(Value::as_str) != Some(workflow_id) {
@@ -352,10 +390,10 @@ pub fn plan(
             blocked.join(", ")
         ));
     }
-    if !account.enabled {
+    if !enabled {
         return Err(DISABLED.into());
     }
-    if !valid_account_ref(&account.id) {
+    if !valid_account_ref(account_id) {
         return Err(ACCOUNT_REF_INVALID.into());
     }
     let executor = show
@@ -374,14 +412,12 @@ pub fn plan(
     // Another provider — or an agent Switchboard does not hold (Hermes, Kimi Code, …) — hands the
     // workflow over across providers (SB-70): the pack is provider-neutral, and the engine still
     // refuses an acceptance that names another provider than the offer.
-    let (to_provider, from_provider) = match provider_of(&executor_provider) {
-        Some(p) if p == account.provider => (executor_provider, None),
-        _ => (
-            provider_name(account.provider).to_owned(),
-            Some(executor_provider),
-        ),
+    let (to_provider, from_provider) = if harness(&executor_provider) == harness(to) {
+        (executor_provider, None)
+    } else {
+        (to.to_owned(), Some(executor_provider))
     };
-    if executor.get("accountRef").and_then(Value::as_str) == Some(account.id.as_str()) {
+    if executor.get("accountRef").and_then(Value::as_str) == Some(account_id) {
         return Err(SAME_ACCOUNT.into());
     }
     let checkouts: Vec<PathBuf> = checkpoint
@@ -703,6 +739,41 @@ mod tests {
             )
             .unwrap_err(),
             NO_EXECUTOR
+        );
+    }
+
+    #[test]
+    fn a_kimi_account_takes_a_workflow_by_its_harness_name() {
+        // SB-99: Kimi Code is no Switchboard provider; a saved Kimi account is named `kimi`.
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let id = "7f0c2e1a-0000-4000-8000-000000000001";
+        let from_claude = open_workflow(&repo_path);
+        let taken = plan_named(&from_claude, WF, KIMI, id, true, &repo_path).unwrap();
+        assert_eq!(taken.to_provider, "kimi");
+        assert!(taken.from_provider.is_some(), "another harness: {taken:?}");
+        // A Kimi executor written as `kimi-code` stays with its own name.
+        let mut from_kimi = open_workflow(&repo_path);
+        from_kimi["lease"]["executor"]["provider"] = json!("kimi-code");
+        let kept = plan_named(&from_kimi, WF, KIMI, id, true, &repo_path).unwrap();
+        assert_eq!(
+            (kept.to_provider.as_str(), kept.from_provider),
+            ("kimi-code", None)
+        );
+        assert!(executor_is_kimi("kimi-code") && executor_is_kimi("kimi"));
+        assert!(!executor_is_kimi("claude") && !executor_is_kimi("hermes"));
+        // Moving from Kimi to Claude names Kimi as the previous agent.
+        let to_claude = plan(
+            &from_kimi,
+            WF,
+            &account("claude-account", Provider::Claude),
+            &repo_path,
+        )
+        .unwrap();
+        assert_eq!(to_claude.from_provider.as_deref(), Some("kimi-code"));
+        assert_eq!(
+            plan_named(&from_kimi, WF, KIMI, id, false, &repo_path).unwrap_err(),
+            DISABLED
         );
     }
 

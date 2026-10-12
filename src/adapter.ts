@@ -117,6 +117,8 @@ const safeErrors = new Set([
   'Unknown preset.',
   'Claude Code runs on a Claude account.',
   'Codex runs on a Codex account.',
+  'A Kimi Code account runs only Kimi Code.',
+  "This account's Kimi MCP settings (mcp.json) cannot be read, so Switchboard did not change them. Fix or remove that file, then try again.",
   'A chain holds at most 8 agents.',
   // Launch in place (SB-75).
   'Launching in place runs on macOS and Linux for now.',

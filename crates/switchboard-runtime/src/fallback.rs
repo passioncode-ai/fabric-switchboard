@@ -7,8 +7,10 @@
 //! workflow per window; the old session is never stopped; the engine's own rules (the executor
 //! silent for 120 s, one offer a minute, one executor by lease) stay the authority.
 //!
-//! Phase 1 hands over to Claude Code and Codex. Another agent in a chain (Kimi Code, Hermes, …) is
-//! skipped with its reason until its launch recipe and paid-key ceilings exist (SB-72, SB-73 phase 2).
+//! Phase 1 hands over to Claude Code and Codex; SB-99 adds Kimi Code on a saved Kimi Code account,
+//! both ways — a Kimi executor at its limit is handed on, and a Kimi step takes a workflow. Another
+//! agent (Hermes, …, or Kimi Code on a paid key) is skipped with its reason until its launch recipe
+//! and paid-key ceilings exist (SB-72, SB-73 phase 2).
 use crate::{continuation, oplog, Operation, Runtime};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -53,10 +55,20 @@ fn used(account: &Account) -> f64 {
     account.usage.as_ref().map_or(1000.0, |u| u.used_percent)
 }
 
+/// The saved Kimi Code accounts a chain may run on (SB-99): their ids, whether one may take a
+/// workflow now (signed in, not limited, no `kimi` running in it), and its highest window use.
+pub(crate) struct KimiChoice<'a> {
+    pub ids: Vec<String>,
+    pub usable: &'a (dyn Fn(&str) -> bool + Sync),
+    pub used: &'a (dyn Fn(&str) -> f64 + Sync),
+}
+
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
 /// recent limit, or one that needs a new sign-in — nor to another saved row of the same identity
 /// as the executor's or a limited account (one login saved twice shares one limit, SB-62). A
-/// pinned account is used only when it is usable.
+/// pinned account is used only when it is usable. Without saved Kimi Code accounts; the pass uses
+/// `resolve_with`.
+#[cfg(test)]
 pub(crate) fn resolve(
     snapshot: &Snapshot,
     chain: &Chain,
@@ -65,6 +77,36 @@ pub(crate) fn resolve(
     sign_in: &HashSet<String>,
     folder: Option<&std::path::Path>,
 ) -> Vec<Step> {
+    let none = KimiChoice {
+        ids: Vec::new(),
+        usable: &|_| false,
+        used: &|_| 0.0,
+    };
+    resolve_with(
+        snapshot,
+        chain,
+        executor_account,
+        limited,
+        sign_in,
+        folder,
+        &none,
+    )
+}
+
+/// The chain resolved in order under `resolve`'s rules, with the saved Kimi Code accounts: a
+/// `kimi-code` step runs on its pinned Kimi account
+/// when that one is usable, else on the usable one with the lowest window use (SB-99).
+pub(crate) fn resolve_with(
+    snapshot: &Snapshot,
+    chain: &Chain,
+    executor_account: Option<&str>,
+    limited: &HashSet<String>,
+    sign_in: &HashSet<String>,
+    folder: Option<&std::path::Path>,
+    kimi: &KimiChoice,
+) -> Vec<Step> {
+    let kimi_usable =
+        |id: &str| Some(id) != executor_account && !limited.contains(id) && (kimi.usable)(id);
     let spent: HashSet<(Provider, &str)> = snapshot
         .accounts
         .iter()
@@ -88,6 +130,34 @@ pub(crate) fn resolve(
         .executors
         .iter()
         .map(|e| {
+            let kimi_pin = e
+                .account_id
+                .as_deref()
+                .filter(|id| kimi.ids.iter().any(|k| k == id));
+            if e.agent == "kimi-code"
+                && e.key.is_none()
+                && (kimi_pin.is_some() || e.account_id.is_none())
+            {
+                let chosen = match kimi_pin {
+                    Some(id) => kimi_usable(id).then(|| id.to_owned()),
+                    None => kimi
+                        .ids
+                        .iter()
+                        .filter(|id| kimi_usable(id))
+                        .min_by(|a, b| (kimi.used)(a).total_cmp(&(kimi.used)(b)))
+                        .cloned(),
+                };
+                return match chosen {
+                    Some(account_id) => Step::Run {
+                        agent: e.agent.clone(),
+                        account_id,
+                    },
+                    None => Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "no_usable_account",
+                    },
+                };
+            }
             let Some(provider) = provider_of_agent(&e.agent) else {
                 return Step::Skip {
                     agent: e.agent.clone(),
@@ -158,6 +228,21 @@ pub(crate) fn executor_limited(
         .map(|id| (provider, Some(id.clone())))
 }
 
+/// A workflow run by Kimi Code on a saved Kimi account that the background view finds limited
+/// (SB-99). Only `accountRef` decides: the ordinary `kimi` is shown, not watched.
+pub(crate) fn kimi_executor_limited(
+    executor: &Value,
+    kimi_ids: &[String],
+    kimi_limited: &HashSet<String>,
+) -> Option<String> {
+    let name = executor.get("provider").and_then(Value::as_str)?;
+    let id = executor.get("accountRef").and_then(Value::as_str)?;
+    (continuation::executor_is_kimi(name)
+        && kimi_ids.iter().any(|k| k == id)
+        && kimi_limited.contains(id))
+    .then(|| id.to_owned())
+}
+
 impl FallbackState {
     fn due(&self, now: i64) -> bool {
         let Ok(mut next) = self.next_scan.lock() else {
@@ -225,10 +310,26 @@ where
     if snapshot.chains.is_empty() {
         return;
     }
-    let limited = runtime.limits.limited_ids(now);
-    if limited.is_empty() || !runtime.fallback.due(now) {
+    let kimi_limited = runtime.kimi_watch.limited(now);
+    let mut limited = runtime.limits.limited_ids(now);
+    if (limited.is_empty() && kimi_limited.is_empty()) || !runtime.fallback.due(now) {
         return;
     }
+    // A limited Kimi account is never a chain's next step either (SB-99).
+    limited.extend(kimi_limited.iter().cloned());
+    let kimi_ids: Vec<String> = snapshot
+        .kimi_accounts
+        .iter()
+        .map(|k| k.id.clone())
+        .collect();
+    let kimi_usable =
+        |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
+    let kimi_used = |id: &str| runtime.kimi_watch.used(id);
+    let kimi = KimiChoice {
+        ids: kimi_ids.clone(),
+        usable: &kimi_usable,
+        used: &kimi_used,
+    };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
     let listed = {
@@ -278,10 +379,12 @@ where
             .pointer("/lease/executor")
             .cloned()
             .unwrap_or(Value::Null);
-        let Some((_, executor_account)) =
-            executor_limited(&executor, &snapshot, &current, &limited, &launched)
-        else {
-            continue;
+        let executor_account = match kimi_executor_limited(&executor, &kimi_ids, &kimi_limited) {
+            Some(id) => Some(id),
+            None => match executor_limited(&executor, &snapshot, &current, &limited, &launched) {
+                Some((_, account)) => account,
+                None => continue,
+            },
         };
         examined += 1;
         let pool = executor_account.as_deref().and_then(|a| {
@@ -311,13 +414,14 @@ where
             log("no_checkout");
             continue;
         };
-        let steps = resolve(
+        let steps = resolve_with(
             &snapshot,
             &chain,
             executor_account.as_deref(),
             &limited,
             &sign_in,
             Some(&dir),
+            &kimi,
         );
         let outcome = hand_over(&act, id, &dir, &steps).await;
         log(outcome);
@@ -455,6 +559,99 @@ mod tests {
         );
     }
     #[test]
+    fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {
+        // SB-99: no Kimi account saved reads as no usable account; then the pin, then the choice.
+        let snapshot = Snapshot::default();
+        let (a, b, c) = ("kimi-a", "kimi-b", "kimi-c");
+        let usable = |id: &str| id != c; // kimi-c: signed out, or a `kimi` runs in it
+        let used = |id: &str| if id == a { 80.0 } else { 20.0 };
+        let kimi = KimiChoice {
+            ids: vec![a.into(), b.into(), c.into()],
+            usable: &usable,
+            used: &used,
+        };
+        let run = |id: &str| Step::Run {
+            agent: "kimi-code".into(),
+            account_id: id.into(),
+        };
+        let none = HashSet::new();
+        let steps = |chain: &Chain, executor: Option<&str>, limited: &HashSet<String>| {
+            resolve_with(&snapshot, chain, executor, limited, &none, None, &kimi)
+        };
+        assert_eq!(
+            steps(&chain(&[("kimi-code", None)]), None, &none),
+            vec![run(b)]
+        );
+        assert_eq!(
+            steps(&chain(&[("kimi-code", Some(a))]), None, &none),
+            vec![run(a)]
+        );
+        // The executor's own account, a limited one and an unusable one are never taken.
+        let only_b_limited: HashSet<String> = [b.to_string()].into();
+        assert_eq!(
+            steps(&chain(&[("kimi-code", None)]), Some(a), &only_b_limited),
+            vec![Step::Skip {
+                agent: "kimi-code".into(),
+                reason: "no_usable_account"
+            }]
+        );
+        assert_eq!(
+            steps(&chain(&[("kimi-code", Some(c))]), None, &none),
+            vec![Step::Skip {
+                agent: "kimi-code".into(),
+                reason: "no_usable_account"
+            }],
+            "a pinned account is used only when it is usable"
+        );
+        // Kimi Code on a paid key stays phase 2.
+        let mut keyed = chain(&[("kimi-code", None)]);
+        keyed.executors[0].key = Some("p/prod/KEY".into());
+        assert_eq!(
+            steps(&keyed, None, &none),
+            vec![Step::Skip {
+                agent: "kimi-code".into(),
+                reason: "agent_not_automatic_yet"
+            }]
+        );
+    }
+
+    #[test]
+    fn a_kimi_executor_is_limited_only_by_its_named_saved_account() {
+        let ids = vec!["kimi-a".to_string()];
+        let limited: HashSet<String> = ["kimi-a".to_string()].into();
+        let executor = |provider: &str, account: Option<&str>| {
+            let mut e = json!({"provider": provider});
+            if let Some(a) = account {
+                e["accountRef"] = json!(a);
+            }
+            e
+        };
+        assert_eq!(
+            kimi_executor_limited(&executor("kimi-code", Some("kimi-a")), &ids, &limited),
+            Some("kimi-a".into())
+        );
+        assert_eq!(
+            kimi_executor_limited(&executor("kimi", Some("kimi-a")), &ids, &HashSet::new()),
+            None,
+            "not limited"
+        );
+        assert_eq!(
+            kimi_executor_limited(&executor("kimi", None), &ids, &limited),
+            None,
+            "the ordinary kimi is not watched"
+        );
+        assert_eq!(
+            kimi_executor_limited(&executor("claude", Some("kimi-a")), &ids, &limited),
+            None
+        );
+        assert_eq!(
+            kimi_executor_limited(&executor("kimi", Some("kimi-x")), &ids, &limited),
+            None,
+            "an account Switchboard does not hold decides nothing"
+        );
+    }
+
+    #[test]
     fn the_chain_resolves_to_usable_accounts_in_order() {
         let snapshot = Snapshot {
             accounts: vec![
@@ -488,7 +685,7 @@ mod tests {
                 },
                 Step::Skip {
                     agent: "kimi-code".into(),
-                    reason: "agent_not_automatic_yet"
+                    reason: "no_usable_account"
                 },
             ]
         );

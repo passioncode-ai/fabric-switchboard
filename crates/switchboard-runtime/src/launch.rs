@@ -321,8 +321,12 @@ pub(crate) fn script_then(
         call.push(' ');
         call.push_str(&quote(arg));
     }
-    format!("{}{call}
-{}", &script[..at], &script[at..])
+    format!(
+        "{}{call}
+{}",
+        &script[..at],
+        &script[at..]
+    )
 }
 #[cfg(any(windows, test))]
 fn powershell_quote(value: &str) -> String {
