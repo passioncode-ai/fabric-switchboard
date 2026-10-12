@@ -151,6 +151,19 @@ fn status_with(program: Option<&Path>) -> Value {
     status
 }
 
+/// The model the ordinary Hermes is set to when it runs on OpenRouter (SB-107, operator
+/// 2026-10-12): a continuation on the saved OpenRouter key keeps the person's own choice, and only
+/// a Hermes on another provider (or none) falls back to the key's default model.
+pub fn openrouter_model() -> Option<String> {
+    own_openrouter_model(&status())
+}
+fn own_openrouter_model(status: &Value) -> Option<String> {
+    (status.get("provider").and_then(Value::as_str) == Some("openrouter"))
+        .then(|| status.get("model").and_then(Value::as_str))
+        .flatten()
+        .filter(|m| switchboard_core::agent_keys::model_valid(m))
+        .map(str::to_owned)
+}
 /// The ordinary Hermes's model and provider (its own `HERMES_HOME` or `~/.hermes`).
 pub fn status() -> Value {
     status_with(find_program("hermes").as_deref())
@@ -187,6 +200,22 @@ fn set_with(program: &Path, provider: Option<&str>, model: Option<&str>) -> Resu
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_continuation_keeps_the_model_hermes_runs_on_openrouter() {
+        let own = |text: &str| own_openrouter_model(&parse_model(text));
+        assert_eq!(
+            own(r#"{"default": "deepseek/deepseek-v4-pro-0813", "provider": "openrouter"}"#)
+                .as_deref(),
+            Some("deepseek/deepseek-v4-pro-0813")
+        );
+        // Another provider's model means nothing on an OpenRouter key; none set, none kept.
+        assert_eq!(own(r#"{"default": "hermes-4", "provider": "nous"}"#), None);
+        assert_eq!(own(""), None);
+        assert_eq!(
+            own(r#"{"default": "bad model; rm", "provider": "openrouter"}"#),
+            None
+        );
+    }
     #[test]
     fn only_four_non_secret_keys_survive_the_read() {
         let status = parse_model(

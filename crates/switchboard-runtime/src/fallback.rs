@@ -356,7 +356,7 @@ where
         ids: kimi_ids.clone(),
         usable: &kimi_usable,
         used: &kimi_used,
-        hermes_ready: crate::launch::hermes_continuation_preflight(&runtime.store).is_ok(),
+        hermes_ready: crate::launch::hermes_continuation_ready(&runtime.store),
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.

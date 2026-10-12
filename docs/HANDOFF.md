@@ -2,6 +2,35 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — 0.6.20: Hermes keeps the person's model; 0.6.19's guard refusal fixed
+
+0.6.19 (tag `v0.6.19` on `d50b46d`, release run 38272410963) was **refused by the release guard
+and never published**: nightly 38272673111 failed on Linux in
+`a_continuation_runs_its_first_turn_then_resumes_the_session_interactively` — the review fix put
+`find_program("kimi")` into the Kimi preflight, and the CI runners have no Kimi (this Mac does).
+Fixed with `continuation_preflight_with(…, program)`; 0.6.20 carries 0.6.19.
+
+Live rehearsal before that (dev build on a temporary data folder, real Observatory and OpenRouter):
+`wf_932609d34cf14593`, Claude executor → `switchboard continue --account hermes` → offered
+(`handoff:9c1cc21b63c64cc2`) → Hermes accepted (executor `hermes`), wrote `e2e-accepted` and closed
+the workflow in about a minute; $0.07 spent. Temporary data, its vault item and the rehearsal
+checkout were removed. Operator feedback on it (2026-10-12): the model was not theirs (kimi-k2,
+the default I chose when saving the key — their Hermes runs `deepseek/deepseek-v4-pro-0813` on
+OpenRouter); the session had to guess `owner` and a UUID `sessionId`; hand-overs should open inside
+Fabric, not in new Terminal windows. Done here: Hermes's own OpenRouter model wins
+(`hermes::openrouter_model`, `modelFrom`), the prompt names `owner agent:hermes` and a UUID session
+id, the key's default model set to `deepseek/deepseek-v4-pro-0813`; Fabric-embedded hand-overs filed
+as SB-108. RM-28 packets CX-SB-01…03 answered and filed (SB-109…SB-111). The operator's machine
+chain is `claude-code → kimi-code → hermes`. Gate `./scripts/check.sh` exit 0 (539 tests).
+
+**Exact next task:** watch the 0.6.20 release run to publication; then, once the installed app
+runs it (it may need one *Restart to update* — the running copy predates SB-105), rehearse the Kimi
+step with a saved Kimi account (`switchboard continue <wf> --account <kimi id>`) and confirm a
+near-limit account's `next_check_at` (50 s / 20 s after its check); then SB-108 with Fabric
+Dashboards.
+
+---
+
 ## 2026-10-12 — SB-107: Hermes in chains; review of everything since 0.6.18; release 0.6.19
 
 Branch `feat/sb-107-hermes-and-review-fixes`, from the operator's request to check every account

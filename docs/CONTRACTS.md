@@ -399,17 +399,29 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   chain; a failed launch after an offer stops (the offer lapses).
 - **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
   (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
-  no account and no key pin runs when Hermes is installed, the key and its default model are saved
-  and the `switchboard` command exists (`launch::hermes_continuation_preflight`), never for a Hermes
-  executor; Hermes runs in `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a
-  `config.yaml` Switchboard writes: Observatory's MCP server, `auth.adopt_external_logins: false`),
-  the handoff prompt in `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600), Terminal running
-  `hermes chat --pass-session-id --query-file <prompt> --provider openrouter -m <model>` — on a
-  terminal that seeds an interactive session with the prompt as its first turn; the key is read
-  from `switchboard agents key --service openrouter` when the session starts, never written. Spend
-  is bounded by the key's own OpenRouter ceiling. Measured 2026-10-12 with Hermes 0.21.4: an empty
+  no account and no key pin is tried when Hermes is installed, the key is saved and the
+  `switchboard` command exists (`launch::hermes_continuation_ready`), never for a Hermes executor.
+  The model is the one the ordinary Hermes runs on OpenRouter (`hermes::openrouter_model`, from
+  `hermes config get model`; operator 2026-10-12: «у меня Гермес был на DeepSeek V4 Pro»), else the
+  key's default model; with neither, `hermes_continuation_preflight` refuses before the offer and
+  the chain moves on. The answer says which (`modelFrom`: `hermes` or `key`). Hermes runs in
+  `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a `config.yaml` Switchboard writes:
+  Observatory's MCP server, `auth.adopt_external_logins: false`), the handoff prompt in
+  `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600) naming `owner agent:hermes` and a UUID
+  `sessionId` Switchboard made — Observatory wants a UUID and Hermes's own ids are not one (seen in
+  the rehearsal below: the session had to work both out) — and Terminal running `hermes chat
+  --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
+  session with the prompt as its first turn; the key is read from `switchboard agents key --service
+  openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
+  ceiling. Measured 2026-10-12 with Hermes 0.21.4: an empty
   `HERMES_HOME` starts without the setup wizard, and the session lists
   `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
+  **Rehearsed live 2026-10-12** (a 0.6.19 build on its own data folder, the real engine and
+  OpenRouter): workflow `wf_932609d34cf14593` with a Claude executor, offered after the engine's
+  two-minute silence (`handoff:9c1cc21b63c64cc2`); the Hermes session accepted it within about 30 s
+  (executor `hermes`), wrote its final checkpoint and closed the workflow — "Accepted by
+  agent:hermes running model moonshotai/kimi-k2 via provider openrouter". Spend of the day's probes
+  and the rehearsal together: $0.07 of the key's $10.
   Tests `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
   `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`. Other agents,
   a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
