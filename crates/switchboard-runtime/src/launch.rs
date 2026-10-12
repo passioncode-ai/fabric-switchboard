@@ -303,6 +303,27 @@ fn script_with(
     }
     result
 }
+/// A launch script that runs `program first…` to its end, then hands the shell to
+/// `program then…` (SB-99: a Kimi continuation's `kimi -p <prompt>`, then `kimi -c`).
+#[cfg(not(windows))]
+pub(crate) fn script_then(
+    home: &Path,
+    program: &Path,
+    first: &[&str],
+    then: &[&str],
+    env: &BTreeMap<String, String>,
+    working_directory: &Path,
+) -> String {
+    let script = script(home, program, then, env, false, working_directory);
+    let at = script.rfind("exec ").unwrap_or(script.len());
+    let mut call = quote(program.to_string_lossy().as_ref());
+    for arg in first {
+        call.push(' ');
+        call.push_str(&quote(arg));
+    }
+    format!("{}{call}
+{}", &script[..at], &script[at..])
+}
 #[cfg(any(windows, test))]
 fn powershell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
@@ -827,7 +848,7 @@ pub(crate) const MAX_LOGINS: usize = 4;
 fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
-fn reservation_open(home: &Path) -> bool {
+pub(crate) fn reservation_open(home: &Path) -> bool {
     fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
         meta.file_type().is_file()
             && !meta
