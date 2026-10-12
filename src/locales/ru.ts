@@ -25,7 +25,7 @@ export const RU: Record<string, string> = {
   "A Kimi Code session still runs on this account. Close it in Terminal first.": "На этом аккаунте ещё работает сессия Kimi Code. Сначала закройте её в Терминале.",
   "reset, refresh to see it": "сброшено — нажмите «Обновить», чтобы увидеть",
   "Limit reached · resets in {time}": "Лимит исчерпан · сброс через {time}",
-  "Hidden limit · refused although the usage figures show room": "Скрытый лимит · отказ, хотя по данным об использовании запас ещё есть",
+  "Hidden personal limit · refused although the usage figures show room": "Скрытый личный лимит · отказ, хотя по данным об использовании запас ещё есть",
   "The organisation's spend cap is reached, so extra usage is off until it resets.": "Организация исчерпала лимит расходов: дополнительное использование выключено до сброса.",
   "No credits are left for extra usage.": "Кредиты на дополнительное использование закончились.",
   "Extra usage is turned off for the organisation.": "Дополнительное использование выключено для организации.",

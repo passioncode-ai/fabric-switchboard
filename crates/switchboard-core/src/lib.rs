@@ -147,6 +147,32 @@ pub const CHECK_AFTER_RESET_SECONDS: i64 = 30;
 /// How old an observation may be and still count as current where no rotation policy sets
 /// `max_age_seconds`: the idle cadence plus slack for a busy pass.
 pub const UNPOLICED_MAX_AGE_SECONDS: i64 = 900;
+/// Near-limit cadence (SB-106): the account a session is working on right now, in a pool that
+/// can switch, is checked every minute from 95 % of its account-wide usage and every 30 seconds
+/// (one background pass) from 98 %, so the switch at the limit acts on a fresh figure. The
+/// pool's next account is checked every minute meanwhile (`Store::pull_in_next_accounts`). Not
+/// for an account whose usage check the provider refused lately: there the provider's wait is
+/// the stronger signal, and checking it faster only earns another one.
+pub const NEAR_LIMIT_PERCENT: f64 = 95.0;
+pub const AT_LIMIT_PERCENT: f64 = 98.0;
+pub const CHECK_NEAR_LIMIT_SECONDS: i64 = 60;
+pub const CHECK_AT_LIMIT_SECONDS: i64 = 30;
+/// The near-limit cadence for the account a session works on, from its account-wide usage:
+/// None below 95 % and at 100 % (full until a reset; the switch has happened or nothing is
+/// left), and when the usage names no account-wide figure.
+pub fn near_limit_check(usage: &Usage, observed: i64) -> Option<i64> {
+    let used = usage.account_used_percent()?;
+    let delay = if used >= 100.0 {
+        return None;
+    } else if used >= AT_LIMIT_PERCENT {
+        CHECK_AT_LIMIT_SECONDS
+    } else if used >= NEAR_LIMIT_PERCENT {
+        CHECK_NEAR_LIMIT_SECONDS
+    } else {
+        return None;
+    };
+    Some(observed.saturating_add(delay))
+}
 /// The schedule after a successful quota check observed at `observed`.
 pub fn next_quota_check(active: bool, usage: &Usage, observed: i64) -> i64 {
     if active {
@@ -262,6 +288,9 @@ pub struct Store {
     /// Managed requests the provider refused for a limit since the runtime last looked (SB-98):
     /// account → when. Memory only; the runtime turns each into limit evidence.
     refused: Mutex<std::collections::HashMap<String, i64>>,
+    /// Accounts whose usage check the provider refused lately (SB-106), as the runtime last
+    /// said: they keep the ordinary cadence. Memory only.
+    paced: Mutex<std::collections::HashSet<String>>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -492,6 +521,7 @@ impl Store {
             in_use: Default::default(),
             limited: Default::default(),
             refused: Default::default(),
+            paced: Default::default(),
         })
     }
     /// The private data folder this store owns.
@@ -549,6 +579,101 @@ impl Store {
             .lock()
             .map(|held| held.clone())
             .unwrap_or_default()
+    }
+    /// Replaces the accounts whose usage check the provider refused lately (SB-106): they
+    /// keep the ordinary cadence near their limit, and are not pulled in as a pool's next.
+    pub fn set_paced(&self, ids: std::collections::HashSet<String>) {
+        if let Ok(mut paced) = self.paced.lock() {
+            *paced = ids;
+        }
+    }
+    /// SB-106: while the account a session works on is near its limit (95 %) or held by one,
+    /// the pool's next account — the one a switch or a failover would take — is due a minute
+    /// after its last check, so the switch acts on a fresh figure. Only pools that can switch:
+    /// a managed route, or an enabled policy with the ordinary CLI signed in to one of its
+    /// accounts. In memory, like any schedule (LC-08). Returns how many schedules moved.
+    pub fn pull_in_next_accounts(&self, now: i64) -> Result<usize, String> {
+        let in_use = self
+            .in_use
+            .lock()
+            .map(|set| set.clone().unwrap_or_default())
+            .unwrap_or_default();
+        let paced = self.paced.lock().map(|set| set.clone()).unwrap_or_default();
+        let limited = self.limited();
+        let near: Vec<(Provider, String, std::collections::HashSet<String>)> = {
+            let state = self.lock()?;
+            let mut pools: BTreeMap<
+                String,
+                (Provider, String, std::collections::HashSet<String>, bool),
+            > = BTreeMap::new();
+            for a in &state.accounts {
+                let key = format!("{}:{}", a.provider.as_str(), a.pool);
+                let routed = state.routes.get(&key).is_some_and(|route| *route == a.id);
+                let rotates = state
+                    .policies
+                    .iter()
+                    .any(|p| p.enabled && p.provider == a.provider && p.pool == a.pool);
+                if !(routed || (rotates && in_use.contains(&a.id))) {
+                    continue;
+                }
+                let measured_near = a.usage_health.as_ref().is_some_and(|h| {
+                    h.status == "ok" && now.saturating_sub(h.checked_at) <= CHECK_IDLE_SECONDS
+                }) && a
+                    .usage
+                    .as_ref()
+                    .and_then(Usage::account_used_percent)
+                    .is_some_and(|used| used >= NEAR_LIMIT_PERCENT);
+                let entry = pools
+                    .entry(key)
+                    .or_insert_with(|| (a.provider, a.pool.clone(), Default::default(), false));
+                entry.2.insert(a.id.clone());
+                entry.3 |= measured_near || limited.contains(&a.id);
+            }
+            pools
+                .into_values()
+                .filter(|(_, _, _, near)| *near)
+                .map(|(provider, pool, current, _)| (provider, pool, current))
+                .collect()
+        };
+        let mut next = Vec::new();
+        for (provider, pool, current) in near {
+            let policy = self.failover_policy(provider, &pool)?;
+            let mut held = limited.clone();
+            held.extend(current);
+            // Only an OAuth account has a usage check to bring forward.
+            let fits = Fits {
+                kind: Some(AuthKind::OAuth),
+                api_key_only: false,
+            };
+            if let Some(id) = self.failover_candidate(&policy, &held, fits, now)? {
+                if !paced.contains(&id) {
+                    next.push(id);
+                }
+            }
+        }
+        if next.is_empty() {
+            return Ok(0);
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let mut moved = 0;
+        for a in candidate
+            .accounts
+            .iter_mut()
+            .filter(|a| next.contains(&a.id))
+        {
+            if let Some(health) = a.usage_health.as_mut().filter(|h| h.status == "ok") {
+                let sooner = health.checked_at.saturating_add(CHECK_NEAR_LIMIT_SECONDS);
+                if sooner < health.next_check_at {
+                    health.next_check_at = sooner;
+                    moved += 1;
+                }
+            }
+        }
+        if moved > 0 {
+            self.hold(&mut state, candidate)?;
+        }
+        Ok(moved)
     }
     /// The refusals recorded by `failover` since the last call, oldest first; taking them
     /// clears them.
@@ -1473,7 +1598,18 @@ impl Store {
                 .routes
                 .get(&format!("{}:{}", a.provider.as_str(), a.pool))
                 .is_some_and(|route| route == id);
-            next_quota_check(in_use || rotates || routed, &usage, usage.observed_at)
+            let next = next_quota_check(in_use || rotates || routed, &usage, usage.observed_at);
+            // SB-106: the account a session works on, where a switch can follow, is checked
+            // sooner near its limit — unless the provider refused its checks lately.
+            let paced = self
+                .paced
+                .lock()
+                .map(|set| set.contains(id))
+                .unwrap_or(true);
+            match near_limit_check(&usage, usage.observed_at) {
+                Some(sooner) if ((in_use && rotates) || routed) && !paced => next.min(sooner),
+                _ => next,
+            }
         };
         let was_ok = a.usage_health.as_ref().is_some_and(|h| h.status == "ok");
         a.usage_health = Some(UsageHealth {

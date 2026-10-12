@@ -187,6 +187,38 @@ Account list order is display-only; it never selects/activates. Within provider/
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
+## Near-limit quota checks (SB-106, 2026-10-12)
+
+- **Who.** The account a session works on where a switch can follow it: the pool's managed route,
+  or the ordinary CLI's account (`Store::set_in_use`) in a pool with an enabled policy. A pool
+  member that is neither keeps the SB-48 cadence, near its limit or not.
+- **Cadence.** `switchboard_core::near_limit_check(usage, observed)` on the account-wide usage
+  (`Usage::account_used_percent`, feature windows excluded): `NEAR_LIMIT_PERCENT` 95 →
+  `CHECK_NEAR_LIMIT_SECONDS` 60; `AT_LIMIT_PERCENT` 98 → `CHECK_AT_LIMIT_SECONDS` 30, one pass
+  (LC-08 holds: nothing faster than the pass); 100 → none (full until a reset). Applied in
+  `observe_generation` as `min(next_quota_check, near_limit_check)`; response headers still
+  never move the schedule.
+- **The next account.** `Store::pull_in_next_accounts(now)`: for each such pool whose current
+  account was measured ≥ 95 % within ten minutes, or is held by a limit (`Store::limited`), the
+  account `failover_candidate` would take (OAuth, not held, not current) is due
+  `checked_at + 60` — only when that is sooner, only for `ok` health, in memory (`hold`, no
+  write; LC-08). The monitor calls it at most once a minute, as choosing reads the pool's stored
+  credentials.
+- **Refused checks pace.** `UsageGate::refused_within(now, PACED_AFTER_REFUSAL_SECONDS = 3600)`
+  — the accounts whose usage check the provider answered 429 in the last hour, memory only,
+  seeded from `usage-holds.json` at start, a time ahead of the clock counted from now — is handed
+  to `Store::set_paced` every pass; a paced account gets neither cadence nor a pull-in. Measured
+  2026-10-06…12 on the operator's Mac: 1–33 refused checks a day at the 180-second cadence.
+- **No schema change**, no new log event, no analytics field. Tests
+  `the_account_a_session_works_on_is_checked_sooner_near_its_limit`,
+  `the_pools_next_account_is_checked_every_minute_while_the_current_one_nears_its_limit`
+  (core), `a_refused_account_is_paced_for_a_while_across_a_restart` (runtime); the idle-hour
+  budget test is unchanged.
+- **Hidden limits read as personal.** A Claude Code "session limit" (`rateLimitType`
+  `five_hour`, `resetsAt`) is read from the marker's fields, never from its wording
+  (`a_session_limit_with_the_usage_figures_below_full_is_read_with_its_reset`); the hidden row
+  now says “Hidden personal limit · …”.
+
 ## Agents keep working through a limit (SB-98, 2026-10-11)
 
 Measured on the operator's machine (Claude Code transcripts, 3 days): 264 sessions hit a limit;
@@ -219,8 +251,8 @@ and closed here:
   (`org_spend_cap_reached`, `group_zero_credit_limit`, `org_level_disabled`) is kept as the
   limit's `reason`, allowlisted; `hidden` is set when the provider refused while its own usage
   figures for that window (or, for a managed refusal, every window) still showed room. `limited`
-  rows carry `reason` and `hidden`; the account row says “Hidden limit · refused although the
-  usage figures show room” and the reason in words. Test
+  rows carry `reason` and `hidden`; the account row says “Hidden personal limit · refused although
+  the usage figures show room” (SB-106 wording) and the reason in words. Test
   `a_spend_cap_reason_is_kept_and_a_limit_the_usage_figures_miss_is_hidden`.
 - Not changed: an ordinary (native) Claude Code session whose turn already ended on a limit does
   not resume by itself — run agents in managed mode for no pauses.

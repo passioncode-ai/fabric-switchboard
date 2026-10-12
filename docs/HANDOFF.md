@@ -2,6 +2,40 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-106: fresher figures near a limit, “Hidden personal limit”
+
+Branch `feat/sb-106-near-limit-checks`, from the operator's request (continued from a Kimi session
+whose plan was approved): accounts at 95–98 % checked more often, the next account every minute.
+Done: `near_limit_check` (the account a session works on, in a pool that can switch: 60 s from
+95 %, 30 s from 98 %); `Store::pull_in_next_accounts` (the pool's failover candidate due 60 s after
+its last check while the current is ≥ 95 % or held; monitor, at most once a minute); an account
+refused 429 within the hour keeps the ordinary cadence (`UsageGate::refused_within`,
+`Store::set_paced`); “Hidden personal limit” wording (ui-logic, ru, brand strings, SCN-052); a test
+of the 2026-10-09 session-limit marker shape. CONTRACTS → Near-limit quota checks;
+ACCOUNTS-AND-ROTATION, SPEC, AGENTS.md monitor row, CHANGELOG, backlog SB-106.
+
+Measured on the operator's Mac (why it "did not switch"): 20 Claude accounts in one native pool
+(threshold 80 %, hysteresis 10 %), 16 at 100 %, 3 at 99 %, 1 at 90 % — nothing under 70 % to
+switch to; the hidden five-hour limit was already detected (`hidden: true`); usage checks refused
+1–33 a day. A native Claude Code turn that already stopped on a limit does not resume by itself
+(CONTRACTS, SB-98 "Not changed") — managed mode avoids the pause.
+
+Also fixed (outside this repository): Codex refused to start — Orca 1.4.210's managed home
+`~/Library/Application Support/orca/codex-runtime-home/home/config.toml` held a duplicate
+`[projects."…/project-observatory"]`. Cause: Orca's preflight matches only unquoted
+`[projects.…]`/`[hooks.state.…]` headers, the file had the equivalent quoted form, so Orca appended
+a second table on every start. The headers and keys were rewritten unquoted (parsed content
+unchanged, backups `config.toml.bak-dupe-*`). Not Switchboard's file.
+
+Gate `./scripts/check.sh` exit 0 (536 Rust tests; lean `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`, ~5 GB free). Not run: the Windows cross-check (before a release).
+
+**Exact next task:** merge the SB-106 PR; then release
+0.6.19 (SB-105 + SB-99 + SB-106) and, on the installed copy, watch a near-limit account's
+`next_check_at` move to 60/30 s. Still open: the live Kimi run (SB-99), the operator's one restart
+by hand, the Russian copy read.
+
+---
+
 ## 2026-10-12 — SB-99 done: Kimi Code in fallback chains
 
 Branch `feat/sb-99-kimi-chains`, on the operator's two answers (background usage checks: yes,

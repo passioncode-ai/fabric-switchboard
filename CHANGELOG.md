@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Fresher figures near a limit** (SB-106). The account a session works on is checked every minute
+from 95 % of its usage and every 30 seconds from 98 %, and the account a switch would move to is
+checked every minute meanwhile, so the switch at the limit acts on current figures. Other
+accounts keep their three- and ten-minute schedules, and an account whose usage checks the
+provider refused within the hour is not checked faster. A limit the usage figures did not show now
+reads *Hidden personal limit* on the account.
+
 **A waiting update never waits forever** (SB-105). While an update waits to start, Switchboard
 keeps checking every six hours, and a newer release takes the waiting one's place — before, a copy
 that never found an idle moment stayed on the waiting version and never saw a later release. The
