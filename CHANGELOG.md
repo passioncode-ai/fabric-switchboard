@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.22 — 2026-10-12
+
+**Hand-overs to saved accounts work again** (found by the live Kimi rehearsal). Project Observatory
+refuses an account id that looks like a key, and Switchboard's account ids are UUIDs, which it
+counts as one — so since the engine started checking, every hand-over to a saved Claude, Codex or
+Kimi Code account was refused before anything started, by hand and in a fallback chain alike;
+only Hermes went through. Switchboard now names an account to Observatory by a short handle derived
+from its id, and still recognises workflows that named it the old way.
+
 ## 0.6.21 — 2026-10-12
 
 A second review of the hand-overs to Kimi Code and Hermes, finished.

@@ -2,6 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — 0.6.22: hand-overs to saved accounts were refused by Observatory (SB-113)
+
+The live Kimi rehearsal on the installed 0.6.20 (`wf_5473b99f80221c4f`, Kimi account
+`3e7b8cf7…`) was refused by the engine before the offer: "to.accountRef looks like a credential
+(uuid)". Every saved account id is a UUID, so every hand-over to a Claude, Codex or Kimi account was
+refused in 0.6.20–0.6.21 — the Hermes rehearsal passed only because its reference is `hermes`. Fixed:
+`continuation::account_ref` sends `sb-` + 12 hex of SHA-256 of the id; `names_account` reads both
+forms. Verified against the real engine (`handoff:a6f7171bfcbcbd75`, which lapses on its own at
+21:39 UTC) and its own `credential_shape` (2000 random handles). The installed app restarted at
+19:56 UTC into 0.6.20.
+
+**Exact next task:** watch the 0.6.22 release to publication; when the installed app runs 0.6.22
+(it checks every 6 h, then restarts at an idle moment, or *Restart to update*), rerun the Kimi
+rehearsal with a new workflow (`switchboard continue <wf> --account <kimi id>`) and a Claude
+account hand-over, and record both; then SB-108.
+
+---
+
 ## 2026-10-12 — 0.6.21: second review of SB-107 fixed; Codex configs repaired
 
 Second independent review of `4395263..2743749`: nothing serious; one medium (the Hermes model read

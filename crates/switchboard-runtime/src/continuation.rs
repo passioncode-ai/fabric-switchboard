@@ -129,6 +129,24 @@ fn valid_handoff_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// The handle Observatory gets for one of Switchboard's accounts (`accountRef`, `--to-account`).
+/// Account ids are UUIDs, and the engine refuses a UUID anywhere in an identifier as
+/// credential-shaped (its `credential_shape`, seen refusing a live Kimi hand-over 2026-10-12): a
+/// UUID becomes `sb-` and the first 12 hexadecimal digits of its SHA-256 — stable, opaque, short,
+/// none of the engine's credential shapes. Any other reference (`hermes`) is passed as it is.
+pub fn account_ref(id: &str) -> String {
+    if uuid::Uuid::parse_str(id).is_err() {
+        return id.to_owned();
+    }
+    let digest = <sha2::Sha256 as sha2::Digest>::digest(id.as_bytes());
+    let hex: String = digest.iter().take(6).map(|b| format!("{b:02x}")).collect();
+    format!("sb-{hex}")
+}
+/// Whether an engine `accountRef` names the account `id`: its handle, or the id itself as
+/// handed over before 0.6.22.
+pub fn names_account(reference: &str, id: &str) -> bool {
+    reference == id || reference == account_ref(id)
+}
 /// The engine's `accountRef` pattern: `[A-Za-z0-9][A-Za-z0-9._:-]{0,63}`.
 fn valid_account_ref(id: &str) -> bool {
     let bytes = id.as_bytes();
@@ -422,7 +440,11 @@ pub fn plan_named(
     } else {
         (to.to_owned(), Some(executor_provider))
     };
-    if executor.get("accountRef").and_then(Value::as_str) == Some(account_id) {
+    if executor
+        .get("accountRef")
+        .and_then(Value::as_str)
+        .is_some_and(|r| names_account(r, account_id))
+    {
         return Err(SAME_ACCOUNT.into());
     }
     let checkouts: Vec<PathBuf> = checkpoint
@@ -500,7 +522,7 @@ pub fn offer(bin: &Path, plan: &Plan, account_id: &str) -> Result<Offer, String>
             "--to-provider",
             &plan.to_provider,
             "--to-account",
-            account_id,
+            &account_ref(account_id),
             "--reason",
             "limit",
         ],
@@ -992,6 +1014,25 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn an_account_reaches_the_engine_as_a_handle_never_as_its_uuid() {
+        // Observatory refuses a UUID anywhere in an identifier as credential-shaped (seen
+        // refusing a live Kimi hand-over, 2026-10-12): the handle is `sb-` and 12 hex digits.
+        let id = "3e7b8cf7-dab5-4d23-bb8f-5a690887db98";
+        let handle = account_ref(id);
+        assert!(handle.starts_with("sb-") && handle.len() == 15, "{handle}");
+        assert!(handle[3..]
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(!handle.contains(id) && valid_account_ref(&handle));
+        assert_eq!(handle, account_ref(id), "stable");
+        assert_ne!(handle, account_ref("6f1c2a4e-1b2c-4d5e-8f90-123456789abc"));
+        // Both forms name the account: the handle, and the id an older build handed over.
+        assert!(names_account(&handle, id) && names_account(id, id));
+        assert!(!names_account("sb-000000000000", id));
+        // A reference that is no UUID is the engine's already.
+        assert_eq!(account_ref("hermes"), "hermes");
+    }
     #[test]
     fn the_engine_is_read_offered_to_under_the_agents_rule_and_its_refusal_reported() {
         let temp = tempfile::tempdir().unwrap();
