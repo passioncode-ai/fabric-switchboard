@@ -350,6 +350,10 @@ check(() => {
   assert.equal(logic.updateLine({ ...base, enabled: false }).text, 'Version 0.6.0. Automatic updates are off.');
   assert.equal(logic.updateLine({ ...base, state: 'downloading', version: '0.7.0' }).text, 'Downloading version 0.7.0…');
   assert.equal(logic.updateLine({ ...base, state: 'failed', error: 'Could not check for updates. Switchboard tries again within the hour.' }).text, 'Could not check for updates. Switchboard tries again within the hour.');
+  // SB-104: a manual check with automatic updates off still says how it went.
+  assert.equal(logic.updateLine({ ...base, enabled: false, state: 'failed', error: 'Could not check for updates. Switchboard tries again within the hour.' }).text, 'Could not check for updates. Switchboard tries again within the hour.');
+  assert.equal(logic.updateLine({ ...base, enabled: false, state: 'checking' }).text, 'Checking for updates…');
+  assert.equal(logic.updateLine({ ...base, enabled: false, state: 'downloading', version: '0.7.0' }).text, 'Downloading version 0.7.0…');
   const ready = logic.updateLine({ ...base, state: 'ready', version: '0.7.0' });
   assert.equal(ready.restart, true); assert.match(ready.text, /0\.7\.0 is ready/);
   // A ready update stays offered even after the switch is turned off: it is already installed.

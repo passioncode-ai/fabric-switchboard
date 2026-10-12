@@ -4,6 +4,7 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Save the account": "Сохранить аккаунт",
   "just now": "только что",
   "The key stays in the Secret Service keyring; an agent receives it only when it starts.": "Ключ хранится в связке ключей Secret Service; агент получает его только при запуске.",
   "Switchboard deletes it from the Secret Service keyring.": "Switchboard удалит его из связки ключей Secret Service.",

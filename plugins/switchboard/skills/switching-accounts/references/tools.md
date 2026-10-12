@@ -39,7 +39,7 @@ The server works out which session asks from its own environment, first match wi
 | `routes` | `"<provider>:<pool>" → {account_id, label}` — who handles the next request |
 | `rules.active`, `rules.total`, `rules.for_this_folder` | active rules (`path`, `provider`, `target`, `state`, `expires_at` in RFC 3339, `account`), the count of all rules, and the resolution for the server's folder |
 | `rotation[]` | `provider`, `pool`, `target`, `enabled`, `threshold_percent`, `last_decision` |
-| `limited[]` | accounts held after a provider limit error: `account_id`, `until` (when it may be tried again, Unix seconds), `resets_at` (the provider's own reset, or null when `until` is an estimated hold; a reset more than seven days out is held seven days, so `until` can be earlier), `kind` (`quota` when Claude Code named a subscription window — see `limit_type` — else `unknown`), `limit_type`, `confidence` (`attributed` for a managed request, `inferred` for a Claude Code transcript), `scope` (`unknown`: a shared organisation budget is not ruled out), `source`, `observed_at`, `event_id`. A hold is not a reset; never present `until` as one when `resets_at` is null |
+| `limited[]` | accounts held after a provider limit error: `account_id`, `until` (when it may be tried again, Unix seconds), `resets_at` (the provider's own reset, or null when `until` is an estimated hold; a reset more than seven days out is held seven days, so `until` can be earlier), `kind` (`quota` when Claude Code named a subscription window — see `limit_type` — else `unknown`), `limit_type`, `confidence` (`attributed` for a managed request, `inferred` for a Claude Code transcript), `reason` (why the provider would not let the account go on, from Claude Code's own report — `org_spend_cap_reached`, `group_zero_credit_limit`, `org_level_disabled`…; null when not said), `hidden` (true when the provider refused while its usage figures from the last ten minutes still showed room: a spend or credit cap those figures do not report), `scope` (`unknown`: a shared organisation budget is not ruled out), `source`, `observed_at`, `event_id`. A hold is not a reset; never present `until` as one when `resets_at` is null |
 
 ### `switchboard_accounts` — `provider?: "claude" | "codex"`
 
@@ -74,7 +74,7 @@ The server works out which session asks from its own environment, first match wi
 
 ### `switchboard_sessions` — `all?` (boolean)
 
-`{sessions[]}`: the Claude Code and Codex sessions Switchboard launched — `account_id`,
+`{sessions[]}`: the Claude Code, Codex and Kimi Code sessions Switchboard launched — `account_id`,
 `label`, `provider`, `pool`, `mode`, `working_directory`, `in_place`, `launched_at`,
 `started_at`, `continues`, `home` and `state` (`starting`, `running`, `ended`, `unknown`).
 Without `all`, only starting and running ones. A session started outside Switchboard is not

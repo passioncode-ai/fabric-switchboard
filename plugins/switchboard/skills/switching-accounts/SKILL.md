@@ -62,7 +62,7 @@ first write call, or when a result field is unclear.
 
 **Degraded paths — say it once, then fall back; never loop:**
 
-- **Only the five read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the ten read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI
@@ -70,7 +70,7 @@ first write call, or when a result field is unclear.
   `switchboard usage`.
 - **No `switchboard` on PATH either**: stop and tell the operator. The desktop app's
   Agents panel links the bundled CLI to `~/.local/bin/switchboard` on macOS;
-  on Windows keep `switchboard.exe` on PATH. Installing Switchboard is not this skill's job.
+  on Windows keep `switchboard.exe` on PATH; on Linux the .deb installs `/usr/bin/switchboard`. Installing Switchboard is not this skill's job.
 
 ## 2. Read status first
 

@@ -233,7 +233,7 @@ function render(options: { background?: boolean } = {}): boolean {
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
   for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
@@ -884,23 +884,31 @@ function kimiAddDialog() {
   const grid = el('div', 'form-grid'); grid.append(field(t('Label'), label, t('Optional.')), field(t('Service'), region, t('Where the membership was bought.')));
   context.body.append(grid);
   const startButton = submit(t('Open sign-in')); context.actions.append(startButton);
-  let loginId: string | null = null; let finishing = false;
+  let loginId: string | null = null; let finishing = false; let completed = false;
+  const waiting = el('p', 'form-note', t('Waiting for the sign-in in Terminal…'));
+  // SB-104: a sign-in that ended, or a save that failed, leaves the dialog usable — never a dead end.
+  const finish = () => {
+    finishing = true; let saved = false;
+    void dialogSave(context, async () => { const { account } = await adapter.kimiLoginFinish(loginId!); saved = true; loginId = null; await loadKimi(); return account; }, t('Kimi Code account saved.'))
+      .then(() => { if (saved) return; finishing = false; startButton.disabled = false; startButton.textContent = t('Save the account'); });
+  };
   const poll = window.setInterval(() => {
-    if (!loginId || finishing) return;
+    if (!loginId || finishing || completed) return;
     void adapter.kimiLoginStatus(loginId).then(({ state }) => {
-      if (state === 'ended') { window.clearInterval(poll); context.error.textContent = t('This Kimi Code sign-in is no longer waiting. Start it again.'); return; }
+      if (state === 'ended') { loginId = null; waiting.remove(); startButton.disabled = false; context.error.textContent = t('This Kimi Code sign-in is no longer waiting. Start it again.'); return; }
       if (state !== 'complete') return;
-      finishing = true; window.clearInterval(poll);
-      void dialogSave(context, async () => { const { account } = await adapter.kimiLoginFinish(loginId!); loginId = null; await loadKimi(); return account; }, t('Kimi Code account saved.'));
+      completed = true; window.clearInterval(poll); finish();
     }, () => { /* the next look retries */ });
   }, 1500);
   context.beforeCancel(async () => { finishing = true; try { if (loginId) await adapter.kimiLoginCancel(loginId); } catch (error) { finishing = false; throw error; } window.clearInterval(poll); });
   context.form.addEventListener('submit', (event) => {
-    event.preventDefault(); if (loginId) return;
+    event.preventDefault();
+    if (completed && loginId && !finishing) { finish(); return; }
+    if (loginId) return;
     context.error.textContent = ''; context.setBusy(true);
     adapter.kimiLoginBegin(label.value.trim(), region.value as KimiRegion).then(({ login_id }) => {
       loginId = login_id; context.setBusy(false); startButton.disabled = true;
-      context.body.append(el('p', 'form-note', t('Waiting for the sign-in in Terminal…')));
+      context.body.append(waiting);
     }, (error) => { context.setBusy(false); context.error.textContent = t(safeError(error)); });
   });
 }

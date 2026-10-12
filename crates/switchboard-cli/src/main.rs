@@ -158,7 +158,8 @@ enum Command {
     },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
-        /// List only the tools that read: status, accounts, usage, project rules.
+        /// List only the ten tools that read: status, accounts, usage, sessions, onboarding, project
+        /// context, fallback chains, the OpenRouter key's status, Kimi accounts, Hermes's model.
         #[arg(long)]
         read_only: bool,
     },
