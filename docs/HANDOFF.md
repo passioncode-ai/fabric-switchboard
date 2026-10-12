@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — 0.6.21: second review of SB-107 fixed; Codex configs repaired
+
+Second independent review of `4395263..2743749`: nothing serious; one medium (the Hermes model read
+could hold the owner's operation up to 15 s, before the cheap refusals) and seven small findings, all
+fixed with tests except the macOS-only cosmetic `deferred` log (backlog SB-107); nine stale doc
+sentences corrected (CHANGELOG, SCN-040, CLI.md, ACCOUNTS-AND-ROTATION, AGENTS.md child processes,
+CONTRACTS `deferred`, READMEs). Also found while fixing: the window would have named a Hermes session
+*Codex CLI* (`providerName` knew two providers). The gate also caught a time-boundary flake in the proxy test
+`a_session_never_meets_409_while_the_pool_has_a_usable_account` (a token expiring `now + 1` crossed
+a second before `select`: 3 runs in 5); now `now + 2` and a 3.1 s wait, 6 runs in 6.
+
+Outside this repository (operator's machine): Codex would not start — Orca 1.4.210 upserts folder
+trust into both `~/.codex/config.toml` and its runtime home with a matcher that knows only unquoted
+`[projects."…"]`; the files used the quoted form, so every trust appended a duplicate (both files were
+broken by the evening). Both rewritten to the unquoted form, duplicates merged, each verified equal
+block by block; backups `config.toml.bak-dupe-*`. My first repair of the runtime home alone made it
+worse (Orca re-copied the quoted tables: 87 duplicates). Recorded in Observatory
+(`mem:d624c6ece9e54019`). The bug is Orca's and should go upstream.
+
+**Exact next task:** watch the 0.6.21 release to publication; when the installed app runs 0.6.20+
+(it installed 0.6.20 at 18:37 UTC and waits for an idle restart), rehearse the Kimi step live
+(`switchboard continue <wf> --account <kimi id>`); then SB-108 with Fabric Dashboards.
+
+---
+
 ## 2026-10-12 — 0.6.20: Hermes keeps the person's model; 0.6.19's guard refusal fixed
 
 0.6.19 (tag `v0.6.19` on `d50b46d`, release run 38272410963) was **refused by the release guard

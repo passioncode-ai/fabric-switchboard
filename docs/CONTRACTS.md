@@ -400,14 +400,21 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
 - **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
   (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
   no account and no key pin is tried when Hermes is installed, the key is saved and the
-  `switchboard` command exists (`launch::hermes_continuation_ready`), never for a Hermes executor.
+  `switchboard` command exists (`launch::hermes_continuation_basics`, no process started), never
+  for a Hermes executor. At the hand-over those basics come first; only then is the model read —
+  `hermes config get model --json` within 5 s in its own process group, killed with everything it
+  started at the deadline (`hermes::run_within`; a Hermes that does not answer gives no model).
   The model is the one the ordinary Hermes runs on OpenRouter (`hermes::openrouter_model`, from
   `hermes config get model`; operator 2026-10-12: «у меня Гермес был на DeepSeek V4 Pro»), else the
   key's default model; with neither, `hermes_continuation_preflight` refuses before the offer and
   the chain moves on. The answer says which (`modelFrom`: `hermes` or `key`). Hermes runs in
   `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a `config.yaml` Switchboard writes:
   Observatory's MCP server, `auth.adopt_external_logins: false`), the handoff prompt in
-  `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600) naming `owner agent:hermes` and a UUID
+  `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600; the folder also holds the script and
+  a `.session.json`, so the hand-over is listed under Sessions as `hermes` labelled with its model;
+  folders of hand-overs that ended more than 7 days ago go at the next one,
+  `prune_hermes_sessions`; `config.yaml` values are written as YAML double-quoted scalars with
+  everything outside printable ASCII escaped) naming `owner agent:hermes` and a UUID
   `sessionId` Switchboard made — Observatory wants a UUID and Hermes's own ids are not one (seen in
   the rehearsal below: the session had to work both out) — and Terminal running `hermes chat
   --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
@@ -422,8 +429,12 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   (executor `hermes`), wrote its final checkpoint and closed the workflow — "Accepted by
   agent:hermes running model moonshotai/kimi-k2 via provider openrouter". Spend of the day's probes
   and the rehearsal together: $0.07 of the key's $10.
-  Tests `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
-  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`. Other agents,
+  `--mode managed` with Hermes or a Kimi account is refused (`MANAGED_NOT_FOR_AGENT`). Tests
+  `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
+  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`,
+  `a_hermes_that_hangs_is_cut_off_with_everything_it_started`,
+  `hermes_config_escapes_every_value_into_plain_ascii`,
+  `finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does`. Other agents,
   a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
   (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
   phase 2). A Hermes executor at its limit is not detected yet.
@@ -606,7 +617,9 @@ updates](DISTRIBUTION.md#automatic-updates-sb-55).
 - `Runtime::busy_reason() -> Option<&'static str>`: `request_in_flight` or `sign_in_waiting`;
   `busy()` is `busy_reason().is_some()`.
 - Log: `update_waiting {reason}` at the first look with a reason, then at most hourly;
-  `update_check replaced`; a check while an update waits adds `waiting=yes` to its outcome.
+  `update_check replaced` — or `deferred` when a restart into the waiting one is already recorded
+  (the newer release waits for the next start); a check while an update waits adds `waiting=yes`
+  to its outcome.
 - Tests: `the_idle_watch_names_its_reason_exactly_when_it_is_not_idle`,
   `the_idle_watch_reports_its_reason_at_once_then_at_most_hourly` (a day on a fake clock),
   `a_newer_release_replaces_a_waiting_update_and_the_same_one_is_not_fetched_again`,

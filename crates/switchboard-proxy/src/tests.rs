@@ -1636,14 +1636,16 @@ async fn a_session_never_meets_409_while_the_pool_has_a_usable_account() {
                 refresh_token: None,
                 id_token: None,
                 native_context: None,
-                expires_at: Some(now() + 1),
+                // Two seconds: the select below must never cross the expiry on a
+                // second boundary (it did, 3 runs in 5, 2026-10-12).
+                expires_at: Some(now() + 2),
                 account_id: Some("identity-a".into()),
             },
         )
         .unwrap();
     let _b = add(&s, Provider::Claude, AuthKind::OAuth, "b", "token-b");
     s.select(Provider::Claude, "default", &a.id).unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(3100)).await;
     assert!(
         s.route(Provider::Claude, "default").is_err(),
         "a has expired"

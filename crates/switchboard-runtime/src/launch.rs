@@ -317,9 +317,15 @@ pub(crate) fn script_then(
     working_directory: &Path,
 ) -> String {
     let script = script(home, program, then, env, false, working_directory);
-    // The final `exec` begins a line; a path or argument cannot hide a line start inside quotes
-    // that the search would take for it.
-    let at = script.rfind("\nexec ").map_or(script.len(), |at| at + 1);
+    // The `exec` follows the change into the working directory, which `script` writes exactly
+    // so: found by that whole line, not by a word a quoted path could also contain.
+    let marker = format!(
+        "cd {} || exit 1\nexec ",
+        quote(working_directory.to_string_lossy().as_ref())
+    );
+    let at = script
+        .rfind(&marker)
+        .map_or(script.len(), |at| at + marker.len() - "exec ".len());
     let mut call = quote(program.to_string_lossy().as_ref());
     for arg in first {
         call.push(' ');
@@ -1542,33 +1548,39 @@ pub const OPENROUTER_CLI_MISSING: &str =
 /// Printed when a continuation's first turn ended in an error: nothing was resumed.
 #[cfg(not(windows))]
 const FIRST_TURN_FAILED: &str = "The first turn did not finish, so the handoff may not have been accepted. Nothing was resumed; run switchboard continue again or open the workflow by hand.";
-/// Whether a `hermes` chain step can be tried (SB-107): Hermes installed, an OpenRouter key saved,
-/// the `switchboard` command present for the session script. The model is settled at the
-/// hand-over (`hermes_continuation_preflight`), which refuses before the offer.
-pub(crate) fn hermes_continuation_ready(store: &Store) -> bool {
-    !cfg!(windows)
-        && find_program("hermes").is_some()
-        && store.agent_key("openrouter").ok().flatten().is_some()
-        && agent_cli().is_some()
-}
-/// What refuses a Hermes continuation before anything is offered (SB-107): Hermes not installed,
-/// no saved OpenRouter key, no model — neither Hermes's own OpenRouter model (`own_model`) nor
-/// the key's default — or no `switchboard` command for the session script.
-pub(crate) fn hermes_continuation_preflight(
-    store: &Store,
-    own_model: Option<&str>,
-) -> Result<(), String> {
+/// What a Hermes continuation needs before its model is even read (SB-107): not Windows, Hermes
+/// installed, an OpenRouter key saved, the `switchboard` command present for the session script.
+/// Cheap — no process is started — so it comes first.
+pub(crate) fn hermes_continuation_basics(store: &Store) -> Result<(), String> {
     if cfg!(windows) {
         return Err(crate::continuation::UNIX_ONLY.into());
     }
     find_program("hermes").ok_or(crate::hermes::HERMES_NOT_INSTALLED)?;
+    store
+        .agent_key("openrouter")?
+        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+    agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    Ok(())
+}
+/// Whether a `hermes` chain step can be tried: `hermes_continuation_basics`. The model is settled
+/// at the hand-over (`hermes_continuation_preflight`), which refuses before the offer, and the
+/// chain then moves on.
+pub(crate) fn hermes_continuation_ready(store: &Store) -> bool {
+    hermes_continuation_basics(store).is_ok()
+}
+/// What refuses a Hermes continuation before anything is offered (SB-107): the basics, then no
+/// model — neither Hermes's own OpenRouter model (`own_model`) nor the key's default.
+pub(crate) fn hermes_continuation_preflight(
+    store: &Store,
+    own_model: Option<&str>,
+) -> Result<(), String> {
+    hermes_continuation_basics(store)?;
     let saved = store
         .agent_key("openrouter")?
         .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
     if own_model.is_none() && saved.model.is_none() {
         return Err(OPENROUTER_MODEL_NEEDED.into());
     }
-    agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
     Ok(())
 }
 /// Continues an Observatory workflow on Hermes Agent with the saved OpenRouter key (SB-107), on
@@ -1640,6 +1652,7 @@ fn hermes_continuation_session(
             hermes_config(&continuation.observatory).as_bytes(),
             false,
         )?;
+        prune_hermes_sessions(&base, SystemTime::now());
         // One folder per workflow: two hand-overs never share a script or a prompt.
         let session = base.join(&continuation.workflow_id);
         private_dir(&session)?;
@@ -1682,6 +1695,18 @@ fn hermes_continuation_session(
             &working_directory,
         );
         let path = write_launch_script(&session, &content)?;
+        // Listed under Sessions like any launch (`sessions`); its label is the model.
+        let record = json!({
+            "account_id": crate::hermes::HERMES_TARGET, "provider": "hermes", "pool": "openrouter",
+            "mode": "isolated", "working_directory": working_directory, "in_place": false,
+            "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
+            "label": model,
+        });
+        private_write(
+            &session.join(SESSION_RECORD),
+            record.to_string().as_bytes(),
+            false,
+        )?;
         Ok((
             path,
             json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from}),
@@ -1689,10 +1714,54 @@ fn hermes_continuation_session(
     }
 }
 #[cfg_attr(windows, allow(dead_code))]
+/// How long a finished Hermes hand-over's folder (its script, prompt and record) is kept.
+#[cfg(not(windows))]
+const HERMES_SESSION_KEEP: Duration = Duration::from_secs(7 * 86_400);
+/// Removes the folders of Hermes hand-overs that ended more than a week ago; a running one, the
+/// shared `agent-home` and anything not named like a workflow are never touched.
+#[cfg(not(windows))]
+fn prune_hermes_sessions(base: &Path, now: SystemTime) {
+    let Ok(entries) = fs::read_dir(base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(crate::continuation::valid_workflow_id);
+        let old = entry.metadata().and_then(|m| m.modified()).is_ok_and(|t| {
+            now.duration_since(t)
+                .is_ok_and(|age| age > HERMES_SESSION_KEEP)
+        });
+        if named
+            && old
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && matches!(session_running(&path), Ok(false))
+        {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
+}
 /// Hermes's `config.yaml` in the home Switchboard owns: JSON strings are YAML double-quoted
 /// scalars, so every value is written escaped.
 fn hermes_config(server: &crate::continuation::McpServer) -> String {
-    let string = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
+    // A YAML double-quoted scalar takes JSON's escapes; anything outside printable ASCII is
+    // written as `\uXXXX` too, since YAML readers reject DEL and fold NEL, LS and PS.
+    let string = |s: &str| {
+        let mut out = String::from("\"");
+        for c in s.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                ' '..='~' => out.push(c),
+                c if (c as u32) <= 0xFFFF => out.push_str(&format!("\\u{:04X}", c as u32)),
+                c => out.push_str(&format!("\\U{:08X}", c as u32)),
+            }
+        }
+        out.push('"');
+        out
+    };
     let args = server
         .args
         .iter()
@@ -2140,7 +2209,12 @@ pub(crate) const SESSION_RECORD: &str = ".session.json";
 /// only sessions that start or run. Reads only; follows no link out of the owned folders.
 pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
     let mut found = Vec::new();
-    for folder in ["homes", "runtimes", "kimi/sessions"] {
+    for folder in [
+        "homes",
+        "runtimes",
+        "kimi/sessions",
+        "runtimes/hermes-continue",
+    ] {
         let Ok(entries) = fs::read_dir(root.join(folder)) else {
             continue;
         };
@@ -3150,6 +3224,77 @@ mod tests {
     }
     #[cfg(not(windows))]
     #[test]
+    fn finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        for name in [
+            "wf_0000000000000001",
+            "wf_0000000000000002",
+            "agent-home",
+            "notes",
+        ] {
+            fs::create_dir(base.join(name)).unwrap();
+        }
+        let now = SystemTime::now() + Duration::from_secs(8 * 86_400);
+        // A hand-over whose session still runs is kept, however old.
+        fs::write(
+            base.join("wf_0000000000000002/.session-pid"),
+            std::process::id().to_string(),
+        )
+        .unwrap();
+        prune_hermes_sessions(base, now);
+        assert!(!base.join("wf_0000000000000001").exists());
+        assert!(base.join("wf_0000000000000002").exists());
+        assert!(base.join("agent-home").exists() && base.join("notes").exists());
+        // A recent one stays.
+        fs::create_dir(base.join("wf_0000000000000003")).unwrap();
+        prune_hermes_sessions(base, SystemTime::now());
+        assert!(base.join("wf_0000000000000003").exists());
+    }
+    #[test]
+    fn hermes_config_escapes_every_value_into_plain_ascii() {
+        let config = hermes_config(&crate::continuation::McpServer {
+            command: "/opt/a \"b\"\\c".into(),
+            args: vec!["x\u{7f}y\u{2028}z\u{1F600}\nw".into()],
+        });
+        assert!(config
+            .bytes()
+            .all(|b| b == b'\n' || (b' '..=b'~').contains(&b)));
+        assert!(config.contains(r#"command: "/opt/a \"b\"\\c""#));
+        assert!(config.contains(r#"args: ["x\u007Fy\u2028z\U0001F600\u000Aw"]"#));
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn a_first_turn_goes_before_the_final_exec_even_when_a_path_reads_like_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = Path::new("/opt/my\nexec tools/kimi");
+        let script = script_then(
+            dir.path(),
+            program,
+            &["-p", "hi"],
+            &["-c"],
+            &BTreeMap::new(),
+            dir.path(),
+        );
+        let guard = script.find("if ! ").unwrap();
+        let resume = script.rfind("' '-c'").unwrap();
+        assert!(guard < resume, "{script}");
+        assert!(script[guard..].starts_with(&format!(
+            "if ! {} '-p' 'hi'; then",
+            quote("/opt/my\nexec tools/kimi")
+        )));
+        let path = dir.path().join("check.command");
+        fs::write(&path, &script).unwrap();
+        let shell = script.lines().next().unwrap().trim_start_matches("#!");
+        assert!(std::process::Command::new(shell)
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+    }
+    #[cfg(not(windows))]
+    #[test]
     fn a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key() {
         // SB-107: Hermes takes a workflow on the saved OpenRouter key and its model.
         let f = fixture();
@@ -3229,6 +3374,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(answer["model_from"], "hermes");
+        // Listed under Sessions, labelled with its model.
+        let listed = sessions(&f.root, true);
+        let hermes = listed
+            .iter()
+            .find(|r| r["provider"] == "hermes")
+            .expect("the hand-over is listed");
+        assert_eq!(hermes["continues"], "wf_0123456789abcdef");
+        assert_eq!(hermes["label"], "deepseek/deepseek-v4-pro-0813");
+        assert_eq!(hermes["home"], "runtimes/hermes-continue");
         assert!(fs::read_to_string(&path)
             .unwrap()
             .contains("'-m' 'deepseek/deepseek-v4-pro-0813'"));

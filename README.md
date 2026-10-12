@@ -40,7 +40,7 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 **Latest published: [v0.6.20](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.20)** · October 12, 2026.
 Work keeps going when the accounts run out: a fallback chain such as `claude-code → kimi-code →
 hermes` hands an Observatory workflow to a saved Kimi Code account, then to Hermes on your
-OpenRouter key and the model your Hermes uses; the account a session works on is checked every
+OpenRouter key and the model your Hermes uses there (else the key's default); the account a session works on is checked every
 minute from 95 % and every 30 seconds from 98 %, and the next one every minute; a limit the usage
 figures miss reads *Hidden personal limit*; a waiting update keeps checking and never waits
 forever. 0.6.19 was tagged but never published; 0.6.20 carries it. Release run

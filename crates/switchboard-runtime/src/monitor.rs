@@ -130,7 +130,12 @@ impl Pass {
                 .usage_gate
                 .refused_within(time, PACED_AFTER_REFUSAL_SECONDS),
         );
-        if time.abs_diff(self.last_pull_in) >= switchboard_core::CHECK_NEAR_LIMIT_SECONDS as u64 {
+        // With the same slack as the schedules it sets: passes 30 s apart, stamped in whole
+        // seconds, may be 59 s apart.
+        if time.abs_diff(self.last_pull_in)
+            >= (switchboard_core::CHECK_NEAR_LIMIT_SECONDS
+                - switchboard_core::NEAR_LIMIT_SLACK_SECONDS) as u64
+        {
             let _ = runtime.store.pull_in_next_accounts(time);
             self.last_pull_in = time;
         }

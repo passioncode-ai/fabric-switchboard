@@ -1671,6 +1671,10 @@ async fn execute(
                 .map_err(|_| "Choose an existing project directory.")?;
             // SB-107: Hermes Agent on the saved OpenRouter key, with the same order — every
             // refusal before the offer, a failed launch after it left to lapse.
+            let other_agent = id == hermes::HERMES_TARGET || store.kimi_account(&id).is_ok();
+            if other_agent && mode == "managed" {
+                return Err(continuation::MANAGED_NOT_FOR_AGENT.into());
+            }
             if id == hermes::HERMES_TARGET {
                 let shown = continuation::show(&bin, &workflow_id)?;
                 let plan = continuation::plan_named(
@@ -1681,7 +1685,9 @@ async fn execute(
                     true,
                     &directory,
                 )?;
-                // The model Hermes itself runs on OpenRouter, read off the async workers.
+                // Cheap refusals first; then the model Hermes itself runs on OpenRouter, read off
+                // the async workers within five seconds.
+                launch::hermes_continuation_basics(&store)?;
                 let own_model = tokio::task::spawn_blocking(hermes::openrouter_model)
                     .await
                     .ok()
@@ -1937,7 +1943,9 @@ async fn execute(
                                 .iter()
                                 .find(|k| Some(&k.id) == id.as_ref())
                                 .map(|k| k.label.clone())
-                        });
+                        })
+                        // A Hermes hand-over names its model itself (SB-107).
+                        .or_else(|| session["label"].as_str().map(str::to_owned));
                     session["label"] = label.into();
                     session
                 })
@@ -3684,8 +3692,15 @@ mod lifecycle_tests {
         loop {
             match Owner::start(root.to_owned(), Arc::new(MemoryVault::default())).await {
                 Ok(owner) => return owner,
-                Err(error) if std::time::Instant::now() >= deadline => panic!("{error}"),
-                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
+                // Only the lock a forked child still holds is waited out; anything else fails
+                // at once.
+                Err(error)
+                    if error.contains("Another Switchboard instance")
+                        && std::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(20)).await
+                }
+                Err(error) => panic!("{error}"),
             }
         }
     }

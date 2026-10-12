@@ -187,12 +187,15 @@ An agent is a catalog id (`switchboard agents list`) that loads MCP servers and 
 without a person; Aider, for example, does not and is refused. `@ACCOUNT_ID` pins an account,
 `#project/env/NAME` a paid key by its Observatory vault name — never a key value. Without a pin
 Switchboard chooses an account at the switch. Claude Code and Codex run on their own provider's
-accounts, Kimi Code on a saved Kimi Code account (`switchboard kimi`, SB-99); any other agent on an
-API-key account or a paid key, never on a subscription sign-in.
+accounts, Kimi Code on a saved Kimi Code account (`switchboard kimi`, SB-99), Hermes also on the
+saved OpenRouter key (SB-107); any other agent on an API-key account or a paid key, never on a
+subscription sign-in.
 Removing an account or a project drops what pinned it. When a workflow's executor hits its limit,
 the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code and Codex;
 Kimi Code on saved Kimi accounts since SB-99 — its first turn runs as `kimi -p`, without approvals,
-then `kimi -c` resumes it; other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
+then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
+SB-107; other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
+`--mode managed` applies to Claude Code and Codex only; with Hermes or Kimi Code it is refused.
 
 ### Other coding agents
 

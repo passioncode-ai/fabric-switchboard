@@ -1146,7 +1146,7 @@ function sessionsPanel() {
   const list = el('ul', 'session-list');
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
-    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
     const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }

@@ -8,6 +8,18 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.21 — 2026-10-12
+
+A second review of the hand-overs to Kimi Code and Hermes, finished.
+
+**Hand-overs to Hermes, finished** (second review, SB-107). A Hermes that does not answer can no
+longer hold Switchboard up: its model is read within five seconds, after the quick checks, and
+whatever it started is stopped with it. Hermes hand-overs appear under Activity → *Sessions* as
+*Hermes Agent* with their model, and their folders go a week after they end. Asking for
+`--mode managed` with Hermes or Kimi Code says it does not apply instead of ignoring it. The next
+account near a limit is checked every minute, not every 90 seconds, and the Hermes settings file
+stays readable whatever characters a path holds.
+
 ## 0.6.20 — 2026-10-12
 
 Work keeps going when the accounts run out: a fallback chain now reaches Kimi Code and Hermes, the
@@ -24,8 +36,8 @@ Hermes no longer has to work them out before accepting.
 
 **Hermes takes over when the subscriptions run out** (SB-107). A fallback chain such as
 `claude-code → kimi-code → hermes` now ends on Hermes Agent: when no Claude or Kimi account is
-left, Hermes picks the workflow up on the OpenRouter key saved under Agents, with its default model,
-inside a home Switchboard keeps for it — the handoff is its first turn in an ordinary interactive
+left, Hermes picks the workflow up on the OpenRouter key saved under Agents — on the model your
+Hermes uses on OpenRouter, else the key's default model — inside a home Switchboard keeps for it — the handoff is its first turn in an ordinary interactive
 session, and it reaches Project Observatory to accept it. Spending stops at the key's own
 OpenRouter limit. By hand: `switchboard continue <workflow> --account hermes --dir <checkout>`.
 
