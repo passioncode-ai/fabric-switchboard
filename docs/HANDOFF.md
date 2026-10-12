@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — Release 0.6.18
+
+Branch `agent/release-0618`: versions 0.6.18 everywhere (`release_preflight.py --tag v0.6.18
+--publish true --windows-signing true` ok); CHANGELOG's 0.6.18 section carries SB-102…104, #156
+and 0.6.17's notes (v0.6.17 was tagged and never published: the release guard refused it on the
+nightly that #156 fixed). Release path: merge, the nightly passes on the merge commit (the guard
+checks it), annotated tag `v0.6.18` on it, release run watched to the published release.
+
+**Exact next task:** after publication — README / README.ru release section (version, run id,
+what is new since 0.6.16), fabric-workspace `knowledge/products.md` Switchboard row, the projects
+wiki page; the local install updates itself.
+
+---
+
 ## 2026-10-12 — SB-104: the window keeps its word; the bug review is closed
 
 Wave 3, third part (branch `fix/sb-104-window-docs`): the window defects and the documentation

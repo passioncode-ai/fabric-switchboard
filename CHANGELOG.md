@@ -6,7 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.18 — 2026-10-12
+
+The first published release since 0.6.16: 0.6.17 was tagged but never published — the release
+guard refused it because the nightly checks had failed on its commit (a Windows test and a Linux
+lint, fixed below) — so this release carries 0.6.17's changes too, listed after this release's own.
 
 **Failover never makes things worse** (SB-102). A session moved off a limited account goes only
 to an account of the same kind — a subscription never onto a paid key, a key shared with agents
@@ -32,8 +36,6 @@ Docs: the ten read tools, Kimi sessions, a limit's `reason` and `hidden`, Linux 
 
 **Nightly on Linux and Windows** (#156): Claude Code on Windows keys a folder with forward
 slashes — onboarding finds the registration either way.
-
-## 0.6.17 — 2026-10-12
 
 **Agents keep working when an account hits a limit** (SB-98). A managed session's request the
 provider refuses for a limit goes once to the pool's next account, so the agent does not pause;
