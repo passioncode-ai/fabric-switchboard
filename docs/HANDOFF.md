@@ -13,7 +13,12 @@ forms. Verified against the real engine (`handoff:a6f7171bfcbcbd75`, which lapse
 21:39 UTC) and its own `credential_shape` (2000 random handles). The installed app restarted at
 19:56 UTC into 0.6.20.
 
-**Exact next task:** watch the 0.6.22 release to publication; when the installed app runs 0.6.22
+0.6.22 (tag `v0.6.22`, run 38305858150) was refused by the guard: the Windows nightly could not
+compile the tests — inserting `an_account_reaches_the_engine_as_a_handle_never_as_its_uuid` above
+a Unix-only test took its `#[cfg(unix)]`. Fixed in 0.6.23; a scan of every test's `cfg` against
+v0.6.18 found no other move. The nightly is dispatched once on the branch before tagging.
+
+**Exact next task:** watch the 0.6.23 release to publication; when the installed app runs 0.6.22
 (it checks every 6 h, then restarts at an idle moment, or *Restart to update*), rerun the Kimi
 rehearsal with a new workflow (`switchboard continue <wf> --account <kimi id>`) and a Claude
 account hand-over, and record both; then SB-108.
