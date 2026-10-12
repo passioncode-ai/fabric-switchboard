@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — Russian copy pass
+
+Branch `agent/ru-copy-pass`, on the operator's request to review all Russian copy («весь русский
+… в целом весь надо пересмотреть — выглядит очень плохо»). 373 of the 963 entries in
+`src/locales/ru.ts` rewritten (settings and setup first, then the account list, quota, automatic
+switching, projects and rules, launch, Sessions, the journal and backend errors); English keys,
+placeholders, commands and product names unchanged. The rules applied and the terms still missing
+from the glossary are in [strings.md](brand/strings.md) ("Russian copy pass, 2026-10-12"). The
+provider-terms sentence now reads «условия использования» for "terms", with the same three claims,
+and README.ru and SCN-049 quote it. Exact-string tests in `scripts/test-ui-logic.mjs` follow.
+Checks: every step of `./scripts/check.sh` except `cargo test` and `cargo clippy` passed locally
+(locale, ui-logic, error vocabulary, build, docs, plugin, Python suites, `cargo fmt --check`); the
+two cargo build steps were not run — the machine's disk was full (No space left on device) — and
+the change touches no Rust. The nightly on `main` is the first full run.
+
+Not reviewed in this pass: README.ru.md and docs/PRODUCT.ru.md (mixed English, a github-readme
+surface), the tray labels in `src-tauri/src/residency.rs` (already glossary-correct). No release:
+copy changes ship with the next release.
+
+**Exact next task:** a native Russian speaker reads the window in Russian (About, + Add account,
+automatic switching, an error) and reports strings that still read wrong; then the README.ru pass.
+The board's open rows (idle budget with a managed policy, P3; SB-99's rest) are unchanged.
+
+---
+
 ## 2026-10-12 — 0.6.18 published
 
 Tag `v0.6.18` on `47ef931` (not the version-bump merge `e815d69`: the nightly there failed on
