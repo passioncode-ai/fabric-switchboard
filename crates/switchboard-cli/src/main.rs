@@ -1186,7 +1186,8 @@ pub(crate) async fn onboard_status(
         .await?;
         probe.project = Some(resolved["project"].clone()).filter(|p| !p.is_null());
     }
-    let home = std::env::var_os("HOME")
+    // SB-103: Windows names the home USERPROFILE (as `agents::setup` reads it).
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .unwrap_or_default();
     let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);

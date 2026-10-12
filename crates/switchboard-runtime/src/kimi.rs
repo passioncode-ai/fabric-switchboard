@@ -213,19 +213,21 @@ fn token(home: &Path, region: &str, now: i64) -> Result<Token, &'static str> {
 }
 
 /// One client for every Kimi request (SB-100): connections are reused across accounts.
-fn client() -> Result<&'static reqwest::Client, &'static str> {
-    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(TIMEOUT)
-                .user_agent(concat!("FabricSwitchboard/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .ok()
-        })
-        .as_ref()
-        .ok_or(KIMI_UNREACHABLE)
+fn client() -> Result<reqwest::Client, &'static str> {
+    // SB-103: a client that failed to build is tried again next time, never kept as a failure.
+    static CLIENT: std::sync::Mutex<Option<reqwest::Client>> = std::sync::Mutex::new(None);
+    let mut kept = CLIENT.lock().map_err(|_| KIMI_UNREACHABLE)?;
+    if let Some(client) = kept.as_ref() {
+        return Ok(client.clone());
+    }
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(TIMEOUT)
+        .user_agent(concat!("FabricSwitchboard/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| KIMI_UNREACHABLE)?;
+    *kept = Some(client.clone());
+    Ok(client)
 }
 async fn get(base: &str, path: &str, token: &Token) -> Result<Value, &'static str> {
     let response = client()?
@@ -336,9 +338,12 @@ async fn accounts_with(
         let base = base(&region);
         asked.spawn(async move { (index, home_status(&folder, &region, &base, now).await) });
     }
-    let mut statuses = vec![Value::Null; accounts.len()];
-    while let Some(Ok((index, status))) = asked.join_next().await {
-        statuses[index] = status;
+    // SB-103: one failed task leaves an error on its own row; the others are still read.
+    let mut statuses = vec![json!({"signed_in": true, "error": KIMI_UNREACHABLE}); accounts.len()];
+    while let Some(done) = asked.join_next().await {
+        if let Ok((index, status)) = done {
+            statuses[index] = status;
+        }
     }
     let mut list = Vec::new();
     for (account, status) in accounts.into_iter().zip(statuses) {
@@ -588,6 +593,8 @@ pub fn sign_in_again(
     private_dir(&session)?;
     // SB-99: never `kimi login` beside a running `kimi` on the same folder.
     let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
+    // SB-103: a sign-in is not a session; the last launch's record must not describe it.
+    let _ = fs::remove_file(session.join(SESSION_RECORD));
     let path = write_launch_script(
         &session,
         &script(
