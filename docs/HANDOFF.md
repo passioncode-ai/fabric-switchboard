@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-105 filed: the installed app never left 0.6.16
+
+Status check on the operator's Mac: `main` = `a5c1948`, v0.6.18 published, no open PRs. The
+installed app runs since 2026-10-10 with a ready 0.6.16 update and has not restarted into it in
+35 h; checks stop while an update is ready, so 0.6.18 is unseen. The broker refused a restart
+(`in_use_by_person`, `not_started_by_broker`). Filed as SB-105 with the evidence; no code changed.
+
+**Exact next task:** the operator presses *Restart to update* (or Quit and open) and the version
+reads 0.6.18; then SB-105 (idle-watch reason log, keep checking while ready), then SB-99's rest. The Russian
+copy pass below still awaits a native speaker's read of the window.
+
+---
+
 ## 2026-10-12 — Russian copy pass
 
 Branch `agent/ru-copy-pass`, on the operator's request to review all Russian copy («весь русский
