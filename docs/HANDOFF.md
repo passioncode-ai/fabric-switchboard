@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-103: sign-ins, sessions and Kimi without loose ends
+
+Wave 3, second part (branch `fix/sb-103-logins-sessions-kimi`): a saved sign-in is never taken back
+after a restart, young sign-in folders survive the start-up sweep, sessions are read off the async
+workers with Kimi labels, Kimi status and client failures stay contained, `onboard --status` on
+Windows. CONTRACTS → Sign-ins, sessions and Kimi without loose ends. Before it, PR #156 fixed the
+nightly on Linux and Windows that made the release guard refuse v0.6.17 (nothing was published).
+
+**Exact next task:** SB-104 (branch `fix/sb-104-window-docs`, work in progress pushed) — window
+defects and documentation drift, then release 0.6.18 with SB-102…104 (the nightly must pass on the
+release commit first: the guard checks it).
+
+---
+
 ## 2026-10-12 — Bug review in waves; SB-102: failover without side effects
 
 Wave 1: three independent readers (switching core; changes since v0.6.16; window and docs)

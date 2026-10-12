@@ -611,6 +611,9 @@ impl Runtime {
             account
         };
         let again = login.signed_in_again;
+        // SB-103: the account is saved; a restart must never offer this sign-in again (and
+        // finishing it twice would write its first credential over a newer one).
+        launch::forget_login_journal(login);
         let cleaned = launch::clean_login(login).is_ok();
         // The account is saved: the slot is released even when staging cleanup fails.
         if let Some(login) = logins.remove(id) {
@@ -643,8 +646,11 @@ impl Runtime {
     /// (or a restarted owner) to show its banner and finish them.
     fn pending_logins(&self) -> Value {
         let logins = self.logins.lock().map(|logins| {
-            logins
-                .values()
+            // SB-103: oldest first, so a window restoring one banner takes the newest.
+            let mut ordered: Vec<_> = logins.values().collect();
+            ordered.sort_by_key(|login| launch::login_started(login));
+            ordered
+                .into_iter()
                 .map(|login| {
                     json!({
                         "login_id": login.id,
@@ -1809,14 +1815,25 @@ async fn execute(
         }
         Operation::Sessions { all } => {
             let snapshot = store.snapshot()?;
-            let sessions: Vec<Value> = launch::sessions(root, all)
+            // SB-103: the liveness checks may start `kill -0`/`ps`: never on an async worker.
+            let listed = crate::blocking::run(|| launch::sessions(root, all));
+            let sessions: Vec<Value> = listed
                 .into_iter()
                 .map(|mut session| {
-                    let account = snapshot
+                    let id = session["account_id"].as_str().map(str::to_owned);
+                    let label = snapshot
                         .accounts
                         .iter()
-                        .find(|a| Some(a.id.as_str()) == session["account_id"].as_str());
-                    session["label"] = account.map(|a| a.label.clone()).into();
+                        .find(|a| Some(&a.id) == id.as_ref())
+                        .map(|a| a.label.clone())
+                        .or_else(|| {
+                            snapshot
+                                .kimi_accounts
+                                .iter()
+                                .find(|k| Some(&k.id) == id.as_ref())
+                                .map(|k| k.label.clone())
+                        });
+                    session["label"] = label.into();
                     session
                 })
                 .collect();

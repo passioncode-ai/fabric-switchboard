@@ -853,6 +853,15 @@ fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
         journal["started_at"].as_i64().unwrap_or(0),
     ))
 }
+/// SB-103: once a sign-in's account is saved its journal goes first, so no later start can
+/// take it back — even when the rest of its folder cannot be removed yet.
+pub(crate) fn forget_login_journal(login: &Login) {
+    let _ = fs::remove_file(login.home.join(LOGIN_JOURNAL));
+}
+/// When a sign-in began, from its journal (0 when it has none), to order them.
+pub(crate) fn login_started(login: &Login) -> i64 {
+    login_journal(&login.home).map_or(0, |(.., at)| at)
+}
 /// The sign-ins an earlier owner started that can still be finished: their journal is readable
 /// and the sign-in either completed in Terminal or is still open there. Newest first, at most
 /// `MAX_LOGINS`. The rest stay for `sweep_logins`.
@@ -931,12 +940,18 @@ pub(crate) enum LeftoverItem {
 /// runs in Terminal, and never one whose Keychain item would ask to be deleted. Runs once, at an
 /// owner's start, before any sign-in of this owner exists.
 pub fn sweep_logins(root: &Path) -> Sweep {
-    sweep_logins_with(root, &native_leftover_item, &native_delete_item)
+    sweep_logins_with(
+        root,
+        &native_leftover_item,
+        &native_delete_item,
+        Duration::from_secs(60),
+    )
 }
 pub(crate) fn sweep_logins_with(
     root: &Path,
     item: &dyn Fn(&Path) -> LeftoverItem,
     delete: &dyn Fn(&Path) -> Result<(), String>,
+    min_age: Duration,
 ) -> Sweep {
     let mut sweep = Sweep::default();
     let Ok(entries) = fs::read_dir(root.join("logins")) else {
@@ -949,6 +964,16 @@ pub(crate) fn sweep_logins_with(
             .to_str()
             .is_some_and(|name| Uuid::parse_str(name).is_ok());
         if !named || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        // SB-103: a folder made in the last minute is a sign-in just beginning (the sweep runs
+        // beside a starting owner), not a leftover.
+        if fs::symlink_metadata(&home)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .is_none_or(|age| age < min_age)
+        {
             continue;
         }
         let pending = reservation_open(&home);
@@ -2568,6 +2593,21 @@ mod tests {
         exited.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(ensure_idle(&login.home).is_ok());
     }
+    #[test]
+    fn a_sign_in_folder_made_a_moment_ago_is_never_swept() {
+        // SB-103: the sweep runs beside a starting owner; a sign-in begun right then is young.
+        let root = tempfile::tempdir().unwrap();
+        let young = root.path().join("logins").join(Uuid::new_v4().to_string());
+        private_dir(&young).unwrap();
+        let sweep = sweep_logins_with(
+            root.path(),
+            &|_| LeftoverItem::Absent,
+            &|_| Ok(()),
+            Duration::from_secs(60),
+        );
+        assert!(young.exists());
+        assert_eq!(sweep, Sweep::default());
+    }
     #[cfg(unix)]
     #[test]
     fn a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask() {
@@ -2604,7 +2644,7 @@ mod tests {
             deleted.borrow_mut().push(h.to_path_buf());
             Ok(())
         };
-        let sweep = sweep_logins_with(root.path(), &item, &delete);
+        let sweep = sweep_logins_with(root.path(), &item, &delete, Duration::ZERO);
         assert_eq!(
             sweep,
             Sweep {
@@ -2640,6 +2680,7 @@ mod tests {
                 }
             },
             &|_| Err("Keychain unavailable.".into()),
+            Duration::ZERO,
         );
         assert!(failing.exists());
         assert_eq!(sweep.removed, 0);
@@ -2650,7 +2691,7 @@ mod tests {
             .unwrap();
         unsafe { libc::kill(-pid, libc::SIGKILL) };
         exited.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(sweep_logins_with(root.path(), &item, &delete).removed >= 1);
+        assert!(sweep_logins_with(root.path(), &item, &delete, Duration::ZERO).removed >= 1);
         assert!(
             !running.home.exists(),
             "removed by a later start once it ended"
@@ -2703,8 +2744,29 @@ mod tests {
         );
         assert_eq!(login_state(&adopted[1]), "complete");
         assert_eq!(login_state(&adopted[0]), "pending");
+        // SB-103: the owner orders them by when they began, from the journal.
+        assert_eq!(
+            (login_started(&adopted[1]), login_started(&adopted[0])),
+            (10, 20)
+        );
+        // SB-103: once its account is saved, a sign-in is never taken back again, even while
+        // its folder is still there.
+        forget_login_journal(&adopted[1]);
+        assert_eq!(
+            adopt_logins(root.path())
+                .iter()
+                .map(|l| l.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Studio"]
+        );
+        journal(&completed, "codex", "Team", 10);
 
-        let sweep = sweep_logins_with(root.path(), &|_| LeftoverItem::Absent, &|_| Ok(()));
+        let sweep = sweep_logins_with(
+            root.path(),
+            &|_| LeftoverItem::Absent,
+            &|_| Ok(()),
+            Duration::ZERO,
+        );
         assert!(
             completed.exists(),
             "a completed sign-in with its journal waits for Finish"
