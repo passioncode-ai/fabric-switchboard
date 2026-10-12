@@ -23,6 +23,9 @@ pub const PROVIDER_INVALID: &str =
 pub const MODEL_INVALID: &str =
     "A model is an id such as moonshotai/kimi-k2 or claude-sonnet-4.5 (letters, digits and / . _ : -).";
 pub const NOTHING_TO_SET: &str = "Name a provider, a model or both.";
+/// The account a continuation names to run on Hermes Agent with the saved OpenRouter key and its
+/// model (SB-107): `switchboard continue <wf> --account hermes`, and a chain's `hermes` step.
+pub const HERMES_TARGET: &str = "hermes";
 
 /// Providers the app offers in its list; any other id of the same shape is accepted too, since
 /// Hermes adds providers between releases (82 in 0.21.4).

@@ -2,6 +2,34 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-107: Hermes in chains; review of everything since 0.6.18; release 0.6.19
+
+Branch `feat/sb-107-hermes-and-review-fixes`, from the operator's request to check every account
+connection and the switching pipeline (Claude → Kimi, Claude → Hermes, Claude → Kimi → Hermes) and
+release it. Live state on the operator's Mac (read-only, no identifiers): 21 subscription accounts
+(20 Claude, 1 Codex) enabled, `ok`, checked within 3 min; 2 Kimi accounts signed in; native
+rotation on (80 %, 10 %, cooldown 1800 s); **no fallback chain set** (`chains: []`), so no
+automatic hand-over could happen; no OpenRouter agent key saved.
+
+Done: a `hermes` chain step and `switchboard continue --account hermes` (CONTRACTS → Automatic
+fallback; SCN-040; CLI.md); the Observatory-issued key `fabric-switchboard-agents` ($10, daily
+reset) saved as Switchboard's OpenRouter agent key with model `moonshotai/kimi-k2` (credit read
+back: $10 left). Measured with Hermes 0.21.4: an empty `HERMES_HOME` starts without a wizard; with
+Switchboard's `config.yaml` the session lists `observatory_handoff_accept`. An independent review
+of v0.6.18..main found five defects, all fixed with tests: Kimi checks after the offer (a chain
+stalled on a broken `mcp.json`), `kimi -c` after a failed `-p`, the 30 s step running every 60 s
+(`NEAR_LIMIT_SLACK_SECONDS`), credential reads when choosing the next account (`next_to_check`), a
+Windows updater race (`deferred`). Not fixed, recorded: a Hermes executor's limit is not detected;
+Kimi's idle-token blindness (SB-100). Gate `./scripts/check.sh` exit 0 (538 Rust tests, lean
+flags); the Windows and Linux checks run in the release guard's nightly on the tag.
+
+**Exact next task:** after the 0.6.19 release is published and the installed app runs it, set the
+operator's machine chain `claude-code → kimi-code → hermes` (`switchboard chain set`), then run a
+live hand-over rehearsal on a test Observatory workflow (`switchboard continue <wf> --account
+hermes`, then `--account <kimi id>`) and record it.
+
+---
+
 ## 2026-10-12 — SB-106: fresher figures near a limit, “Hidden personal limit”
 
 Branch `feat/sb-106-near-limit-checks`, from the operator's request (continued from a Kimi session

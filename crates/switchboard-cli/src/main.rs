@@ -94,13 +94,15 @@ enum Command {
         args: Vec<String>,
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account —
-    /// of the same provider, or of the other one (Claude Code ↔ Codex) with the same context:
-    /// reads the workflow, offers it (reason `limit`) and launches the account's session, which
-    /// accepts the handoff itself. Requires a running desktop app or serve.
+    /// of the same provider, or of another agent (Claude Code, Codex, a saved Kimi Code account,
+    /// or Hermes on the saved OpenRouter key) with the same context: reads the workflow, offers
+    /// it (reason `limit`) and launches the account's session, which accepts the handoff itself.
+    /// Requires a running desktop app or serve.
     Continue {
         /// The workflow id, `wf_` and 16 hex digits (`project-observatory full workflow list`).
         workflow_id: String,
-        /// The account that continues it.
+        /// The account that continues it: a saved account's or Kimi Code account's id, or
+        /// `hermes` for Hermes Agent on the saved OpenRouter key and its model.
         #[arg(long)]
         account: String,
         /// `isolated` or `managed`, as for `launch`.

@@ -1139,8 +1139,12 @@ fn becoming_the_account_in_use_pulls_its_check_in_without_a_write() {
 fn the_account_a_session_works_on_is_checked_sooner_near_its_limit() {
     use switchboard_core::{
         near_limit_check, CHECK_ACTIVE_SECONDS, CHECK_AT_LIMIT_SECONDS, CHECK_IDLE_SECONDS,
-        CHECK_NEAR_LIMIT_SECONDS,
+        CHECK_NEAR_LIMIT_SECONDS, NEAR_LIMIT_SLACK_SECONDS,
     };
+    // Stamped a little early, so a 30-second schedule falls due on the next 30-second pass.
+    let near = CHECK_NEAR_LIMIT_SECONDS - NEAR_LIMIT_SLACK_SECONDS;
+    let at = CHECK_AT_LIMIT_SECONDS - NEAR_LIMIT_SLACK_SECONDS;
+    assert!(at > 0 && at < 30);
     let (_root, _vault, store) = setup();
     let now = clock();
     // The managed route of a pool with no policy: a failover can move it (SB-98).
@@ -1149,10 +1153,10 @@ fn the_account_a_session_works_on_is_checked_sooner_near_its_limit() {
     store.select(Provider::Claude, "routed", &routed).unwrap();
     let cases = [
         (94.9, CHECK_ACTIVE_SECONDS),
-        (95., CHECK_NEAR_LIMIT_SECONDS),
-        (97.9, CHECK_NEAR_LIMIT_SECONDS),
-        (98., CHECK_AT_LIMIT_SECONDS),
-        (99.9, CHECK_AT_LIMIT_SECONDS),
+        (95., near),
+        (97.9, near),
+        (98., at),
+        (99.9, at),
         // Full until a reset: nothing a sooner check could change before then.
         (100., CHECK_ACTIVE_SECONDS),
     ];
@@ -1182,10 +1186,7 @@ fn the_account_a_session_works_on_is_checked_sooner_near_its_limit() {
     native_policy.pool = "native".into();
     store.set_policy(native_policy).unwrap();
     observe(&store, &native, 96., now + 20);
-    assert_eq!(
-        next_check(&store, &native),
-        now + 20 + CHECK_NEAR_LIMIT_SECONDS
-    );
+    assert_eq!(next_check(&store, &native), now + 20 + near);
 
     // An account whose checks the provider refused lately keeps the ordinary cadence.
     store.set_paced([routed.clone()].into());
@@ -1193,16 +1194,16 @@ fn the_account_a_session_works_on_is_checked_sooner_near_its_limit() {
     assert_eq!(next_check(&store, &routed), now + 30 + CHECK_ACTIVE_SECONDS);
     store.set_paced(Default::default());
     observe(&store, &routed, 99., now + 40);
-    assert_eq!(
-        next_check(&store, &routed),
-        now + 40 + CHECK_AT_LIMIT_SECONDS
-    );
+    assert_eq!(next_check(&store, &routed), now + 40 + at);
 }
 
 #[test]
 fn the_pools_next_account_is_checked_every_minute_while_the_current_one_nears_its_limit() {
-    use switchboard_core::{CHECK_IDLE_SECONDS, CHECK_NEAR_LIMIT_SECONDS};
-    let (_root, _vault, store) = setup();
+    use switchboard_core::{
+        CHECK_IDLE_SECONDS, CHECK_NEAR_LIMIT_SECONDS, NEAR_LIMIT_SLACK_SECONDS,
+    };
+    let next_minute = CHECK_NEAR_LIMIT_SECONDS - NEAR_LIMIT_SLACK_SECONDS;
+    let (_root, vault, store) = setup();
     let now = clock();
     let current = account_in(&store, "org-current", "work", now);
     let next = account_in(&store, "org-next", "work", now);
@@ -1226,7 +1227,7 @@ fn the_pools_next_account_is_checked_every_minute_while_the_current_one_nears_it
     let writes = writes.max(store.metadata_writes());
     assert_eq!(store.pull_in_next_accounts(now + 10).unwrap(), 1);
     // The least used other account, a minute after its last check — in memory only.
-    assert_eq!(next_check(&store, &next), now + CHECK_NEAR_LIMIT_SECONDS);
+    assert_eq!(next_check(&store, &next), now + next_minute);
     assert_eq!(next_check(&store, &fuller), now + CHECK_IDLE_SECONDS);
     assert_eq!(next_check(&store, &elsewhere), now + CHECK_IDLE_SECONDS);
     assert_eq!(store.metadata_writes(), writes, "timestamps stay in memory");
@@ -1239,16 +1240,21 @@ fn the_pools_next_account_is_checked_every_minute_while_the_current_one_nears_it
     assert_eq!(store.pull_in_next_accounts(now + 30).unwrap(), 0);
     store.set_limited([current.clone()].into());
     assert_eq!(store.pull_in_next_accounts(now + 31).unwrap(), 1);
-    assert_eq!(
-        next_check(&store, &next),
-        now + 30 + CHECK_NEAR_LIMIT_SECONDS
-    );
+    assert_eq!(next_check(&store, &next), now + 30 + next_minute);
 
     // A next account whose checks the provider refused lately is left on its schedule.
     observe(&store, &next, 30., now + 40);
     store.set_paced([next.clone()].into());
     assert_eq!(store.pull_in_next_accounts(now + 41).unwrap(), 0);
     assert_eq!(next_check(&store, &next), now + 40 + CHECK_IDLE_SECONDS);
+
+    // Choosing reads no credential: a vault that cannot be read changes nothing.
+    store.set_paced(Default::default());
+    for id in [&current, &next, &fuller] {
+        vault.delete(id).unwrap();
+    }
+    assert_eq!(store.pull_in_next_accounts(now + 50).unwrap(), 1);
+    assert_eq!(next_check(&store, &next), now + 40 + next_minute);
 }
 
 // Projects (0.6): a project reserves a pool for its folders.

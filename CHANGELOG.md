@@ -8,6 +8,20 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Hermes takes over when the subscriptions run out** (SB-107). A fallback chain such as
+`claude-code → kimi-code → hermes` now ends on Hermes Agent: when no Claude or Kimi account is
+left, Hermes picks the workflow up on the OpenRouter key saved under Agents, with its default model,
+inside a home Switchboard keeps for it — the handoff is its first turn in an ordinary interactive
+session, and it reaches Project Observatory to accept it. Spending stops at the key's own
+OpenRouter limit. By hand: `switchboard continue <workflow> --account hermes --dir <checkout>`.
+
+**A chain never stalls on a broken step** (found by review). A Kimi Code step whose `kimi` is
+missing or whose `mcp.json` cannot be read is now passed over before anything is offered, so the
+next step runs instead of the same offer lapsing every quarter of an hour; a Kimi first turn that
+fails no longer opens the folder's previous Kimi session; the 30-second check near a limit now
+really runs every 30 seconds; choosing the account checked next reads no credentials; on Windows a
+newer release found while a restart is already under way waits for the next start.
+
 **Fresher figures near a limit** (SB-106). The account a session works on is checked every minute
 from 95 % of its usage and every 30 seconds from 98 %, and the account a switch would move to is
 checked every minute meanwhile, so the switch at the limit acts on current figures. Other

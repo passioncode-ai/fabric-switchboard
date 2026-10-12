@@ -310,6 +310,48 @@ impl Store {
             .map(|(a, _, _)| a.id.clone()))
     }
 }
+impl Store {
+    /// The account a switch or a failover would most likely take next, for a check brought
+    /// forward (SB-106): `failover_candidate`'s order — measured lately and below full first,
+    /// least used, then by last known usage — over enabled OAuth accounts whose last check
+    /// succeeded, not held. It reads no credential: an account whose credential turns out dead
+    /// fails its check and backs off as any other.
+    pub(crate) fn next_to_check(
+        &self,
+        policy: &RotationPolicy,
+        held: &std::collections::HashSet<String>,
+        now: i64,
+    ) -> Result<Option<String>, String> {
+        let state = self.lock()?;
+        Ok(state
+            .accounts
+            .iter()
+            .filter(|a| {
+                a.provider == policy.provider
+                    && a.pool == policy.pool
+                    && a.enabled
+                    && a.kind == AuthKind::OAuth
+                    && !held.contains(&a.id)
+                    && a.usage_health.as_ref().is_some_and(|h| h.status == "ok")
+            })
+            .filter_map(|a| match fresh_usage(a, policy, now) {
+                Some(used) if used < 100.0 => Some((a, 0u8, used)),
+                Some(_) => None,
+                None => {
+                    let used = last_known_usage(a, now);
+                    (used < 100.0).then_some((a, 1u8, used))
+                }
+            })
+            .min_by(|(a, tier_a, x), (b, tier_b, y)| {
+                tier_a
+                    .cmp(tier_b)
+                    .then_with(|| x.total_cmp(y))
+                    .then_with(|| a.created_at.cmp(&b.created_at))
+                    .then_with(|| a.id.cmp(&b.id))
+            })
+            .map(|(a, _, _)| a.id.clone()))
+    }
+}
 /// The best guess at an account's usage when nothing fresh is known (SB-98): its last
 /// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
 /// still below a full account — when it was never measured.

@@ -195,18 +195,23 @@ Account list order is display-only; it never selects/activates. Within provider/
 - **Cadence.** `switchboard_core::near_limit_check(usage, observed)` on the account-wide usage
   (`Usage::account_used_percent`, feature windows excluded): `NEAR_LIMIT_PERCENT` 95 →
   `CHECK_NEAR_LIMIT_SECONDS` 60; `AT_LIMIT_PERCENT` 98 → `CHECK_AT_LIMIT_SECONDS` 30, one pass
-  (LC-08 holds: nothing faster than the pass); 100 → none (full until a reset). Applied in
+  (LC-08 holds: nothing faster than the pass); 100 → none (full until a reset); both less
+  `NEAR_LIMIT_SLACK_SECONDS` (below). Applied in
   `observe_generation` as `min(next_quota_check, near_limit_check)`; response headers still
   never move the schedule.
 - **The next account.** `Store::pull_in_next_accounts(now)`: for each such pool whose current
   account was measured ≥ 95 % within ten minutes, or is held by a limit (`Store::limited`), the
-  account `failover_candidate` would take (OAuth, not held, not current) is due
-  `checked_at + 60` — only when that is sooner, only for `ok` health, in memory (`hold`, no
-  write; LC-08). The monitor calls it at most once a minute, as choosing reads the pool's stored
-  credentials.
+  account a failover would most likely take (`Store::next_to_check`: `failover_candidate`'s order
+  over enabled OAuth accounts with `ok` health, not held, not current — from metadata alone, no
+  credential read) is due `checked_at + 50` — only when that is sooner, in memory (`hold`, no
+  write; LC-08). The monitor calls it at most once a minute.
+- **Slack.** A check is stamped when its answer arrives, seconds after its pass began, so both
+  near-limit schedules are set `NEAR_LIMIT_SLACK_SECONDS` = 10 s early (50 s and 20 s after the
+  answer): they fall due on the pass they name — otherwise the 30-second step would run every
+  minute (found by review, 2026-10-12).
 - **Refused checks pace.** `UsageGate::refused_within(now, PACED_AFTER_REFUSAL_SECONDS = 3600)`
   — the accounts whose usage check the provider answered 429 in the last hour, memory only,
-  seeded from `usage-holds.json` at start, a time ahead of the clock counted from now — is handed
+  seeded at start from the holds in `usage-holds.json` that still apply (a refusal whose wait already ended before a restart is not remembered), a time ahead of the clock counted from now — is handed
   to `Store::set_paced` every pass; a paced account gets neither cadence nor a pull-in. Measured
   2026-10-06…12 on the operator's Mac: 1–33 refused checks a day at the 180-second cadence.
 - **No schema change**, no new log event, no analytics field. Tests
@@ -393,8 +398,23 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
   chain; a failed launch after an offer stops (the offer lapses).
 - **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
-  (SB-99, below). Other agents, and Kimi Code on a paid key, are skipped (`agent_not_automatic_yet`)
-  until their launch recipes and paid-key ceilings exist (SB-72, SB-73 phase 2).
+  (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
+  no account and no key pin runs when Hermes is installed, the key and its default model are saved
+  and the `switchboard` command exists (`launch::hermes_continuation_preflight`), never for a Hermes
+  executor; Hermes runs in `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a
+  `config.yaml` Switchboard writes: Observatory's MCP server, `auth.adopt_external_logins: false`),
+  the handoff prompt in `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600), Terminal running
+  `hermes chat --pass-session-id --query-file <prompt> --provider openrouter -m <model>` — on a
+  terminal that seeds an interactive session with the prompt as its first turn; the key is read
+  from `switchboard agents key --service openrouter` when the session starts, never written. Spend
+  is bounded by the key's own OpenRouter ceiling. Measured 2026-10-12 with Hermes 0.21.4: an empty
+  `HERMES_HOME` starts without the setup wizard, and the session lists
+  `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
+  Tests `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
+  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`. Other agents,
+  a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
+  (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
+  phase 2). A Hermes executor at its limit is not detected yet.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the

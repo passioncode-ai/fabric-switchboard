@@ -53,7 +53,7 @@
         "extra_env": {},
         "isolate_env": "HERMES_HOME",
         "default": true,
-        "notes": "`~/.hermes/.env` and `hermes auth` pool entries win over the launch's key, so the launch runs in its own `HERMES_HOME`; whether an empty home starts Hermes's setup wizard is unverified."
+        "notes": "`~/.hermes/.env` and `hermes auth` pool entries win over the launch's key, so the launch runs in its own `HERMES_HOME`; an empty home starts without the setup wizard (measured 2026-10-12, Hermes 0.21.4)."
       },
       "proxy_ok": true,
       "level": "proxy",
