@@ -1008,7 +1008,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Open the app for the first time → Accounts shows, above everything else on the screen, including the empty “Start with one account” state: “Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can get your account blocked. You are responsible for how you use your accounts.”
 2. *Dismiss* → the banner closes, focus returns to the page title, and the choice is saved; later starts do not show it on Accounts.
 3. Open About → the *Provider terms* panel shows the same text, dismissed or not.
-**Alt paths:** a window store that refuses to save → the banner closes for this run and shows again next start rather than never; Russian → «Пользуйтесь Switchboard в соответствии с правилами Anthropic и OpenAI. Нарушение правил провайдера может привести к блокировке аккаунта. Ответственность за использование аккаунтов несёте вы.»
+**Alt paths:** a window store that refuses to save → the banner closes for this run and shows again next start rather than never; Russian → «Пользуйтесь Switchboard в соответствии с условиями использования Anthropic и OpenAI. Нарушение условий провайдера может привести к блокировке аккаунта. Ответственность за то, как вы используете свои аккаунты, несёте вы.»
 **Expected result:** the notice is in sight on first run and while the first account is added, can be dismissed once, and stays readable in About; nothing else in the product repeats it.
 **UI elements:** the banner on Accounts (text, *Dismiss*), the About panel *Provider terms*.
 **States covered:** first start, dismissed, dismissal not saved, About.
