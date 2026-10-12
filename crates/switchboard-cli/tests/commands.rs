@@ -538,6 +538,8 @@ fn onboard_prints_the_guide_and_reads_the_setup_without_creating_storage() {
         ])
         .arg(tmp.path())
         .env("HOME", &home)
+        // Windows reads the home from USERPROFILE (SB-103).
+        .env("USERPROFILE", &home)
         .env_remove("CODEX_HOME")
         .output()
         .unwrap();

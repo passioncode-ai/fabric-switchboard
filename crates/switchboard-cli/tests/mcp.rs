@@ -272,7 +272,11 @@ async fn onboarding_reports_the_steps_and_the_first_answered_call_proves_the_con
     let mut agent = Agent::start(
         data.path(),
         projects.path(),
-        &[("HOME", home.path().to_str().unwrap())],
+        // Windows reads the home from USERPROFILE (SB-103), the rest from HOME.
+        &[
+            ("HOME", home.path().to_str().unwrap()),
+            ("USERPROFILE", home.path().to_str().unwrap()),
+        ],
         false,
     );
     agent.request(
