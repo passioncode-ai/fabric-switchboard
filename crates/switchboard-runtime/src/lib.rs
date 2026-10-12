@@ -1681,7 +1681,12 @@ async fn execute(
                     true,
                     &directory,
                 )?;
-                launch::hermes_continuation_preflight(&store)?;
+                // The model Hermes itself runs on OpenRouter, read off the async workers.
+                let own_model = tokio::task::spawn_blocking(hermes::openrouter_model)
+                    .await
+                    .ok()
+                    .flatten();
+                launch::hermes_continuation_preflight(&store, own_model.as_deref())?;
                 launch::agent_folder(root, &directory)?;
                 let observatory = continuation::observatory_mcp(&bin)?;
                 let offer = continuation::offer(&bin, &plan, &id)?;
@@ -1696,6 +1701,7 @@ async fn execute(
                     &store,
                     &directory,
                     &resumed,
+                    own_model.as_deref(),
                     launch::start_terminal,
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
@@ -1705,6 +1711,7 @@ async fn execute(
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
                     "model": launched["model"],
+                    "modelFrom": launched["model_from"],
                 }));
             }
             // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —

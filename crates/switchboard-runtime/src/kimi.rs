@@ -843,8 +843,17 @@ pub(crate) fn add_observatory(
 /// Everything the launch would refuse for the account is checked here, so a refusal moves a
 /// chain on instead of spending an offer that then lapses.
 pub fn continuation_preflight(root: &Path, store: &Store, id: &str) -> Result<(), String> {
+    continuation_preflight_with(root, store, id, find_program("kimi").as_deref())
+}
+/// `continuation_preflight` with the `kimi` found (or not), so tests need no installed Kimi.
+fn continuation_preflight_with(
+    root: &Path,
+    store: &Store,
+    id: &str,
+    program: Option<&Path>,
+) -> Result<(), String> {
     store.kimi_account(id)?;
-    find_program("kimi").ok_or(KIMI_NOT_INSTALLED)?;
+    program.ok_or(KIMI_NOT_INSTALLED)?;
     if !signed_in(root, store, id) {
         return Err(KIMI_SIGNED_OUT.into());
     }
@@ -1543,12 +1552,24 @@ mod tests {
             previous_provider: Some("claude".into()),
         };
         let program = Path::new("/opt/kimi");
+        // Nothing is offered without a `kimi` to run it (found by review, SB-107).
         assert_eq!(
-            continuation_preflight(&root, &store, &id).unwrap_err(),
+            continuation_preflight_with(&root, &store, &id, None).unwrap_err(),
+            KIMI_NOT_INSTALLED
+        );
+        assert_eq!(
+            continuation_preflight_with(&root, &store, &id, Some(program)).unwrap_err(),
             KIMI_SIGNED_OUT
         );
         signed_in(&home, "kimi-code.json", "synthetic-access", NOW);
-        continuation_preflight(&root, &store, &id).unwrap();
+        continuation_preflight_with(&root, &store, &id, Some(program)).unwrap();
+        // An `mcp.json` the launch could not extend refuses before the offer too.
+        fs::write(home.join("mcp.json"), b"{not json").unwrap();
+        assert_eq!(
+            continuation_preflight_with(&root, &store, &id, Some(program)).unwrap_err(),
+            KIMI_MCP_UNREADABLE
+        );
+        fs::remove_file(home.join("mcp.json")).unwrap();
         launch_continuation_with(
             &root,
             &store,
@@ -1583,7 +1604,7 @@ mod tests {
             serde_json::from_slice(&fs::read(session.join(SESSION_RECORD)).unwrap()).unwrap();
         assert_eq!(record["continues"], "wf_0123456789abcdef");
         assert_eq!(
-            continuation_preflight(&root, &store, &id).unwrap_err(),
+            continuation_preflight_with(&root, &store, &id, Some(program)).unwrap_err(),
             KIMI_SESSION_RUNNING,
             "one kimi per account folder"
         );

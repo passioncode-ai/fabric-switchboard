@@ -1542,9 +1542,22 @@ pub const OPENROUTER_CLI_MISSING: &str =
 /// Printed when a continuation's first turn ended in an error: nothing was resumed.
 #[cfg(not(windows))]
 const FIRST_TURN_FAILED: &str = "The first turn did not finish, so the handoff may not have been accepted. Nothing was resumed; run switchboard continue again or open the workflow by hand.";
+/// Whether a `hermes` chain step can be tried (SB-107): Hermes installed, an OpenRouter key saved,
+/// the `switchboard` command present for the session script. The model is settled at the
+/// hand-over (`hermes_continuation_preflight`), which refuses before the offer.
+pub(crate) fn hermes_continuation_ready(store: &Store) -> bool {
+    !cfg!(windows)
+        && find_program("hermes").is_some()
+        && store.agent_key("openrouter").ok().flatten().is_some()
+        && agent_cli().is_some()
+}
 /// What refuses a Hermes continuation before anything is offered (SB-107): Hermes not installed,
-/// no saved OpenRouter key or no model for it, no `switchboard` command for the session script.
-pub(crate) fn hermes_continuation_preflight(store: &Store) -> Result<(), String> {
+/// no saved OpenRouter key, no model — neither Hermes's own OpenRouter model (`own_model`) nor
+/// the key's default — or no `switchboard` command for the session script.
+pub(crate) fn hermes_continuation_preflight(
+    store: &Store,
+    own_model: Option<&str>,
+) -> Result<(), String> {
     if cfg!(windows) {
         return Err(crate::continuation::UNIX_ONLY.into());
     }
@@ -1552,29 +1565,40 @@ pub(crate) fn hermes_continuation_preflight(store: &Store) -> Result<(), String>
     let saved = store
         .agent_key("openrouter")?
         .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
-    saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
+    if own_model.is_none() && saved.model.is_none() {
+        return Err(OPENROUTER_MODEL_NEEDED.into());
+    }
     agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
     Ok(())
 }
-/// Continues an Observatory workflow on Hermes Agent with the saved OpenRouter key and its model
-/// (SB-107). Hermes runs in a home Switchboard owns (`runtimes/hermes-continue/agent-home`, its
+/// Continues an Observatory workflow on Hermes Agent with the saved OpenRouter key (SB-107), on
+/// the model Hermes itself runs on OpenRouter (`own_model`), else the key's default model. Hermes runs in a home Switchboard owns (`runtimes/hermes-continue/agent-home`, its
 /// `HERMES_HOME`): its `config.yaml` is Switchboard's — Observatory's MCP server, so the session
 /// can accept the handoff, and no adoption of other tools' logins. Terminal runs
-/// `hermes chat --pass-session-id --query-file <prompt>`, which on a terminal seeds an interactive session with the
-/// handoff prompt as its first turn (Hermes 0.21.4). The key is read when the session starts,
+/// `hermes chat --query-file <prompt>`, which on a terminal seeds an interactive session with the
+/// handoff prompt as its first turn (Hermes 0.21.4). The prompt names the owner and a session id
+/// Switchboard made (Observatory wants a UUID; Hermes's own ids are not one). The key is read when the session starts,
 /// never written (as `launch_agent_openrouter`).
 pub(crate) fn hermes_continuation(
     root: &Path,
     store: &Store,
     working_directory: &Path,
     continuation: &crate::continuation::Continuation,
+    own_model: Option<&str>,
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
-    hermes_continuation_preflight(store)?;
+    hermes_continuation_preflight(store, own_model)?;
     let program = find_program("hermes").ok_or(crate::hermes::HERMES_NOT_INSTALLED)?;
     let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
-    let (path, result) =
-        hermes_continuation_session(root, store, &program, &cli, working_directory, continuation)?;
+    let (path, result) = hermes_continuation_session(
+        root,
+        store,
+        &program,
+        &cli,
+        working_directory,
+        continuation,
+        own_model,
+    )?;
     start(&path)?;
     Ok(result)
 }
@@ -1586,6 +1610,7 @@ fn hermes_continuation_session(
     cli: &Path,
     working_directory: &Path,
     continuation: &crate::continuation::Continuation,
+    own_model: Option<&str>,
 ) -> Result<(PathBuf, Value), String> {
     #[cfg(windows)]
     {
@@ -1600,7 +1625,10 @@ fn hermes_continuation_session(
         let saved = store
             .agent_key("openrouter")?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
-        let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
+        let (model, model_from) = match own_model {
+            Some(m) if switchboard_core::agent_keys::model_valid(m) => (m.to_owned(), "hermes"),
+            _ => (saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?, "key"),
+        };
         let recipe = crate::agent_catalog::openrouter("hermes")?;
         let base = root.join("runtimes").join("hermes-continue");
         private_dir(&root.join("runtimes"))?;
@@ -1616,24 +1644,19 @@ fn hermes_continuation_session(
         let session = base.join(&continuation.workflow_id);
         private_dir(&session)?;
         let prompt = session.join("handoff-prompt.txt");
-        private_write(
-            &prompt,
-            crate::continuation::prompt(continuation).as_bytes(),
-            false,
-        )?;
+        let session_id = uuid::Uuid::new_v4();
+        let first = format!(
+            "{} In every Observatory call use owner agent:hermes and sessionId {session_id}.",
+            crate::continuation::prompt(continuation)
+        );
+        private_write(&prompt, first.as_bytes(), false)?;
         let mut env = BTreeMap::new();
         if let Some(isolate) = &recipe.isolate_env {
             env.insert(isolate.clone(), own.to_string_lossy().into_owned());
         }
         env.extend(recipe.extra_env.clone());
         let prompt = prompt.to_string_lossy().into_owned();
-        // `--pass-session-id`: the prompt asks for this session's own id at acceptance.
-        let mut args = vec![
-            "chat".to_string(),
-            "--pass-session-id".into(),
-            "--query-file".into(),
-            prompt,
-        ];
+        let mut args = vec!["chat".to_string(), "--query-file".into(), prompt];
         args.extend(
             recipe
                 .model_flag
@@ -1661,7 +1684,7 @@ fn hermes_continuation_session(
         let path = write_launch_script(&session, &content)?;
         Ok((
             path,
-            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model}),
+            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from}),
         ))
     }
 }
@@ -3151,6 +3174,7 @@ mod tests {
                 Path::new("/opt/Switchboard Tools/switch'board"),
                 &f.project,
                 &continuation,
+                None,
             )
         };
         assert_eq!(
@@ -3162,13 +3186,14 @@ mod tests {
         openrouter_key(&f, Some("moonshotai/kimi-k2"));
         let (path, answer) = session(&f).unwrap();
         assert_eq!(answer["model"], "moonshotai/kimi-k2");
+        assert_eq!(answer["model_from"], "key");
         let base = f.root.join("runtimes/hermes-continue");
         assert!(path.starts_with(base.join("wf_0123456789abcdef")));
         let text = fs::read_to_string(&path).unwrap();
         assert!(!text.contains("sk-or-"), "the key reached the script");
         let prompt = base.join("wf_0123456789abcdef/handoff-prompt.txt");
         assert!(text.contains(&format!(
-            "exec '/opt/Agent Tools/hermes' 'chat' '--pass-session-id' '--query-file' {} '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'",
+            "exec '/opt/Agent Tools/hermes' 'chat' '--query-file' {} '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'",
             quote(prompt.to_string_lossy().as_ref())
         )));
         assert!(text.contains(&format!(
@@ -3185,6 +3210,28 @@ mod tests {
             .success());
         let first = fs::read_to_string(&prompt).unwrap();
         assert!(first.contains("ho_synthetic") && first.contains("wf_0123456789abcdef"));
+        // The owner and a UUID session id are named: Hermes's own ids are not UUIDs.
+        let id = first
+            .split("sessionId ")
+            .last()
+            .unwrap()
+            .trim_end_matches('.');
+        assert!(first.contains("owner agent:hermes") && uuid::Uuid::parse_str(id).is_ok());
+        // Hermes's own OpenRouter model wins over the key's default.
+        let (path, answer) = hermes_continuation_session(
+            &f.root,
+            &f.store,
+            Path::new("/opt/Agent Tools/hermes"),
+            Path::new("/opt/Switchboard Tools/switch'board"),
+            &f.project,
+            &continuation,
+            Some("deepseek/deepseek-v4-pro-0813"),
+        )
+        .unwrap();
+        assert_eq!(answer["model_from"], "hermes");
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("'-m' 'deepseek/deepseek-v4-pro-0813'"));
         let config = fs::read_to_string(base.join("agent-home/config.yaml")).unwrap();
         assert!(config.contains("adopt_external_logins: false"));
         assert!(config.contains("command: \"/opt/Engine \\\"Tools\\\"/python\""));
@@ -3205,7 +3252,8 @@ mod tests {
             Path::new("/bin/true"),
             Path::new("/bin/true"),
             &f.project,
-            &bad
+            &bad,
+            None
         )
         .is_err());
         assert!(hermes_continuation_session(
@@ -3214,7 +3262,8 @@ mod tests {
             Path::new("/bin/true"),
             Path::new("/bin/true"),
             &f.root,
-            &continuation
+            &continuation,
+            None
         )
         .is_err());
     }
