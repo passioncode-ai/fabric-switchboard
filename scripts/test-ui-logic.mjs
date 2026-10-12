@@ -38,7 +38,7 @@ check(() => {
 });
 // SB-98: a hidden limit says so first; the provider's reason reads in words.
 check(() => {
-  assert.equal(logic.limitTitle({ source: 'claude_code', hidden: true }), 'Hidden limit · refused although the usage figures show room');
+  assert.equal(logic.limitTitle({ source: 'claude_code', hidden: true }), 'Hidden personal limit · refused although the usage figures show room');
   assert.equal(logic.limitTitle({ source: 'managed' }), 'Limit reached · a managed request was refused');
   assert.equal(logic.limitTitle({ source: 'claude_code', hidden: false }), 'Limit reached · reported by Claude Code');
   assert.match(logic.limitReasonText('org_spend_cap_reached'), /spend cap/);

@@ -1229,6 +1229,47 @@ mod tests {
         );
     }
     #[test]
+    fn a_session_limit_with_the_usage_figures_below_full_is_read_with_its_reset() {
+        // SB-106: Claude Code's "You've hit your session limit · resets 6:40pm" as its transcript
+        // carries it (shape seen on this machine 2026-10-09, fields only): the reset comes from
+        // `quotaLimits.resetsAt`, never from the wording, and the extra `apiError` fields change
+        // nothing.
+        let line = serde_json::json!({"type": "assistant", "isApiErrorMessage": true,
+            "error": "rate_limit", "apiErrorStatus": 429, "apiError": "usage_limit_reached",
+            "timestamp": rfc(NOW - 10),
+            "apiErrorParams": {"rate_limit_info": {"status": "rejected", "resetsAt": NOW + 7200,
+                "rateLimitType": "five_hour", "overageDisabledReason": "org_level_disabled_until"}},
+            "quotaLimits": {"status": "rejected", "resetsAt": NOW + 7200,
+                "unifiedRateLimitFallbackAvailable": false, "rateLimitType": "five_hour",
+                "overageStatus": "rejected", "overageDisabledReason": "org_spend_cap_reached",
+                "upgradePaths": ["overage"], "isUsingOverage": false}})
+        .to_string();
+        let (_, reset, kind, reason) = marker(line.as_bytes(), NOW - 60, NOW).unwrap();
+        assert_eq!(
+            (reset, kind.as_deref(), reason.as_deref()),
+            (
+                Some(NOW + 7200),
+                Some("five_hour"),
+                Some("org_spend_cap_reached")
+            )
+        );
+        assert!(quota_window("five_hour"), "a five-hour window is a quota");
+        // At 97 % the figures still showed room: the limit is hidden.
+        let account: switchboard_core::Account = serde_json::from_value(serde_json::json!({
+            "id": "id-a", "label": "a", "provider": "claude", "kind": "oauth", "pool": "default",
+            "enabled": true, "created_at": 1,
+            "usage": {"used_percent": 97.0, "observed_at": NOW - 5, "resets_at": NOW + 7200,
+                "source": "claude_oauth",
+                "windows": [{"name": "five_hour", "used_percent": 97.0, "resets_at": NOW + 7200}]}
+        }))
+        .unwrap();
+        let snapshot = Snapshot {
+            accounts: vec![account],
+            ..Default::default()
+        };
+        assert!(shows_room(&snapshot, "id-a", kind.as_deref(), NOW));
+    }
+    #[test]
     fn a_refused_managed_request_holds_its_account_at_once_until_the_reset() {
         // SB-98: no second refusal is waited for; a full window gives the provider's reset.
         let account = |id: &str, used: f64, reset: i64| -> switchboard_core::Account {

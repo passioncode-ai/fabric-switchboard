@@ -458,7 +458,7 @@ export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'poo
 }
 /** SB-98: what a limit row says — a hidden limit (refused while the usage figures showed room) first. */
 export function limitTitle(limit: Pick<AccountLimit, 'source' | 'hidden'>): string {
-  if (limit.hidden) return t('Hidden limit · refused although the usage figures show room');
+  if (limit.hidden) return t('Hidden personal limit · refused although the usage figures show room');
   return limit.source === 'managed' ? t('Limit reached · a managed request was refused') : t('Limit reached · reported by Claude Code');
 }
 /** SB-98: the provider's reason for refusing more, in words; null when none was given. */

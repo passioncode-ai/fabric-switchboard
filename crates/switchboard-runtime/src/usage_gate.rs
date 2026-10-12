@@ -126,6 +126,10 @@ pub(crate) struct UsageGate {
     /// The version last written; held while writing, so writes never overlap or go backwards.
     written: Mutex<u64>,
     slots: Mutex<HashMap<String, Arc<Slot>>>,
+    /// When the provider last refused each account's usage check (SB-106): such an account is
+    /// not checked faster near its limit for a while. Memory only, seeded from the holds read
+    /// at start.
+    refused_at: Mutex<HashMap<String, i64>>,
     /// Synthetic usage endpoints for tests; production always uses the fixed provider origins.
     #[cfg(test)]
     pub(crate) origins: Mutex<Option<(String, String)>>,
@@ -149,6 +153,10 @@ impl UsageGate {
                     .filter_map(|(id, hold)| sane(hold.clone(), now).map(|h| (id, h)))
                     .collect();
                 let changed = kept.len() != loaded;
+                lock(&gate.refused_at).extend(
+                    kept.iter()
+                        .map(|(id, hold)| (id.clone(), hold.recorded_at.min(now))),
+                );
                 let snapshot = {
                     let mut holds = lock(&gate.holds);
                     holds.by_account = kept;
@@ -220,7 +228,25 @@ impl UsageGate {
             );
             Some(self.changed(&mut holds))
         };
+        lock(&self.refused_at).insert(id.to_owned(), recorded_at);
         self.write(snapshot);
+    }
+
+    /// The accounts whose usage check the provider refused less than `window` seconds before
+    /// `now` (SB-106). A refusal stamped ahead of a clock that was set back counts from `now`.
+    pub(crate) fn refused_within(
+        &self,
+        now: i64,
+        window: i64,
+    ) -> std::collections::HashSet<String> {
+        let mut refused = lock(&self.refused_at);
+        for at in refused.values_mut() {
+            if *at > now {
+                *at = now;
+            }
+        }
+        refused.retain(|_, at| now.saturating_sub(*at) < window);
+        refused.keys().cloned().collect()
     }
 
     /// True while a hold for `id` has not passed — without reading any credential, for the
@@ -278,6 +304,7 @@ impl UsageGate {
     pub(crate) fn forget_missing<'a>(&self, accounts: impl IntoIterator<Item = &'a str>) {
         let present: std::collections::HashSet<&str> = accounts.into_iter().collect();
         lock(&self.slots).retain(|id, _| present.contains(id.as_str()));
+        lock(&self.refused_at).retain(|id, _| present.contains(id.as_str()));
         let snapshot = {
             let mut holds = lock(&self.holds);
             let before = holds.by_account.len();
@@ -370,6 +397,32 @@ mod tests {
             !UsageGate::kept_in(file(&root), 5_001).has_hold("id-a"),
             "and stays dropped"
         );
+    }
+
+    #[test]
+    fn a_refused_account_is_paced_for_a_while_across_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let a = credential("synthetic-a");
+        let gate = UsageGate::kept_in(file(&root), 1_000);
+        assert!(gate.refused_within(1_000, 3_600).is_empty());
+        gate.hold("id-a", &a, 1_000, 1_900);
+        // Paced for the window, past the provider's own wait.
+        assert!(gate.held("id-a", 1_899));
+        assert!(!gate.held("id-a", 1_900));
+        assert!(gate.refused_within(4_599, 3_600).contains("id-a"));
+        assert!(gate.refused_within(4_600, 3_600).is_empty());
+        // A restart while a hold applies learns the refusal from the file.
+        gate.hold("id-b", &a, 10_000, 10_900);
+        let restarted = UsageGate::kept_in(file(&root), 10_100);
+        assert!(restarted.refused_within(10_100, 3_600).contains("id-b"));
+        // A refusal stamped ahead of a clock set back counts from now, not from the future.
+        restarted.hold("id-c", &a, 90_000, 90_900);
+        assert!(restarted.refused_within(20_000, 3_600).contains("id-c"));
+        assert!(!restarted.refused_within(23_600, 3_600).contains("id-c"));
+        // A removed account is forgotten.
+        restarted.hold("id-d", &a, 30_000, 30_900);
+        restarted.forget_missing(std::iter::empty());
+        assert!(restarted.refused_within(30_001, 3_600).is_empty());
     }
 
     #[test]

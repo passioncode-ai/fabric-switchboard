@@ -23,6 +23,9 @@ const CHECKS_PER_PASS: usize = 4;
 const FLUSH_SECONDS: i64 = 900;
 /// A renewal that did not happen is tried again after this long, not on every pass.
 const RENEW_RETRY_SECONDS: i64 = 60;
+/// SB-106: an account whose usage check the provider refused keeps the ordinary cadence for
+/// this long after the refusal, near its limit or not.
+pub(crate) const PACED_AFTER_REFUSAL_SECONDS: i64 = 3600;
 
 pub fn now() -> i64 {
     SystemTime::now()
@@ -94,6 +97,9 @@ pub(crate) struct Pass {
     swap_was_running: Option<bool>,
     swap_last_signature: Option<(u64, u64, u128)>,
     renew: RenewSchedule,
+    /// When the pool's next accounts were last brought forward (SB-106): at most once a minute,
+    /// as choosing one reads the pool's credentials.
+    last_pull_in: i64,
 }
 /// When each inactive Claude account's token comes due, learned from the vault only when the
 /// store's credentials changed — not by reading every credential on every pass (LC-08).
@@ -117,6 +123,17 @@ impl Pass {
             let _ = runtime.maybe_backup(time, false);
         }
         scan_limits(runtime, claude, time);
+        // SB-106: near its limit the account a session works on is checked sooner, and the
+        // pool's next account every minute — never one whose checks the provider refused lately.
+        runtime.store.set_paced(
+            runtime
+                .usage_gate
+                .refused_within(time, PACED_AFTER_REFUSAL_SECONDS),
+        );
+        if time.abs_diff(self.last_pull_in) >= switchboard_core::CHECK_NEAR_LIMIT_SECONDS as u64 {
+            let _ = runtime.store.pull_in_next_accounts(time);
+            self.last_pull_in = time;
+        }
         let Ok(snapshot) = runtime.store.snapshot() else {
             return;
         };

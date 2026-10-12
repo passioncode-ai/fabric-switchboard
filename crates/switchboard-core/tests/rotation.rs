@@ -1135,6 +1135,122 @@ fn becoming_the_account_in_use_pulls_its_check_in_without_a_write() {
     assert_eq!(next_check(&store, &target), now + CHECK_ACTIVE_SECONDS);
 }
 
+#[test]
+fn the_account_a_session_works_on_is_checked_sooner_near_its_limit() {
+    use switchboard_core::{
+        near_limit_check, CHECK_ACTIVE_SECONDS, CHECK_AT_LIMIT_SECONDS, CHECK_IDLE_SECONDS,
+        CHECK_NEAR_LIMIT_SECONDS,
+    };
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    // The managed route of a pool with no policy: a failover can move it (SB-98).
+    let routed = account_in(&store, "org-routed", "routed", now);
+    let spare = account_in(&store, "org-spare", "routed", now);
+    store.select(Provider::Claude, "routed", &routed).unwrap();
+    let cases = [
+        (94.9, CHECK_ACTIVE_SECONDS),
+        (95., CHECK_NEAR_LIMIT_SECONDS),
+        (97.9, CHECK_NEAR_LIMIT_SECONDS),
+        (98., CHECK_AT_LIMIT_SECONDS),
+        (99.9, CHECK_AT_LIMIT_SECONDS),
+        // Full until a reset: nothing a sooner check could change before then.
+        (100., CHECK_ACTIVE_SECONDS),
+    ];
+    for (n, (used, cadence)) in cases.into_iter().enumerate() {
+        let at = now + n as i64;
+        observe(&store, &routed, used, at);
+        assert_eq!(next_check(&store, &routed), at + cadence, "{used} %");
+    }
+    // Another account of the pool near its limit is not the one a session works on.
+    observe(&store, &spare, 97., now);
+    assert_eq!(next_check(&store, &spare), now + CHECK_IDLE_SECONDS);
+    // A feature window does not stand for the account (SB-40).
+    let mut feature = usage_resetting(now, &[Some(now + 3600)]);
+    feature.windows[0].name = "feature_review_primary".into();
+    feature.windows[0].used_percent = 99.;
+    assert_eq!(near_limit_check(&feature, now), None);
+
+    // The ordinary CLI's account: sooner only where a policy can switch it.
+    let native = account_in(&store, "org-native", "native", now);
+    let mate = account_in(&store, "org-mate", "native", now);
+    store.select(Provider::Claude, "native", &mate).unwrap();
+    store.set_in_use(Default::default()).unwrap();
+    store.set_in_use([native.clone()].into()).unwrap();
+    observe(&store, &native, 96., now + 10);
+    assert_eq!(next_check(&store, &native), now + 10 + CHECK_ACTIVE_SECONDS);
+    let mut native_policy = policy();
+    native_policy.pool = "native".into();
+    store.set_policy(native_policy).unwrap();
+    observe(&store, &native, 96., now + 20);
+    assert_eq!(
+        next_check(&store, &native),
+        now + 20 + CHECK_NEAR_LIMIT_SECONDS
+    );
+
+    // An account whose checks the provider refused lately keeps the ordinary cadence.
+    store.set_paced([routed.clone()].into());
+    observe(&store, &routed, 99., now + 30);
+    assert_eq!(next_check(&store, &routed), now + 30 + CHECK_ACTIVE_SECONDS);
+    store.set_paced(Default::default());
+    observe(&store, &routed, 99., now + 40);
+    assert_eq!(
+        next_check(&store, &routed),
+        now + 40 + CHECK_AT_LIMIT_SECONDS
+    );
+}
+
+#[test]
+fn the_pools_next_account_is_checked_every_minute_while_the_current_one_nears_its_limit() {
+    use switchboard_core::{CHECK_IDLE_SECONDS, CHECK_NEAR_LIMIT_SECONDS};
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let current = account_in(&store, "org-current", "work", now);
+    let next = account_in(&store, "org-next", "work", now);
+    let fuller = account_in(&store, "org-fuller", "work", now);
+    let elsewhere = account_in(&store, "org-elsewhere", "other", now);
+    store.select(Provider::Claude, "work", &current).unwrap();
+    observe(&store, &current, 50., now);
+    observe(&store, &next, 30., now);
+    observe(&store, &fuller, 60., now);
+    observe(&store, &elsewhere, 10., now);
+    assert_eq!(
+        store.pull_in_next_accounts(now + 5).unwrap(),
+        0,
+        "far from the limit"
+    );
+    assert_eq!(next_check(&store, &next), now + CHECK_IDLE_SECONDS);
+
+    store.flush().unwrap();
+    let writes = store.metadata_writes();
+    observe(&store, &current, 96., now + 10);
+    let writes = writes.max(store.metadata_writes());
+    assert_eq!(store.pull_in_next_accounts(now + 10).unwrap(), 1);
+    // The least used other account, a minute after its last check — in memory only.
+    assert_eq!(next_check(&store, &next), now + CHECK_NEAR_LIMIT_SECONDS);
+    assert_eq!(next_check(&store, &fuller), now + CHECK_IDLE_SECONDS);
+    assert_eq!(next_check(&store, &elsewhere), now + CHECK_IDLE_SECONDS);
+    assert_eq!(store.metadata_writes(), writes, "timestamps stay in memory");
+    // Asking again moves nothing more.
+    assert_eq!(store.pull_in_next_accounts(now + 20).unwrap(), 0);
+
+    // A current account a limit holds counts as near, whatever its figures say.
+    observe(&store, &current, 40., now + 30);
+    observe(&store, &next, 30., now + 30);
+    assert_eq!(store.pull_in_next_accounts(now + 30).unwrap(), 0);
+    store.set_limited([current.clone()].into());
+    assert_eq!(store.pull_in_next_accounts(now + 31).unwrap(), 1);
+    assert_eq!(
+        next_check(&store, &next),
+        now + 30 + CHECK_NEAR_LIMIT_SECONDS
+    );
+
+    // A next account whose checks the provider refused lately is left on its schedule.
+    observe(&store, &next, 30., now + 40);
+    store.set_paced([next.clone()].into());
+    assert_eq!(store.pull_in_next_accounts(now + 41).unwrap(), 0);
+    assert_eq!(next_check(&store, &next), now + 40 + CHECK_IDLE_SECONDS);
+}
+
 // Projects (0.6): a project reserves a pool for its folders.
 #[test]
 fn a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out() {
