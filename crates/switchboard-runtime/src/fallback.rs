@@ -234,9 +234,13 @@ pub(crate) fn executor_limited(
 ) -> Option<(Provider, Option<String>)> {
     let provider =
         continuation::executor_provider(executor.get("provider").and_then(Value::as_str)?)?;
-    if let Some(id) = executor.get("accountRef").and_then(Value::as_str) {
-        return (snapshot.accounts.iter().any(|a| a.id == id) && limited.contains(id))
-            .then(|| (provider, Some(id.to_owned())));
+    if let Some(reference) = executor.get("accountRef").and_then(Value::as_str) {
+        return snapshot
+            .accounts
+            .iter()
+            .find(|a| continuation::names_account(reference, &a.id))
+            .filter(|a| limited.contains(&a.id))
+            .map(|a| (provider, Some(a.id.clone())));
     }
     if launched(provider) {
         return None;
@@ -264,11 +268,15 @@ pub(crate) fn kimi_executor_limited(
     kimi_limited: &HashSet<String>,
 ) -> Option<String> {
     let name = executor.get("provider").and_then(Value::as_str)?;
-    let id = executor.get("accountRef").and_then(Value::as_str)?;
-    (continuation::executor_is_kimi(name)
-        && kimi_ids.iter().any(|k| k == id)
-        && kimi_limited.contains(id))
-    .then(|| id.to_owned())
+    let reference = executor.get("accountRef").and_then(Value::as_str)?;
+    if !continuation::executor_is_kimi(name) {
+        return None;
+    }
+    kimi_ids
+        .iter()
+        .find(|k| continuation::names_account(reference, k))
+        .filter(|k| kimi_limited.contains(*k))
+        .cloned()
 }
 
 impl FallbackState {
@@ -869,6 +877,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_executor_named_by_its_handle_is_found_and_judged() {
+        // Hand-overs since 0.6.22 name the account by its handle (`continuation::account_ref`).
+        let id = "3e7b8cf7-dab5-4d23-bb8f-5a690887db98";
+        let snapshot = Snapshot {
+            accounts: vec![account(id, Provider::Claude, Some(100.0))],
+            ..Default::default()
+        };
+        let limited: HashSet<String> = [id.to_string()].into();
+        let handle = continuation::account_ref(id);
+        let executor = json!({"provider": "claude-code", "accountRef": handle});
+        assert_eq!(
+            executor_limited(&executor, &snapshot, &Value::Null, &limited, &|_| false),
+            Some((Provider::Claude, Some(id.to_owned())))
+        );
+        let kimi = json!({"provider": "kimi", "accountRef": handle});
+        assert_eq!(
+            kimi_executor_limited(&kimi, &[id.to_owned()], &limited),
+            Some(id.to_owned())
+        );
+        assert_eq!(
+            kimi_executor_limited(&kimi, &[id.to_owned()], &HashSet::new()),
+            None
+        );
+    }
     #[test]
     fn the_executor_is_limited_by_its_account_or_by_the_cli_it_runs_in() {
         let snapshot = Snapshot {
