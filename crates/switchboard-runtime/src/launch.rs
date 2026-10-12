@@ -2744,6 +2744,22 @@ mod tests {
         );
         assert_eq!(login_state(&adopted[1]), "complete");
         assert_eq!(login_state(&adopted[0]), "pending");
+        // SB-103: the owner orders them by when they began, from the journal.
+        assert_eq!(
+            (login_started(&adopted[1]), login_started(&adopted[0])),
+            (10, 20)
+        );
+        // SB-103: once its account is saved, a sign-in is never taken back again, even while
+        // its folder is still there.
+        forget_login_journal(&adopted[1]);
+        assert_eq!(
+            adopt_logins(root.path())
+                .iter()
+                .map(|l| l.label.as_str())
+                .collect::<Vec<_>>(),
+            ["Studio"]
+        );
+        journal(&completed, "codex", "Team", 10);
 
         let sweep = sweep_logins_with(
             root.path(),

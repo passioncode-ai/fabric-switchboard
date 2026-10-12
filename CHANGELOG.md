@@ -16,6 +16,12 @@ picked again in the same moment; an account set aside after a failed switch is n
 limited once it is in use; a model's weekly limit no longer holds the whole account; automatic
 hand-over never picks another project's account.
 
+**Sign-ins and sessions tie up their loose ends** (SB-103). A sign-in whose account was saved is
+never offered again after a restart; a sign-in that has just begun is never swept away as a
+leftover; the Sessions list names Kimi accounts and never stalls other requests; a Kimi re-sign-in
+no longer shows the previous session, one Kimi account that cannot be read no longer blanks the
+others, and `switchboard onboard --status` finds the home on Windows.
+
 ## 0.6.17 — 2026-10-12
 
 **Agents keep working when an account hits a limit** (SB-98). A managed session's request the

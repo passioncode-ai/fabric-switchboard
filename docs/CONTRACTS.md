@@ -225,6 +225,29 @@ and closed here:
 - Not changed: an ordinary (native) Claude Code session whose turn already ended on a limit does
   not resume by itself — run agents in managed mode for no pauses.
 
+## Sign-ins, sessions and Kimi without loose ends (SB-103, 2026-10-12)
+
+From the same review, the second part:
+
+- **A saved sign-in is never taken back.** `finish_login` removes the sign-in's journal
+  (`forget_login_journal`) before its folder; a restart that finds the folder still there no longer
+  offers to finish it again, which would have written its first credential over a newer one.
+- **Pending sign-ins in the order they began.** The owner lists them by their journal's
+  `started_at` (`login_started`), oldest first, so a window restoring one banner takes the newest.
+- **The start-up sweep leaves young folders alone.** `sweep_logins` skips a sign-in folder made in
+  the last 60 s: the sweep runs beside a starting owner, and a sign-in begun right then is not a
+  leftover.
+- **Sessions off the async workers, Kimi labelled.** `Operation::Sessions` runs the liveness
+  checks (`kill -0`, `ps`) through `blocking::run`, and a Kimi session carries its account's label.
+- **Kimi.** A re-sign-in removes the folder's last session record (a sign-in is not a session);
+  one account's failed status task leaves `KIMI_UNREACHABLE` on its own row only; the shared HTTP
+  client is built again after a failure instead of failing for the life of the process.
+- **Onboarding on Windows.** `switchboard onboard --status` reads the home from `USERPROFILE` on
+  Windows.
+- Tests: `a_sign_in_folder_made_a_moment_ago_is_never_swept`, and the extended
+  `a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep` (order, and a forgotten
+  journal is not taken back).
+
 ## Failover without side effects (SB-102, 2026-10-12)
 
 A review on 2026-10-12 (three independent readings of the switching core) found SB-98's failover
