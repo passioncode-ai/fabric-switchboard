@@ -34,6 +34,8 @@ pub const KIMI_LOGIN_PENDING: &str = "Finish the Kimi Code sign-in in Terminal f
 pub const KIMI_LOGIN_EMPTY: &str =
     "The Kimi Code sign-in did not save a login. Start it again and complete it in the browser.";
 pub const KIMI_LOGIN_UNKNOWN: &str = "This Kimi Code sign-in is no longer waiting. Start it again.";
+/// The same sentence Claude and Codex sign-ins give at their cap (`launch::MAX_LOGINS`).
+pub const LOGINS_WAITING: &str = "Finish an existing sign-in before starting another.";
 pub const KIMI_SIGNED_OUT: &str = "This account is signed out. Sign in to it again.";
 pub const KIMI_TOKEN_STALE: &str =
     "Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.";
@@ -403,6 +405,10 @@ fn begin_login_with(
     if label.len() > 80 || label.chars().any(char::is_control) {
         return Err("Enter a label of up to 80 characters.".into());
     }
+    // SB-99: at most as many waiting Kimi sign-ins as Claude and Codex ones.
+    if waiting_logins(root) >= crate::launch::MAX_LOGINS {
+        return Err(LOGINS_WAITING.into());
+    }
     private_dir(&homes(root))?;
     let id = Uuid::new_v4().to_string();
     let home = home(root, &id)?;
@@ -434,6 +440,59 @@ fn begin_login_with(
         return Err(error);
     }
     Ok(json!({"login_id": id, "state": "pending"}))
+}
+
+/// The unsaved sign-in homes under `<data>/kimi/`: UUID-named folders with a sign-in marker. A
+/// saved account's marker is gone once it is saved, so an account is never one of them.
+fn login_homes(root: &Path) -> Vec<(String, PathBuf)> {
+    let Ok(entries) = fs::read_dir(homes(root)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| {
+            let id = e.file_name().to_str()?.to_owned();
+            (Uuid::parse_str(&id).map(|u| u.to_string()).ok()? == id).then_some(id)
+        })
+        .filter_map(|id| {
+            let home = home(root, &id).ok()?;
+            login_marker(&home).is_file().then_some((id, home))
+        })
+        .collect()
+}
+
+/// Sign-ins still waiting: open in Terminal, or completed there and not yet saved.
+fn waiting_logins(root: &Path) -> usize {
+    login_homes(root)
+        .into_iter()
+        .filter(|(id, _)| login_state(root, id) != "ended")
+        .count()
+}
+
+/// Removes the Kimi sign-in homes an earlier owner left behind whose `kimi login` ended without
+/// signing in (SB-99): never a saved account, never one still open in Terminal, never one that
+/// completed (`switchboard kimi finish <id>` can still save it), never a folder younger than
+/// `min_age` (a sign-in just beginning). Runs once, at an owner's start. Returns how many went.
+pub fn sweep_logins(root: &Path, store: &Store) -> usize {
+    sweep_logins_older(root, store, Duration::from_secs(60))
+}
+fn sweep_logins_older(root: &Path, store: &Store, min_age: Duration) -> usize {
+    let mut removed = 0;
+    for (id, home) in login_homes(root) {
+        let young = fs::symlink_metadata(&home)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+            .is_none_or(|age| age < min_age);
+        if young || store.kimi_account(&id).is_ok() || login_state(root, &id) != "ended" {
+            continue;
+        }
+        if fs::remove_dir_all(&home).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// `pending` while Terminal runs `kimi login`, `complete` once it exited successfully, `ended`
@@ -869,6 +928,59 @@ mod tests {
         assert!(script.contains("login") && script.contains("global"));
         assert!(script.contains(".completed"));
         assert_eq!(login_state(root, "not-an-id"), "ended");
+    }
+
+    #[test]
+    fn waiting_sign_ins_are_capped_and_a_start_sweeps_only_the_ended_ones() {
+        // SB-99: four sign-ins may wait at once; a fifth is refused until one ends or is saved.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = store(root);
+        let program = Path::new("/opt/kimi");
+        let ids: Vec<String> = (0..crate::launch::MAX_LOGINS)
+            .map(|_| {
+                begin_login_with(root, "", "global", program, started).unwrap()["login_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        assert_eq!(
+            begin_login_with(root, "", "global", program, started).unwrap_err(),
+            LOGINS_WAITING
+        );
+        let homes: Vec<PathBuf> = ids.iter().map(|id| home(root, id).unwrap()).collect();
+        let ended = |home: &Path| {
+            let _ = fs::remove_file(home.join(".launch-pending"));
+            #[cfg(unix)]
+            private_write(&home.join(".session-pid"), b"999999", false).unwrap();
+            #[cfg(windows)]
+            private_write(
+                &home.join(".session-process"),
+                br#"{"pid":999999,"created":1}"#,
+                false,
+            )
+            .unwrap();
+        };
+        // [0] ended without signing in; [1] completed, not yet saved; [2] still open in Terminal;
+        // [3] ended, and saved as an account meanwhile (its marker kept, as a crash would leave it).
+        ended(&homes[0]);
+        ended(&homes[1]);
+        private_write(&homes[1].join(".completed"), b"complete", false).unwrap();
+        ended(&homes[3]);
+        store
+            .add_kimi_account(&ids[3], "Saved", "global", None, None)
+            .unwrap();
+        assert_eq!(login_state(root, &ids[2]), "pending");
+        // A start right after the sign-ins began leaves every one: they may be just beginning.
+        assert_eq!(sweep_logins(root, &store), 0);
+        assert_eq!(sweep_logins_older(root, &store, Duration::ZERO), 1);
+        assert!(!homes[0].exists(), "an ended sign-in goes");
+        assert!(homes[1].exists(), "a completed one can still be saved");
+        assert!(homes[2].exists(), "an open one is kept");
+        assert!(homes[3].exists(), "a saved account is never swept");
+        // One slot is free again.
+        assert!(begin_login_with(root, "", "global", program, started).is_ok());
     }
 
     #[test]

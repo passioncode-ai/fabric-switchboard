@@ -15,6 +15,10 @@ log now says why a waiting update has not started (`update_waiting`: the window 
 or a sign-in is running, updates are off), at once and then at most hourly. *Restart to update*
 waits for an install in progress instead of quitting in the middle of it.
 
+**Kimi sign-ins without loose ends** (SB-99). At most four Kimi Code sign-ins wait at once, as
+for Claude and Codex, and a start removes the sign-in folders whose `kimi login` ended without
+signing in; a completed sign-in stays until it is saved.
+
 ## 0.6.18 — 2026-10-12
 
 The first published release since 0.6.16: 0.6.17 was tagged but never published — the release

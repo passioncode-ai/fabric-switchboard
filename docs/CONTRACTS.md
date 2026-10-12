@@ -634,7 +634,16 @@ list|login|finish|cancel|relogin|launch|rename|remove`, MCP `switchboard_kimi_ac
   dot) until its reset, and a window whose reset has passed reads “reset, refresh to see it”
   instead of its old share. Tests: `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`
   (extended), `kimiLimitUntil` / `kimiWindowsLine` in `scripts/test-ui-logic.mjs`. Not yet: Kimi in
-  automatic fallback chains, pending Kimi sign-ins swept at start (SB-99 left).
+  automatic fallback chains (SB-99 left, with SB-73 phase 2).
+- **Waiting Kimi sign-ins (SB-99, 2026-10-12).** At most four Kimi sign-ins wait at once
+  (`launch::MAX_LOGINS`, as for Claude and Codex): open in Terminal, or completed and not yet
+  saved; a fifth is refused with “Finish an existing sign-in before starting another.”. An owner's
+  start (`kimi::sweep_logins`, beside SB-87's sweep, real data folder only) removes the
+  `<data>/kimi/<id>/` homes whose `kimi login` ended without signing in — never a saved account,
+  one still open in Terminal, one that completed (`switchboard kimi finish <id>` still saves it),
+  or a folder younger than a minute; log `kimi_login_leftovers {removed}`. Test
+  `waiting_sign_ins_are_capped_and_a_start_sweeps_only_the_ended_ones` (fails with the ended-state
+  check removed).
 
 ## Agent keys (SB-79, slice 1, 2026-10-07)
 
