@@ -484,7 +484,11 @@ mod tests {
             serde_json::json!({"projects": {key: {"mcpServers": {"switchboard": {"command": "switchboard"}}}}})
                 .to_string()
         };
-        std::fs::write(home.join(".claude.json"), local(folder.display().to_string())).unwrap();
+        std::fs::write(
+            home.join(".claude.json"),
+            local(folder.display().to_string()),
+        )
+        .unwrap();
         assert!(registered(Host::Claude, &home, Some(&folder), None));
         assert!(!registered(Host::Claude, &home, None, None));
         // Claude Code on Windows writes the folder with forward slashes.
