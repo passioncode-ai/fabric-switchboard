@@ -21,7 +21,10 @@ block by block; backups `config.toml.bak-dupe-*`. My first repair of the runtime
 worse (Orca re-copied the quoted tables: 87 duplicates). Recorded in Observatory
 (`mem:d624c6ece9e54019`). The bug is Orca's and should go upstream.
 
-**Exact next task:** watch the 0.6.21 release to publication; when the installed app runs 0.6.20+
+**Published:** v0.6.21, release run 38299497744, 2026-10-12T20:25:13Z, 25 files, first attempt
+(guard nightly, all five builds and signing green); `latest.json` → 0.6.21.
+
+**Exact next task:** when the installed app runs 0.6.20+
 (it installed 0.6.20 at 18:37 UTC and waits for an idle restart), rehearse the Kimi step live
 (`switchboard continue <wf> --account <kimi id>`); then SB-108 with Fabric Dashboards.
 
