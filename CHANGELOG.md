@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.19 — 2026-10-12
+
+Work keeps going when the accounts run out: a fallback chain now reaches Kimi Code and Hermes, the
+account in use is checked more often near its limit and the next one is ready, and a waiting update
+no longer waits forever.
+
 **Hermes takes over when the subscriptions run out** (SB-107). A fallback chain such as
 `claude-code → kimi-code → hermes` now ends on Hermes Agent: when no Claude or Kimi account is
 left, Hermes picks the workflow up on the OpenRouter key saved under Agents, with its default model,
