@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — 0.6.18 published
+
+Tag `v0.6.18` on `47ef931` (not the version-bump merge `e815d69`: the nightly there failed on
+Windows, fixed by #160, then a Linux arm64 storage-test race, fixed by #161). Nightly run
+38192215005 green on `47ef931`; release run
+[38193536833](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38193536833).
+README / README.ru name 0.6.18; fabric-workspace `knowledge/products.md` and `roadmap.md` and
+the projects wiki page updated in the same run.
+
+**Exact next task:** the board's open rows — the idle budget with a managed policy (P3) and
+SB-99's rest (Kimi Code in fallback chains with SB-73 phase 2).
+
+---
+
 ## 2026-10-12 — Release 0.6.18
 
 Branch `agent/release-0618`: versions 0.6.18 everywhere (`release_preflight.py --tag v0.6.18
