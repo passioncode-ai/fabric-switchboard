@@ -1013,7 +1013,6 @@ mod tests {
         bin
     }
 
-    #[cfg(unix)]
     #[test]
     fn an_account_reaches_the_engine_as_a_handle_never_as_its_uuid() {
         // Observatory refuses a UUID anywhere in an identifier as credential-shaped (seen
@@ -1033,6 +1032,7 @@ mod tests {
         // A reference that is no UUID is the engine's already.
         assert_eq!(account_ref("hermes"), "hermes");
     }
+    #[cfg(unix)]
     #[test]
     fn the_engine_is_read_offered_to_under_the_agents_rule_and_its_refusal_reported() {
         let temp = tempfile::tempdir().unwrap();
