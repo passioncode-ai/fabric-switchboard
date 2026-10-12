@@ -18,7 +18,15 @@ compile the tests — inserting `an_account_reaches_the_engine_as_a_handle_never
 a Unix-only test took its `#[cfg(unix)]`. Fixed in 0.6.23; a scan of every test's `cfg` against
 v0.6.18 found no other move. The nightly is dispatched once on the branch before tagging.
 
-**Exact next task:** watch the 0.6.23 release to publication; when the installed app runs 0.6.22
+0.6.23 (tag `v0.6.23`, run 38309519776) was refused too: its nightly 38309742988 failed on Windows
+arm64 in `external::tests::the_native_config_stamp_ignores_unrelated_rewrites` (green on the same
+code an hour earlier) — two same-size configs written within one ~15.6 ms clock tick share a file
+stamp, so the cached digest of the previous one came back; the test now waits 50 ms before each
+write it reads back. Released as 0.6.24. Disk was down to 0 at 22:05 machine-wide (other
+projects); this checkout's `target/` and scratchpad were cleared (~2.9 GB). The Kimi rehearsal
+workflow `wf_5473b99f80221c4f` was closed by its creator.
+
+**Exact next task:** watch the 0.6.24 release to publication; when the installed app runs 0.6.22
 (it checks every 6 h, then restarts at an idle moment, or *Restart to update*), rerun the Kimi
 rehearsal with a new workflow (`switchboard continue <wf> --account <kimi id>`) and a Claude
 account hand-over, and record both; then SB-108.
