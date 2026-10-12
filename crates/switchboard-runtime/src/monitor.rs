@@ -664,6 +664,9 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         // A rejected sign-in is never a candidate: activation would refuse it every pass and
         // the next eligible account would never be tried.
         let mut excluded = runtime.limits.limited_ids(now());
+        // SB-102: refusals the proxy recorded since the last scan count at once, so the pass
+        // never moves a pool back onto the account a request was just refused on.
+        excluded.extend(runtime.store.limited());
         excluded.extend(
             runtime
                 .refresh
@@ -673,12 +676,15 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         );
         // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
         // is tried in the same pass — up to three — instead of the same one every 30 s.
-        if let Ok(failed) = runtime.failed_switches.lock() {
+        // SB-102: only ever as a candidate — the account in use is never "limited" for an earlier
+        // failed switch to it; expired entries go.
+        if let Ok(mut failed) = runtime.failed_switches.lock() {
+            failed.retain(|_, until| *until > now());
             excluded.extend(
                 failed
-                    .iter()
-                    .filter(|(_, until)| **until > now())
-                    .map(|(id, _)| id.clone()),
+                    .keys()
+                    .filter(|id| current.as_deref() != Some(id.as_str()))
+                    .cloned(),
             );
         }
         let mut attempt = 0;
@@ -710,6 +716,10 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     Err("Native account source unavailable.".into())
                 };
                 if result.is_ok() {
+                    // SB-102: a successful switch clears any earlier set-aside of the account.
+                    if let Ok(mut failed) = runtime.failed_switches.lock() {
+                        failed.remove(id);
+                    }
                     runtime.invalidate_current();
                     if policy.target == "claude_cli" {
                         let identity = snapshot
@@ -902,6 +912,34 @@ mod tests {
             return Err("Claude activation failed; previous account restored.".into());
         }
         crate::fixtures::activates(credential, target, expected, preserve)
+    }
+    #[tokio::test]
+    async fn an_account_set_aside_earlier_is_not_limited_once_it_is_in_use() {
+        // SB-102: the person switched to B after an earlier failed switch to it; B is in use
+        // and below the threshold, so nothing moves.
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 10.0);
+        quota(&runtime.store, &b.id, 20.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &b.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        runtime
+            .failed_switches
+            .lock()
+            .unwrap()
+            .insert(b.id.clone(), now() + 600);
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "below_threshold");
+        assert_eq!(
+            runtime.store.snapshot().unwrap().routes["claude:default"],
+            b.id
+        );
     }
     #[tokio::test]
     async fn a_candidate_that_fails_to_activate_is_set_aside_and_the_next_one_tried_at_once() {

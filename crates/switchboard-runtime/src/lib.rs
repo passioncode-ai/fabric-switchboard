@@ -2228,15 +2228,19 @@ fn replace_native(
         Ok(())
     };
     (native.activate)(&credential, identity, expected.as_ref(), &mut preserve)?;
-    if store.snapshot()?.policies.iter().any(|p| {
-        p.provider == Provider::Claude && p.pool == account.pool && p.target == "claude_cli"
+    // SB-102: the switch has happened; failing to note its time must not report it as failed
+    // (the monitor would set the account now in use aside and try another).
+    if store.snapshot().is_ok_and(|s| {
+        s.policies.iter().any(|p| {
+            p.provider == Provider::Claude && p.pool == account.pool && p.target == "claude_cli"
+        })
     }) {
-        store.mark_rotated(
+        let _ = store.mark_rotated(
             Provider::Claude,
             &account.pool,
             "claude_cli",
             monitor::now(),
-        )?;
+        );
     }
     Ok(())
 }

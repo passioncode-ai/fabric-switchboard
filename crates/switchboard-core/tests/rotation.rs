@@ -1342,7 +1342,7 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
     store.set_policy(off).unwrap();
 
     let (moved, _) = store
-        .failover(Provider::Claude, "default", &a, now)
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
         .unwrap()
         .unwrap();
     assert_eq!(moved.id, c);
@@ -1366,12 +1366,12 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
 
     // c refused too: b is next; then nothing is left and the route stays.
     let (moved, _) = store
-        .failover(Provider::Claude, "default", &c, now)
+        .failover(Provider::Claude, "default", &c, OAUTH, now)
         .unwrap()
         .unwrap();
     assert_eq!(moved.id, b);
     assert!(store
-        .failover(Provider::Claude, "default", &b, now)
+        .failover(Provider::Claude, "default", &b, OAUTH, now)
         .unwrap()
         .is_none());
     assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
@@ -1401,7 +1401,7 @@ fn an_unusable_selection_moves_the_pool_without_holding_the_account() {
         .unwrap();
     assert!(store.route(Provider::Claude, "default").is_err());
     let (moved, _) = store
-        .failover_unusable(Provider::Claude, "default", now)
+        .failover_unusable(Provider::Claude, "default", OAUTH, now)
         .unwrap()
         .unwrap();
     assert_eq!(moved.id, b);
@@ -1410,4 +1410,140 @@ fn an_unusable_selection_moves_the_pool_without_holding_the_account() {
         "an expired token is not a limit"
     );
     assert!(store.take_refusals().is_empty());
+}
+
+const OAUTH: switchboard_core::Fits = switchboard_core::Fits {
+    kind: Some(AuthKind::OAuth),
+    api_key_only: false,
+};
+
+/// SB-102: a subscription session refused for a limit never moves onto a pay-per-token key —
+/// and the pool's route is never taken from the agents that share it by key.
+#[test]
+fn a_failover_moves_only_to_an_account_of_the_same_kind() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    observe(&store, &a, 20., now);
+    let key = store
+        .add(
+            "key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential {
+                access_token: "sk-ant-api03-synthetic".into(),
+                refresh_token: None,
+                id_token: None,
+                native_context: None,
+                expires_at: None,
+                account_id: None,
+            },
+        )
+        .unwrap();
+    store.select(Provider::Claude, "default", &a).unwrap();
+    assert!(
+        store
+            .failover(Provider::Claude, "default", &a, OAUTH, now)
+            .unwrap()
+            .is_none(),
+        "only a key is left, and a subscription session never moves onto it"
+    );
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, a);
+    let keys = switchboard_core::Fits {
+        kind: Some(AuthKind::ApiKey),
+        api_key_only: true,
+    };
+    assert!(keys.admits(
+        &store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .into_iter()
+            .find(|x| x.id == key.id)
+            .unwrap()
+    ));
+}
+
+/// SB-102: a refusal that comes back after the pool moved — by another request or by the
+/// person — takes the route as it is now instead of moving it again.
+#[test]
+fn a_late_refusal_never_moves_a_route_that_already_moved() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    for (id, used) in [(&a, 20.), (&b, 10.), (&c, 50.)] {
+        observe(&store, id, used, now);
+    }
+    store.select(Provider::Claude, "default", &c).unwrap();
+    let (taken, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(taken.id, c, "the person's choice stands");
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, c);
+    assert!(
+        store.limited().contains(&a),
+        "the refused account is still held"
+    );
+    let _ = b;
+}
+
+/// SB-102: a pool whose selection was switched off (or never usable) still finds its next account,
+/// and two requests that both found the route broken end on the same account.
+#[test]
+fn a_pool_left_without_a_usable_selection_still_moves_and_concurrent_repairs_agree() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    observe(&store, &b, 10., now);
+    observe(&store, &c, 40., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    // Switching the selected account off clears the pool's route: no account is selected.
+    store.update_fields(&a, None, Some(false)).unwrap();
+    assert!(store.route(Provider::Claude, "default").is_err());
+    let any = switchboard_core::Fits {
+        kind: None,
+        api_key_only: false,
+    };
+    let first = store
+        .failover_unusable(Provider::Claude, "default", any, now)
+        .unwrap();
+    let second = store
+        .failover_unusable(Provider::Claude, "default", any, now)
+        .unwrap();
+    assert_eq!(first.unwrap().0.id, b);
+    assert_eq!(
+        second.unwrap().0.id,
+        b,
+        "the repaired route is used, not moved again"
+    );
+    let _ = c;
+}
+
+/// SB-102: publishing the held accounts never frees one the proxy just refused and the runtime
+/// has not taken yet.
+#[test]
+fn publishing_the_held_accounts_keeps_a_refusal_not_yet_taken() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    observe(&store, &b, 10., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap();
+    store.set_limited(Default::default());
+    assert!(store.limited().contains(&a));
+    store.take_refusals();
+    store.set_limited(Default::default());
+    assert!(
+        !store.limited().contains(&a),
+        "once taken, the runtime's evidence decides"
+    );
 }

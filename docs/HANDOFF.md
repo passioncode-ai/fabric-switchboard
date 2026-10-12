@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — Bug review in waves; SB-102: failover without side effects
+
+Wave 1: three independent readers (switching core; changes since v0.6.16; window and docs)
+found ≈ 40 issues. Wave 2: verified the P1s by reading the code and chose the design (CONTRACTS →
+Failover without side effects). Wave 3, first part (branch `fix/sb-102-switching-core`):
+kind-compatible compare-and-move failover, one held set, candidate-only set-asides, fresher hidden
+limits, project-aware fallback. Next parts: SB-103 (sign-ins, sessions, Kimi, onboarding on
+Windows), SB-104 (window defects and documentation drift), then release 0.6.18.
+
+**Exact next task:** SB-103 — see the board row for the list.
+
+---
+
 ## 2026-10-12 — SB-101 done: a renewed sign-in is never only in memory
 
 Branch `fix/sb-101-keep-renewed`: the idle renewal files the successor into the vault when Claude

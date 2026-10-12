@@ -225,6 +225,39 @@ and closed here:
 - Not changed: an ordinary (native) Claude Code session whose turn already ended on a limit does
   not resume by itself — run agents in managed mode for no pauses.
 
+## Failover without side effects (SB-102, 2026-10-12)
+
+A review on 2026-10-12 (three independent readings of the switching core) found SB-98's failover
+could hurt as well as help. Decided and built:
+
+- **Only a compatible account.** `Store::failover` and `failover_unusable` take a `Fits`: the
+  kind of the account the request leaves (OAuth ↔ OAuth, API key ↔ API key; any when that account
+  is gone) and `api_key_only` for Chat Completions. A subscription session never moves onto a
+  pay-per-token key, and a pool's key route shared with agents never moves onto a subscription
+  sign-in (agents would get 403). Candidate: `failover_candidate` — measured lately and below full
+  first, then last known usage, never still full.
+- **Compare and move.** The route changes only while it still names the refused (or broken)
+  account (`select_transaction` with an expectation); a refusal that comes back after another
+  request or the person moved the pool takes the route as it is. Concurrent refusals no longer
+  repeat the move, and concurrent repairs of a broken route end on one account.
+- **One held set.** `set_limited` keeps refusals not yet taken by the runtime; `rotate` adds
+  `Store::limited` to its exclusions, so the pass never moves a pool back onto a refused account.
+- **Set-aside candidates are candidates only.** `failed_switches` never excludes the account in
+  use, drops expired entries, and is cleared for an account a switch then reaches; a successful
+  native switch is never reported failed because noting its time failed.
+- **Holds and hidden limits read the right figures.** A refusal holds until the reset of a full
+  `five_hour` or `seven_day` window only (a model's weekly window no longer holds the account);
+  `hidden` needs figures from the last ten minutes.
+- **Fallback respects projects before acting.** `fallback::resolve` takes the workflow's folder
+  and skips accounts `project_allows` refuses there, before any renewal or launch.
+- Tests: `a_failover_moves_only_to_an_account_of_the_same_kind`,
+  `a_late_refusal_never_moves_a_route_that_already_moved`,
+  `a_pool_left_without_a_usable_selection_still_moves_and_concurrent_repairs_agree`,
+  `publishing_the_held_accounts_keeps_a_refusal_not_yet_taken`,
+  `an_account_set_aside_earlier_is_not_limited_once_it_is_in_use`,
+  `a_projects_reserved_account_never_takes_over_work_outside_its_folders`, and the extended
+  `a_spend_cap_reason_is_kept_and_a_limit_the_usage_figures_miss_is_hidden`.
+
 ## Switch reliability (SB-101, 2026-10-11)
 
 From the switch audit of 2026-10-11:

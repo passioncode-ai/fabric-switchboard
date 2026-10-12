@@ -384,13 +384,21 @@ async fn relay(
     };
     // SB-101: a selected account whose credential expired, or that is gone, no longer answers
     // a session with 409 while the pool has another usable account.
+    // SB-102: only to an account of the same kind as the broken one (any kind when it is
+    // gone), and one that serves this operation.
+    let api_key_only = operation == "chat/completions";
     let route = match g.store.route(provider, &pool) {
         Ok(route) => Some(route),
-        Err(_) if official => g
-            .store
-            .failover_unusable(provider, &pool, now())
-            .ok()
-            .flatten(),
+        Err(_) if official => {
+            let fits = switchboard_core::Fits {
+                kind: g.store.selected_account(provider, &pool).map(|a| a.kind),
+                api_key_only,
+            };
+            g.store
+                .failover_unusable(provider, &pool, fits, now())
+                .ok()
+                .flatten()
+        }
         Err(_) => None,
     };
     let Some((account, credential)) = route else {
@@ -512,7 +520,11 @@ async fn relay(
                     let _ = g.store.observe_credential(&account.id, &credential, usage);
                 }
             }
-            if let Ok(Some(next)) = g.store.failover(provider, &pool, &account.id, now()) {
+            let fits = switchboard_core::Fits {
+                kind: Some(account.kind),
+                api_key_only,
+            };
+            if let Ok(Some(next)) = g.store.failover(provider, &pool, &account.id, fits, now()) {
                 (account, credential) = next;
                 moved = true;
                 continue;

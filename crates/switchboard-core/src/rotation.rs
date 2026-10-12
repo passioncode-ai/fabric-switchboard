@@ -253,6 +253,63 @@ impl Store {
             && (policy.target != "claude_cli" || credential.native_context.is_some())
     }
 }
+/// What a request moved by a failover can run on (SB-102): the same kind of account as the one
+/// it left — a subscription session never moves onto a pay-per-token key, nor a key's caller
+/// (an agent) onto a subscription — and, for an operation only an API key serves (Chat
+/// Completions), an API key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fits {
+    /// The kind of the account the request leaves; None when that account is gone.
+    pub kind: Option<AuthKind>,
+    pub api_key_only: bool,
+}
+impl Fits {
+    pub fn admits(&self, account: &Account) -> bool {
+        self.kind.is_none_or(|kind| account.kind == kind)
+            && (!self.api_key_only || account.kind == AuthKind::ApiKey)
+    }
+}
+impl Store {
+    /// The pool's best account to move a request to (SB-102), without the account in use having
+    /// to be found: enabled, credential usable, not held, `fits` it; measured lately and below
+    /// full first (least used), then by last known usage (`last_known_usage`), never one still
+    /// known full. Oldest, then smallest id, on a tie.
+    pub(crate) fn failover_candidate(
+        &self,
+        policy: &RotationPolicy,
+        held: &std::collections::HashSet<String>,
+        fits: Fits,
+        now: i64,
+    ) -> Result<Option<String>, String> {
+        let state = self.lock()?;
+        Ok(state
+            .accounts
+            .iter()
+            .filter(|a| {
+                a.provider == policy.provider
+                    && a.pool == policy.pool
+                    && !held.contains(&a.id)
+                    && fits.admits(a)
+                    && self.rotation_credential_eligible(a, policy, now)
+            })
+            .filter_map(|a| match fresh_usage(a, policy, now) {
+                Some(used) if used < 100.0 => Some((a, 0u8, used)),
+                Some(_) => None,
+                None => {
+                    let used = last_known_usage(a, now);
+                    (used < 100.0).then_some((a, 1u8, used))
+                }
+            })
+            .min_by(|(a, tier_a, x), (b, tier_b, y)| {
+                tier_a
+                    .cmp(tier_b)
+                    .then_with(|| x.total_cmp(y))
+                    .then_with(|| a.created_at.cmp(&b.created_at))
+                    .then_with(|| a.id.cmp(&b.id))
+            })
+            .map(|(a, _, _)| a.id.clone()))
+    }
+}
 /// The best guess at an account's usage when nothing fresh is known (SB-98): its last
 /// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
 /// still below a full account — when it was never measured.
