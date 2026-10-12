@@ -485,7 +485,7 @@ check(() => {
 check(() => {
   assert.equal(logic.termsNoticeText(), "Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can get your account blocked. You are responsible for how you use your accounts.");
   i18n.setLocale('ru');
-  assert.equal(logic.termsNoticeText(), 'Пользуйтесь Switchboard в соответствии с правилами Anthropic и OpenAI. Нарушение правил провайдера может привести к блокировке аккаунта. Ответственность за использование аккаунтов несёте вы.');
+  assert.equal(logic.termsNoticeText(), 'Пользуйтесь Switchboard в соответствии с условиями использования Anthropic и OpenAI. Нарушение условий провайдера может привести к блокировке аккаунта. Ответственность за то, как вы используете свои аккаунты, несёте вы.');
   i18n.setLocale('en');
 });
 // The wiring: Accounts draws the banner first in every state it renders, including the empty
