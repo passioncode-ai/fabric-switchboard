@@ -389,7 +389,7 @@ check(() => {
   assert.equal(i18n.plural(1, { one: '{n} account restored', other: '{n} accounts restored' }), '1 account restored');
   i18n.setLocale('ru');
   assert.equal(i18n.t('Refresh'), 'Обновить');
-  assert.equal(i18n.t('{label} enabled.', { label: 'Work' }), 'Work включён.');
+  assert.equal(i18n.t('{label} enabled.', { label: 'Work' }), 'Аккаунт Work включён.');
   assert.equal(i18n.t('A string no dictionary has'), 'A string no dictionary has', 'a missing entry shows English, never a key');
   const restored = (n) => i18n.plural(n, { one: '{n} account restored', other: '{n} accounts restored' });
   assert.deepEqual([1, 2, 5, 11, 21, 22, 25, 111].map(restored), [
@@ -398,7 +398,7 @@ check(() => {
   // L10N-04: a backend refusal is compared in English and shown in Russian.
   assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
   assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
-  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в Work снова выполнен \(Claude Code · work\)\.$/);
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code · work\)\.$/);
   i18n.setLocale('en');
 });
 // A backend sentence with a name in it is shown, and translated by its template (L10N-04).
@@ -446,7 +446,7 @@ check(() => {
   assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: null, usage_daily: null }), '$3.25 of $5.00 left · spent today unknown');
   assert.equal(logic.openrouterCreditLine({ limit: null, limit_remaining: null, limit_reset: null, usage_daily: 0.5 }), 'No spending limit · spent today $0.50');
   i18n.setLocale('ru');
-  assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: 'weekly', usage_daily: 0 }), 'Осталось $3.25 из $5.00, сброс раз в неделю · сегодня потрачено $0.00');
+  assert.equal(logic.openrouterCreditLine({ limit: 5, limit_remaining: 3.25, limit_reset: 'weekly', usage_daily: 0 }), 'Осталось $3.25 из $5.00, сброс еженедельно · сегодня потрачено $0.00');
   i18n.setLocale('en');
 });
 
