@@ -37,14 +37,14 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.18](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.18)** · October 12, 2026.
-Agents keep working when an account hits a limit: a managed session's refused request moves once
-to the pool's next account of the same kind, and limits the usage figures miss (spend and credit
-caps) show as hidden limits. Switching no longer overwrites Claude Code's own config writes; Kimi
-Code accounts are safer and report exactly what Kimi answered; a coding agent can set Switchboard
-up (`switchboard onboard`); `switchboard sessions` and Activity → *Sessions* list the sessions
-Switchboard launched; a sign-in open across a restart is taken back. 0.6.17 was tagged but never
-published; 0.6.18 carries it. Release run [38193536833](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38193536833).
+**Latest published: [v0.6.20](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.20)** · October 12, 2026.
+Work keeps going when the accounts run out: a fallback chain such as `claude-code → kimi-code →
+hermes` hands an Observatory workflow to a saved Kimi Code account, then to Hermes on your
+OpenRouter key and the model your Hermes uses; the account a session works on is checked every
+minute from 95 % and every 30 seconds from 98 %, and the next one every minute; a limit the usage
+figures miss reads *Hidden personal limit*; a waiting update keeps checking and never waits
+forever. 0.6.19 was tagged but never published; 0.6.20 carries it. Release run
+[38275250263](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38275250263).
 From 0.6.16 Windows installers and the CLI are Authenticode-signed; 0.6.15 added Linux and Windows on ARM.
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,

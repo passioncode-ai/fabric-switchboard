@@ -23,7 +23,17 @@ id, the key's default model set to `deepseek/deepseek-v4-pro-0813`; Fabric-embed
 as SB-108. RM-28 packets CX-SB-01…03 answered and filed (SB-109…SB-111). The operator's machine
 chain is `claude-code → kimi-code → hermes`. Gate `./scripts/check.sh` exit 0 (539 tests).
 
-**Exact next task:** watch the 0.6.20 release run to publication; then, once the installed app
+**Published:** v0.6.20, release run 38275250263, 2026-10-12T17:22:51Z, 25 files, `latest.json` →
+0.6.20 for all seven platforms. It took three attempts, none a code change to the release: (1)
+Linux arm64 failed once in `lifecycle_tests::a_restarted_owner_keeps_the_address_and_token_a_session_holds`
+(a forked child holding the store lock — fixed for later releases in #172) and Windows x64 failed
+in *Sign the desktop executable and the CLI* (`Invoke-ArtifactSigning` not recognized); (2) the same
+signing failure again — the Actions cache entry `ArtifactSigning-0.1.8` saved for `refs/tags/v0.6.20`
+earlier in this run (66095 bytes; older entries 66120–66128) restored a module PowerShell could not
+load; (3) after `gh cache delete 8843982625` the module was installed afresh and every job passed.
+If signing fails that way again, delete that tag's `ArtifactSigning-*` cache entry and re-run.
+
+**Exact next task:** once the installed app
 runs it (it may need one *Restart to update* — the running copy predates SB-105), rehearse the Kimi
 step with a saved Kimi account (`switchboard continue <wf> --account <kimi id>`) and confirm a
 near-limit account's `next_check_at` (50 s / 20 s after its check); then SB-108 with Fabric
