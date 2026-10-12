@@ -2281,6 +2281,10 @@ mod tests {
         switchboard_core::private_fs::private_write(&path, &serde_json::to_vec(&other).unwrap())
             .unwrap();
         assert_eq!(config_stamp(&path), first);
+        // Every write the test reads back waits a moment first: the two configs have the same
+        // size, and a file stamp taken within one tick of the clock (Windows on ARM) would be
+        // the previous one's (seen in the 0.6.23 nightly; Windows' clock ticks every ~15.6 ms).
+        std::thread::sleep(std::time::Duration::from_millis(50));
         switchboard_core::private_fs::private_write(&path, &config("b@example.test")).unwrap();
         assert_ne!(config_stamp(&path), first);
 
@@ -2295,12 +2299,14 @@ mod tests {
             user: "fixture".into(),
             mac: false,
         };
+        std::thread::sleep(std::time::Duration::from_millis(50));
         switchboard_core::private_fs::private_write(&path, &config("a@example.test")).unwrap();
         let before = probe_context(Provider::Claude, &c, &NativeProbe);
         std::thread::sleep(std::time::Duration::from_millis(20));
         switchboard_core::private_fs::private_write(&path, &serde_json::to_vec(&other).unwrap())
             .unwrap();
         assert_eq!(probe_context(Provider::Claude, &c, &NativeProbe), before);
+        std::thread::sleep(std::time::Duration::from_millis(50));
         switchboard_core::private_fs::private_write(&path, &config("b@example.test")).unwrap();
         assert_ne!(probe_context(Provider::Claude, &c, &NativeProbe), before);
     }

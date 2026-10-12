@@ -8,11 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-## 0.6.23 — 2026-10-12
+## 0.6.24 — 2026-10-12
 
-0.6.22 was tagged but refused by the release guard and never published: a Unix-only test lost its
-`#[cfg(unix)]` when a test was added above it, so the Windows build of the tests failed. This
-release carries 0.6.22.
+0.6.22 and 0.6.23 were tagged but refused by the release guard and never published, each for a
+test, not the product: 0.6.22's Windows test build failed (a Unix-only test lost its `#[cfg(unix)]`
+when a test was added above it), and 0.6.23's Windows on ARM run read a config file's stamp twice
+within one clock tick in a timing-sensitive test. This release carries 0.6.22.
 
 **Hand-overs to saved accounts work again** (found by the live Kimi rehearsal). Project Observatory
 refuses an account id that looks like a key, and Switchboard's account ids are UUIDs, which it
