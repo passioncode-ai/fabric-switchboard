@@ -349,10 +349,11 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
       ? { text: t('Version {version} is ready. Restarting asks for an administrator password to replace the app.', { version: status.version }), restart: true }
       : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
   }
-  if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
-  if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };
-  if (status.state === 'checking') return { text: t('Checking for updates…'), restart: false };
+  // SB-104: a check that failed says so, even with automatic updates off (a manual check).
   if (status.state === 'failed' && status.error) return { text: t(status.error), restart: false };
+  if (status.state === 'checking') return { text: t('Checking for updates…'), restart: false };
+  if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };
+  if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
   return { text: t('Version {version} is the latest. Switchboard checks again every six hours.', { version: status.current }), restart: false };
 }
 

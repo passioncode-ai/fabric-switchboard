@@ -1,6 +1,6 @@
 # switchboard CLI
 
-Reference for the `switchboard` CLI as of 0.6.5: the same account store, vault, request proxy and launcher the desktop app uses. The original [CLI release plan](CLI-RELEASE-PLAN.md) fixed the 0.2 behaviour; release records: [0.5.x–0.6.x](evidence/release-0.5.md), [0.2](evidence/release-0.2.md). This file is an operational contract, not a claim of real-provider acceptance.
+Reference for the `switchboard` CLI as of 0.6.18: the same account store, vault, request proxy and launcher the desktop app uses. The original [CLI release plan](CLI-RELEASE-PLAN.md) fixed the 0.2 behaviour; release records: [0.5.x–0.6.x](evidence/release-0.5.md), [0.2](evidence/release-0.2.md). This file is an operational contract, not a claim of real-provider acceptance.
 
 ## Install and first use
 
@@ -113,11 +113,11 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the five read tools; usage refresh shows the stored observation
+switchboard mcp --read-only   # only the ten read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
-`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` — MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0 — accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists the tools that only read (status, accounts, usage, `switchboard_onboarding`, project context, chains, the OpenRouter key's status, Kimi accounts, Hermes's model) and none that writes. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` — MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0 — accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists the ten tools that only read (status, accounts, usage, `switchboard_sessions`, `switchboard_onboarding`, project context, chains, the OpenRouter key's status, Kimi accounts, Hermes's model) and none of the seven that write. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
@@ -136,7 +136,7 @@ switchboard project apply --path /path/to/project --global
 
 `--path` defaults to the current folder and must be absolute. `--target` is `managed` (default) or `claude-cli`; `--expires-in-hours` accepts 1 to 720; `--paused` saves the rule switched off. `apply` detects the calling session (managed, isolated or native) and reports one action per provider: `selected`, `activated`, `already_in_effect`, `no_rule`, `rule_paused`, `rule_expired`, `other_pool`, `other_session`, `needs_global` or `failed`. A `claude_cli` rule changes the ordinary Claude Code login only with `--global`.
 
-Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS the desktop app's Agents panel links the bundled CLI to `~/.local/bin/switchboard`, and on Windows the installer puts `switchboard.exe` beside the desktop app (since 0.6.0, SB-05), where the Agents panel finds it and prints the registration commands with its full path; to type `switchboard` in a shell, add that folder to `PATH`.
+Connecting an agent. The `switchboard` executable must be on `PATH`; on macOS the desktop app's Agents panel links the bundled CLI to `~/.local/bin/switchboard`, and on Windows the installer puts `switchboard.exe` beside the desktop app (since 0.6.0, SB-05), where the Agents panel finds it and prints the registration commands with its full path; to type `switchboard` in a shell, add that folder to `PATH`. On Linux the .deb installs it as `/usr/bin/switchboard`, already on `PATH`; the AppImage's files exist only while it runs, so connect agents from a .deb install or the `-cli.tar.gz` ([INSTALL → Linux](INSTALL.md#linux)).
 
 | Agent | Command |
 |---|---|
@@ -150,12 +150,12 @@ Restart the agent after installing; it loads servers and skills at session start
 ### Sessions (SB-95)
 
 ```sh
-switchboard sessions          # Claude Code and Codex sessions Switchboard launched that are starting or running
+switchboard sessions          # Claude Code, Codex and Kimi Code sessions Switchboard launched that are starting or running
 switchboard sessions --all    # also the ended ones (each home keeps its last launch's record)
 switchboard --json sessions   # {sessions: [...]}
 ```
 
-Each launch writes `.session.json` beside its `launch.command` (0600): `account_id`, `provider`, `pool`, `mode` (`managed`/`isolated`), `working_directory`, `in_place`, `launched_at` and `continues` (the workflow id a continuation picks up, or null) — no credential. The list adds `label`, `home` (`homes` or `runtimes`), `started_at` (when the script recorded its process) and `state`: `starting` (Terminal has not run the script yet), `running` (the recorded process is still that session — the pid alive and at least as old as its marker; on Windows, the pid with its creation time), `ended`, or `unknown` (the marker cannot be read). Only Switchboard's own homes are read and no link is followed; a session started outside Switchboard is not listed. The MCP tool `switchboard_sessions` (`all?`) answers the same. A managed session follows its pool's selected account from the next request, so `account_id` is the account selected at launch.
+Each launch writes `.session.json` beside its `launch.command` (0600): `account_id`, `provider`, `pool`, `mode` (`managed`/`isolated`), `working_directory`, `in_place`, `launched_at` and `continues` (the workflow id a continuation picks up, or null) — no credential. The list adds `label`, `home` (`homes` or `runtimes`), `started_at` (when the script recorded its process) and `state`: `starting` (Terminal has not run the script yet), `running` (the recorded process is still that session — the pid alive and at least as old as its marker; on Windows, the pid with its creation time), `ended`, or `unknown` (the marker cannot be read). Only Switchboard's own homes are read (`homes`, `runtimes` and `kimi/sessions`) and no link is followed; a session started outside Switchboard is not listed. The MCP tool `switchboard_sessions` (`all?`) answers the same. A managed session follows its pool's selected account from the next request, so `account_id` is the account selected at launch.
 
 ### Setting up with a coding agent (SB-93)
 

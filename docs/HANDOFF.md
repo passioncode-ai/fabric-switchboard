@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-104: the window keeps its word; the bug review is closed
+
+Wave 3, third part (branch `fix/sb-104-window-docs`): the window defects and the documentation
+drift from the review (see the board row SB-104). With SB-102 and SB-103 the review's P1 and P2
+findings are fixed; left on the board: the idle budget with a managed policy (P3).
+
+**Exact next task:** release 0.6.18 (SB-102…104 and #156). v0.6.17 was tagged but never
+published — the guard refused it on a failed nightly — so 0.6.18 carries 0.6.17's notes too.
+
+---
+
 ## 2026-10-12 — SB-103: sign-ins, sessions and Kimi without loose ends
 
 Wave 3, second part (branch `fix/sb-103-logins-sessions-kimi`): a saved sign-in is never taken back
