@@ -4,6 +4,14 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "just now": "только что",
+  "The key stays in the Secret Service keyring; an agent receives it only when it starts.": "Ключ хранится в связке ключей Secret Service; агент получает его только при запуске.",
+  "Switchboard deletes it from the Secret Service keyring.": "Switchboard удалит его из связки ключей Secret Service.",
+  "The key stays in this computer’s Secret Service keyring. These backups restore after reinstalling Switchboard here; they cannot be opened on another computer or after the keyring is erased.": "Ключ хранится в связке ключей Secret Service этого компьютера. Эти копии восстанавливаются после переустановки Switchboard здесь; их нельзя открыть на другом компьютере или после очистки связки ключей.",
+  "macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.": "Сборки для macOS, Windows и Linux. Проверка с живыми провайдерами — отдельная проверка на каждой платформе. Уже запущенные внешние сессии CLI и Codex Desktop не управляются.",
+  "made on another computer": "сделана на другом компьютере",
+  "Limits and sign-in states are unavailable right now. Refresh to retry.": "Сейчас не удаётся узнать лимиты и состояние входа. Обновите, чтобы повторить.",
+  "The list may be out of date: the last read failed.": "Список может быть устаревшим: последнее чтение не удалось.",
   "Not signed in. Run kimi login in Terminal.": "Вход не выполнен. Запустите kimi login в Terminal.",
   "Run kimi once in Terminal to renew its sign-in, then refresh.": "Запустите kimi один раз в Terminal, чтобы он обновил вход, затем обновите.",
   "checked {time} ago": "проверено {time} назад",
@@ -584,7 +592,6 @@ export const RU: Record<string, string> = {
   "Build": "Сборка",
   "{platform} build. Native platform is reported by the running app.": "Сборка для {platform}. Нативную платформу сообщает запущенное приложение.",
   "Compatibility": "Совместимость",
-  "macOS and Windows builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.": "Сборки для macOS и Windows. Приёмка с реальными провайдерами проводится отдельно на каждой платформе. Уже запущенные внешние сессии CLI и Codex Desktop не контролируются.",
   "Imported OAuth": "Импортированный OAuth",
   "Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.": "По умолчанию выключено для каждого провайдера, пула и цели. Использует свежие данные квоты, порог, минимальное улучшение и паузу. Если подходящего аккаунта нет, остаётся выбран текущий.",
   "Tour": "Тур",

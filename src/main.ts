@@ -39,12 +39,15 @@ let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
 const onWindows = () => runtime?.platform === 'windows';
+/** SB-104: the tray icon sits in the notification area on Windows and Linux, in the menu bar on macOS. */
+const trayInArea = () => runtime?.platform === 'windows' || runtime?.platform === 'linux';
+const onLinux = () => runtime?.platform === 'linux';
 const tour = (): { page: Page; target: string | null; title: string; text: string }[] => [
   { page: 'accounts', target: null, title: t('Welcome to Switchboard'), text: t('Switchboard keeps your Claude Code and Codex accounts on this computer and moves your work between them, so you can keep working on another account when one reaches its limit.') },
   { page: 'accounts', target: '[data-focus="menu-add"]', title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
   { page: 'accounts', target: '.rotation-bar', title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
   { page: 'projects', target: '[data-focus="new-project"]', title: t('Give a project its own accounts'), text: t('Press + New project, add the project\'s folders and choose its accounts. Sessions launched from those folders use only them, and other projects never switch to them.') },
-  { page: 'agents', target: '[data-focus="copy-onboard"]', title: t('Agents, and it keeps running'), text: onWindows() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
+  { page: 'agents', target: '[data-focus="copy-onboard"]', title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
 let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
@@ -94,6 +97,8 @@ let kimi: KimiAccounts | null = null;
 let kimiError = '';
 let openMenu: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
+/** SB-104: one Try again at a time — a double click never starts two sign-ins. */
+let retrying = false;
 let pendingLogin: { id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'ended' | 'finishing'; error: string; cancelError?: string } | null = null;
 const quotaOpen = new Set<string>();
 let backupStatus: BackupStatus | null = null;
@@ -120,7 +125,7 @@ if (native) void reportLanguage(locale()).catch(() => undefined);
 const providerName = (provider: Provider) => provider === 'claude' ? t('Claude Code') : t('Codex CLI');
 const kindName = (kind: AuthKind) => ({ api_key: t('API key'), setup_token: t('Setup token'), oauth: t('OAuth') })[kind];
 const date = (seconds: number) => new Date(seconds * 1000).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const age = (seconds: number) => { const minutes = Math.max(0, Math.floor((Date.now() / 1000 - seconds) / 60)); return minutes < 1 ? 'just now' : minutes < 60 ? t('{n}m ago', { n: minutes }) : minutes < 2880 ? t('{n}h ago', { n: Math.floor(minutes / 60) }) : t('{n}d ago', { n: Math.floor(minutes / 1440) }); };
+const age = (seconds: number) => { const minutes = Math.max(0, Math.floor((Date.now() / 1000 - seconds) / 60)); return minutes < 1 ? t('just now') : minutes < 60 ? t('{n}m ago', { n: minutes }) : minutes < 2880 ? t('{n}h ago', { n: Math.floor(minutes / 60) }) : t('{n}d ago', { n: Math.floor(minutes / 1440) }); };
 const identityText = (identity?: ExternalIdentity | null) => identity?.email || identity?.account_id || t('Identity not reported');
 const currentMatch = (account: Account) => {
   const current = currentAccounts?.[account.provider];
@@ -464,7 +469,7 @@ function openrouterPanel() {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'openrouter-heading');
   const heading = el('h2', '', t('OpenRouter key for agents')); heading.id = 'openrouter-heading';
   const names = openrouterAgents().map((agent) => agent.name).join(', ');
-  section.append(heading, el('p', '', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
+  section.append(heading, el('p', '', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : onLinux() ? t('The key stays in the Secret Service keyring; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
   if (openrouterError && !openrouter) { section.append(el('p', 'usage-error', t(openrouterError)), button(t('Retry'), () => void loadOpenrouter(), 'text-button', 'openrouter-retry')); return section; }
   if (!openrouter) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
   if (!openrouter.saved) {
@@ -507,7 +512,7 @@ function openrouterModelDialog() {
   model.focus();
 }
 function openrouterRemoveDialog() {
-  const context = openDialog(t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+  const context = openDialog(t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(); await loadOpenrouter(); }, t('OpenRouter key removed.')); });
   context.actions.querySelector('button')?.focus();
@@ -648,7 +653,7 @@ function menu(key: string, label: string, items: ([string, () => void] | [string
   if (openMenu === key) {
     const list = el('div', 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
     for (const [text, action, tone] of items) {
-      const item = button(text, () => { openMenu = null; action(); }, `menu-item ${tone ?? ''}`); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; list.append(item);
+      const item = button(text, () => { openMenu = null; render(); action(); }, `menu-item ${tone ?? ''}`); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; list.append(item);
     }
     list.addEventListener('keydown', (event) => {
       const entries = [...list.querySelectorAll<HTMLElement>('[role="menuitem"]')]; const index = entries.indexOf(document.activeElement as HTMLElement);
@@ -752,7 +757,7 @@ function loginBanner(main: HTMLElement) {
   if (login.cancelError) text.append(el('span', 'usage-error', t(login.cancelError)));
   const actions = el('div', 'login-actions');
   if (login.error && login.state === 'pending') actions.append(button(t('Retry'), () => { login.error = ''; render(); void pollLogin(); }, 'button', 'login-retry-finish'));
-  if (login.state === 'ended') actions.append(button(t('Try again'), () => { const { provider, label, pool } = login; void adapter.cancelLogin(login.id).then(() => true, (error) => loginOutcome(safeError(error)) === 'forgotten' || (showNotice(safeError(error), true), render(), false)).then((cleared) => { if (!cleared) return; pendingLogin = null; void startLogin(provider, label, pool); }); }, 'button', 'login-retry'));
+  if (login.state === 'ended') actions.append(button(t('Try again'), () => { if (retrying) return; retrying = true; const { provider, label, pool } = login; void adapter.cancelLogin(login.id).then(() => true, (error) => loginOutcome(safeError(error)) === 'forgotten' || (showNotice(safeError(error), true), render(), false)).then((cleared) => { if (!cleared) return; pendingLogin = null; void startLogin(provider, label, pool); }).finally(() => { retrying = false; }); }, 'button', 'login-retry'));
   actions.append(button(login.state === 'ended' ? t('Dismiss') : t('Cancel'), () => void cancelLogin(), 'button quiet', 'login-cancel'));
   banner.append(text, actions); main.append(banner);
 }
@@ -1097,6 +1102,8 @@ const policyTarget = (target: RotationPolicy['target']) => target === 'managed' 
 function renderPolicies(main: HTMLElement) {
   const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
   const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
+  // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
+  if (!monitor && (native || demo)) panel.append(el('p', 'usage-error', t('Limits and sign-in states are unavailable right now. Refresh to retry.')));
   const copy = el('div', 'rotation-copy');
   copy.append(el('strong', '', enabled.length ? t('Automatic switching is on') : t('Automatic switching is off')));
   if (enabled.length) for (const policy of enabled) {
@@ -1110,7 +1117,7 @@ function renderPolicies(main: HTMLElement) {
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
   if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code in {pool}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { pool, threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
-  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {pool}', { pool: policy.pool }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for this provider, pool and target.'), 'policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
+  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {pool}', { pool: policy.pool }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for this provider, pool and target.'), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} · {pool} · {target}…', { provider: providerName(policy.provider), pool: policy.pool, target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New policy…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
 }
@@ -1125,6 +1132,7 @@ function sessionsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'sessions-heading');
   const heading = el('h2', '', t('Sessions')); heading.id = 'sessions-heading'; panel.append(heading);
   if (sessionsError && !sessionList) { panel.append(el('p', 'usage-error', t('Sessions are unavailable. Refresh to retry.'))); return panel; }
+  if (sessionsError) panel.append(el('p', 'usage-error', t('The list may be out of date: the last read failed.')));
   if (!sessionList) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
   if (!sessionList.length) { panel.append(el('p', 'form-note', t('No session Switchboard launched is running. Sessions started outside Switchboard are not listed.'))); return panel; }
   const list = el('ul', 'session-list');
@@ -1160,7 +1168,7 @@ function renderAbout(main: HTMLElement) {
     [t('Pools'), t('Explicit routing boundaries, such as work and personal. Selection never silently falls back to a different pool.')],
     [t('Usage'), t('A timestamped provider observation. Unknown, stale, and unavailable are distinct from measured zero. API billing is separate from subscription quota.')],
     [t('Build'), demo ? t('Synthetic browser demo; it runs without the native app.') : t('{platform} build. Native platform is reported by the running app.', { platform: platformLabel(runtime?.platform) })],
-    [t('Compatibility'), t('macOS and Windows builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
+    [t('Compatibility'), t('macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
     [t('Imported OAuth'), t('A captured credential snapshot. After you sign in again elsewhere, add the account the CLI uses again. Switchboard renews inactive Claude accounts; the account Claude Code uses is renewed by Claude Code.')],
     [t('Switch'), t('Switch changes the account of the ordinary Claude Code. New claude sessions start on it; a session already running may keep its account until it restarts.')],
     [t('Automatic switching'), t('Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
@@ -1183,15 +1191,25 @@ async function loadBackups() {
 function residencyPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'residency-heading');
   const heading = el('h2', '', t('Running in the background')); heading.id = 'residency-heading';
-  panel.append(heading, el('p', '', (onWindows() ? t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its icon in the notification area.') : t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'))));
+  panel.append(heading, el('p', '', (trayInArea() ? t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its icon in the notification area.') : t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'))));
   if (loginItemError) { panel.append(el('p', 'form-note', t('The login setting is unavailable. Refresh to retry.'))); updateControls(panel); return panel; }
   if (!loginItem) { panel.append(el('p', 'form-note', t('Reading the login setting…'))); updateControls(panel); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = loginItem.enabled; box.disabled = !loginItem.available; box.dataset.focus = 'login-item';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { loginItem = await adapter.setLoginItem(wanted); }, wanted ? t('Switchboard will open at login, in the background.') : t('Switchboard will no longer open at login.'), 'login-item'); });
   option.append(box, el('span', '', t('Open at login, in the background')));
-  panel.append(option, el('p', 'form-note', loginItem.available ? (onWindows() ? t('Starts without a window; open it from its icon in the notification area.') : t('Starts without a window; open it from the menu-bar icon.')) : t('Available in the installed app.')));
+  panel.append(option, el('p', 'form-note', loginItem.available ? (trayInArea() ? t('Starts without a window; open it from its icon in the notification area.') : t('Starts without a window; open it from the menu-bar icon.')) : t('Available in the installed app.')));
   updateControls(panel);
   return panel;
+}
+/** SB-104: a manual check runs in the background — it may download and install for minutes — and
+ * says how it ended; the rest of the window stays usable meanwhile. */
+async function checkUpdatesNow() {
+  if (updateState) { updateState = { ...updateState, state: 'checking' }; render(); restoreFocus('update-check'); }
+  try { updateState = await adapter.checkForUpdates(); }
+  catch (error) { showNotice(safeError(error), true); }
+  await loadUpdate();
+  if (updateState) showNotice(updateLine(updateState).text, updateState.state === 'failed');
+  backgroundRender();
 }
 /** SB-55: the backend checks, downloads and installs on its own; the window only reads the state, once a minute while a check can still change it. */
 async function loadUpdate() {
@@ -1211,7 +1229,7 @@ function updateControls(panel: HTMLElement) {
   panel.append(option, el('p', 'form-note', line.text));
   if (line.restart) panel.append(button(t('Restart to update'), () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, t('Restarting Switchboard with the new version…'), 'update-restart'), 'button', 'update-restart'));
   // LC-16: the person can always ask, with automatic updates off too.
-  else if (status.available && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void mutate(async () => { updateState = await adapter.checkForUpdates(); await loadUpdate(); }, t('Update check finished.'), 'update-check'), 'button', 'update-check'));
+  else if (status.available && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void checkUpdatesNow(), 'button', 'update-check'));
 }
 /** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode.ai tool shares. */
 function analyticsPanel() {
@@ -1233,13 +1251,15 @@ function backupsPanel() {
   const status = backupStatus;
   panel.append(el('p', '', status.enabled ? t('Switchboard saves an encrypted copy of your accounts after every change and once a day, and keeps the newest ten.') : t('Automatic backups run in the desktop app.')));
   if (status.directory) panel.append(el('code', 'address', status.directory));
-  panel.append(el('p', 'form-note', (onWindows() ? t('The key is protected by Windows for your user account. These backups restore after reinstalling Switchboard on this computer; they cannot be opened on another computer or by another Windows user.') : t('The key stays in this Mac’s Keychain. These backups restore after reinstalling Switchboard on this Mac; they cannot be opened on another Mac or after the Keychain is erased.'))));
+  panel.append(el('p', 'form-note', (onWindows() ? t('The key is protected by Windows for your user account. These backups restore after reinstalling Switchboard on this computer; they cannot be opened on another computer or by another Windows user.') : onLinux() ? t('The key stays in this computer’s Secret Service keyring. These backups restore after reinstalling Switchboard here; they cannot be opened on another computer or after the keyring is erased.') : t('The key stays in this Mac’s Keychain. These backups restore after reinstalling Switchboard on this Mac; they cannot be opened on another Mac or after the Keychain is erased.'))));
   if (status.last_error) panel.append(el('p', 'usage-error', t('The last automatic backup failed: {error}', { error: t(safeError(status.last_error)) })));
   const list = el('div', 'backup-list');
   if (!status.backups.length) list.append(el('p', 'form-note', t('No backups yet.')));
+  // SB-104: a backup this computer cannot open is listed, never offered to restore.
   for (const backup of status.backups.slice(0, 5)) {
     const row = el('div', 'policy-row'); const copy = el('div');
     copy.append(el('strong', 'block', date(backup.created_at)), el('span', 'usage-caption', `${plural(backup.accounts, { one: '{n} account', other: '{n} accounts' })}`));
+    if (backup.openable === false) { copy.append(el('span', 'usage-caption', ` · ${t('made on another computer')}`)); row.append(copy); list.append(row); continue; }
     row.append(copy, button(t('Restore'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), `restore-${backup.file}`), 'text-button', `restore-${backup.file}`));
     list.append(row);
   }
@@ -1506,7 +1526,8 @@ function backgroundRefresh() {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
     snapshot = data; applyContext(context); backgroundRender();
-    void loadSessions();
+    // SB-104: the session list is read only while it is on screen.
+    if (page === 'activity') void loadSessions();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
