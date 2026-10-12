@@ -22,6 +22,17 @@ leftover; the Sessions list names Kimi accounts and never stalls other requests;
 no longer shows the previous session, one Kimi account that cannot be read no longer blanks the
 others, and `switchboard onboard --status` finds the home on Windows.
 
+**The window keeps its word** (SB-104). *Check for updates* runs in the background and says how it
+went, also with automatic updates off; a menu closes before its action runs; on Linux the window
+names the Secret Service keyring and the notification area; when limits and sign-in states cannot
+be read the window says so instead of showing every account as available; a backup made on
+another computer is listed but not offered to restore; the Kimi *Add* dialog can start again after
+a sign-in ended and retry a save that failed; the Sessions list refreshes when Activity opens.
+Docs: the ten read tools, Kimi sessions, a limit's `reason` and `hidden`, Linux CLI paths.
+
+**Nightly on Linux and Windows** (#156): Claude Code on Windows keys a folder with forward
+slashes — onboarding finds the registration either way.
+
 ## 0.6.17 — 2026-10-12
 
 **Agents keep working when an account hits a limit** (SB-98). A managed session's request the
