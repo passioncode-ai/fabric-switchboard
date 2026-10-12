@@ -22,6 +22,8 @@ pub(crate) const WINDOW_SECONDS: i64 = 900;
 pub(crate) const SWITCH_GRACE_SECONDS: i64 = 60;
 /// A limit with no reported reset holds for this long, then the account may be tried again.
 const DEFAULT_HOLD_SECONDS: i64 = 900;
+/// How recent usage figures must be to call a refused limit hidden (SB-102).
+const HIDDEN_FRESH_SECONDS: i64 = 600;
 const MAX_HOLD_SECONDS: i64 = 7 * 86_400;
 const MAX_FILES: usize = 64;
 const MANAGED_REPEAT_SECONDS: i64 = 300;
@@ -225,7 +227,10 @@ impl LimitState {
                 usage
                     .windows
                     .iter()
-                    .filter(|w| !w.is_feature() && w.used_percent >= 100.0)
+                    // SB-102: the account's own windows only — a model's weekly window at 100 %
+                    // (`seven_day_opus`) must not hold the whole account for days.
+                    .filter(|w| matches!(w.name.as_str(), "five_hour" | "seven_day"))
+                    .filter(|w| w.used_percent >= 100.0)
                     .filter_map(|w| w.resets_at)
                     .filter(|t| *t > now)
                     .max()
@@ -253,7 +258,7 @@ impl LimitState {
                     until,
                     confidence: Confidence::Attributed,
                     reason: None,
-                    hidden: reset.is_none() && shows_room(snapshot, id, None),
+                    hidden: reset.is_none() && shows_room(snapshot, id, None, now),
                 },
             );
         }
@@ -546,7 +551,7 @@ impl LimitState {
                         until: found.hold,
                         confidence: Confidence::Inferred,
                         reason: found.reason.clone(),
-                        hidden: shows_room(snapshot, id, found.limit_type.as_deref()),
+                        hidden: shows_room(snapshot, id, found.limit_type.as_deref(), now),
                     },
                 );
             }
@@ -877,7 +882,7 @@ fn marker(
 /// Whether the provider's own usage figures still showed room for `id` when it refused (SB-98):
 /// the named window below 100 %, or — with none named — every account window below 100 %. An
 /// account never measured shows nothing, so its limit is not called hidden.
-fn shows_room(snapshot: &Snapshot, id: &str, window: Option<&str>) -> bool {
+fn shows_room(snapshot: &Snapshot, id: &str, window: Option<&str>, now: i64) -> bool {
     let Some(usage) = snapshot
         .accounts
         .iter()
@@ -886,6 +891,11 @@ fn shows_room(snapshot: &Snapshot, id: &str, window: Option<&str>) -> bool {
     else {
         return false;
     };
+    // SB-102: only figures from the last ten minutes can contradict a refusal; older ones may
+    // simply predate the spending.
+    if now - usage.observed_at > HIDDEN_FRESH_SECONDS {
+        return false;
+    }
     let windows: Vec<_> = usage.windows.iter().filter(|w| !w.is_feature()).collect();
     match window {
         Some(name) => windows
@@ -1198,20 +1208,24 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            shows_room(&with(0.0), "id-a", Some("five_hour")),
+            shows_room(&with(0.0), "id-a", Some("five_hour"), NOW),
             "usage says 0 %, the provider refused: hidden"
         );
         assert!(
-            !shows_room(&with(100.0), "id-a", Some("five_hour")),
+            !shows_room(&with(100.0), "id-a", Some("five_hour"), NOW),
             "a full window is no surprise"
         );
         assert!(
-            shows_room(&with(40.0), "id-a", Some("seven_day_opus")),
+            shows_room(&with(40.0), "id-a", Some("seven_day_opus"), NOW),
             "a window the figures do not carry"
         );
         assert!(
-            !shows_room(&Snapshot::default(), "id-a", None),
+            !shows_room(&Snapshot::default(), "id-a", None, NOW),
             "never measured: not called hidden"
+        );
+        assert!(
+            !shows_room(&with(0.0), "id-a", Some("five_hour"), NOW + 3600),
+            "figures an hour old cannot call a limit hidden (SB-102)"
         );
     }
     #[test]

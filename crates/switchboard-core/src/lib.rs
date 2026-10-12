@@ -31,7 +31,7 @@ pub mod windows;
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution};
-pub use rotation::{RotationDecision, RotationPolicy};
+pub use rotation::{Fits, RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 
 use serde::{Deserialize, Serialize};
@@ -531,9 +531,17 @@ impl Store {
     /// stays in memory like any other timestamp (lifecycle LC-08). The first call only learns the
     /// set: a start moves no schedule.
     /// Replaces the accounts a limit holds (SB-98): the runtime publishes its evidence here.
+    /// Refusals the proxy recorded and the runtime has not taken yet stay held (SB-102): a
+    /// publication racing a failover never frees the account that was just refused.
     pub fn set_limited(&self, ids: std::collections::HashSet<String>) {
+        let pending: Vec<String> = self
+            .refused
+            .lock()
+            .map(|refused| refused.keys().cloned().collect())
+            .unwrap_or_default();
         if let Ok(mut held) = self.limited.lock() {
             *held = ids;
+            held.extend(pending);
         }
     }
     pub fn limited(&self) -> std::collections::HashSet<String> {
@@ -553,27 +561,9 @@ impl Store {
         taken.sort_by_key(|(_, at)| *at);
         taken
     }
-    /// A managed request on `from` was refused for a limit (SB-98): `from` joins the held
-    /// accounts and the pool moves to its next usable account at once — the same choice the
-    /// automatic switch makes for a limited account (`rotation_decision_with`), with the pool's
-    /// managed policy's figures when it has one, whether or not that policy is switched on: a
-    /// limit is an outage, not a preference. Returns the new route, or None when no other
-    /// account can take the request (the caller then answers the provider's refusal).
-    pub fn failover(
-        &self,
-        provider: Provider,
-        pool: &str,
-        from: &str,
-        now: i64,
-    ) -> Result<Option<(Account, Credential)>, String> {
-        let mut held = self.limited();
-        held.insert(from.to_owned());
-        if let Ok(mut shared) = self.limited.lock() {
-            shared.insert(from.to_owned());
-        }
-        if let Ok(mut refused) = self.refused.lock() {
-            refused.insert(from.to_owned(), now);
-        }
+    /// The pool's managed policy's figures, switched on for the purpose — a limit or a dead
+    /// credential is an outage, not a preference — or the defaults when it has none.
+    fn failover_policy(&self, provider: Provider, pool: &str) -> Result<RotationPolicy, String> {
         let mut policy = self
             .lock()?
             .policies
@@ -593,56 +583,72 @@ impl Store {
             });
         policy.enabled = true;
         policy.last_switched_at = None;
-        self.move_route(provider, pool, from, &policy, &held, now)
+        Ok(policy)
     }
-    /// The pool's selected account cannot serve a request — its credential expired or it is
-    /// gone (SB-101): the pool moves to its next usable account, as for a limit, but the account
-    /// is not held — an expired token is not a limit. None when no other account can serve.
+    /// A managed request on `from` was refused for a limit (SB-98, SB-102). `from` is held and
+    /// handed to the runtime as evidence; the pool moves to its best account that `fits` the
+    /// request — only while the route still names `from`: a request that comes back refused
+    /// after another one (or the person) moved the pool takes the route as it now is. Returns
+    /// the route the request should go to, or None when nothing usable is left.
+    pub fn failover(
+        &self,
+        provider: Provider,
+        pool: &str,
+        from: &str,
+        fits: Fits,
+        now: i64,
+    ) -> Result<Option<(Account, Credential)>, String> {
+        if let Ok(mut shared) = self.limited.lock() {
+            shared.insert(from.to_owned());
+        }
+        if let Ok(mut refused) = self.refused.lock() {
+            refused.insert(from.to_owned(), now);
+        }
+        self.move_route(provider, pool, Some(from), fits, now)
+    }
+    /// The pool's selected account cannot serve a request — its credential expired, it was
+    /// switched off, or it is gone (SB-101, SB-102): the pool moves to its best account that
+    /// `fits`, but nothing is held — an expired token is not a limit. A route another request
+    /// already repaired is used as it is.
     pub fn failover_unusable(
         &self,
         provider: Provider,
         pool: &str,
+        fits: Fits,
         now: i64,
     ) -> Result<Option<(Account, Credential)>, String> {
-        let Some(from) = self
+        if let Ok(route) = self.route(provider, pool) {
+            return Ok(fits.admits(&route.0).then_some(route));
+        }
+        let from = self
             .lock()?
             .routes
             .get(&format!("{}:{}", provider.as_str(), pool))
-            .cloned()
-        else {
-            return Ok(None);
-        };
-        let mut held = self.limited();
-        held.insert(from.clone());
-        let policy = RotationPolicy {
-            provider,
-            pool: pool.to_owned(),
-            target: "managed".into(),
-            enabled: true,
-            threshold_percent: 90.0,
-            hysteresis_percent: 10.0,
-            cooldown_seconds: 0,
-            max_age_seconds: 300,
-            last_switched_at: None,
-        };
-        self.move_route(provider, pool, &from, &policy, &held, now)
+            .cloned();
+        self.move_route(provider, pool, from.as_deref(), fits, now)
     }
     fn move_route(
         &self,
         provider: Provider,
         pool: &str,
-        from: &str,
-        policy: &RotationPolicy,
-        held: &std::collections::HashSet<String>,
+        from: Option<&str>,
+        fits: Fits,
         now: i64,
     ) -> Result<Option<(Account, Credential)>, String> {
-        let decision = self.rotation_decision_with(policy, Some(from), now, held)?;
-        let Some(id) = decision.candidate_id else {
+        let policy = self.failover_policy(provider, pool)?;
+        let mut held = self.limited();
+        held.extend(from.map(str::to_owned));
+        let Some(id) = self.failover_candidate(&policy, &held, fits, now)? else {
             return Ok(None);
         };
-        self.select_with_cooldown(provider, pool, &id, now)?;
-        let _ = self.record("rotation", Some(&id), "switched");
-        self.route(provider, pool).map(Some)
+        // Compare and move: only a route still on `from` changes.
+        if self.select_transaction(provider, pool, &id, Some(now), Some(from))? {
+            let _ = self.record("rotation", Some(&id), "switched");
+        }
+        Ok(self
+            .route(provider, pool)
+            .ok()
+            .filter(|(account, _)| fits.admits(account)))
     }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {
@@ -1281,7 +1287,8 @@ impl Store {
         Ok(())
     }
     pub fn select(&self, provider: Provider, pool: &str, id: &str) -> Result<(), String> {
-        self.select_transaction(provider, pool, id, None)
+        self.select_transaction(provider, pool, id, None, None)
+            .map(|_| ())
     }
     /// Publishes the managed route and any matching policy's cooldown in one metadata write.
     pub fn select_with_cooldown(
@@ -1294,16 +1301,29 @@ impl Store {
         if now <= 0 {
             return Err("Invalid rotation time".into());
         }
-        self.select_transaction(provider, pool, id, Some(now))
+        self.select_transaction(provider, pool, id, Some(now), None)
+            .map(|_| ())
     }
+    /// Selects `id`. With `expect`, only while the route still names that account (`None`: no
+    /// route); Ok(false) when it no longer does, and nothing changes (SB-102).
     fn select_transaction(
         &self,
         provider: Provider,
         pool: &str,
         id: &str,
         switched_at: Option<i64>,
-    ) -> Result<(), String> {
+        expect: Option<Option<&str>>,
+    ) -> Result<bool, String> {
         let mut state = self.lock()?;
+        if let Some(expected) = expect {
+            let route = state
+                .routes
+                .get(&format!("{}:{}", provider.as_str(), pool))
+                .map(String::as_str);
+            if route != expected {
+                return Ok(false);
+            }
+        }
         let a = state
             .accounts
             .iter()
@@ -1330,7 +1350,7 @@ impl Store {
             }
         }
         append_event(&mut candidate, "account_selected", Some(id), "success");
-        self.publish(&mut state, candidate)
+        self.publish(&mut state, candidate).map(|()| true)
     }
     fn checked_credential(&self, a: &Account) -> Result<Credential, String> {
         if !a.enabled {
@@ -1344,6 +1364,18 @@ impl Store {
             return Err("Credential expired; reauthenticate this account".into());
         }
         Ok(c)
+    }
+    /// The selected account of a pool, usable or not (SB-102: what a broken route was).
+    pub fn selected_account(&self, provider: Provider, pool: &str) -> Option<Account> {
+        let state = self.lock().ok()?;
+        let id = state
+            .routes
+            .get(&format!("{}:{}", provider.as_str(), pool))?;
+        state
+            .accounts
+            .iter()
+            .find(|a| &a.id == id && a.provider == provider && a.pool == pool)
+            .cloned()
     }
     pub fn route(&self, provider: Provider, pool: &str) -> Result<(Account, Credential), String> {
         let state = self.lock()?;

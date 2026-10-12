@@ -6,6 +6,16 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+**Failover never makes things worse** (SB-102). A session moved off a limited account goes only
+to an account of the same kind — a subscription never onto a paid key, a key shared with agents
+never onto a subscription — and only while the pool still points at the refused account, so
+parallel requests and the person's own choice are never overridden. A refused account is never
+picked again in the same moment; an account set aside after a failed switch is never treated as
+limited once it is in use; a model's weekly limit no longer holds the whole account; automatic
+hand-over never picks another project's account.
+
 ## 0.6.17 — 2026-10-12
 
 **Agents keep working when an account hits a limit** (SB-98). A managed session's request the

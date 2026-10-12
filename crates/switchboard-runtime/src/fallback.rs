@@ -63,6 +63,7 @@ pub(crate) fn resolve(
     executor_account: Option<&str>,
     limited: &HashSet<String>,
     sign_in: &HashSet<String>,
+    folder: Option<&std::path::Path>,
 ) -> Vec<Step> {
     let spent: HashSet<(Provider, &str)> = snapshot
         .accounts
@@ -70,8 +71,11 @@ pub(crate) fn resolve(
         .filter(|a| Some(a.id.as_str()) == executor_account || limited.contains(&a.id))
         .filter_map(|a| a.identity.as_deref().map(|i| (a.provider, i)))
         .collect();
+    // SB-102: a project's reserved account serves only its folders, and an account outside a
+    // project never serves a project's folder — decided here, before any renewal or launch.
     let usable = |a: &Account| {
-        a.enabled
+        folder.is_none_or(|f| crate::launch::project_allows(snapshot, a, f).is_ok())
+            && a.enabled
             && Some(a.id.as_str()) != executor_account
             && !limited.contains(&a.id)
             && !sign_in.contains(&a.id)
@@ -313,6 +317,7 @@ where
             executor_account.as_deref(),
             &limited,
             &sign_in,
+            Some(&dir),
         );
         let outcome = hand_over(&act, id, &dir, &steps).await;
         log(outcome);
@@ -405,6 +410,51 @@ mod tests {
     }
 
     #[test]
+    fn a_projects_reserved_account_never_takes_over_work_outside_its_folders() {
+        // SB-102: decided while resolving, so no renewal or launch is spent on a refusal.
+        let mut reserved = account("claude-reserved", Provider::Claude, Some(1.0));
+        reserved.pool = "client-alpha".into();
+        let snapshot = Snapshot {
+            accounts: vec![
+                reserved,
+                account("claude-free", Provider::Claude, Some(60.0)),
+            ],
+            projects: vec![switchboard_core::Project {
+                pool: "client-alpha".into(),
+                name: "Client Alpha".into(),
+                folders: vec!["/work/alpha".into()],
+                created_at: 1,
+            }],
+            ..Default::default()
+        };
+        let resolve_in = |folder: &str| {
+            resolve(
+                &snapshot,
+                &chain(&[("claude-code", None)]),
+                Some("someone-else"),
+                &HashSet::new(),
+                &HashSet::new(),
+                Some(std::path::Path::new(folder)),
+            )
+        };
+        assert_eq!(
+            resolve_in("/work/beta"),
+            [Step::Run {
+                agent: "claude-code".into(),
+                account_id: "claude-free".into()
+            }],
+            "the least-used account is reserved elsewhere: the free one serves"
+        );
+        assert_eq!(
+            resolve_in("/work/alpha/api"),
+            [Step::Run {
+                agent: "claude-code".into(),
+                account_id: "claude-reserved".into()
+            }],
+            "inside the project its own account serves"
+        );
+    }
+    #[test]
     fn the_chain_resolves_to_usable_accounts_in_order() {
         let snapshot = Snapshot {
             accounts: vec![
@@ -422,6 +472,7 @@ mod tests {
             Some("claude-a"),
             &limited,
             &HashSet::new(),
+            None,
         );
         assert_eq!(
             steps,
@@ -480,6 +531,7 @@ mod tests {
             Some("exec"),
             &limited,
             &HashSet::new(),
+            None,
         );
         assert_eq!(
             steps,
@@ -514,6 +566,7 @@ mod tests {
             Some("claude-a"),
             &HashSet::new(),
             &sign_in,
+            None,
         );
         assert!(
             steps.iter().all(|s| matches!(
