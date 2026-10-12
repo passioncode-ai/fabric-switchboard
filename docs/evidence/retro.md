@@ -55,8 +55,11 @@
 | 2026-10-04 | SB-40 Codex limits beyond the two windows | `585c255` | yes — entry below |
 | 2026-10-04 | SB-41 typed, attributable limit evidence | `64068c0` | yes — entry below |
 | 2026-10-05 | SB-30, SB-43, SB-42, SB-46, SB-29, release v0.5.4-beta.3 | `d918734` | yes — entry below |
+| 2026-10-12 | SB-105 waiting update; SB-99 Kimi sign-ins | `0f4078a` | yes — disk-full gate (Recent log) |
 
 ## Recent log
+
+- **2026-10-12, SB-105.** Symptom: the first full gate failed one storage test (`storage.rs:629`, `record().unwrap()`); the data volume had dropped to 117 MB free during the build. Surfaced at stage 6, owned by stage 0 (no disk check in the autonomy sweep). Root cause: a full debug build of the workspace needs more than the 4.7 GB that was free. Fix: `cargo clean --profile dev` on this checkout (5.1 GB) and the gate rerun with `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0` under a free-space watchdog — 1.5 GB of `target/`. Next time: stage 0 records `df` of the data volume; under 10 GB free, the gate runs lean from the start.
 
 ### 2026-10-05 — the release found what no gate had compiled
 

@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-12 — SB-99 second part: Kimi sign-ins capped and swept
+
+Branch `feat/sb-99-kimi-sign-ins`: at most four waiting Kimi sign-ins; an owner start removes the
+Kimi sign-in homes whose `kimi login` ended (log `kimi_login_leftovers`). CONTRACTS → Kimi Code
+accounts. Gate `./scripts/check.sh` exit 0 (lean: `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0`;
+the data volume has ~3 GB free).
+
+Measured for the rest of SB-99 (2026-10-12, `kimi` 2.1.1): `kimi -p <prompt>` without `-y`/`--auto`
+ran a shell command with no prompt (`echo`, stream-json: tool call then result) and ends with a
+resume hint `kimi -r <session>`; the interactive `kimi` takes no first message. A Kimi account
+home has its own `mcp.json` (`mcpServers`). The engine's `handoff --to-provider` is free text.
+Kimi limits are computed only in the window today (`kimiLimitUntil`), never in the background.
+
+**Exact next task:** the operator answers the two SB-99 questions — (a) may the owner check each
+saved Kimi account's usage in the background (every 10 min, only while a fallback chain is set),
+so a workflow a Kimi executor runs is handed on at its limit; (b) Kimi as a chain step: a first
+turn through `kimi -p` (no approvals) then `kimi -r` interactive, or skip Kimi as a target. Then
+build them; the app restart by hand and the Russian copy read are still open.
+
+---
+
 ## 2026-10-12 — SB-105 done: a waiting update never waits forever
 
 Branch `fix/sb-105-update-waits`. While an update waits, the 6-hour checks go on and a newer

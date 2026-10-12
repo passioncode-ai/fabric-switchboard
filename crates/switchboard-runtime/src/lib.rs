@@ -1124,7 +1124,16 @@ impl Owner {
         // Keychain, each bounded), and only the real owner of its data folder does it.
         if native_sources {
             let root = runtime.root.clone();
+            let store = runtime.store.clone();
             tokio::task::spawn_blocking(move || {
+                // SB-99: Kimi sign-ins that ended without signing in, the same way.
+                let kimi = kimi::sweep_logins(&root, &store);
+                if kimi > 0 {
+                    oplog::event(
+                        "kimi_login_leftovers",
+                        &[("removed", oplog::Field::Number(kimi as i64))],
+                    );
+                }
                 let sweep = launch::sweep_logins(&root);
                 if sweep != launch::Sweep::default() {
                     oplog::event(
