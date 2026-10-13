@@ -2,8 +2,8 @@
 //! "Open hand-overs in Fabric" on, the automatic fallback offers the workflow and prepares the
 //! continuing session as `switchboard continue --in-place` would, but starts nothing: it records a
 //! pending hand-over here. Fabric polls `switchboard handovers --json` and runs
-//! `switchboard handovers run <id>` on a console PTY; a hand-over runs once (taking it renames its
-//! record before anything reads it). One nobody takes within `CONSOLE_WAIT` seconds is opened in
+//! `switchboard handovers run <id>` on a console PTY; a hand-over runs once (taking it exclusively
+//! creates a permanent receipt before reading it). One nobody takes within `CONSOLE_WAIT` seconds is opened in
 //! Terminal by the background, as before, so a closed Fabric never strands an offer.
 //!
 //! Records live in `<data>/handovers/<id>.json` (0600): ids, a label, a folder and a script path —
@@ -83,6 +83,9 @@ pub(crate) fn record(root: &Path, handover: &Handover) -> Result<(), String> {
     }
     let folder = dir(root);
     crate::launch::private_dir(&folder)?;
+    if fs::symlink_metadata(folder.join(format!("{}.taken", handover.id))).is_ok() {
+        return Err(NOT_FOUND.into());
+    }
     // Crash receipts count too: never grow an unbounded directory of ambiguous takes.
     if fs::read_dir(&folder)
         .map_err(|_| NOT_FOUND)?
@@ -120,14 +123,14 @@ pub fn pending(root: &Path) -> Vec<Handover> {
         .flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
         .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| fs::symlink_metadata(e.path().with_extension("taken")).is_err())
         .filter_map(|e| read(&e.path()))
         .collect();
     found.sort_by_key(|h| (h.created_at, h.id.clone()));
     found
 }
 
-/// Takes a hand-over once: its record is renamed before it is read, so of two takers exactly one
-/// gets it. Returns it; the record is gone.
+/// Takes a hand-over once, retaining an exclusive receipt even after a crash.
 pub fn take(root: &Path, id: &str) -> Result<Handover, String> {
     take_at(root, id, crate::monitor::now())
 }
@@ -139,9 +142,16 @@ fn take_at(root: &Path, id: &str, now: i64) -> Result<Handover, String> {
     let folder = dir(root);
     let from = folder.join(format!("{id}.json"));
     let to = folder.join(format!("{id}.taken"));
-    fs::rename(&from, &to).map_err(|_| NOT_FOUND.to_string())?;
-    let handover = read_taken(&to, id);
-    let _ = fs::remove_file(&to);
+    if !fs::symlink_metadata(&from).is_ok_and(|m| m.file_type().is_file()) {
+        return Err(NOT_FOUND.into());
+    }
+    // Windows can report success for concurrent renames of the same open source.
+    // CREATE_NEW/O_EXCL chooses one taker; never unlink this deduplication receipt.
+    let receipt =
+        switchboard_core::private_fs::create_new(&to).map_err(|_| NOT_FOUND.to_string())?;
+    receipt.sync_all().map_err(|_| NOT_FOUND.to_string())?;
+    let handover = read_taken(&from, id);
+    let _ = fs::remove_file(&from);
     handover
         .filter(|h| offer_live(h, now))
         .ok_or_else(|| NOT_FOUND.to_string())
@@ -165,7 +175,7 @@ fn read_taken(path: &Path, id: &str) -> Option<Handover> {
 /// The background's look (every pass, only while the folder exists): a hand-over no console
 /// took within `CONSOLE_WAIT` seconds, or one beyond `MAX_WAITING`, is taken and opened with
 /// `start` (Terminal); an unreadable or expired pending record is removed. Returns how many
-/// were opened. Ambiguous `.taken` receipts remain until uninstall or explicit reconciliation.
+/// were opened. All `.taken` receipts remain until uninstall or explicit reconciliation.
 pub(crate) fn sweep(root: &Path, now: i64, start: fn(&Path) -> Result<(), String>) -> usize {
     let folder = dir(root);
     let Ok(entries) = fs::read_dir(&folder) else {
@@ -299,6 +309,7 @@ mod tests {
         expired.offered_until = "1970-01-01T00:02:00Z".into();
         record(root.path(), &expired).unwrap();
         assert!(take_at(root.path(), &expired.id, 120).is_err());
+        expired.id = "ho-000000000002".into();
         expired.offered_until = "invalid".into();
         record(root.path(), &expired).unwrap();
         fn never(_: &Path) -> Result<(), String> {
@@ -319,5 +330,29 @@ mod tests {
             [a.join().unwrap(), b.join().unwrap()]
         });
         assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+        assert!(root
+            .path()
+            .join(format!("handovers/{}.taken", h.id))
+            .is_file());
+        assert!(
+            record(root.path(), &h).is_err(),
+            "a receipt prevents republication"
+        );
+    }
+
+    #[test]
+    fn a_crash_after_claim_never_reoffers_or_replays_the_pending_record() {
+        let root = tempfile::tempdir().unwrap();
+        let h = handover("ho-000000000001", 100);
+        record(root.path(), &h).unwrap();
+        let receipt = root.path().join(format!("handovers/{}.taken", h.id));
+        switchboard_core::private_fs::create_new(&receipt).unwrap();
+        assert!(pending(root.path()).is_empty());
+        assert!(take_at(root.path(), &h.id, 101).is_err());
+        fn never(_: &Path) -> Result<(), String> {
+            panic!("an ambiguous claim was replayed")
+        }
+        assert_eq!(sweep(root.path(), 1000, never), 0);
+        assert!(receipt.is_file());
     }
 }

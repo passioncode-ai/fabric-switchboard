@@ -40,7 +40,11 @@ was instructed to add the other 17 canonical clones, `sshlg-skills` and its 11 c
 member repositories (29 selected); worktrees/comparison clones were excluded. The native
 consent dialog for Codex access to the `fabric` project appeared while import ran. It was
 left unanswered: opening a project is distinct from granting an agent one-year access.
-The dialog prevents UI readback, so the 29 additions are **submitted, not yet verified**.
+A later screenshot showed the consent dialog gone, added project entries (including
+Fabric, Adapter, Contract and Dashboards), and the neighboring SB-115 task. UI actions
+then failed with `noWindowsAvailable`; all 29 additions remain **submitted, not fully
+verified**. No access consent was clicked by this run. The registered MCP reconnected
+and `fabric_whoami` again resolved Switchboard.
 
 **Checks:** `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 ./scripts/check.sh`
 exited 0 on the final 0.6.26 source: 561 Rust tests passed, three explicit native
@@ -59,17 +63,32 @@ a fresh remote clone of that commit passed docs, plugin and release-preflight ch
 The merge tree matched the locally checked tree. The annotated `v0.6.26` tag names
 `b58477b1cc0108047367882cd7ee1e277d3c39bf`.
 
-**Release:** [run 38331819706](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38331819706)
-is in progress; preflight passed, the exact-commit guard is running. This is not yet
-a publication receipt. `gh run watch 38331819706 --exit-status --interval 60` is the
-active watcher in this run; it reports the result, never bypasses a failed guard.
+**Release:** [0.6.26 run 38331819706](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38331819706)
+finished `failure` without publishing. Its [exact-tag nightly](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38331992391)
+failed `handovers::tests::two_consoles_cannot_take_the_same_handover` on Windows x64
+(job 115083614169) and arm64 (job 115083614116): two successful takes, expected one.
+The release guard must remain closed. The original tag is retained unchanged.
 
-**Exact next task:** finish the release run above and record its outcome, then connect
-the packet's REQ-5 through the owning Projects on Fabric's board. Obtain Project ids through the
-supported directory/board interface; submit the packet to Fabric, Observatory and
-Dashboards, and retain their message receipts here. Complete UI readback after the
-separate native access dialog is resolved by the operator; do not approve it as the agent.
-Keep SB-114 and the overall SB-108 row open until the host provides actual session evidence.
+**Correction verified locally, 0.6.27:** exclusive private-file creation replaces rename
+as the hand-over claim. A permanent `.taken` receipt prevents republishing, hides a
+pending record left by a crash, and remains subject to the bounded queue. The existing
+concurrent-taker test and new crash-after-claim test cover this. The final full local gate exited 0: 562 Rust tests passed, three native checks ignored,
+plus clippy, UI, docs, plugin, packaging and notices checks. The plugin-layout check
+now excludes isolated `.worktrees/`; its regression fixture passed. No Windows acceptance
+is claimed until the new exact-tag nightly succeeds. Branch: `docs/sb114-release-receipt`.
+
+**Parallel owner:** the operator supplied the neighboring session's hybrid no-wait
+plan; its checkout is `feat/sb-115-limit-stop-resume`. That session owns SB-115 and
+shared Fabric/orchestration rule and skill updates. SB-114 readiness is not a global
+prohibition on an independently authorized host retry. See the packet's operator
+coordination update. No neighbor implementation or publication is claimed here.
+
+**Exact next task:** validate and publish corrected 0.6.27 through its guarded release,
+then record the actual outcome. Connect the packet's REQ-5 through the owning Projects
+on Fabric's board, coordinated with SB-115. Obtain Project ids through the supported
+interface and retain message receipts. Complete import UI readback when native UI interaction works again; do not approve
+new agent access as the agent.
+Keep SB-114 and overall SB-108 open until actual host session evidence exists.
 
 ---
 

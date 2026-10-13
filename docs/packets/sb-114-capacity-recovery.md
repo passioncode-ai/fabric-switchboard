@@ -94,3 +94,19 @@ repository names are not server-issued Project ids. The operator requested no mo
 questions during this run, so these asks remain prepared, not falsely sent.
 A rejoin-only MCP attempt later returned `call budget exhausted before body admission`.
 No new enrollment may be used to work around that refusal.
+
+## Operator coordination update — 2026-10-13
+
+The operator supplied a neighboring session's accepted hybrid plan in this run:
+SB-115 owns a prompt host continuation attempt after a confirmed limit stop or route
+change, followed by bounded retries with backoff. That session also owns the shared
+Fabric and orchestration skill updates. Its implementation and publication have not
+been verified here; do not duplicate its work from this packet.
+
+SB-114's fresh-quota requirement governs its capacity-ready claim. It does not prohibit
+an independently authorized host continuation attempt under the hybrid policy. A reset
+time alone still does not establish healthy capacity. A quiet session alone does not
+prove a stopped executor: the host must reconcile activity, checkpoint, cancellation,
+and uncertain launch outcomes before acting. Resume only unfinished work and children;
+never replay an ambiguous launch or completed task. Preserve provider, pool and project
+boundaries for every attempt. REQ-5 remains open until host evidence exists.

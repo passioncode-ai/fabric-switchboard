@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.27 — 2026-10-13
+
+**Prevent duplicate console hand-overs on Windows.** An exclusive claim receipt now ensures
+that only one console can start each hand-over. The receipt survives a crash and prevents
+the same hand-over from being offered again. The setting remains off by default.
+
+This includes the capacity-recovery and console-queue features described below for 0.6.26.
+The 0.6.26 release was stopped by its mandatory Windows checks and was not published.
+
 ## 0.6.26 — 2026-10-13
 
 **Prepare stopped sessions for recovery** (SB-114). A host can register a session stopped by

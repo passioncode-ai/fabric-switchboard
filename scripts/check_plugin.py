@@ -35,7 +35,7 @@ TOOL_MENTION = re.compile(r"(?<![A-Za-z0-9_])(switchboard_[a-z]+(?:_[a-z]+)*)")
 PREFIXED_MENTION = re.compile(r"mcp__(?:plugin_switchboard_)?switchboard__([a-z_]+)")
 OUTCOME = re.compile(r'outcome\(\s*provider,\s*"([a-z_]+)"')
 TUPLE_ACTION = re.compile(r'\(\s*"([a-z_]+)"\s*,\s*"')
-SKIP_DIRS = {".git", "node_modules", "target", "dist", ".claude", "__pycache__", "gen"}
+SKIP_DIRS = {".git", ".worktrees", "node_modules", "target", "dist", ".claude", "__pycache__", "gen"}
 
 
 # --- strict front matter -------------------------------------------------------------
