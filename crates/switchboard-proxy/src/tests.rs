@@ -1406,6 +1406,73 @@ fn feature_order_does_not_change_the_observation() {
     assert_eq!(names(&one), names(&two));
 }
 
+// SB-118: a project folder's capability reaches its own pool, as a session would, and no other.
+#[tokio::test]
+async fn a_pool_capability_reaches_its_pool_only() {
+    let (_root, s) = store();
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let router = Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(headers["authorization"], "Bearer synthetic-oauth");
+                "{}"
+            }
+        }),
+    );
+    let (url, _up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let scoped = crate::pool_token(p.token(), "default");
+    assert_ne!(scoped, p.token());
+    assert_ne!(scoped, crate::pool_token(p.token(), "other"));
+    let client = reqwest::Client::new();
+    let to = |pool: &str| format!("http://{}/claude/{pool}/v1/messages", p.address());
+    let ok = client
+        .post(to("default"))
+        .bearer_auth(&scoped)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        ok.status(),
+        200,
+        "its own pool, with the pool's subscription"
+    );
+    let elsewhere = client
+        .post(to("other"))
+        .bearer_auth(&scoped)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(elsewhere.status(), 401, "another pool refuses it");
+    let as_key = client
+        .post(to("default"))
+        .header("x-api-key", &scoped)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        as_key.status(),
+        401,
+        "only as a bearer, like the session token"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
 // Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.
 #[tokio::test]
 async fn agents_reach_api_key_accounts_and_never_a_subscription_sign_in() {

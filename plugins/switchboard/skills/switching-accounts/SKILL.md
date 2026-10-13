@@ -187,7 +187,15 @@ this by themselves at start through the plugin's hook; do it explicitly for a fo
 and do not start a session in, and in agents without the hook (Codex, others). Never add folders
 to a project with `project save` yourself to skip the approval.
 
-## 8. Never
+## 8. A project folder routes Claude Code to its own accounts
+
+In a project folder, `.claude/settings.local.json` carries `ANTHROPIC_BASE_URL` and
+`ANTHROPIC_AUTH_TOKEN` written by Switchboard (SB-118). Claude Code sessions started there use
+the project's accounts. Never print, copy or commit that file, and never edit those two keys:
+the token opens the project's pool on this computer. `switchboard project bindings` lists the
+folders. A session that started before the folder joined keeps its old account until restarted.
+
+## 9. Never
 
 - Ask for, accept, print or search for a credential, token, auth JSON or Switchboard's
   `control.json`; never read Claude or Codex credential files or managed homes.

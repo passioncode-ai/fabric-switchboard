@@ -25,6 +25,7 @@ const OWNED: &[&str] = &[
     "limit-evidence.json",
     "recovery.json",
     "project-suggestions.json",
+    "claude-bindings.json",
     "fabric-handovers",
     "handovers",
     "backup-id",
@@ -207,6 +208,8 @@ pub fn uninstall_with(
             LOGIN_ITEM_MACOS
         },
         "data_entries": if keep_data { json!([]) } else { json!(owned) },
+        // SB-118: the project route Switchboard wrote into project folders' Claude Code settings.
+        "claude_bindings": crate::bindings::read(root).map(|r| r.len()).unwrap_or(0),
         "kept": {
             "foreign_entries": foreign,
             "backups": "kept, with their key: a reinstall restores them",
@@ -220,6 +223,10 @@ pub fn uninstall_with(
         return Ok(plan);
     }
     let mut failures = Vec::new();
+    // Before the data folder goes: the record says what was written and where.
+    if let Err(error) = crate::bindings::unbind_all(root) {
+        failures.push(json!({"item": "claude_bindings", "error": error}));
+    }
     for id in &accounts {
         if let Err(error) = vault.delete(id) {
             failures.push(json!({"account_id": id, "error": error}));
@@ -470,5 +477,82 @@ mod tests {
         // `purge` removes the homes too, and the folder with them.
         let done = uninstall_with(&root, vault, false, true, true, &places).unwrap();
         assert_eq!(done["data_folder_removed"], true);
+    }
+
+    fn claude_snapshot(folder: &Path) -> switchboard_core::Snapshot {
+        switchboard_core::Snapshot {
+            projects: vec![switchboard_core::Project {
+                pool: "pc".into(),
+                name: "pc".into(),
+                folders: vec![folder
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()],
+                created_at: 1,
+                sources: vec![],
+            }],
+            accounts: vec![switchboard_core::Account {
+                id: "id-pc".into(),
+                label: "Synthetic".into(),
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                pool: "pc".into(),
+                enabled: true,
+                created_at: 1,
+                identity: None,
+                external_identity: None,
+                usage: None,
+                usage_health: None,
+            }],
+            ..Default::default()
+        }
+    }
+    fn bound_folder(temp: &tempfile::TempDir, root: &Path) -> PathBuf {
+        let app = temp.path().join("app");
+        std::fs::create_dir_all(app.join(".git/info")).unwrap();
+        std::fs::write(app.join(".git/config"), "").unwrap();
+        crate::bindings::sync(root, &claude_snapshot(&app), "127.0.0.1:4000", "session").unwrap();
+        app
+    }
+    fn no_places() -> Places {
+        Places {
+            bin: None,
+            remove_orphan_key: removed_ok,
+            remove_login_item: removed_ok,
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bindings_are_unbound_before_the_data_folder_goes() {
+        let (temp, root, vault) = setup();
+        let app = bound_folder(&temp, &root);
+        let settings = app.join(".claude/settings.local.json");
+        assert!(settings.exists());
+        let done = uninstall(&root, vault.clone(), false, true, &no_places()).unwrap();
+        assert_eq!(done["failures"], json!([]));
+        assert!(
+            !settings.exists(),
+            "the settings file Switchboard created is removed before the data folder"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_binding_that_cannot_be_removed_is_a_plan_failure_not_a_stop() {
+        let (temp, root, vault) = setup();
+        let app = bound_folder(&temp, &root);
+        // The folder's settings file is unreadable: the unbind fails, the removal goes on.
+        std::fs::write(app.join(".claude/settings.local.json"), "{ not json").unwrap();
+        let done = uninstall(&root, vault.clone(), false, true, &no_places()).unwrap();
+        assert_eq!(
+            done["failures"],
+            json!([{"item": "claude_bindings", "error": "Could not update every bound folder."}])
+        );
+        assert!(
+            !root.join("accounts.json").exists(),
+            "the rest of the removal still ran"
+        );
     }
 }

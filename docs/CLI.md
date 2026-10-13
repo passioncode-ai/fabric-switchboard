@@ -121,6 +121,21 @@ switchboard --data-dir /path/to/app-data mcp
 
 A project reserves its accounts to its folders and their subfolders. A project has no folder limit; all projects together hold at most 1024 folders, and no folder may sit inside another project's (`a_project_has_no_folder_limit_and_all_projects_hold_1024`).
 
+### Ordinary Claude Code in a project's folders uses the project's accounts (SB-118)
+
+The ordinary `claude` is signed in once for every folder. So that sessions in a project's folders spend the project's accounts, Switchboard writes two keys into each folder's `.claude/settings.local.json`:
+
+- `env.ANTHROPIC_BASE_URL`: the proxy route of the project's pool;
+- `env.ANTHROPIC_AUTH_TOKEN`: a capability for that pool only.
+
+This covers worktrees inside a project folder too. Everything else in the file stays as it was, and the file is kept out of Git through the repository's `info/exclude`. Your skills, plugins, MCP servers and `CLAUDE.md` stay in force. A session already running keeps its account until it restarts.
+
+```sh
+switchboard project bindings    # the folders bound, with their pool and route
+```
+
+Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
+
 ### A project offers its new folders (SB-117)
 
 Switchboard finds folders that belong to a project and asks before adding them:

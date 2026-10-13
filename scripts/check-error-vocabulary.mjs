@@ -55,6 +55,11 @@ const ALLOWLIST = {
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
+  // runtime bindings.rs (SB-118): read by the background pass, uninstall and `project bindings` (CLI) only.
+  'Claude Code bindings could not be read. Restore the private file before continuing.': 'background and CLI only',
+  // runtime bindings.rs unbind_all(): surfaces under `failures` in `switchboard uninstall`
+  // output; uninstall is never a desktop operation.
+  'Could not update every bound folder.': 'uninstall CLI output only',
   // core projects.rs set_project_sources(): only `switchboard project source` sets sources.
   'Name a source as host/owner, for example github.com/example.': 'CLI only (project source)',
   'A project watches at most 16 sources.': 'CLI only (project source)',

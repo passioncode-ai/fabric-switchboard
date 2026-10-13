@@ -114,6 +114,15 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
   - The scanner lists folders outside the owner transaction and records under it. It never watches the home folder or a filesystem root as a parent. A folder that contains another project's folder is never suggested. Accept admits the folder through `project_dir`.
   - Evidence: `suggest::tests`, core `a_project_has_no_folder_limit_and_all_projects_hold_1024`, CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`, the app's `suggestions::tests`.
 
+- **SB-118 (operator 2026-10-14; [packet](packets/sb-118-claude-bindings.md)).**
+  - `switchboard_proxy::pool_token(session, pool)` = SHA-256 of `switchboard-pool:<pool>:<session>`, in hex. It is accepted as the session token for `/claude|codex/<pool>/…`, and only as a bearer.
+  - `bindings::sync` writes `env.ANTHROPIC_BASE_URL` and `env.ANTHROPIC_AUTH_TOKEN` into `<folder>/.claude/settings.local.json` (0600, atomic) for every folder of a project with an enabled Claude account, and for worktrees of its repositories inside a project folder.
+  - It appends `.claude/settings.local.json` to the repository's `info/exclude`.
+  - It records `{folder, pool, base_url, token_sha256, created}` in `<data>/claude-bindings.json` (0600; operational, not backed up, removed by uninstall after `unbind_all`).
+  - It removes only values equal to what it wrote and never touches a file that is not a JSON object.
+  - Runs from a real owner's pass when `bindings::key` moved, under the owner transaction; log `claude_binding` (bound, removed, skipped counts).
+  - `Operation::ProjectBindings` → `{bindings:[{folder, pool, base_url}]}`; CLI `project bindings`.
+
 ## 0.5 additions
 
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.

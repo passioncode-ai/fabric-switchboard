@@ -286,6 +286,9 @@ enum Project {
     },
     /// The folders waiting for a person's Add or Not this one.
     Suggestions,
+    /// The project folders whose ordinary Claude Code sessions use the project's accounts
+    /// (SB-118): Switchboard keeps the route in each folder's `.claude/settings.local.json`.
+    Bindings,
     /// Add a suggested folder to its project.
     Accept {
         /// The folder, as `project suggestions` lists it.
@@ -1178,6 +1181,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 },
             },
             Project::Suggestions => Operation::ProjectSuggestions,
+            Project::Bindings => Operation::ProjectBindings,
             Project::Accept { folder } => Operation::ProjectSuggestionAccept {
                 folder: folder.clone(),
             },
