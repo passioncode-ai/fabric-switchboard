@@ -135,10 +135,55 @@ Successful platform jobs were retained. The workflow now disables dependency cac
 for future tags; the original 0.6.27 tag is unchanged. YAML parsing and the full local
 gate passed for this workflow change.
 
-Publication and installed-version readback are still pending. A `gh run watch` at
-60-second cadence tracks attempt 2. The running app was observed at 0.6.20; its own
-updater installed 0.6.25 into the bundle at 01:59 UTC, awaiting its normal restart.
-No installed or running 0.6.27 claim yet.
+Attempt 2 finished **success**. [0.6.27](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.27)
+was published at **2026-10-13T02:36:01Z** and was the latest stable release when read
+back. The release has **25 assets**. Downloaded `latest.json` names version 0.6.27
+and exactly seven platform targets; each URL names an existing release asset and each
+embedded signature matches that asset's downloaded `.sig` (five distinct packages).
+All five downloaded platform receipts name commit
+`61a2348ae2441af8d1d2403b955c0c574988fde0`, version 0.6.27 and `source_clean: true`.
+The macOS receipt reports verified signature and accepted app/CLI notarization;
+both Windows receipts report `windows_authenticode: SIGNED`. The failed cache's
+future-workflow correction landed in [PR #183](https://github.com/passioncode-ai/fabric-switchboard/pull/183),
+commit `065afb04aeacafc81e82ce18f59f72d16eafe888`. This did not move the release tag.
+
+**Installed acceptance remains open.** `plutil` reading the installed bundle and its
+bundled `switchboard --version` both returned **0.6.25** after publication. The running
+window was last observed at 0.6.20; its own updater installed 0.6.25 at 01:59 UTC.
+The GUI then returned `cgWindowNotFound`, so 0.6.27 installation/running acceptance
+is not claimed. Local Lifecycle reports the Switchboard runtime ready and authenticated,
+with `startedBy: other`; the broker only restarts its own starts. No process was killed
+or restarted manually. The already-enabled native updater (six-hour checks and its
+five-minute idle watcher) remains the owner of automatic installation/activation.
+
+**Fabric readback remains partial.** The bulk importer received the 29 selections
+below. Added project entries and SB-108/SB-114/SB-115 appeared in a later screenshot;
+complete import readback did not succeed. Native UI operations reported
+`noWindowsAvailable`; reload commands subsequently yielded an empty captured surface.
+Local Lifecycle later reported Fabric's backend ready but zero windows and
+`startedBy: other`. No restart was requested. The original registered MCP reconnected
+and identified Switchboard, but its exposed catalogue still had only `fabric_whoami`.
+The existing auxiliary runtime's rejoin-only call returned `not-enrolled`; no replacement
+binding was created. Cross-project requests remain prepared, not delivered.
+
+The selected project labels were:
+
+- PassionCode (17; Switchboard was already present): `fabric`, `fabric-agent-adapter`,
+  `fabric-agent-contract`, `fabric-dashboards`, `fabric-inbox`, `fabric-vr`,
+  `fabric-workspace`, `org-index`, `passioncode`, `passioncode-ai.github.io`,
+  `passioncode-org-profile`, `passioncode-platform`, `passioncode-vesta`,
+  `project-observatory-contract`, `project-observatory-open-source`, `okolos-extension`,
+  `relay`.
+- Skills (12): `sshlg-skills`, and its canonical member repositories `agent-stack`,
+  `agent-sync`, `make-skill`, `seo-aeo-audit`, `sheleg-design`, `sheleg-dev`, `super-ux`,
+  `task-pipeline`, `telegram-dev`, `web3d-dev`, `xr-dev`.
+
+**Exact next task:** coordinate REQ-5 with the existing SB-115 owner, and FD-62 with
+Dashboards, using actual Project ids and `com.submit` when available. Observe a real
+registered stop, eligible return, one notification/claim, resumed checkpoint and only
+unfinished children before closing the feature. Finish installed 0.6.27 and full import
+readback through the authorized native surfaces. A host-ready claim, published binary,
+or zero registered stops is not proof that every stopped session was observed/resumed.
 
 The separate SB-115 owner must use a later version for its release. This receipt is
 available in Git; it is not proof that the neighboring session read a notification.
