@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.30 — 2026-10-14
+
 **Work in a project's folders on the project's accounts** (SB-118). The ordinary `claude` is one
 sign-in for every folder, so project accounts used to serve only sessions Switchboard launched.
 Now Switchboard writes the project's route into each project folder's Claude Code settings
