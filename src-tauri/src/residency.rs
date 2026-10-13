@@ -177,7 +177,7 @@ fn russian() -> &'static std::sync::atomic::AtomicBool {
         std::sync::atomic::AtomicBool::new(switchboard_core::language::system_prefers_russian())
     })
 }
-fn in_russian() -> bool {
+pub(crate) fn in_russian() -> bool {
     russian().load(std::sync::atomic::Ordering::Relaxed)
 }
 /// The tray's labels: Open, Quit.
@@ -189,24 +189,75 @@ fn labels(ru: bool) -> (&'static str, &'static str) {
     }
 }
 
-/// The tray menu: Open and Quit, and "Restart to update" once an update is ready (SB-55).
+/// Open project suggestions (SB-117), kept so every menu rebuild shows them.
+static SUGGESTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The tray menu: Open and Quit, "Restart to update" once an update is ready (SB-55), and the
+/// folders waiting to join a project (SB-117).
 fn menu(app: &AppHandle, update: Option<&str>) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let (open_label, quit_label) = labels(in_russian());
     let open = MenuItemBuilder::with_id("open", open_label).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", quit_label).build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    match update {
-        Some(version) => {
-            let restart =
-                MenuItemBuilder::with_id("update", restart_label_in(version, in_russian()))
-                    .build(app)?;
-            MenuBuilder::new(app)
-                .items(&[&open, &restart, &separator, &quit])
-                .build()
+    let waiting = SUGGESTIONS.load(std::sync::atomic::Ordering::Relaxed);
+    let mut builder = MenuBuilder::new(app).item(&open);
+    if waiting > 0 {
+        let item =
+            MenuItemBuilder::with_id("suggestions", suggestions_label(waiting, in_russian()))
+                .build(app)?;
+        builder = builder.item(&item);
+    }
+    if let Some(version) = update {
+        let restart = MenuItemBuilder::with_id("update", restart_label_in(version, in_russian()))
+            .build(app)?;
+        builder = builder.item(&restart);
+    }
+    builder.item(&separator).item(&quit).build()
+}
+
+fn suggestions_label(n: usize, ru: bool) -> String {
+    if !ru {
+        return if n == 1 {
+            "Add a folder to a project…".into()
+        } else {
+            format!("Add {n} folders to projects…")
+        };
+    }
+    let (m10, m100) = (n % 10, n % 100);
+    let noun = if m10 == 1 && m100 != 11 {
+        "папку"
+    } else if (2..=4).contains(&m10) && !(12..=14).contains(&m100) {
+        "папки"
+    } else {
+        "папок"
+    };
+    if n == 1 {
+        "Добавить папку в проект…".into()
+    } else {
+        format!("Добавить {n} {noun} в проекты…")
+    }
+}
+
+/// SB-117: the number of folders waiting stays next to the icon until each is answered: the
+/// menu-bar title on macOS, the tooltip elsewhere, and a menu item that opens the window.
+pub fn set_suggestions(app: &AppHandle, n: usize) {
+    SUGGESTIONS.store(n, std::sync::atomic::Ordering::Relaxed);
+    let ready = READY.lock().ok().and_then(|r| r.clone());
+    if let Some(tray) = app.tray_by_id("switchboard") {
+        if let Ok(menu) = menu(app, ready.as_deref()) {
+            let _ = tray.set_menu(Some(menu));
         }
-        None => MenuBuilder::new(app)
-            .items(&[&open, &separator, &quit])
-            .build(),
+        #[cfg(target_os = "macos")]
+        let _ = tray.set_title((n > 0).then(|| n.to_string()));
+        let tip = if n > 0 {
+            format!(
+                "Fabric Switchboard — {}",
+                suggestions_label(n, in_russian())
+            )
+        } else {
+            "Fabric Switchboard".to_owned()
+        };
+        let _ = tray.set_tooltip(Some(tip));
     }
 }
 
@@ -255,7 +306,7 @@ pub fn tray(app: &AppHandle) -> tauri::Result<()> {
         .tooltip("Fabric Switchboard")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => reveal(app),
+            "open" | "suggestions" => reveal(app),
             // Through the exit event, which drains the owner (LC-01).
             "quit" => app.exit(0),
             "update" => {

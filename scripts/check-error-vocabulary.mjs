@@ -55,6 +55,9 @@ const ALLOWLIST = {
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
+  // core projects.rs set_project_sources(): only `switchboard project source` sets sources.
+  'Name a source as host/owner, for example github.com/example.': 'CLI only (project source)',
+  'A project watches at most 16 sources.': 'CLI only (project source)',
   // runtime lib.rs RecoveryHook (SB-115): only `switchboard recovery hook` sends it, from Claude
   // Code's StopFailure hook; the CLI turns it into `registered: false`, the window never asks.
   'No saved account matches the stopped session.': 'StopFailure hook (CLI) only',

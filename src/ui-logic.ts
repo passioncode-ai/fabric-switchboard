@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, ProjectSuggestion, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -76,6 +76,16 @@ export function ruleState(rule: Pick<ProjectRule, 'enabled' | 'expires_at'>, now
   if (!rule.enabled) return 'paused';
   return typeof rule.expires_at === 'number' && rule.expires_at <= nowSeconds ? 'expired' : 'active';
 }
+/** SB-117: why a folder is offered to a project, in the person's words. */
+export function suggestionReason(s: Pick<ProjectSuggestion, 'reason' | 'repository'>): string {
+  if (s.reason === 'worktree') return t('A worktree of {repository}.', { repository: s.repository });
+  if (s.reason === 'same_repository') return t('Another copy of {repository}.', { repository: s.repository });
+  return t('A new repository of {source}.', { source: s.repository });
+}
+/** SB-117: the banner's question for the first open suggestion. */
+export function suggestionQuestion(s: Pick<ProjectSuggestion, 'name' | 'project' | 'pool'>): string {
+  return t('Add the folder {folder} to {project}?', { folder: s.name, project: s.project ?? s.pool });
+}
 export function activeRules<T extends Pick<ProjectRule, 'enabled' | 'expires_at'>>(rules: T[] | undefined, nowSeconds: number): T[] {
   return (rules ?? []).filter((rule) => ruleState(rule, nowSeconds) === 'active');
 }
@@ -130,6 +140,7 @@ export function eventDetail(detail: string): string {
     case 'applied': return t('applied');
     case 'created': return t('created');
     case 'updated': return t('updated');
+    case 'sources': return t('sources changed');
     case 'set': return t('set');
     case 'cleared': return t('cleared');
     case 'offered': return t('offered');

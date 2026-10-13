@@ -7,6 +7,11 @@ export const reportFrontendReady = () => invoke('frontend_ready');
 export const reportLanguage = (locale: string) => invoke('set_language', { locale });
 
 export const native = isTauri();
+/** SB-117: the owner found, added or declined a project folder; the window reads the list again. */
+export function onProjectSuggestions(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('project-suggestions', () => callback())).catch(() => { /* the minute refresh still reads them */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => readWithDeadline(invoke('snapshot')),
@@ -39,6 +44,9 @@ export const nativeAdapter: Adapter = {
   linkCli: () => invoke('link_cli'),
   saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds }),
   removeProject: (pool) => invoke('remove_project', { pool }),
+  projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
+  acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),
+  dismissProjectSuggestion: (folder) => invoke('dismiss_project_suggestion', { folder }),
   agentConnect: (agent, pool) => readWithDeadline(invoke('agent_connect', { agent, pool })),
   launchAgent: (agent, pool, workingDirectory) => invoke('launch_agent', { agent, pool, workingDirectory }),
   // Not under the read deadline: the status asks OpenRouter itself (10 s timeout in the backend).
@@ -71,6 +79,9 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // Project suggestions (SB-117).
+  'Project suggestions could not be read. Restore the private file before continuing.',
+  'No such suggestion. Read the suggestions again.',
   // Hermes's model and provider (SB-80): each names the fix.
   'Hermes is not installed. Install it from hermes-agent.nousresearch.com, then try again.',
   'Hermes did not answer. Run hermes config check, then try again.',

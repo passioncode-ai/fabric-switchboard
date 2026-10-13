@@ -1168,7 +1168,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
             Project::Suggest {
                 from_hook: true, ..
-            } => return Ok(project_suggest_hook(&root).await),
+            } => project_suggest_hook_and_exit(&root).await,
             Project::Suggest { folder: path, .. } => Operation::ProjectSuggest {
                 folder: folder(path)?,
             },
@@ -1415,7 +1415,20 @@ pub(crate) async fn onboard_status(
     Ok(onboarding::steps(&probe))
 }
 /// `switchboard project suggest --from-hook` (SB-117): Claude Code's `SessionStart` hook names
-/// the session's folder as `cwd`. Every refusal is an answer with a reason, never a failed exit.
+/// the session's folder as `cwd`. A `SessionStart` hook's output joins the session's context,
+/// so it prints one line only when a folder was suggested, and nothing otherwise; it always
+/// exits 0.
+async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
+    let value = project_suggest_hook(root).await;
+    if value["suggested"] == true {
+        let s = &value["suggestion"];
+        println!(
+            "Switchboard: this folder looks like part of the project \"{}\"; the operator was asked to add it.",
+            s["project"].as_str().unwrap_or("?")
+        );
+    }
+    std::process::exit(0)
+}
 async fn project_suggest_hook(root: &std::path::Path) -> Value {
     use std::io::Read;
     let mut input = Vec::new();

@@ -155,12 +155,32 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
     git(&api, "git@github.com:org/api.git");
     let hook =
         serde_json::json!({"session_id": "s", "cwd": api, "hook_event_name": "SessionStart"});
-    let (ok, json, err) = run(
-        &["project", "suggest", "--from-hook"],
-        Some(&hook.to_string()),
-    );
-    assert!(ok, "{err}");
-    assert_eq!(json["data"]["suggestion"]["reason"], "ecosystem");
+    // The hook's output joins the session's context: one line, only when something was found.
+    let hooked = |input: &str| {
+        let mut child = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(["project", "suggest", "--from-hook"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let said = hooked(&hook.to_string());
+    assert!(said.contains("part of the project \"App\""), "{said}");
+    assert_eq!(said.lines().count(), 1);
+    let (_, listed, _) = run(&["project", "suggestions"], None);
+    assert_eq!(listed["data"]["suggestions"][0]["reason"], "ecosystem");
     let (ok, _, _) = run(&["project", "dismiss", api.to_str().unwrap()], None);
     assert!(ok);
     let (_, again, _) = run(
@@ -168,10 +188,9 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
         None,
     );
     assert_eq!(again["data"]["suggested"], false);
-    // The hook never fails a session.
-    let (ok, json, _) = run(&["project", "suggest", "--from-hook"], Some("not json"));
-    assert!(ok);
-    assert_eq!(json["data"]["reason"], "malformed_input");
+    // The hook never fails a session, and says nothing when nothing was found.
+    assert_eq!(hooked("not json"), "");
+    assert_eq!(hooked(&hook.to_string()), "", "already declined");
 }
 #[test]
 fn recovery_hook_never_fails_the_session() {

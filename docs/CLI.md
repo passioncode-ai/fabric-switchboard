@@ -119,7 +119,27 @@ switchboard --data-dir /path/to/app-data mcp
 
 `switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` — MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0 — accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and login and launch are not exposed. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. `--read-only` lists the ten tools that only read (status, accounts, usage, `switchboard_sessions`, `switchboard_onboarding`, project context, chains, the OpenRouter key's status, Kimi accounts, Hermes's model) and none of the seven that write. A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set.
 
-A project reserves its accounts to its folders and their subfolders: at most 64 folders a project, 1024 across all projects, and no folder inside another project's (`a_project_holds_sixty_four_folders_and_all_projects_1024`).
+A project reserves its accounts to its folders and their subfolders. A project has no folder limit; all projects together hold at most 1024 folders, and no folder may sit inside another project's (`a_project_has_no_folder_limit_and_all_projects_hold_1024`).
+
+### A project offers its new folders (SB-117)
+
+Switchboard finds folders that belong to a project and asks before adding them:
+
+- a git worktree of a project repository;
+- a clone with the same `origin`;
+- a repository of one of the project's sources (`host/owner`).
+
+The owner's background pass looks at the parent folder of every project folder and at every project repository's worktree list. It re-reads either only when its modification time changed. The plugin's `SessionStart` hook reports the folder a Claude Code session starts in. A suggestion shows as a notification, as a count next to the tray icon, and as a banner in the window with **Add** and **Not this one**. Nothing joins until a person adds it, and a declined folder is never offered again. A folder two projects match equally is not offered.
+
+```sh
+switchboard project suggest --folder /work/app-review   # offer a folder (default: the current one)
+switchboard project suggestions                         # what waits for an answer
+switchboard project accept /work/app-review             # add it to its project
+switchboard project dismiss /work/app-review            # never offer it again
+switchboard project source --pool app --add github.com/example   # also offer new repositories of this owner
+```
+
+`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when a folder was offered, and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md); `suggest::tests` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 

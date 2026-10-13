@@ -4,11 +4,11 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, safeError, reportFrontendReady, reportLanguage } from './adapter';
+import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, ProjectSuggestion, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -31,6 +31,8 @@ let dialogSequence = 0;
 const REPOSITORY = 'https://github.com/passioncode-ai/fabric-switchboard';
 let adapter: Adapter = nativeAdapter;
 let snapshot: Snapshot | null = null;
+/** SB-117: folders found for a project, waiting for Add or Not this one. */
+let suggestions: ProjectSuggestion[] = [];
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
@@ -177,6 +179,7 @@ async function reload() {
   void loadSessions();
   void restorePendingLogin();
   void loadBackups();
+  void loadSuggestions();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   void loadUpdate();
@@ -257,6 +260,7 @@ function render(options: { background?: boolean } = {}): boolean {
     header.append(actions);
   }
   main.append(header);
+  suggestionBanner(main);
   if (busy) { const progress = el('p', 'operation-progress', t('Working…')); progress.setAttribute('role', 'status'); main.append(progress); }
   if (!native && !demo) {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
@@ -280,6 +284,26 @@ function render(options: { background?: boolean } = {}): boolean {
 const ruleAccount = (rule: ProjectRule) => snapshot?.accounts.find((account) => account.id === rule.account_id);
 const ruleTarget = (rule: ProjectRule) => rule.target === 'managed' ? t('Managed sessions') : t('Claude Code login (all claude sessions)');
 /** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
+async function loadSuggestions() {
+  if (!native && !demo) return;
+  try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* the next refresh reads them again */ }
+  backgroundRender();
+}
+/** SB-117: a found folder stays on screen, above every page, until it is added or declined. */
+function suggestionBanner(main: HTMLElement) {
+  const first = suggestions[0];
+  if (!first) return;
+  const strip = el('section', 'notice suggestion-strip'); strip.setAttribute('aria-label', t('A folder for a project'));
+  const text = el('div', 'suggestion-text');
+  const question = el('strong', '', suggestionQuestion(first)); question.title = first.folder;
+  text.append(question, el('span', '', ` ${suggestionReason(first)}`));
+  if (suggestions.length > 1) text.append(el('span', 'account-meta', ` ${plural(suggestions.length - 1, { one: '{n} more folder is waiting.', other: '{n} more folders are waiting.' })}`));
+  const project = first.project ?? first.pool;
+  const add = button(t('Add'), () => void mutate(async () => { await adapter.acceptProjectSuggestion(first.folder); await loadSuggestions(); }, t('{folder} added to {project}.', { folder: first.name, project }), 'suggestion-add'), 'button primary', 'suggestion-add');
+  const skip = button(t('Not this one'), () => void mutate(async () => { await adapter.dismissProjectSuggestion(first.folder); await loadSuggestions(); }, t('{folder} will not be suggested again.', { folder: first.name }), 'suggestion-add'), 'text-button', 'suggestion-skip');
+  const actions = el('div', 'management-actions'); actions.append(add, skip);
+  strip.append(text, actions); main.append(strip);
+}
 function rulesStrip(main: HTMLElement) {
   const live = activeRules(snapshot?.rules, Date.now() / 1000);
   if (!live.length) return;
@@ -1536,11 +1560,14 @@ function backgroundRefresh() {
     snapshot = data; applyContext(context); backgroundRender();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
+    void loadSuggestions();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
 }
 setInterval(backgroundRefresh, 60_000);
+// SB-117: the owner says when a project folder was found, added or declined.
+onProjectSuggestions(() => void loadSuggestions());
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });

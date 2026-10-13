@@ -1,5 +1,5 @@
 import { isAbsoluteProjectPath } from './platform';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -77,6 +77,8 @@ export function createDemoAdapter(): Adapter {
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, checked_at: now(), error: null, needs_permission: false };
   const analytics = { available: true, enabled: true };
+  // SB-117: shown once a project named Client Alpha (pool client-alpha) exists in the demo.
+  let suggestions: ProjectSuggestion[] = [{ folder: '/srv/projects/alpha-web-review', name: 'alpha-web-review', pool: 'client-alpha', project: 'Client Alpha', reason: 'worktree', repository: 'github.com/example/alpha-web', first_seen: now() - 60 }];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   return {
     async currentAccounts() { return structuredClone(current); },
@@ -206,6 +208,9 @@ export function createDemoAdapter(): Adapter {
       return structuredClone(project);
     },
     async removeProject(pool) { await pause(); const before = state.projects?.length ?? 0; state.projects = (state.projects ?? []).filter((p) => p.pool !== pool); if (state.projects.length === before) throw new Error('Project not found.'); log('project', '', 'removed'); },
+    async projectSuggestions() { return { suggestions: structuredClone(suggestions.filter((s) => (state.projects ?? []).some((p) => p.pool === s.pool))) }; },
+    async acceptProjectSuggestion(folder) { await pause(); const s = suggestions.find((x) => x.folder === folder); if (!s) throw new Error('No such suggestion. Read the suggestions again.'); const project = (state.projects ?? []).find((p) => p.pool === s.pool); if (!project) throw new Error('Project not found.'); project.folders.push(folder); suggestions = suggestions.filter((x) => x.folder !== folder); log('project', '', 'updated'); },
+    async dismissProjectSuggestion(folder) { await pause(); if (!suggestions.some((x) => x.folder === folder)) throw new Error('No such suggestion. Read the suggestions again.'); suggestions = suggestions.filter((x) => x.folder !== folder); },
     async removeProjectRule(path, provider) { await pause(); const before = state.rules!.length; state.rules = state.rules!.filter((rule) => !(rule.path === path && rule.provider === provider)); if (state.rules.length === before) throw new Error('Project rule not found.'); log('project_rule', '', 'removed'); },
     async agentSetup() { return structuredClone(setup); },
     async backups() { return { directory: '~/Library/Application Support/Fabric Switchboard Backups', enabled: true, backups: structuredClone(backups), last_error: null, last_written_at: backups[0]?.created_at ?? null }; },
