@@ -52,8 +52,20 @@ stale/hidden quotas, cancellation, oversized updates and malformed data. `target
 was below the 10 GiB cap. No full hosted suite was manually dispatched; the release
 guard owns the exact-tag nightly run. Git and release receipts follow below.
 
-**Exact next task:** verify the final local gate receipt below, then connect the packet's
-REQ-5 through the owning Projects on Fabric's board. Obtain Project ids through the
+**Git receipt:** [PR #181](https://github.com/passioncode-ai/fabric-switchboard/pull/181)
+merged as [`b58477b`](https://github.com/passioncode-ai/fabric-switchboard/commit/b58477b1cc0108047367882cd7ee1e277d3c39bf).
+The pushed implementation branch resolved to `37ad36d64cb35b1603f971f232352934aa792fba`;
+a fresh remote clone of that commit passed docs, plugin and release-preflight checks.
+The merge tree matched the locally checked tree. The annotated `v0.6.26` tag names
+`b58477b1cc0108047367882cd7ee1e277d3c39bf`.
+
+**Release:** [run 38331819706](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38331819706)
+is in progress; preflight passed, the exact-commit guard is running. This is not yet
+a publication receipt. `gh run watch 38331819706 --exit-status --interval 60` is the
+active watcher in this run; it reports the result, never bypasses a failed guard.
+
+**Exact next task:** finish the release run above and record its outcome, then connect
+the packet's REQ-5 through the owning Projects on Fabric's board. Obtain Project ids through the
 supported directory/board interface; submit the packet to Fabric, Observatory and
 Dashboards, and retain their message receipts here. Complete UI readback after the
 separate native access dialog is resolved by the operator; do not approve it as the agent.
