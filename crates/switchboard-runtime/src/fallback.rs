@@ -319,21 +319,68 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
     let Ok(bin) = continuation::observatory() else {
         return;
     };
+    // SB-108: with "Open hand-overs in Fabric" on, the session is prepared in place and left
+    // for a console to take (`handovers`); the monitor opens it in Terminal after two minutes.
+    let in_fabric = crate::handovers::enabled(&runtime.root);
     pass_with(runtime, now, &bin, |workflow, account, dir| async move {
-        runtime
+        let answer = runtime
             .execute(Operation::Continue {
-                workflow_id: workflow,
-                id: account,
+                workflow_id: workflow.clone(),
+                id: account.clone(),
                 mode: "isolated".into(),
-                working_directory: dir,
-                in_place: false,
+                working_directory: dir.clone(),
+                in_place: in_fabric,
             })
-            .await
-            .map(|_| ())
+            .await?;
+        if in_fabric {
+            let script = answer["script"]
+                .as_str()
+                .map(PathBuf::from)
+                .ok_or_else(|| "Offered, but the session script is missing.".to_string())?;
+            let snapshot = runtime.store.snapshot().ok();
+            let (agent, label) = describe(snapshot.as_ref(), &account);
+            let handover = crate::handovers::Handover {
+                id: crate::handovers::new_id(),
+                workflow,
+                agent,
+                account_label: label,
+                dir,
+                script: script.clone(),
+                offered_until: answer["offeredUntil"].as_str().unwrap_or_default().into(),
+                created_at: now,
+            };
+            if crate::handovers::record(&runtime.root, &handover).is_err() {
+                if !crate::handovers::offer_live(&handover, crate::monitor::now()) {
+                    return Err("The hand-over offer expired before it could be opened.".into());
+                }
+                // Nowhere to wait: Terminal now, as without Fabric.
+                crate::launch::start_terminal(&script)
+                    .map_err(|e| format!("Offered {}: {e}", handover.workflow))?;
+            }
+        }
+        Ok(())
     })
     .await
 }
 
+/// The agent and label a hand-over shows: Hermes, a saved Kimi Code account, or a saved account.
+fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
+    if account == crate::hermes::HERMES_TARGET {
+        return ("hermes".into(), "Hermes Agent".into());
+    }
+    let Some(snapshot) = snapshot else {
+        return ("unknown".into(), String::new());
+    };
+    if let Some(k) = snapshot.kimi_accounts.iter().find(|k| k.id == account) {
+        return ("kimi-code".into(), k.label.clone());
+    }
+    snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == account)
+        .map(|a| (provider_agent(a.provider).to_owned(), a.label.clone()))
+        .unwrap_or_else(|| ("unknown".into(), String::new()))
+}
 /// The pass with the hand-over as a parameter: the monitor passes `switchboard continue`'s own
 /// operation, a test a recorder.
 pub(crate) async fn pass_with<F, Fut>(runtime: &Runtime, now: i64, bin: &std::path::Path, act: F)

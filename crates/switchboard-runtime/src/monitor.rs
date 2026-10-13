@@ -186,6 +186,8 @@ impl Pass {
         // SB-99: saved Kimi accounts, seen only while a chain is set (every 10 min, at most 4).
         crate::kimi::watch(&runtime.root, &runtime.store, &runtime.kimi_watch, time).await;
         crate::fallback::pass(runtime, time).await;
+        // SB-108: a hand-over no console took in two minutes opens in Terminal.
+        crate::handovers::sweep(&runtime.root, time, crate::launch::start_terminal);
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

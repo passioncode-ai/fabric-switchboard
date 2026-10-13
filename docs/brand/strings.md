@@ -79,3 +79,12 @@ Russian copy pass, 2026-10-12 (Status: proposed; operator outcome unobserved) �
 - Provider terms: «Пользуйтесь Switchboard в соответствии с условиями использования Anthropic и OpenAI. Нарушение условий провайдера может привести к блокировке аккаунта. Ответственность за то, как вы используете свои аккаунты, несёте вы.» — same three claims; README.ru and SCN-049 carry the same sentence.
 - Missing terms reported, not added: quota window (kept «окно квоты»), setup token (kept «Setup-токен»), policy (used «настройка автопереключения»), identity (used «владелец аккаунта»).
 Humanization: on — own pass, 3 markers before / 1 after across ~7,800 words, 373 entries changed, 21% of the dictionary's characters (36% within changed entries).
+
+## Recovery CLI and console hand-overs, 2026-10-13
+
+Surface: product-ui (CLI). Status: proposed. SCN-053 and SCN-054.
+`recovery.rs` owns invalid/conflicting stop, unreadable registry and no-longer-ready
+errors; `handovers.rs` owns invalid id, unavailable offer and failed queue writes.
+The CLI uses "register", "claim" and "finish" for distinct host actions; it never
+calls a claim "resumed". No new renderer strings or locale keys.
+Humanization: on, own operational-language pass; no decorative or promotional wording.

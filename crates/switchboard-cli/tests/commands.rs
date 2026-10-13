@@ -32,6 +32,39 @@ fn help_and_invalid_arguments_do_not_create_storage_or_echo_values() {
     assert!(!root.exists());
 }
 #[test]
+fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
+    // SB-108 / FD-62: Fabric polls `switchboard handovers --json`; the setting is off until set.
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let listed = run(&["handovers"]);
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["handovers"], serde_json::json!([]));
+    let set: serde_json::Value =
+        serde_json::from_slice(&run(&["handovers", "set", "on"]).stdout).unwrap();
+    assert_eq!(set["data"]["enabled"], true);
+    let refused = run(&["handovers", "run", "ho-0123456789ab"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("needs a terminal"));
+    let set: serde_json::Value =
+        serde_json::from_slice(&run(&["handovers", "set", "off"]).stdout).unwrap();
+    assert_eq!(set["data"]["enabled"], false);
+}
+#[test]
 fn continuing_in_place_without_a_terminal_is_refused_before_anything_is_offered() {
     // SB-108: an offer nobody can accept is never made; no owner is even asked.
     let tmp = tempfile::tempdir().unwrap();

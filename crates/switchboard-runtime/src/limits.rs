@@ -191,6 +191,28 @@ impl LimitState {
             })
             .unwrap_or_default()
     }
+    /// Recovery needs an observation made after the hold ended. A quota probe taken
+    /// during a hidden hold can still say 98%; expiration alone must not wake a session.
+    pub(crate) fn recovery_blocked(&self, snapshot: &Snapshot, now: i64) -> HashSet<String> {
+        self.limited
+            .lock()
+            .map(|limits| {
+                limits
+                    .iter()
+                    .filter(|(id, limit)| {
+                        limit.until > now
+                            || !snapshot.accounts.iter().any(|a| {
+                                &a.id == *id
+                                    && a.usage
+                                        .as_ref()
+                                        .is_some_and(|u| u.observed_at > limit.until)
+                            })
+                    })
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_else(|_| snapshot.accounts.iter().map(|a| a.id.clone()).collect())
+    }
     pub(crate) fn report(&self, now: i64) -> Vec<Value> {
         let Ok(limited) = self.limited.lock() else {
             return vec![];
@@ -387,7 +409,8 @@ impl LimitState {
         since
     }
 
-    /// One pass: drop expired limits, then add what the proxy and Claude Code report.
+    /// One pass: retain expired evidence for recovery's freshness window, then add
+    /// what the proxy and Claude Code report. Active holds still end at `until`.
     pub(crate) fn refresh(
         &self,
         snapshot: &Snapshot,
@@ -398,7 +421,7 @@ impl LimitState {
         let mut changed = false;
         if let Ok(mut limited) = self.limited.lock() {
             let before = limited.len();
-            limited.retain(|_, l| l.until > now);
+            limited.retain(|_, l| l.until >= now.saturating_sub(crate::recovery::MAX_AGE));
             changed |= limited.len() != before;
         }
         if let Ok(mut sessions) = self.sessions.lock() {
@@ -562,7 +585,7 @@ impl LimitState {
 
 /// Evidence read back from disk that can still apply and is internally consistent.
 fn sane(limit: &Limit, now: i64) -> bool {
-    limit.until > now
+    limit.until >= now.saturating_sub(crate::recovery::MAX_AGE)
         && limit.until <= now.saturating_add(MAX_HOLD_SECONDS)
         && limit.observed_at <= now + 60
         && limit.resets_at.is_none_or(|r| r >= limit.until)

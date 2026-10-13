@@ -131,6 +131,18 @@ enum Command {
         #[command(subcommand)]
         command: KimiCommand,
     },
+    /// Stopped sessions and accounts ready to continue their work.
+    Recovery {
+        #[command(subcommand)]
+        command: Option<RecoveryCommand>,
+    },
+    /// Hand-overs waiting for a console (SB-108): with "Open hand-overs in Fabric" on, the
+    /// automatic fallback prepares each continuing session and leaves it here for Fabric's
+    /// console; one no console takes within two minutes opens in Terminal.
+    Handovers {
+        #[command(subcommand)]
+        command: Option<HandoversCommand>,
+    },
     /// Fallback chains: which agents continue a workflow, in what order, when its accounts run
     /// out — per machine, per project or per task. None applies until you set one.
     Chain {
@@ -390,6 +402,66 @@ enum Rotation {
 enum RotationTarget {
     Managed,
     ClaudeCli,
+}
+#[derive(Subcommand)]
+enum RecoveryCommand {
+    /// Register a host-observed stop; repeated identical events are safe.
+    Register {
+        /// Stable id of this limit event; reuse it on a registration retry.
+        event: String,
+        /// Exact stopped session id supplied by its host.
+        #[arg(long)]
+        session: String,
+        /// Saved subscription account used by the stopped session.
+        #[arg(long)]
+        account: String,
+        /// Existing checkout folder for the stopped work.
+        #[arg(long)]
+        directory: PathBuf,
+    },
+    /// Claim a ready stop once, before the host resumes its session.
+    Claim {
+        /// Stop event id returned by recovery status.
+        event: String,
+        /// Compatible candidate returned by recovery status.
+        #[arg(long)]
+        account: String,
+    },
+    /// Record the host's outcome; this command does not run a session.
+    Finish {
+        /// Stop event whose result the session host observed.
+        event: String,
+        /// Resumed after a claim, or cancelled by the operator.
+        #[arg(value_enum)]
+        outcome: RecoveryOutcome,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum RecoveryOutcome {
+    Resumed,
+    Cancelled,
+}
+#[derive(Subcommand)]
+enum HandoversCommand {
+    /// The hand-overs waiting for a console, oldest first, and whether Fabric gets them.
+    List,
+    /// Take a waiting hand-over and run its session in this terminal (needs a terminal on stdin
+    /// and stdout). It runs once: a second taker is refused.
+    Run {
+        /// The hand-over's id, `ho-` and 12 hex digits (`switchboard handovers`).
+        id: String,
+    },
+    /// Turn "Open hand-overs in Fabric" on or off.
+    Set {
+        /// `on` or `off`.
+        #[arg(value_enum)]
+        state: OnOff,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
 }
 #[derive(Subcommand)]
 enum ChainCommand {
@@ -887,6 +959,35 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             dir,
             in_place,
         } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
+        Command::Recovery { command } => match command {
+            None => Operation::Recovery,
+            Some(RecoveryCommand::Register {
+                event,
+                session,
+                account,
+                directory,
+            }) => Operation::RecoveryRegister {
+                event: event.clone(),
+                session: session.clone(),
+                account: account.clone(),
+                directory: directory.clone(),
+            },
+            Some(RecoveryCommand::Claim { event, account }) => Operation::RecoveryClaim {
+                event: event.clone(),
+                account: account.clone(),
+            },
+            Some(RecoveryCommand::Finish { event, outcome }) => Operation::RecoveryFinish {
+                event: event.clone(),
+                resumed: matches!(outcome, RecoveryOutcome::Resumed),
+            },
+        },
+        Command::Handovers { command } => match command {
+            None | Some(HandoversCommand::List) => Operation::Handovers,
+            Some(HandoversCommand::Set { state }) => Operation::HandoverSetting {
+                on: Some(matches!(state, OnOff::On)),
+            },
+            Some(HandoversCommand::Run { id }) => return run_handover(&root, id).await,
+        },
         Command::Chain { command } => match command {
             ChainCommand::List { workflow, pool } => Operation::Chains {
                 workflow: workflow.clone(),
@@ -1115,6 +1216,19 @@ async fn launch(
     if !in_place {
         return Ok(value);
     }
+    let script = value["script"]
+        .as_str()
+        .ok_or("The session script is missing.")?;
+    run_in_place(std::path::Path::new(script))
+}
+/// `switchboard handovers run <id>`: takes the hand-over (once) and runs its session here.
+async fn run_handover(root: &std::path::Path, id: &str) -> Result<Value, String> {
+    use std::io::IsTerminal;
+    // Checked before it is taken: a hand-over taken by a caller with no terminal would be lost.
+    if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Err("Running a hand-over needs a terminal on stdin and stdout.".into());
+    }
+    let value = call(root, Operation::HandoverTake { id: id.to_owned() }).await?;
     let script = value["script"]
         .as_str()
         .ok_or("The session script is missing.")?;

@@ -2,6 +2,65 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-13 — SB-108 producer recovered; SB-114 capacity recovery
+
+**Objective:** recover the previous Claude Code session, finish its console hand-over
+producer, and let session hosts recover work after eligible account capacity returns.
+Base: `516ea45` (v0.6.25). Branch: `feat/sb-108-handovers`. Start with the bounded
+[SB-114 packet](packets/sb-114-capacity-recovery.md), [CLI](CLI.md) and [contracts](CONTRACTS.md).
+
+**Implemented:** `handovers` records/claims prepared continuations once, offers the host
+120 seconds before Terminal fallback and never launches an expired offer. The setting
+remains off until its consumer is connected (FD-62). `recovery` retains host-reported
+stops across restart, lists account/session counts and eligible same-provider/pool/project
+accounts, and persists a claim before returning it. Hidden holds win over 98–99% usage;
+a returning account needs a successful observation after the hold deadline. A claimed
+launch with an unknown outcome is never retried automatically. Cancelled/finished events
+remain deduplicated; bounded storage refuses overflow. Operational files are excluded
+from backups and included in uninstall. Source exports remain local and untracked.
+
+**Still open:** REQ-5 belongs to Fabric/Observatory/session hosts: actual stop/cancel
+registration, notification delivery, resume from checkpoints and restoring unfinished
+children. Producer tests do not establish this integration, live account acceptance,
+Windows acceptance, installation or release. Ordinary Claude credentials were not
+changed for tests; no running agent was killed or restarted.
+
+**Fabric:** the operator approved Switchboard enrollment; `fabric_whoami` resolves it.
+The already-registered bundled MCP exposes the board after admission: `com.status`
+was ready, `com.list` empty. SB-108/SB-114 were linked to the canonical rows via
+`fabric_work_claim`. The tool catalogue offered no Project directory (the adapter reference says its contract is pending); recipient ids
+for cross-project `com.submit` were not available yet. Do not substitute session messages
+or foreign-repository edits for that channel. A later rejoin-only attempt failed with
+`call budget exhausted before body admission`; no new binding was used to bypass it.
+
+**Project enrollment:** the operator separately asked to add all PassionCode projects
+and skills/contracts. GitHub's live repository list contained 18 non-archived PassionCode
+repositories, matching org-index. Switchboard was already present. Fabric's bulk importer
+was instructed to add the other 17 canonical clones, `sshlg-skills` and its 11 canonical
+member repositories (29 selected); worktrees/comparison clones were excluded. The native
+consent dialog for Codex access to the `fabric` project appeared while import ran. It was
+left unanswered: opening a project is distinct from granting an agent one-year access.
+The dialog prevents UI readback, so the 29 additions are **submitted, not yet verified**.
+
+**Checks:** `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 ./scripts/check.sh`
+exited 0 on the final 0.6.26 source: 561 Rust tests passed, three explicit native
+checks ignored; UI, clippy, brand, error vocabulary, plugin, Python packaging,
+documentation and notices checks passed. Release preflight for `v0.6.26`, publish
+true and Windows signing true passed. The fixtures cover restart, duplicate events,
+simultaneous owner claims, changed project permissions, duplicate identities,
+stale/hidden quotas, cancellation, oversized updates and malformed data. `target/`
+was below the 10 GiB cap. No full hosted suite was manually dispatched; the release
+guard owns the exact-tag nightly run. Git and release receipts follow below.
+
+**Exact next task:** verify the final local gate receipt below, then connect the packet's
+REQ-5 through the owning Projects on Fabric's board. Obtain Project ids through the
+supported directory/board interface; submit the packet to Fabric, Observatory and
+Dashboards, and retain their message receipts here. Complete UI readback after the
+separate native access dialog is resolved by the operator; do not approve it as the agent.
+Keep SB-114 and the overall SB-108 row open until the host provides actual session evidence.
+
+---
+
 ## 2026-10-12 — 0.6.22: hand-overs to saved accounts were refused by Observatory (SB-113)
 
 The live Kimi rehearsal on the installed 0.6.20 (`wf_5473b99f80221c4f`, Kimi account
