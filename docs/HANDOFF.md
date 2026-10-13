@@ -2,6 +2,41 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-14 — SB-117 project suggestions; SB-118 found
+
+**SB-117 (merged with this entry; release with SB-118).** A project offers its new folders:
+worktrees, same-origin clones and repositories of its sources. The background pass is
+stamp-driven, the plugin has a `SessionStart` hook, and `switchboard project suggest` is the
+manual way. The person answers through a notification, the tray count or the window banner
+(Add / Not this one). A project has no folder limit; all projects together hold up to 1024
+folders.
+
+- Checks: `./scripts/check.sh` exit 0, 581 Rust tests passed. Unit and seam verification
+  each ran twice, and every finding was fixed with a test. The WebKit demo is in SCN-055.
+- 0.6.29 (64 folders per project) was published, run 38474680117 succeeded.
+- The project PassionCode (pool `passioncode`, vibecoder@ and contact@passioncode.ai, 16
+  folders) exists on this Mac.
+
+**SB-118, found 2026-10-14.** The operator saw the project's accounts unused. Measured: every
+session runs the ordinary `claude`, signed in as the default-pool account, which serves every
+folder. Project reservation reaches only sessions Switchboard launches, and those have minimal
+homes (SB-20/SB-110), so nobody uses them.
+
+Proved two ways that the per-folder `.claude/settings.local.json` `env` reroutes ordinary
+Claude Code with all user configuration intact:
+1. A probe server received `Bearer <capability>` from `claude -p` started in a subfolder.
+2. `claude -p` against the real proxy route `/claude/passioncode` answered, and the pool
+   rotated (vibecoder 91 % → contact@).
+
+**Exact next task:** SB-118. Add a pool-scoped capability to the proxy, then a bindings sync:
+write and remove only what Switchboard wrote, add the file to `info/exclude`, cover worktrees
+inside project folders, and re-run on project, folder or port change. After that, docs and
+release 0.6.30 with SB-117. Then add the remaining PassionCode clones (and
+`project source --add github.com/passioncode-ai`) on the installed 0.6.30, and restart the
+PassionCode sessions.
+
+---
+
 ## 2026-10-13 (evening) — FD-62 consumer landed; the live hand-over check waits on two updates
 
 Fabric Dashboards reports that FD-62 is on its main as PR #130 (`0c922cb`) and ships in 0.7.9. The console polls
