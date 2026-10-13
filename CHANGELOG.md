@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A limit stop is not a wait** (SB-115). A session stopped on a usage or session limit is
+ready for an immediate restart when a compatible account has room. Without one, it is
+ready as a probe after 2, 5, 10, then 15 minutes, never only at the provider's reset time.
+Spend and billing limits are never probed. The plugin's new `StopFailure` hook registers
+such a stop by itself. Switchboard still never re-prompts a session: the host or the
+orchestrator does, as fabric-workspace principle 10 now requires of every agent.
+
 ## 0.6.27 — 2026-10-13
 
 **Prevent duplicate console hand-overs on Windows.** An exclusive claim receipt now ensures

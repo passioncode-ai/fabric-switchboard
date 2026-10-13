@@ -2,6 +2,49 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-13 — SB-115: a limit stop is not a wait
+
+**Objective:** the operator's standing rule (relayed by nicegram-business, decision
+"hybrid"): a session, lane or subagent stopped on a usage or session limit is restarted at
+once, not at the stated reset. Branch `feat/sb-115-limit-stop-resume` off `b58477b`.
+Packet: [SB-115](packets/sb-115-limit-stop-resume.md).
+
+**Done:**
+- **The rule:** fabric-workspace principle 10, item 6 (`0bae3875`, PR #194).
+- **Skills:** fabric-agent-adapter 0.29.0 (`working-with-fabric`, PR #101, npm 0.29.0) and
+  agent-stack 0.28.1 (`agent-orchestrator`, PR #46, npm 0.28.1; `v0.28.0` is a tag on the wrong
+  commit, cancelled before publish).
+- **Switchboard:** a stop is ready on fresh capacity at once (`mode: capacity`), else as a probe
+  after 2/5/10/15 min by `attempt` (`mode: probe`, `probe_at`). Billing stops and pools that are
+  fully spend-capped are never probed. One `recovery::readiness` serves both `status` and `claim`.
+  `switchboard recovery hook` and the plugin's `hooks/hooks.json` (`StopFailure`, `rate_limit` and
+  `billing_error`) register the session's own stop: the account comes from the session's limit
+  binding, else the ordinary CLI's; the hook always exits 0. Docs: CLI.md, CONTRACTS.md, the
+  plugin README, the `switching-accounts` skill §6, CHANGELOG (Unreleased); board SB-115, SB-116.
+
+**Not done:**
+- Switchboard never re-prompts a session: FD-62 and Fabric's host consume `ready` rows
+  (SB-114 REQ-5).
+- Live acceptance: whether a subscription session limit arrives as `StopFailure`
+  `rate_limit` is undocumented and unobserved.
+- SB-116: silence detection needs the host.
+- Release 0.6.28 is not cut (0.6.27 was published by the SB-114 run meanwhile).
+
+**Checks:** `./scripts/check.sh` exited 0 with lean Cargo settings and a shared
+`CARGO_TARGET_DIR`, because only 1.4 GiB of disk was free: after the rebase on 0.6.27, 569 Rust tests passed, 3 ignored.
+New tests: `recovery::tests`, namely `a_stop_without_capacity_is_probed_on_the_backoff_not_at_the_reset`,
+`a_billing_stop_is_never_probed`, `a_probe_claim_is_checked_by_the_same_rule_and_taken_once`,
+`repeated_stops_of_one_session_raise_the_attempt`, `an_sb114_record_still_loads` and
+`the_hook_names_the_account_the_sessions_limit_was_charged_to`; also CLI
+`recovery_hook_never_fails_the_session`. `target/` is 2.5 GB, under the cap. The same night,
+two subagents stopped on "session limit · resets 8:10am" and finished after an immediate «resume».
+
+**Exact next task:** merge the SB-115 PR, release 0.6.28 (CHANGELOG Unreleased → 0.6.28;
+check the Windows cross-compile first, retro instruction 8), then watch one real `StopFailure`
+on the installed app and record `recovery_hook` from the log.
+
+---
+
 ## 2026-10-13 — SB-108 producer recovered; SB-114 capacity recovery
 
 **Objective:** recover the previous Claude Code session, finish its console hand-over

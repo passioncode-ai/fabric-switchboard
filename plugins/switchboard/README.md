@@ -7,7 +7,7 @@ managed sessions through a local proxy and rotates off an exhausted account.
 | Field | Value |
 |---|---|
 | Version | follows Switchboard (`plugin.json`, kept equal to the app's version by `scripts/check_plugin.py`) |
-| Ships | `.mcp.json` (server `switchboard`, runs `switchboard mcp` over stdio) and the skill `switching-accounts` |
+| Ships | `.mcp.json` (server `switchboard`, runs `switchboard mcp` over stdio), the skill `switching-accounts`, and `hooks/hooks.json`: a `StopFailure` hook (`rate_limit`, `billing_error`) that runs `switchboard recovery hook`, so a session stopped on a limit is registered for an immediate restart (SB-115). The hook only registers the stop; it never re-prompts the session and always exits 0 |
 | Skill purpose | read status and remaining usage honestly, switch a managed session's account, apply optional project rules and report them, change the ordinary Claude Code login only on the operator's explicit OK |
 | Mutations | only through Switchboard's own tools; nothing in the plugin writes files |
 | Network | none of its own; `switchboard_usage` with `refresh: true` asks the provider for one account |

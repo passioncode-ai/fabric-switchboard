@@ -65,6 +65,54 @@ fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
     assert_eq!(set["data"]["enabled"], false);
 }
 #[test]
+fn recovery_hook_never_fails_the_session() {
+    // SB-115: Claude Code's StopFailure hook runs `switchboard recovery hook`; whatever the
+    // input or the owner's state, it exits 0 and says why nothing was registered.
+    let tmp = tempfile::tempdir().unwrap();
+    let hook = |input: &str| {
+        let mut child = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(["--json", "recovery", "hook"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (
+            json["data"]["registered"].clone(),
+            json["data"]["reason"].clone(),
+        )
+    };
+    let dir = tmp.path().to_string_lossy().into_owned();
+    assert_eq!(hook("not json").1, "malformed_input");
+    let overloaded = serde_json::json!({"session_id": "s-1", "cwd": dir, "error": "overloaded"});
+    assert_eq!(hook(&overloaded.to_string()).1, "not_a_limit");
+    let no_session = serde_json::json!({"cwd": dir, "error": "rate_limit"});
+    assert_eq!(hook(&no_session.to_string()).1, "malformed_input");
+    // No owner runs in this data folder: refused, still exit 0, nothing written.
+    let limit = serde_json::json!({"session_id": "s-1", "cwd": dir, "error": "rate_limit"});
+    let (registered, reason) = hook(&limit.to_string());
+    assert_eq!(
+        (registered, reason),
+        (serde_json::json!(false), serde_json::json!("refused"))
+    );
+    assert!(!tmp.path().join("recovery.json").exists());
+}
+#[test]
 fn continuing_in_place_without_a_terminal_is_refused_before_anything_is_offered() {
     // SB-108: an offer nobody can accept is never made; no owner is even asked.
     let tmp = tempfile::tempdir().unwrap();
