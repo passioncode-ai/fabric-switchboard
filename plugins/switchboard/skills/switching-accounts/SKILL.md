@@ -172,7 +172,22 @@ between. A spend, credit or billing limit is the operator's to pay; report it on
 not retry it. `switchboard recovery` lists registered stops with `mode` `capacity` or
 `probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
 
-## 7. Never
+## 7. New worktrees and clones belong to their project
+
+A Switchboard project reserves its accounts to its folders. When you create a git worktree, a
+second clone of a project repository, or a clone of a new repository of the same product, offer
+it to its project:
+
+```sh
+switchboard project suggest --folder <the new folder>
+```
+
+The operator approves it in Switchboard; nothing joins without a click. Claude Code sessions do
+this by themselves at start through the plugin's hook; do it explicitly for a folder you create
+and do not start a session in, and in agents without the hook (Codex, others). Never add folders
+to a project with `project save` yourself to skip the approval.
+
+## 8. Never
 
 - Ask for, accept, print or search for a credential, token, auth JSON or Switchboard's
   `control.json`; never read Claude or Codex credential files or managed homes.

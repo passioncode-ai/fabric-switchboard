@@ -733,7 +733,7 @@ pub(crate) fn project_views(snapshot: &Value) -> Vec<Value> {
                 .filter(|a| a["pool"] == p["pool"])
                 .map(|a| json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "enabled": a["enabled"]}))
                 .collect();
-            json!({"pool": p["pool"], "name": p["name"], "folders": p["folders"], "accounts": own})
+            json!({"pool": p["pool"], "name": p["name"], "folders": p["folders"], "sources": p["sources"].as_array().cloned().unwrap_or_default(), "accounts": own})
         })
         .collect()
 }

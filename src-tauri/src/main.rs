@@ -2,6 +2,7 @@
 use serde_json::{json, Value};
 use std::sync::Arc;
 mod residency;
+mod suggestions;
 mod updates;
 use residency::reveal;
 
@@ -49,6 +50,11 @@ struct Slot {
 const STARTUP_FAILED: &str = "Switchboard could not start its account service. Retry; if it keeps failing, quit and reopen Switchboard.";
 const STORE_BUSY: &str = "Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.";
 impl Slot {
+    /// The running owner, if any; never starts one (SB-117's watcher must not double the
+    /// start-up retry).
+    async fn running(&self) -> Option<std::sync::Arc<Runtime>> {
+        self.owner.lock().await.as_ref().map(|o| o.runtime.clone())
+    }
     async fn runtime(&self) -> Result<std::sync::Arc<Runtime>, String> {
         let mut owner = self.owner.lock().await;
         if owner.is_none() {
@@ -399,6 +405,37 @@ async fn save_project(
         })
         .await
 }
+/// SB-117: folders found for a project, waiting for Add or Not this one.
+#[tauri::command]
+async fn project_suggestions(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectSuggestions)
+        .await
+}
+#[tauri::command]
+async fn accept_project_suggestion(
+    folder: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectSuggestionAccept { folder })
+        .await
+}
+#[tauri::command]
+async fn dismiss_project_suggestion(
+    folder: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectSuggestionDismiss { folder })
+        .await
+}
 #[tauri::command]
 async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -683,7 +720,9 @@ fn main() {
     let Launch { smoke, background } = launch(std::env::args());
     // The folder picker is called from Rust (`pick_folder`); the window holds no dialog or
     // filesystem permission of its own.
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init());
     // A second launch (double-click on Windows, `open -n` on macOS) focuses this window
     // instead of starting another owner that would find the store locked. The packaged smoke
     // check runs beside an installed app on purpose, with its own temporary store.
@@ -744,10 +783,17 @@ fn main() {
                 });
             }
             app.manage(SmokeMode(temporary));
+
             // Residency (SB-28): the tray keeps Open and Quit reachable while the window is
             // hidden; the login item starts Switchboard in the background.
             if let Err(error) = residency::tray(app.handle()) {
                 eprintln!("Switchboard could not add its menu-bar icon: {error}");
+            }
+            // SB-117: folders found for a project — a notification when one appears, the count
+            // next to the tray icon until each is answered, and the window's banner. Started
+            // after the tray, so the first count has an icon to sit next to.
+            if !smoke {
+                suggestions::watch(app.handle().clone());
             }
             if !smoke {
                 if let Ok(root) = default_root() {
@@ -857,6 +903,9 @@ fn main() {
             kimi_launch,
             kimi_remove,
             remove_project,
+            project_suggestions,
+            accept_project_suggestion,
+            dismiss_project_suggestion,
             agent_setup,
             link_cli
         ])

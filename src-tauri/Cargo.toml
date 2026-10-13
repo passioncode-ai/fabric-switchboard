@@ -19,4 +19,5 @@ serde_json.workspace = true
 tempfile = "3"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 semver = "1"

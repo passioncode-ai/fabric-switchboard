@@ -8,6 +8,17 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A project offers its new folders, and has no folder limit** (SB-117). When an agent creates a
+worktree of a project repository, clones one again, or clones a new repository of the project's
+source (`switchboard project source --add github.com/<owner>`), Switchboard finds it. It finds
+the folder by itself in the background or when a Claude Code session starts there, and asks:
+- a notification;
+- a count next to the menu-bar icon until you answer;
+- a banner in the window with **Add** and **Not this one**.
+
+Nothing joins without a click, and a declined folder is never offered again. A project no
+longer has a folder limit; all projects together hold up to 1024 folders.
+
 ## 0.6.29 — 2026-10-13
 
 **A project holds up to 64 folders** (was 16). A product often lives in many clones and

@@ -31,7 +31,9 @@ export interface ProjectRule { path: string; provider: Provider; account_id: str
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
 /** A project's folders and the pool of accounts reserved for them (0.6). */
-export interface Project { pool: string; name: string; folders: string[]; created_at: number }
+export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[] }
+/** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
+export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem'; repository: string; first_seen: number }
 export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[] }
 export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
@@ -72,6 +74,9 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[] }>;
+  acceptProjectSuggestion(folder: string): Promise<unknown>;
+  dismissProjectSuggestion(folder: string): Promise<unknown>;
   agentConnect(agent: string, pool: string): Promise<AgentConnection>;
   launchAgent(agent: string, pool: string, workingDirectory: string): Promise<unknown>;
   /** The OpenRouter key agents run on (SB-79): metadata and what it may still spend, never the key. */

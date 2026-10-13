@@ -21,6 +21,14 @@ const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
 
+// SB-117: a suggested folder says which project it is for and why.
+check(() => {
+  assert.equal(logic.suggestionReason({ reason: 'worktree', repository: 'github.com/org/app' }), 'A worktree of github.com/org/app.');
+  assert.equal(logic.suggestionReason({ reason: 'same_repository', repository: 'github.com/org/app' }), 'Another copy of github.com/org/app.');
+  assert.equal(logic.suggestionReason({ reason: 'ecosystem', repository: 'github.com/org' }), 'A new repository of github.com/org.');
+  assert.equal(logic.suggestionQuestion({ name: 'app-2', project: 'App', pool: 'app' }), 'Add the folder app-2 to App?');
+  assert.equal(logic.suggestionQuestion({ name: 'app-2', project: null, pool: 'app' }), 'Add the folder app-2 to app?');
+});
 // SB-99/100: a Kimi window at 100 % stops the account until its reset; a passed reset no longer shows the old percent.
 check(() => {
   const now = 1_000_000;
