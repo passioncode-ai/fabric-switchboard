@@ -179,6 +179,9 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 
 .nav-count { margin-left: auto; min-width: 1.5rem; padding: 0 .4rem; border-radius: 999px; background: var(--accent); color: var(--accent-ink, var(--bg)); font-size: .75rem; font-weight: 700; text-align: center; }
 .rules-strip { align-items: center; }
+/* SB-117: a folder found for a project stays above every page until it is answered. */
+.suggestion-strip { align-items: center; background: var(--accent-weak); border-left: 3px solid var(--accent); }
+.suggestion-text { min-width: 0; overflow-wrap: anywhere; }
 
 /* 0.5 Accounts: compact rows grouped by provider and pool; one primary action, the rest in a menu. */
 .status-dot.unavailable { background: var(--warn); }

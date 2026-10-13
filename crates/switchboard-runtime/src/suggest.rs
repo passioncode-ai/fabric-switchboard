@@ -20,6 +20,7 @@ const MAX_DISMISSED: usize = 2048;
 const MAX_ROWS: usize = MAX_PENDING + MAX_DISMISSED;
 /// A folder path longer than this is never suggested (projects allow 1024 bytes).
 const MAX_FOLDER: usize = 1024;
+const MAX_LABEL: usize = 300;
 /// 2304 rows of at most ~1.3 KiB each fit with room to spare; `write` refuses beyond it.
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 /// Repositories without an `origin` yet, watched for one (D-3c): a new repository usually gets
@@ -263,7 +264,10 @@ fn too_busy_to_watch(dir: &Path) -> bool {
         || ["HOME", "USERPROFILE"]
             .iter()
             .filter_map(std::env::var_os)
-            .any(|home| Path::new(&home) == dir)
+            .any(|home| {
+                let home = Path::new(&home);
+                home == dir || home.canonicalize().is_ok_and(|h| h == dir)
+            })
 }
 
 pub(crate) fn read(root: &Path) -> Result<Vec<Suggestion>, String> {
@@ -348,18 +352,20 @@ pub(crate) fn record(
     if snapshot.project_for(&folder).is_some() {
         return Ok(Outcome::InProject);
     }
-    let rows = read(root)?;
+    // Decided before the list is read: most folders a pass looks at are no project's.
+    let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
+        let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
+        return Ok(Outcome::NotOurs { settled });
+    };
+    let mut rows = read(root)?;
     if let Some(row) = rows.iter().find(|r| r.folder == text) {
         return Ok(match row.state {
             State::Pending => Outcome::Waiting,
             State::Dismissed => Outcome::Declined,
         });
     }
-    let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
-        let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
-        return Ok(Outcome::NotOurs { settled });
-    };
-    let mut rows = rows;
+    // A label is shown, never parsed: bounded so a row stays small.
+    let repository: String = repository.chars().take(MAX_LABEL).collect();
     if rows.iter().filter(|r| r.state == State::Pending).count() >= MAX_PENDING {
         return Ok(Outcome::Full);
     }
@@ -438,6 +444,10 @@ pub(crate) struct Scanner {
     seen: HashSet<PathBuf>,
     unsure: HashMap<PathBuf, i64>,
     unsettled: HashMap<PathBuf, Option<SystemTime>>,
+    /// Repositories whose recording failed (a full list, an unreadable file): offered again.
+    retry: HashSet<PathBuf>,
+    /// Worktree lists with an unreadable entry, read once more before settling.
+    incomplete: HashSet<PathBuf>,
     /// Directories read by the last pass, for the idle-budget test.
     pub(crate) reads: usize,
 }
@@ -508,13 +518,16 @@ impl Scanner {
                 continue;
             };
             self.reads += 1;
-            let mut complete = true;
+            let mut complete = !self.incomplete.contains(&dir);
             for entry in entries.flatten().take(MAX_ENTRIES) {
                 let path = if is_worktrees {
                     // `.git/worktrees/<name>/gitdir` holds `<worktree>/.git`, absolute or
                     // relative to that admin folder.
                     let Some(text) = read_small(&entry.path().join("gitdir"), SMALL) else {
-                        complete = false;
+                        // Being written now, or broken for good: one more read, then settled.
+                        if self.incomplete.insert(dir.clone()) {
+                            complete = false;
+                        }
                         continue;
                     };
                     let gitfile = PathBuf::from(text.trim());
@@ -534,20 +547,40 @@ impl Scanner {
                     }
                     entry.path()
                 };
-                if !self.seen.contains(&path) {
+                if self.seen.contains(&path) || self.unsure.contains_key(&path) {
+                    continue;
+                }
+                if path.join(".git").exists() {
                     candidates.push(path);
+                } else {
+                    // Maybe a clone still arriving: watched for its `.git` a while (below).
+                    self.unsure.insert(path, now);
                 }
             }
             // A folder read only in part is read again next pass.
             if complete {
+                self.incomplete.remove(&dir);
                 self.stamps.insert(dir, modified);
             }
         }
-        // A folder that has no `.git` yet may be a clone still arriving.
-        self.unsure
-            .retain(|_, first| now - *first <= UNSURE_SECONDS);
-        candidates.extend(self.unsure.keys().cloned());
-        // A repository without an `origin`: looked at again once its config changes.
+        // A folder without `.git` yet: a candidate once it has one; after the window, settled.
+        let mut arrived = Vec::new();
+        let mut expired = Vec::new();
+        for (path, first) in &self.unsure {
+            if path.join(".git").exists() {
+                arrived.push(path.clone());
+            } else if now - *first > UNSURE_SECONDS || !path.is_dir() {
+                expired.push(path.clone());
+            }
+        }
+        for path in arrived.iter().chain(expired.iter()) {
+            self.unsure.remove(path);
+        }
+        self.seen.extend(expired);
+        candidates.extend(arrived);
+        // A repository without an `origin`: looked at again once its config changes; one
+        // that is gone is forgotten.
+        self.unsettled.retain(|path, _| path.join(".git").exists());
         let changed: Vec<PathBuf> = self
             .unsettled
             .iter()
@@ -555,6 +588,7 @@ impl Scanner {
             .map(|(path, _)| path.clone())
             .collect();
         candidates.extend(changed);
+        candidates.extend(self.retry.drain());
         candidates.sort();
         candidates.dedup();
         candidates
@@ -574,10 +608,9 @@ impl Scanner {
         let mut found = Vec::new();
         for path in candidates {
             if !path.join(".git").exists() {
-                self.unsure.entry(path).or_insert(now);
+                self.unsettled.remove(&path);
                 continue;
             }
-            self.unsure.remove(&path);
             match record(root, snapshot, &repos, &path, now) {
                 Ok(Outcome::New(s)) => {
                     self.unsettled.remove(&path);
@@ -592,7 +625,11 @@ impl Scanner {
                     self.seen.insert(path);
                 }
                 // A full list or an unreadable file: tried again next pass.
-                Ok(Outcome::Full) | Err(_) => {}
+                Ok(Outcome::Full) | Err(_) => {
+                    if self.retry.len() < MAX_PENDING {
+                        self.retry.insert(path);
+                    }
+                }
                 Ok(_) => {
                     self.unsettled.remove(&path);
                     self.seen.insert(path);
@@ -840,6 +877,46 @@ mod tests {
             write(root.path(), &more).is_err(),
             "never more than read accepts"
         );
+    }
+
+    #[test]
+    fn a_failed_recording_is_retried_and_gone_or_plain_folders_cost_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let main = data.join("app");
+        git(&main, Some("git@github.com:org/app.git"));
+        let notes = data.join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        let s = snapshot(&[("p", &[&main], &["github.com/org"])]);
+        let mut scan = Scanner::default();
+        assert!(scan.pass(root.path(), &s, 100).is_empty());
+        // The list is unreadable while a new repository appears; once restored, it is offered.
+        switchboard_core::private_fs::private_write(&root.path().join(FILE), b"broken").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let api = data.join("api");
+        git(&api, Some("git@github.com:org/api.git"));
+        assert!(scan.pass(root.path(), &s, 130).is_empty());
+        std::fs::remove_file(root.path().join(FILE)).unwrap();
+        assert_eq!(
+            scan.pass(root.path(), &s, 160).len(),
+            1,
+            "retried without a parent change"
+        );
+        // A repository without an origin that is deleted is forgotten, not looked at forever.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let scratch = data.join("scratch");
+        git(&scratch, None);
+        assert!(scan.pass(root.path(), &s, 190).is_empty());
+        std::fs::remove_dir_all(&scratch).unwrap();
+        assert!(scan.collect(&s, 220).is_empty(), "gone: no candidate");
+        assert!(scan.collect(&s, 250).is_empty());
+        // A plain folder, once its window passed, is not listed again when the parent changes.
+        assert!(scan.collect(&s, 100 + UNSURE_SECONDS + 1).is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::create_dir_all(data.join("other")).unwrap();
+        let listed = scan.collect(&s, 100 + UNSURE_SECONDS + 2);
+        assert!(!listed.contains(&notes), "{listed:?}");
     }
 
     #[test]

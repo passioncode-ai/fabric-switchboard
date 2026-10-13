@@ -1145,6 +1145,6 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** a refusal on Add (the folder became part of another project, or the 1024-folder total is reached) names the cause and keeps the suggestion.
 **Status:** draft
 **Meaning:** operator request 2026-10-14 (SB-117).
-**Coverage:** `suggest::tests`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; `ui-logic` suggestion cases.
+**Coverage:** `suggest::tests`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; `ui-logic` suggestion cases; browser demo in Playwright WebKit 2026-10-14 (create Client Alpha → banner “Add the folder alpha-web-review to Client Alpha? A worktree of …” → Add → “alpha-web-review added to Client Alpha.”, banner gone, folder listed): [screenshot](../evidence/screenshots/sb117-suggestion-banner-demo.png).
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-117 packet

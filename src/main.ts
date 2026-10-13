@@ -202,6 +202,8 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
     showNotice(restoredText || success); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
+    // A project saved or removed can answer a waiting folder suggestion (SB-117).
+    try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* the next refresh reads them */ }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
   finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
 }
@@ -1433,7 +1435,7 @@ function select(options: [string, string][]) { const node = el('select'); option
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
 async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string) {
   context.error.textContent = ''; context.setBusy(true); clock.begin();
-  try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
+  try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* SB-117: the next refresh reads them */ } render(); context.setBusy(false); context.close(); }
   catch (error) { context.error.textContent = t(safeError(error)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
