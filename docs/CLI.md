@@ -271,3 +271,56 @@ key --service openrouter` when it starts and exports it under the agent's own va
 Hermes, pi, omp and Qwen Code start in their own home under Switchboard's data folder, so a key
 they saved themselves cannot win. Which agents launch this way, and their caveats:
 [AGENT-SUPPORT.md](AGENT-SUPPORT.md) ("OpenRouter key" lines). OpenClaw and Cline cannot.
+
+## Capacity recovery (SB-114)
+
+The running desktop app or `switchboard serve` owns the registry. The host that
+knows a session stopped registers its exact binding; Switchboard does not infer
+an instruction to resume from arbitrary transcript text.
+
+```sh
+switchboard recovery --json
+switchboard recovery register limit-1 --session session-1 --account <id> --directory /work/project
+switchboard recovery claim limit-1 --account <candidate-id>
+switchboard recovery finish limit-1 resumed
+# Or when the person cancelled the work:
+switchboard recovery finish limit-1 cancelled
+```
+
+Status separates `limited_accounts`, `waiting_sessions`, `ready_sessions` and
+`claimed_sessions`. `coverage: registered_sessions_only` and
+`source: host_reported` are part of the contract: zero registered waits is not
+proof that no external session is stopped. `limits` includes hidden-limit evidence.
+Each ready row carries its stable stop event and compatible candidates. The host
+polls status, notifies the session owner, claims immediately before acting, and
+reports resumed only after observing that session continue. Child-agent state
+belongs to the host's checkpoint. No command here sends a prompt or restarts a client.
+
+Same-event registration and same-result finish are idempotent. Claim is deliberately
+not replayable: after a lost response inspect the existing claim and reconcile the
+host's receipt. The full private registry is bounded at 1024 records, including
+completed receipts; reaching it requires reconciliation, never silent eviction.
+See [SB-114 packet](packets/sb-114-capacity-recovery.md) and `recovery::tests`.
+
+## Console hand-overs (SB-108)
+
+```sh
+switchboard handovers --json
+switchboard handovers set on
+switchboard handovers run ho-0123456789ab
+switchboard handovers set off
+```
+
+Off by default. With the setting on, automatic fallback prepares a continuation
+and queues metadata for the host console. `run` requires a terminal on stdin and
+stdout and takes the record once. After 120 seconds without a taker, the monitor
+requests a Terminal launch while the offer is live. Expired offers never launch.
+The private queue stores no credential or prompt. Fabric Dashboards' consumer
+(FD-62) is separate from this CLI producer; an available command is not evidence
+that the installed console has consumed it. Checks: `handovers::tests` and
+`hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
+
+Recovery status separates `limited_accounts` (active holds) from
+`awaiting_post_limit_probe_accounts` (ended holds awaiting a successful observation
+made after the deadline). `limit_unavailable_accounts` includes both. A quota sample
+made during a hidden hold cannot make the account ready when its timer ends.

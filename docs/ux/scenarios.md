@@ -60,6 +60,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-050 | A coding agent sets Switchboard up | draft |
 | SCN-051 | See which sessions Switchboard launched are running | draft |
 | SCN-052 | An agent keeps working when its account hits a limit | draft |
+| SCN-053 | A stopped session gets a capacity notice once | draft |
+| SCN-054 | Take a workflow hand-over in a console | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1084,3 +1086,42 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** CONTRACTS → Agents keep working through a limit (tests named there); `limitTitle`, `limitReasonText` in `scripts/test-ui-logic.mjs`.
 **Product:** unobserved
 **Traces:** SCN-040, SCN-022
+
+## SCN-053 — A stopped session gets a capacity notice once
+**Persona:** P-01
+**Goal:** Continue unfinished work when a suitable account becomes available.
+**Preconditions:** A session host registers a stop with its session, event, account and folder; the Switchboard owner runs.
+**Entry point:** CLI `switchboard recovery`
+**Steps:**
+1. The host registers a stopped session → the wait survives owner restart and account reset.
+2. The host reads recovery status → account limits, registered waiting sessions and ready sessions have separate counts; coverage says registered sessions only.
+3. Fresh quota arrives for a suitable same-provider/pool account → that stop lists the candidate; project restrictions and hidden holds still apply.
+4. The host claims the event and candidate → Switchboard rechecks and durably marks claimed before returning; the host resumes from its checkpoint and reports its result.
+**Alt paths:** The original account resets and receives a fresh observation → it can become a candidate. A person cancels work → the host marks cancelled, preventing later claims.
+**Expected result:** One claim per stop event; only host-reported completion becomes resumed. Switchboard never types a prompt, kills a client or restarts children itself.
+**UI elements:** CLI JSON records and error messages; no desktop surface added.
+**States covered:** empty, waiting, ready, claimed, resumed, cancelled, error
+**Errors & recovery:** A stale observation, wrong project/pool, sign-in requirement or hidden limit prevents a claim. A lost claim response stays claimed for reconciliation. Corrupt storage is an error, never an empty list. Host consumer integration remains unobserved.
+**Status:** draft
+**Coverage:** `recovery::tests`; [packet](../packets/sb-114-capacity-recovery.md).
+**Product:** unobserved
+**Traces:** ST-001, FLW-01
+
+## SCN-054 — Take a workflow hand-over in a console
+**Persona:** P-01
+**Goal:** Let a console take a prepared continuation once.
+**Preconditions:** Automatic fallback configured; Fabric hand-overs explicitly enabled with the CLI.
+**Entry point:** CLI `switchboard handovers`
+**Steps:**
+1. A fallback prepares a continuation → its metadata waits in the private hand-over queue.
+2. The host takes the hand-over in a terminal → one taker receives the script; concurrent takers are refused.
+3. No host takes it within two minutes → the monitor requests Terminal launch while the offer remains live.
+**Alt paths:** Hand-overs off (the default) → existing Terminal behavior. Expired offer → removed without launching.
+**Expected result:** A queued continuation runs at most once; a launch request is not proof of workflow acceptance.
+**UI elements:** CLI list, setting and run command.
+**States covered:** empty, waiting, taken, expired, error
+**Errors & recovery:** No terminal → refuse before taking; expired offer → never launch; ambiguous taken record → retain for reconciliation.
+**Status:** draft
+**Coverage:** `handovers::tests`; CLI `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01

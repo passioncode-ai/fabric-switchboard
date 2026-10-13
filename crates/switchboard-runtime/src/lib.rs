@@ -10,6 +10,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub mod handovers;
 pub mod hermes;
 pub mod kimi;
 pub mod launch;
@@ -18,6 +19,7 @@ mod monitor;
 pub mod onboarding;
 pub mod oplog;
 pub mod projects;
+pub mod recovery;
 mod refresh;
 pub mod uninstall;
 mod usage_gate;
@@ -212,8 +214,34 @@ pub enum Operation {
     AgentKeyValue {
         service: String,
     },
-    /// Fallback chains (SB-71): every chain set, the presets, and the one that applies to a
-    /// workflow and/or a project pool.
+    /// Durable stopped-session registrations and capacity notices (SB-114), CLI/host only.
+    Recovery,
+    RecoveryRegister {
+        event: String,
+        session: String,
+        account: String,
+        directory: PathBuf,
+    },
+    RecoveryClaim {
+        event: String,
+        account: String,
+    },
+    RecoveryFinish {
+        event: String,
+        resumed: bool,
+    },
+    /// The hand-overs waiting for a console (SB-108) and whether Fabric gets them.
+    Handovers,
+    /// Takes a waiting hand-over once, for the caller's terminal (`handovers run`).
+    HandoverTake {
+        id: String,
+    },
+    /// Reads, or with `on` changes, the "Open hand-overs in Fabric" setting.
+    HandoverSetting {
+        #[serde(default)]
+        on: Option<bool>,
+    },
+    /// Fallback chains (SB-71): every chain, presets, and effective workflow/project chain.
     Chains {
         #[serde(default)]
         workflow: Option<String>,
@@ -1458,6 +1486,68 @@ async fn execute(
             ))
         }
         Operation::AgentCatalog => Ok(agent_catalog::catalog()),
+        Operation::Recovery => {
+            let rt = needs_owner()?;
+            let time = monitor::now();
+            let limited = rt.limits.limited_ids(time);
+            let sign_in = rt.refresh.sign_in_required(&store).into_iter().collect();
+            let snapshot = store.snapshot()?;
+            let blocked = rt.limits.recovery_blocked(&snapshot, time);
+            let mut status = recovery::status(root, &snapshot, &blocked, &sign_in, time)?;
+            status["limited_accounts"] = json!(limited.len());
+            status["awaiting_post_limit_probe_accounts"] =
+                json!(blocked.difference(&limited).count());
+            status["limits"] = json!(rt.limits.report(time));
+            Ok(status)
+        }
+        Operation::RecoveryRegister {
+            event,
+            session,
+            account,
+            directory,
+        } => {
+            needs_owner()?;
+            recovery::register(
+                root,
+                &store.snapshot()?,
+                &event,
+                &session,
+                &account,
+                &directory,
+                monitor::now(),
+            )?;
+            Ok(json!({"registered": true}))
+        }
+        Operation::RecoveryClaim { event, account } => {
+            let rt = needs_owner()?;
+            let time = monitor::now();
+            let sign_in = rt.refresh.sign_in_required(&store).into_iter().collect();
+            let _credential = store.credential(&account)?;
+            let snapshot = store.snapshot()?;
+            let blocked = rt.limits.recovery_blocked(&snapshot, time);
+            let claimed =
+                recovery::claim(root, &event, &account, &snapshot, &blocked, &sign_in, time)?;
+            Ok(json!({"claimed": claimed, "resumed": false}))
+        }
+        Operation::RecoveryFinish { event, resumed } => {
+            needs_owner()?;
+            recovery::finish(root, &event, resumed)?;
+            Ok(json!({"recorded": true}))
+        }
+        Operation::Handovers => Ok(json!({
+            "enabled": handovers::enabled(root),
+            "handovers": handovers::pending(root),
+        })),
+        Operation::HandoverTake { id } => {
+            let taken = handovers::take(root, &id)?;
+            Ok(json!({"handover": taken, "script": taken.script}))
+        }
+        Operation::HandoverSetting { on } => {
+            if let Some(on) = on {
+                handovers::set_enabled(root, on)?;
+            }
+            Ok(json!({"enabled": handovers::enabled(root)}))
+        }
         Operation::Chains { workflow, pool } => {
             let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
             Ok(json!({

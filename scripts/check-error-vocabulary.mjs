@@ -21,6 +21,12 @@ const LIST = argv.includes('--list');
 const SOURCE_DIRS = ['crates/switchboard-core/src', 'crates/switchboard-runtime/src', 'crates/switchboard-proxy/src', 'src-tauri/src'];
 // Whole files that never answer a renderer request. Each is excluded with its reason.
 const EXCLUDED_FILES = {
+  // Host/CLI-only operations; no Tauri command exposes these registries.
+  'crates/switchboard-runtime/src/recovery.rs': 'CLI-only recovery protocol; no renderer caller',
+  'crates/switchboard-runtime/src/handovers.rs': 'CLI-only hand-over queue; no renderer caller',
+  // Automatic fallback logs fixed outcome codes and never returns these errors to a renderer.
+  'crates/switchboard-runtime/src/fallback.rs': 'background fallback only; errors become outcome codes',
+
   // Unit tests of the proxy (`mod tests;`), never compiled into the app.
   'crates/switchboard-proxy/src/tests.rs': 'test module',
   // Loopback control socket. Its client errors (control::request) reach only the CLI and

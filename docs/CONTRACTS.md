@@ -814,3 +814,34 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
     zsh script with a stand-in CLI and agent.
   - The desktop window gets `openrouter_status`, `openrouter_save`, `openrouter_model`,
     `openrouter_remove` and `launch_agent {via, model}` — never `AgentKeyValue`.
+
+## Capacity notices and console hand-overs (SB-114, SB-108)
+
+[Recovery packet](packets/sb-114-capacity-recovery.md) owns the host protocol;
+[CLI](CLI.md#capacity-recovery-sb-114) names the commands. `Operation::Recovery*`
+is owner-only and runs under the owner mutation lock. A host-reported stop freezes
+provider, pool, folder and event/session binding in `<data>/recovery.json` (0600).
+Candidates use post-stop successful observations at most 300 seconds old; a passed
+reset invalidates the observation. Hidden holds, sign-in requirements, disabled
+accounts, API keys, other pools/providers and project-folder refusals are excluded.
+A duplicate row of a held identity is excluded too. Claim rechecks and validates
+the credential before persisting `claimed`; it never returns a credential. An
+ambiguous claim survives restart without automatic replay. Completion is the
+host's claim, not independent provider acceptance. Evidence: `recovery::tests`.
+
+The hand-over queue is `<data>/handovers/`, records 0600, at most 16 pending before
+the monitor starts overflow in Terminal; recording refuses at 256 directory entries
+(including ambiguous `.taken` receipts). Individual records are at most 16 KiB.
+The atomic rename chooses one taker; expired/unparseable deadlines never launch.
+`fabric-handovers` absent means off. Pending/taken records and recovery state are
+operational state, excluded from account backups and removed by uninstall. A queue
+record never contains a prompt or credential. Evidence: `handovers::tests`,
+`uninstall::OWNED`, CLI command test.
+
+SB-114 retains expired limit evidence for the five-minute quota freshness window.
+`limited_accounts` counts active holds; `awaiting_post_limit_probe_accounts` counts
+ended holds without a newer quota observation. Both are excluded from recovery
+candidates (`limit_unavailable_accounts`). Ordinary routing's existing hold deadline is
+unchanged. `recovery::tests::a_probe_during_a_hidden_hold_cannot_wake_work_after_its_deadline`
+checks this across restart; `simultaneous_host_claims_are_serialized_by_the_owner`
+checks competing runtime callers.

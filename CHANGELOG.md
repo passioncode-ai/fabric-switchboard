@@ -8,6 +8,19 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.26 — 2026-10-13
+
+**Prepare stopped sessions for recovery** (SB-114). A host can register a session stopped by
+an account limit, see counts and compatible accounts, and claim its continuation once.
+Readiness requires fresh quota after a hold ends, including hidden limits; project and pool
+restrictions still apply. Fabric/Observatory must connect their session lifecycle before this
+resumes sessions automatically.
+
+**Queue automatic hand-overs for an embedded console** (SB-108 producer). With
+`switchboard handovers set on`, a console can take a prepared hand-over once. Unclaimed live
+offers fall back to Terminal after two minutes; expired offers never launch. The setting is
+off by default, pending the host integration.
+
 ## 0.6.25 — 2026-10-13
 
 **Continue a workflow inside another app's console** (SB-108, first half). `switchboard continue
