@@ -481,6 +481,8 @@ pub struct Runtime {
     suggestions_seq: std::sync::atomic::AtomicU64,
     /// What the project folders' Claude Code route was last synced for (SB-118).
     bindings_key: Mutex<Option<u64>>,
+    /// The project folders' resolved repositories, re-read only when a `.git` stamp moves.
+    bindings_repos: Mutex<bindings::RepoCache>,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -568,6 +570,7 @@ impl Runtime {
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
             bindings_key: Mutex::new(None),
+            bindings_repos: Mutex::new(bindings::RepoCache::default()),
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -651,7 +654,12 @@ impl Runtime {
             return;
         };
         let address = self.proxy.address().to_string();
-        let key = bindings::key(&snapshot, &address);
+        let key = {
+            let Ok(mut repos) = self.bindings_repos.lock() else {
+                return;
+            };
+            bindings::key(&snapshot, &address, &mut repos)
+        };
         if self.bindings_key.lock().ok().and_then(|k| *k) == Some(key) {
             return;
         }
@@ -667,6 +675,10 @@ impl Runtime {
                         ("bound", oplog::Field::Number(report.bound as i64)),
                         ("removed", oplog::Field::Number(report.removed as i64)),
                         ("skipped", oplog::Field::Number(report.skipped.len() as i64)),
+                        (
+                            "user_values",
+                            oplog::Field::Number(report.user_values_present.len() as i64),
+                        ),
                     ],
                 );
                 if let Ok(mut k) = self.bindings_key.lock() {

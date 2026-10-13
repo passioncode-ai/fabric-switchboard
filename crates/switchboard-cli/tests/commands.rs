@@ -817,3 +817,41 @@ fn onboard_prints_the_guide_and_reads_the_setup_without_creating_storage() {
         .unwrap();
     assert!(!output.status.success());
 }
+#[test]
+fn project_bindings_are_listed_offline() {
+    // SB-118 REQ-5: `switchboard project bindings` lists the bound folders; the record's
+    // digest stays in the record.
+    let tmp = tempfile::tempdir().unwrap();
+    let rows = serde_json::json!([{
+        "folder": "/work/app",
+        "pool": "pc",
+        "base_url": "http://127.0.0.1:4000/claude/pc",
+        "token_sha256": "00",
+        "created": true
+    }]);
+    switchboard_core::private_fs::private_write(
+        &tmp.path().join("claude-bindings.json"),
+        &serde_json::to_vec(&rows).unwrap(),
+    )
+    .unwrap();
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .arg("--json")
+        .args(["project", "bindings"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["data"]["bindings"][0]["folder"], "/work/app");
+    assert_eq!(
+        json["data"]["bindings"][0]["base_url"],
+        "http://127.0.0.1:4000/claude/pc"
+    );
+    assert!(json["data"]["bindings"][0].get("token_sha256").is_none());
+}

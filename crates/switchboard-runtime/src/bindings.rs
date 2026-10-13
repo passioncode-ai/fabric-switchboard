@@ -45,6 +45,8 @@ pub(crate) struct Report {
     pub removed: usize,
     /// Folders whose settings file could not be read as JSON or written: left untouched.
     pub skipped: Vec<String>,
+    /// Folders whose `ANTHROPIC_*` values are the person's, not Switchboard's: left untouched.
+    pub user_values_present: Vec<String>,
 }
 
 fn sha256(text: &str) -> String {
@@ -79,12 +81,12 @@ fn write(root: &Path, rows: &[Binding]) -> Result<(), String> {
     switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
 }
 
-/// The git folder of the repository `folder` is in (its own `.git`, or a worktree's common
-/// folder), walking up as Git does.
-fn git_common(folder: &Path) -> Option<PathBuf> {
+/// The working-tree root `folder` resolves under (its nearest ancestor holding `.git`) and the
+/// repository's common git folder (shared by all its worktrees).
+fn git_root_and_common(folder: &Path) -> Option<(PathBuf, PathBuf)> {
     folder
         .ancestors()
-        .find_map(|dir| crate::suggest::repo(dir).map(|r| r.common))
+        .find_map(|dir| crate::suggest::repo(dir).map(|r| (dir.to_owned(), r.common)))
 }
 
 /// The folders whose Claude Code sessions should use a pool: every folder of a project whose
@@ -194,14 +196,26 @@ fn write_settings(path: &Path, map: &Map<String, Value>) -> Result<(), ()> {
 }
 
 /// Keeps the file out of Git through the repository's own `info/exclude` (never a tracked
-/// `.gitignore`). Claude Code ignores it the same way when it creates the file itself.
+/// `.gitignore`). Claude Code ignores it the same way when it creates the file itself. A
+/// pattern with a slash is anchored to the working-tree root, so a folder that is a subfolder
+/// of the repository gets its path relative to that root.
 fn exclude(folder: &Path) {
-    let Some(common) = git_common(folder) else {
+    let Some((root, common)) = git_root_and_common(folder) else {
         return;
+    };
+    let relative = folder.strip_prefix(&root).unwrap_or(Path::new(""));
+    let line = if relative.as_os_str().is_empty() {
+        EXCLUDE_LINE.to_owned()
+    } else {
+        let parts: Vec<String> = relative
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        format!("{}/{EXCLUDE_LINE}", parts.join("/"))
     };
     let path = common.join("info").join("exclude");
     let current = std::fs::read_to_string(&path).unwrap_or_default();
-    if current.lines().any(|l| l.trim() == EXCLUDE_LINE) {
+    if current.lines().any(|l| l.trim() == line) {
         return;
     }
     let mut text = current;
@@ -209,7 +223,7 @@ fn exclude(folder: &Path) {
         text.push('\n');
     }
     text.push_str("# Fabric Switchboard (SB-118): the project's Claude Code route, local only\n");
-    text.push_str(EXCLUDE_LINE);
+    text.push_str(&line);
     text.push('\n');
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -217,13 +231,58 @@ fn exclude(folder: &Path) {
     let _ = std::fs::write(&path, text);
 }
 
-/// Writes the route into one folder. `Ok(Some(created))` when written, `Ok(None)` when it was
-/// already there.
-fn apply(folder: &Path, base_url: &str, token: &str) -> Result<Option<bool>, ()> {
+/// What `apply` did with one folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Applied {
+    /// The route was written; `true` when Switchboard created the settings file.
+    Written(bool),
+    /// The route was already there.
+    Unchanged,
+    /// An `ANTHROPIC_*` value is the person's, not Switchboard's: the folder is left untouched.
+    UserValues,
+}
+
+/// A value in the settings file is Switchboard's when it is the one about to be written or
+/// still equals what the record says was written before.
+fn is_ours(value: &Value, current: &str, previous: Option<&Binding>, base: bool) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    text == current
+        || previous.is_some_and(|old| {
+            if base {
+                text == old.base_url
+            } else {
+                sha256(text) == old.token_sha256
+            }
+        })
+}
+
+/// Writes the route into one folder, never over a value that is the person's.
+fn apply(
+    folder: &Path,
+    base_url: &str,
+    token: &str,
+    previous: Option<&Binding>,
+) -> Result<Applied, ()> {
     let path = settings_path(folder);
     let existing = read_settings(&path)?;
     let created = existing.is_none();
     let mut map = existing.unwrap_or_default();
+    if let Some(env) = map.get("env") {
+        let Value::Object(env) = env else {
+            return Err(());
+        };
+        let base_ok = env
+            .get(BASE_URL)
+            .is_none_or(|v| is_ours(v, base_url, previous, true));
+        let token_ok = env
+            .get(AUTH_TOKEN)
+            .is_none_or(|v| is_ours(v, token, previous, false));
+        if !base_ok || !token_ok {
+            return Ok(Applied::UserValues);
+        }
+    }
     let env = map
         .entry("env")
         .or_insert_with(|| Value::Object(Map::new()));
@@ -234,15 +293,16 @@ fn apply(folder: &Path, base_url: &str, token: &str) -> Result<Option<bool>, ()>
         && env.get(AUTH_TOKEN).and_then(Value::as_str) == Some(token);
     exclude(folder);
     if same {
-        return Ok(None);
+        return Ok(Applied::Unchanged);
     }
     env.insert(BASE_URL.into(), Value::String(base_url.into()));
     env.insert(AUTH_TOKEN.into(), Value::String(token.into()));
     write_settings(&path, &map)?;
-    Ok(Some(created))
+    Ok(Applied::Written(created))
 }
 
-/// Removes what a binding wrote, only while the values are still the ones it wrote.
+/// Removes what a binding wrote, per key: each of the two keys whose value is still the one it
+/// wrote goes; a key the person edited stays.
 fn unapply(row: &Binding) -> Result<bool, ()> {
     let path = settings_path(Path::new(&row.folder));
     let Some(mut map) = read_settings(&path)? else {
@@ -251,16 +311,22 @@ fn unapply(row: &Binding) -> Result<bool, ()> {
     let Some(Value::Object(env)) = map.get_mut("env") else {
         return Ok(false);
     };
-    let ours = env.get(BASE_URL).and_then(Value::as_str) == Some(row.base_url.as_str())
-        && env
-            .get(AUTH_TOKEN)
-            .and_then(Value::as_str)
-            .is_some_and(|t| sha256(t) == row.token_sha256);
-    if !ours {
+    let mut removed = false;
+    if env.get(BASE_URL).and_then(Value::as_str) == Some(row.base_url.as_str()) {
+        env.remove(BASE_URL);
+        removed = true;
+    }
+    if env
+        .get(AUTH_TOKEN)
+        .and_then(Value::as_str)
+        .is_some_and(|t| sha256(t) == row.token_sha256)
+    {
+        env.remove(AUTH_TOKEN);
+        removed = true;
+    }
+    if !removed {
         return Ok(false);
     }
-    env.remove(BASE_URL);
-    env.remove(AUTH_TOKEN);
     if env.is_empty() {
         map.remove("env");
     }
@@ -297,15 +363,16 @@ pub(crate) fn sync(
                 let _ = unapply(old);
             }
         }
-        match apply(folder, &base_url, &token) {
-            Ok(result) => {
+        match apply(folder, &base_url, &token, previous) {
+            Ok(result @ (Applied::Written(_) | Applied::Unchanged)) => {
                 let created = match (result, previous) {
-                    (Some(created), Some(old)) => created || old.created,
-                    (Some(created), None) => created,
-                    (None, Some(old)) => old.created,
-                    (None, None) => false,
+                    (Applied::Written(written), Some(old)) => written || old.created,
+                    (Applied::Written(written), None) => written,
+                    (Applied::Unchanged, Some(old)) => old.created,
+                    (Applied::Unchanged, None) => false,
+                    (Applied::UserValues, _) => unreachable!(),
                 };
-                if result.is_some() {
+                if matches!(result, Applied::Written(_)) {
                     report.bound += 1;
                 } else {
                     report.unchanged += 1;
@@ -318,7 +385,21 @@ pub(crate) fn sync(
                     created,
                 });
             }
-            Err(()) => report.skipped.push(text.to_owned()),
+            // The folder's values are the person's: never overwritten. What an earlier row of
+            // ours still covers stays removable through it.
+            Ok(Applied::UserValues) => {
+                report.user_values_present.push(text.to_owned());
+                if let Some(old) = previous {
+                    kept.push(old.clone());
+                }
+            }
+            // Still ours but not writable now: kept to try again.
+            Err(()) => {
+                report.skipped.push(text.to_owned());
+                if let Some(old) = previous {
+                    kept.push(old.clone());
+                }
+            }
         }
     }
     for row in rows
@@ -340,20 +421,61 @@ pub(crate) fn sync(
     Ok(report)
 }
 
-/// Removes every binding (`switchboard uninstall`).
-pub(crate) fn unbind_all(root: &Path) -> usize {
-    let Ok(rows) = read(root) else {
-        return 0;
-    };
-    let removed = rows.iter().filter(|r| unapply(r).unwrap_or(false)).count();
+/// Removes every binding (`switchboard uninstall`). A folder whose file could not be updated
+/// is an error — the rest is still done, and the record stays for a retry.
+pub(crate) fn unbind_all(root: &Path) -> Result<usize, String> {
+    let rows = read(root)?;
+    let mut removed = 0;
+    let mut failed = 0;
+    for row in &rows {
+        match unapply(row) {
+            Ok(true) => removed += 1,
+            Ok(false) => {}
+            Err(()) => failed += 1,
+        }
+    }
+    if failed > 0 {
+        return Err("Could not update every bound folder.".into());
+    }
     let _ = std::fs::remove_file(root.join(FILE));
-    removed
+    Ok(removed)
+}
+
+/// A file's modification time and length; `None` when the path is absent or unstamped.
+type Stamp = Option<(std::time::SystemTime, u64)>;
+
+/// The repository common folder of each project folder, re-resolved only when the folder's
+/// `.git` modification stamp moves, so an idle pass reads no git files (LC-04) — the same
+/// stamp-driven shape as the SB-117 scanner.
+#[derive(Default)]
+pub(crate) struct RepoCache {
+    entries: std::collections::HashMap<PathBuf, (Stamp, Option<PathBuf>)>,
+    /// Resolutions done so far, for the idle-budget test.
+    pub(crate) reads: usize,
+}
+
+impl RepoCache {
+    fn common(&mut self, folder: &Path) -> Option<PathBuf> {
+        let stamp: Stamp = std::fs::symlink_metadata(folder.join(".git"))
+            .ok()
+            .and_then(|m| m.modified().ok().map(|t| (t, m.len())));
+        if let Some((seen, common)) = self.entries.get(folder) {
+            if *seen == stamp {
+                return common.clone();
+            }
+        }
+        self.reads += 1;
+        let common = crate::suggest::repo(folder).map(|r| r.common);
+        self.entries
+            .insert(folder.to_owned(), (stamp, common.clone()));
+        common
+    }
 }
 
 /// A cheap fingerprint of everything `sync` depends on, so the background runs it only when
 /// something changed: projects, their pools' Claude accounts, the proxy address, and the
 /// modification time of each project repository's worktree list.
-pub(crate) fn key(snapshot: &Snapshot, address: &str) -> u64 {
+pub(crate) fn key(snapshot: &Snapshot, address: &str, repos: &mut RepoCache) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     address.hash(&mut h);
@@ -361,7 +483,7 @@ pub(crate) fn key(snapshot: &Snapshot, address: &str) -> u64 {
         p.pool.hash(&mut h);
         p.folders.hash(&mut h);
         for f in &p.folders {
-            let worktrees = crate::suggest::repo(Path::new(f)).map(|r| r.common.join("worktrees"));
+            let worktrees = repos.common(Path::new(f)).map(|c| c.join("worktrees"));
             let stamp =
                 worktrees.and_then(|w| std::fs::metadata(w).and_then(|m| m.modified()).ok());
             stamp.hash(&mut h);
@@ -553,5 +675,165 @@ mod tests {
         assert!(settings_path(&wt).exists());
         let excluded = std::fs::read_to_string(app.join(".git/info/exclude")).unwrap();
         assert_eq!(excluded.matches(EXCLUDE_LINE).count(), 1);
+    }
+
+    #[test]
+    fn a_folder_nested_in_a_repository_gets_a_relative_exclude_line() {
+        // A pattern with a slash is anchored to the working-tree root: a project folder that is
+        // a subfolder of the repository needs its path relative to that root.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let repo = data.join("repo");
+        git(&repo);
+        let app = repo.join("packages").join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        let s = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let report = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(report.bound, 1);
+        assert!(settings_path(&app).exists());
+        let excluded = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert!(
+            excluded
+                .lines()
+                .any(|l| l == "packages/app/.claude/settings.local.json"),
+            "{excluded}"
+        );
+        assert!(!excluded.lines().any(|l| l == EXCLUDE_LINE));
+    }
+
+    #[test]
+    fn a_failed_re_apply_keeps_the_record_row_and_later_syncs_own_it_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let app = data.join("app");
+        git(&app);
+        let mut s = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        // The settings file is unreadable at re-sync time: skipped, but the row survives, so
+        // the written capability is never orphaned.
+        std::fs::write(settings_path(&app), "{ not json").unwrap();
+        let failed = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(failed.skipped.len(), 1);
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows.len(), 1, "the record row survives a failed re-apply");
+        assert_eq!(rows[0].pool, "pc");
+        // Restored: the folder is owned again, and leaving the project removes ours.
+        std::fs::remove_file(settings_path(&app)).unwrap();
+        let again = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!((again.bound, again.skipped.len()), (1, 0));
+        assert!(env(&app).unwrap().contains_key(AUTH_TOKEN));
+        s.projects.clear();
+        let gone = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(gone.removed, 1);
+    }
+
+    #[test]
+    fn values_that_are_not_switchboards_are_never_overwritten_but_own_values_are_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let theirs = data.join("theirs");
+        git(&theirs);
+        std::fs::create_dir_all(theirs.join(".claude")).unwrap();
+        std::fs::write(
+            settings_path(&theirs),
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://person.example","ANTHROPIC_AUTH_TOKEN":"theirs"}}"#,
+        )
+        .unwrap();
+        let mixed = data.join("mixed");
+        git(&mixed);
+        std::fs::create_dir_all(mixed.join(".claude")).unwrap();
+        std::fs::write(
+            settings_path(&mixed),
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://person.example"}}"#,
+        )
+        .unwrap();
+        let clean = data.join("clean");
+        git(&clean);
+        let s = Snapshot {
+            projects: vec![project("pc", &[&theirs, &mixed, &clean])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let report = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(report.bound, 1, "only the clean folder is bound");
+        assert_eq!(report.user_values_present.len(), 2);
+        assert!(report.skipped.is_empty());
+        let e = env(&theirs).unwrap();
+        assert_eq!(e[BASE_URL], "https://person.example");
+        assert_eq!(e[AUTH_TOKEN], "theirs");
+        assert_eq!(env(&mixed).unwrap()[BASE_URL], "https://person.example");
+        assert!(
+            read(root.path()).unwrap().len() == 1,
+            "no record for a folder never written"
+        );
+        // Over Switchboard's own values a re-apply replaces: a new port rewrites the route.
+        let report = sync(root.path(), &s, "127.0.0.1:4001", "session").unwrap();
+        assert_eq!(report.bound, 1);
+        assert!(report.user_values_present.len() == 2);
+        assert_eq!(
+            env(&clean).unwrap()[BASE_URL],
+            "http://127.0.0.1:4001/claude/pc"
+        );
+    }
+
+    #[test]
+    fn removal_is_per_key_a_value_the_person_edited_stays() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let app = data.join("app");
+        git(&app);
+        let mut s = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        // The person edits only the base URL: unbind removes the token (still ours) and keeps
+        // the edited key.
+        let mut map = read_settings(&settings_path(&app)).unwrap().unwrap();
+        map["env"][BASE_URL] = Value::String("https://person.example".into());
+        write_settings(&settings_path(&app), &map).unwrap();
+        s.projects.clear();
+        let gone = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(gone.removed, 1);
+        let e = env(&app).unwrap();
+        assert_eq!(e[BASE_URL], "https://person.example");
+        assert_eq!(e.get(AUTH_TOKEN), None);
+        assert!(read(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_repository_is_resolved_again_only_when_its_git_stamp_moves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let app = data.join("app");
+        git(&app);
+        let s = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let mut repos = RepoCache::default();
+        let first = key(&s, "127.0.0.1:4000", &mut repos);
+        assert_eq!(repos.reads, 1);
+        assert_eq!(key(&s, "127.0.0.1:4000", &mut repos), first);
+        assert_eq!(repos.reads, 1, "an unchanged `.git` is not re-read");
+        // The stamp moves: resolved once more, the fingerprint stays the same.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(app.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        assert_eq!(key(&s, "127.0.0.1:4000", &mut repos), first);
+        assert_eq!(repos.reads, 2);
     }
 }
