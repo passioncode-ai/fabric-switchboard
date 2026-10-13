@@ -596,6 +596,7 @@ impl Runtime {
                 | Operation::LoginStatus { .. }
                 | Operation::PendingLogins
                 | Operation::Backups
+                | Operation::ProjectSuggestions
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -637,12 +638,27 @@ impl Runtime {
     }
     /// The background half of SB-117, under the owner transaction like any other write.
     pub(crate) async fn suggest_pass(&self, time: i64) {
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        if snapshot.projects.is_empty() {
+            return;
+        }
+        // Listing folders writes nothing: it runs outside the owner transaction, which only
+        // the recording below takes, and only when something changed.
+        let candidates = match self.suggest.lock() {
+            Ok(mut scanner) => scanner.collect(&snapshot, time),
+            Err(_) => return,
+        };
+        if candidates.is_empty() {
+            return;
+        }
         let _transaction = self.mutations.lock().await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
         let found = match self.suggest.lock() {
-            Ok(mut scanner) => scanner.pass(&self.root, &snapshot, time),
+            Ok(mut scanner) => scanner.settle(&self.root, &snapshot, candidates, time),
             Err(_) => return,
         };
         if !found.is_empty() {
@@ -2113,6 +2129,10 @@ async fn execute(
                 return Err(PROJECT_ACCOUNT_IN_CLI.into());
             }
             let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            // A folder added by hand, or a project's folders changed, can answer a suggestion.
+            if let Some(rt) = runtime {
+                rt.suggestions_changed();
+            }
             Ok(projects::project_view(&store.snapshot()?, &project))
         }
         Operation::ProjectSuggestions => {
@@ -2127,18 +2147,25 @@ async fn execute(
             let snapshot = store.snapshot()?;
             let repos = suggest::project_repos(&snapshot);
             match suggest::record(root, &snapshot, &repos, &folder, monitor::now())? {
-                Some(s) => {
+                suggest::Outcome::New(s) => {
                     if let Some(rt) = runtime {
                         oplog::event("project_suggestion", &[("found", oplog::Field::Number(1))]);
                         rt.suggestions_changed();
                     }
                     Ok(json!({"suggested": true, "suggestion": suggestion_view(&snapshot, &s)}))
                 }
-                None => Ok(json!({"suggested": false, "message": suggest::explain_none()})),
+                other => Ok(
+                    json!({"suggested": false, "reason": other.code(), "message": other.message()}),
+                ),
             }
         }
         Operation::ProjectSuggestionAccept { folder } => {
             let suggestion = suggest::find_pending(root, &folder)?;
+            if !Path::new(&suggestion.folder).is_dir() {
+                return Err("This folder is gone. Read the suggestions again.".into());
+            }
+            // The same admission as a folder added by hand (canonical, not the data folder).
+            let admitted = projects::project_dir(root, Path::new(&suggestion.folder))?;
             let snapshot = store.snapshot()?;
             let project = snapshot
                 .projects
@@ -2146,7 +2173,7 @@ async fn execute(
                 .find(|p| p.pool == suggestion.pool)
                 .ok_or("Project not found.")?;
             let mut folders: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
-            folders.push(PathBuf::from(&suggestion.folder));
+            folders.push(admitted);
             let accounts: Vec<String> = snapshot
                 .accounts
                 .iter()
@@ -2155,7 +2182,13 @@ async fn execute(
                 .collect();
             let saved =
                 store.save_project(Some(&project.pool), &project.name, &folders, &accounts)?;
-            suggest::forget(root, &folder)?;
+            // The folder is in its project now; a list that could not be rewritten hides it anyway.
+            if suggest::forget(root, &folder).is_err() {
+                oplog::event(
+                    "project_suggestion",
+                    &[("forget", oplog::Field::Code("failed"))],
+                );
+            }
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
@@ -2172,10 +2205,16 @@ async fn execute(
         }
         Operation::ProjectSources { pool, sources } => {
             let project = store.set_project_sources(&pool, &sources)?;
+            if let Some(rt) = runtime {
+                rt.suggestions_changed();
+            }
             Ok(projects::project_view(&store.snapshot()?, &project))
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
+            if let Some(rt) = runtime {
+                rt.suggestions_changed();
+            }
             Ok(json!({"removed": project.pool, "name": project.name}))
         }
         Operation::RemoveProjectRule { path, provider } => {

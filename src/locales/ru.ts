@@ -795,6 +795,8 @@ export const RU: Record<string, string> = {
   "sources changed": "источники изменены",
   "Project suggestions could not be read. Restore the private file before continuing.": "Не удалось прочитать предложения папок. Восстановите закрытый файл и повторите.",
   "No such suggestion. Read the suggestions again.": "Такого предложения нет. Обновите список предложений.",
+  "This folder is gone. Read the suggestions again.": "Этой папки больше нет. Обновите список предложений.",
+  "Too many folders wait for an answer. Answer some in Switchboard first.": "Слишком много папок ждут ответа. Сначала ответьте на часть из них в Switchboard.",
   "applied": "применено",
   "created": "создано",
   "updated": "обновлено",

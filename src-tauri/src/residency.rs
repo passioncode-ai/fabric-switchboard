@@ -247,7 +247,8 @@ pub fn set_suggestions(app: &AppHandle, n: usize) {
         if let Ok(menu) = menu(app, ready.as_deref()) {
             let _ = tray.set_menu(Some(menu));
         }
-        #[cfg(target_os = "macos")]
+        // macOS: next to the icon; Linux: the indicator's label (tooltips are not shown there).
+        #[cfg(not(target_os = "windows"))]
         let _ = tray.set_title((n > 0).then(|| n.to_string()));
         let tip = if n > 0 {
             format!(
@@ -293,10 +294,8 @@ pub fn hide_update(app: &AppHandle) {
 /// ready update's item.
 pub fn set_language(app: &AppHandle, ru: bool) {
     russian().store(ru, std::sync::atomic::Ordering::Relaxed);
-    let ready = READY.lock().ok().and_then(|r| r.clone());
-    if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, ready.as_deref())) {
-        let _ = tray.set_menu(Some(menu));
-    }
+    // Rebuilds the menu, the count and the tooltip in the new language.
+    set_suggestions(app, SUGGESTIONS.load(std::sync::atomic::Ordering::Relaxed));
 }
 
 /// The menu-bar (macOS) or notification-area (Windows) icon: Open and Quit.

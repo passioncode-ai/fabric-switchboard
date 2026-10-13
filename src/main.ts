@@ -283,7 +283,6 @@ function render(options: { background?: boolean } = {}): boolean {
 }
 const ruleAccount = (rule: ProjectRule) => snapshot?.accounts.find((account) => account.id === rule.account_id);
 const ruleTarget = (rule: ProjectRule) => rule.target === 'managed' ? t('Managed sessions') : t('Claude Code login (all claude sessions)');
-/** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
 async function loadSuggestions() {
   if (!native && !demo) return;
   try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* the next refresh reads them again */ }
@@ -304,6 +303,7 @@ function suggestionBanner(main: HTMLElement) {
   const actions = el('div', 'management-actions'); actions.append(add, skip);
   strip.append(text, actions); main.append(strip);
 }
+/** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
 function rulesStrip(main: HTMLElement) {
   const live = activeRules(snapshot?.rules, Date.now() / 1000);
   if (!live.length) return;

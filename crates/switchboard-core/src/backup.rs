@@ -95,6 +95,10 @@ struct Payload {
     rules: Vec<ProjectRule>,
     #[serde(default)]
     projects: Vec<Project>,
+    /// SB-117: each project's sources, kept beside `projects` so a 0.6.29 or older reader, which
+    /// refuses an unknown field inside a project, still restores everything else.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    project_sources: BTreeMap<String, Vec<String>>,
     /// Managed selections, `provider:pool` → account id.
     #[serde(default)]
     routes: BTreeMap<String, String>,
@@ -225,7 +229,20 @@ pub fn write(
         policies: snapshot.policies,
         credentials,
         rules: snapshot.rules,
-        projects: snapshot.projects,
+        project_sources: snapshot
+            .projects
+            .iter()
+            .filter(|p| !p.sources.is_empty())
+            .map(|p| (p.pool.clone(), p.sources.clone()))
+            .collect(),
+        projects: snapshot
+            .projects
+            .into_iter()
+            .map(|p| Project {
+                sources: Vec::new(),
+                ..p
+            })
+            .collect(),
         routes: snapshot.routes,
         settings,
         agent_keys,
@@ -502,7 +519,10 @@ pub fn restore(
         }
     }
     // Projects first: their accounts are already in their pools; only the reservation returns.
-    for project in payload.projects {
+    for mut project in payload.projects {
+        if let Some(sources) = payload.project_sources.get(&project.pool) {
+            project.sources = sources.clone();
+        }
         if store.restore_project(project).is_ok() {
             result.projects += 1;
         }
@@ -692,6 +712,67 @@ mod tests {
     use crate::{AuthKind, ExternalIdentity, MemoryVault, Provider};
     use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn a_backup_with_project_sources_still_opens_in_an_older_build() {
+        // SB-117: a 0.6.29 reader has `Project` without `sources`, under deny_unknown_fields,
+        // and ignores unknown payload fields. Sources travel beside the projects.
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct OldProject {
+            pool: String,
+            name: String,
+            folders: Vec<String>,
+            created_at: i64,
+        }
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct OldPayload {
+            projects: Vec<OldProject>,
+        }
+        let snapshot = crate::Snapshot {
+            projects: vec![Project {
+                pool: "app".into(),
+                name: "App".into(),
+                folders: vec!["/work/app".into()],
+                created_at: 1,
+                sources: vec!["github.com/example".into()],
+            }],
+            ..Default::default()
+        };
+        let payload = Payload {
+            accounts: vec![],
+            policies: vec![],
+            credentials: BTreeMap::new(),
+            rules: vec![],
+            project_sources: snapshot
+                .projects
+                .iter()
+                .map(|p| (p.pool.clone(), p.sources.clone()))
+                .collect(),
+            projects: snapshot
+                .projects
+                .iter()
+                .cloned()
+                .map(|p| Project {
+                    sources: Vec::new(),
+                    ..p
+                })
+                .collect(),
+            routes: BTreeMap::new(),
+            settings: BTreeMap::new(),
+            agent_keys: vec![],
+        };
+        let json = serde_json::to_vec(&payload).unwrap();
+        let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
+        assert_eq!(old.projects.len(), 1);
+        let back: Payload = serde_json::from_slice(&json).unwrap();
+        assert_eq!(
+            back.project_sources["app"],
+            vec!["github.com/example".to_string()]
+        );
+    }
+
     #[derive(Default, Clone)]
     struct Keys(Arc<Mutex<Option<[u8; 32]>>>);
     fn names(dir: &Path, store: &Store, keys: &Keys) -> Vec<Info> {
@@ -760,6 +841,9 @@ mod tests {
             )
             .unwrap();
         original
+            .set_project_sources("alpha", &["github.com/example".into()])
+            .unwrap();
+        original
             .set_rule(&repo, &a.id, "managed", true, None)
             .unwrap();
         original.select(Provider::Claude, "default", &b.id).unwrap();
@@ -804,6 +888,11 @@ mod tests {
         let by_label = |l: &str| snap.accounts.iter().find(|x| x.label == l).unwrap().clone();
         let (a2, b2) = (by_label("synthetic-a"), by_label("synthetic-b"));
         assert_eq!(snap.projects[0].name, "Alpha");
+        assert_eq!(
+            snap.projects[0].sources,
+            vec!["github.com/example".to_string()],
+            "SB-117"
+        );
         assert_eq!(
             a2.pool, "alpha",
             "the project's account is back in its pool"

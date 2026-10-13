@@ -13,8 +13,18 @@ use std::{
 use switchboard_core::Snapshot;
 
 pub(crate) const FILE: &str = "project-suggestions.json";
-const MAX_ROWS: usize = 256;
-const MAX_BYTES: u64 = 512 * 1024;
+/// Open questions at once; a found folder beyond this waits for the next pass.
+const MAX_PENDING: usize = 256;
+/// Declined folders remembered. Past this many the oldest declined folder may be offered again.
+const MAX_DISMISSED: usize = 2048;
+const MAX_ROWS: usize = MAX_PENDING + MAX_DISMISSED;
+/// A folder path longer than this is never suggested (projects allow 1024 bytes).
+const MAX_FOLDER: usize = 1024;
+/// 2304 rows of at most ~1.3 KiB each fit with room to spare; `write` refuses beyond it.
+const MAX_BYTES: u64 = 4 * 1024 * 1024;
+/// Repositories without an `origin` yet, watched for one (D-3c): a new repository usually gets
+/// its remote a little after `git init`.
+const MAX_UNSETTLED: usize = 512;
 const SMALL: u64 = 4096;
 const CONFIG_LIMIT: u64 = 64 * 1024;
 /// Entries read from one parent folder; a larger folder is read up to this many.
@@ -24,7 +34,11 @@ const UNSURE_SECONDS: i64 = 600;
 const UNREADABLE: &str =
     "Project suggestions could not be read. Restore the private file before continuing.";
 const NOT_FOUND: &str = "No such suggestion. Read the suggestions again.";
-const NOT_A_REPOSITORY: &str = "This folder is not a git repository of any project.";
+const NOT_OURS: &str = "No project claims this folder: it is not a worktree, a clone or a source repository of exactly one project.";
+const WAITING: &str = "This folder already waits for an answer in Switchboard.";
+const DECLINED: &str = "This folder was declined for its project and is not offered again.";
+const IN_PROJECT: &str = "This folder is already part of a project.";
+const FULL: &str = "Too many folders wait for an answer. Answer some in Switchboard first.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -179,7 +193,7 @@ pub(crate) fn classify(
     repos: &[(String, Repo)],
     folder: &Path,
 ) -> Option<(String, Reason, String)> {
-    if snapshot.project_for(folder).is_some() {
+    if snapshot.project_for(folder).is_some() || contains_project(snapshot, folder) {
         return None;
     }
     let candidate = repo(folder)?;
@@ -232,6 +246,26 @@ pub(crate) fn classify(
     best.map(|(_, pool, reason, label)| (pool, reason, label))
 }
 
+/// A folder around another project's folder could never join (projects never nest).
+fn contains_project(snapshot: &Snapshot, folder: &Path) -> bool {
+    snapshot
+        .projects
+        .iter()
+        .flat_map(|p| p.folders.iter())
+        .any(|f| Path::new(f).starts_with(folder))
+}
+
+/// Folders whose listing changes all day for reasons of their own: the home folder (Claude
+/// Code rewrites `~/.claude.json` in place) and a filesystem root. A project folder directly in
+/// them is still offered its worktrees, and agents' hooks still report new folders.
+fn too_busy_to_watch(dir: &Path) -> bool {
+    dir.parent().is_none()
+        || ["HOME", "USERPROFILE"]
+            .iter()
+            .filter_map(std::env::var_os)
+            .any(|home| Path::new(&home) == dir)
+}
+
 pub(crate) fn read(root: &Path) -> Result<Vec<Suggestion>, String> {
     let path = root.join(FILE);
     match std::fs::symlink_metadata(&path) {
@@ -250,44 +284,95 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Suggestion>, String> {
 
 fn write(root: &Path, rows: &[Suggestion]) -> Result<(), String> {
     let bytes = serde_json::to_vec(rows).map_err(|_| UNREADABLE)?;
+    // Never write what `read` would refuse.
+    if bytes.len() as u64 > MAX_BYTES || rows.len() > MAX_ROWS {
+        return Err(FULL.into());
+    }
     switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
 }
 
-/// Records a folder if it is a project's and not already suggested, added or dismissed.
-/// `Ok(Some)` is a new suggestion; `Ok(None)` means nothing new.
+/// What `record` did with a folder.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    New(Suggestion),
+    Waiting,
+    Declined,
+    InProject,
+    /// No project claims it. `settled: false`: a repository without an `origin` yet.
+    NotOurs {
+        settled: bool,
+    },
+    Full,
+}
+impl Outcome {
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Outcome::New(_) => "suggested",
+            Outcome::Waiting => "waiting",
+            Outcome::Declined => "declined",
+            Outcome::InProject => "in_project",
+            Outcome::NotOurs { .. } => "not_ours",
+            Outcome::Full => "full",
+        }
+    }
+    pub(crate) fn message(&self) -> &'static str {
+        match self {
+            Outcome::New(_) => "",
+            Outcome::Waiting => WAITING,
+            Outcome::Declined => DECLINED,
+            Outcome::InProject => IN_PROJECT,
+            Outcome::NotOurs { .. } => NOT_OURS,
+            Outcome::Full => FULL,
+        }
+    }
+}
+
+/// Records a folder if it is a project's and not already suggested, added or declined.
 pub(crate) fn record(
     root: &Path,
     snapshot: &Snapshot,
     repos: &[(String, Repo)],
     folder: &Path,
     now: i64,
-) -> Result<Option<Suggestion>, String> {
+) -> Result<Outcome, String> {
     let Ok(folder) = folder.canonicalize() else {
-        return Ok(None);
+        return Ok(Outcome::NotOurs { settled: true });
     };
-    let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
-        return Ok(None);
+    let Some(text) = folder
+        .to_str()
+        .filter(|t| t.len() <= MAX_FOLDER)
+        .map(str::to_owned)
+    else {
+        return Ok(Outcome::NotOurs { settled: true });
     };
-    let Some(text) = folder.to_str().map(str::to_owned) else {
-        return Ok(None);
-    };
-    let mut rows = read(root)?;
-    if rows.iter().any(|r| r.folder == text) {
-        return Ok(None);
+    if snapshot.project_for(&folder).is_some() {
+        return Ok(Outcome::InProject);
     }
-    if rows.len() >= MAX_ROWS {
-        // Make room by forgetting the oldest declined folder; never drop an open question.
-        match rows
+    let rows = read(root)?;
+    if let Some(row) = rows.iter().find(|r| r.folder == text) {
+        return Ok(match row.state {
+            State::Pending => Outcome::Waiting,
+            State::Dismissed => Outcome::Declined,
+        });
+    }
+    let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
+        let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
+        return Ok(Outcome::NotOurs { settled });
+    };
+    let mut rows = rows;
+    if rows.iter().filter(|r| r.state == State::Pending).count() >= MAX_PENDING {
+        return Ok(Outcome::Full);
+    }
+    let dismissed = rows.iter().filter(|r| r.state == State::Dismissed).count();
+    if dismissed >= MAX_DISMISSED {
+        if let Some(i) = rows
             .iter()
             .enumerate()
             .filter(|(_, r)| r.state == State::Dismissed)
             .min_by_key(|(_, r)| r.first_seen)
             .map(|(i, _)| i)
         {
-            Some(i) => {
-                rows.remove(i);
-            }
-            None => return Ok(None),
+            rows.remove(i);
         }
     }
     let suggestion = Suggestion {
@@ -300,7 +385,7 @@ pub(crate) fn record(
     };
     rows.push(suggestion.clone());
     write(root, &rows)?;
-    Ok(Some(suggestion))
+    Ok(Outcome::New(suggestion))
 }
 
 /// The open suggestions: still pending, the folder still there and still in no project.
@@ -342,20 +427,17 @@ pub(crate) fn dismiss(root: &Path, folder: &str) -> Result<(), String> {
     write(root, &rows)
 }
 
-/// For `switchboard project suggest`: a folder that is no project's says so.
-pub(crate) fn explain_none() -> &'static str {
-    NOT_A_REPOSITORY
-}
-
 /// The background half (D-4, D-5): looks at the parent folder of every project folder and at
 /// every project repository's worktree list, re-reading each only when its modification time
-/// changed. What it has looked at is remembered until the projects change.
+/// changed. What it has settled is remembered until the projects change; a repository without
+/// an `origin` yet is looked at again when its git config changes.
 #[derive(Default)]
 pub(crate) struct Scanner {
     key: u64,
     stamps: HashMap<PathBuf, SystemTime>,
     seen: HashSet<PathBuf>,
     unsure: HashMap<PathBuf, i64>,
+    unsettled: HashMap<PathBuf, Option<SystemTime>>,
     /// Directories read by the last pass, for the idle-budget test.
     pub(crate) reads: usize,
 }
@@ -371,8 +453,22 @@ fn projects_key(snapshot: &Snapshot) -> u64 {
     h.finish()
 }
 
+fn config_stamp(folder: &Path) -> Option<SystemTime> {
+    let r = repo(folder)?;
+    std::fs::metadata(r.common.join("config"))
+        .and_then(|m| m.modified())
+        .ok()
+}
+
 impl Scanner {
+    /// Both halves at once (tests; the owner runs them apart, `settle` under its transaction).
+    #[cfg(test)]
     pub(crate) fn pass(&mut self, root: &Path, snapshot: &Snapshot, now: i64) -> Vec<Suggestion> {
+        let candidates = self.collect(snapshot, now);
+        self.settle(root, snapshot, candidates, now)
+    }
+    /// Lists what changed; writes nothing, so it runs outside the owner transaction.
+    pub(crate) fn collect(&mut self, snapshot: &Snapshot, now: i64) -> Vec<PathBuf> {
         self.reads = 0;
         if snapshot.projects.is_empty() {
             return vec![];
@@ -387,12 +483,15 @@ impl Scanner {
         let mut watched: Vec<(PathBuf, bool)> = Vec::new();
         for folder in snapshot.projects.iter().flat_map(|p| p.folders.iter()) {
             let folder = Path::new(folder);
-            if let Some(parent) = folder.parent() {
+            if let Some(parent) = folder.parent().filter(|p| !too_busy_to_watch(p)) {
                 watched.push((parent.to_owned(), false));
             }
-            let worktrees = folder.join(".git").join("worktrees");
-            if worktrees.is_dir() {
-                watched.push((worktrees, true));
+            // The repository's own worktree list, also when the project folder is a worktree.
+            if let Some(r) = repo(folder) {
+                let worktrees = r.common.join("worktrees");
+                if worktrees.is_dir() {
+                    watched.push((worktrees, true));
+                }
             }
         }
         watched.sort();
@@ -405,20 +504,28 @@ impl Scanner {
             if self.stamps.get(&dir) == Some(&modified) {
                 continue;
             }
-            self.stamps.insert(dir.clone(), modified);
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 continue;
             };
             self.reads += 1;
+            let mut complete = true;
             for entry in entries.flatten().take(MAX_ENTRIES) {
                 let path = if is_worktrees {
-                    // `.git/worktrees/<name>/gitdir` holds `<worktree>/.git`.
+                    // `.git/worktrees/<name>/gitdir` holds `<worktree>/.git`, absolute or
+                    // relative to that admin folder.
                     let Some(text) = read_small(&entry.path().join("gitdir"), SMALL) else {
+                        complete = false;
                         continue;
                     };
                     let gitfile = PathBuf::from(text.trim());
-                    match gitfile.parent() {
-                        Some(p) => p.to_owned(),
+                    let gitfile = if gitfile.is_absolute() {
+                        gitfile
+                    } else {
+                        entry.path().join(gitfile)
+                    };
+                    // A worktree deleted without `git worktree prune` leaves its entry: skip it.
+                    match gitfile.parent().and_then(|p| p.canonicalize().ok()) {
+                        Some(p) => p,
                         None => continue,
                     }
                 } else {
@@ -427,16 +534,39 @@ impl Scanner {
                     }
                     entry.path()
                 };
-                if self.seen.insert(path.clone()) {
+                if !self.seen.contains(&path) {
                     candidates.push(path);
                 }
+            }
+            // A folder read only in part is read again next pass.
+            if complete {
+                self.stamps.insert(dir, modified);
             }
         }
         // A folder that has no `.git` yet may be a clone still arriving.
         self.unsure
             .retain(|_, first| now - *first <= UNSURE_SECONDS);
-        let unsure: Vec<PathBuf> = self.unsure.keys().cloned().collect();
-        candidates.extend(unsure);
+        candidates.extend(self.unsure.keys().cloned());
+        // A repository without an `origin`: looked at again once its config changes.
+        let changed: Vec<PathBuf> = self
+            .unsettled
+            .iter()
+            .filter(|(path, stamp)| config_stamp(path) != **stamp)
+            .map(|(path, _)| path.clone())
+            .collect();
+        candidates.extend(changed);
+        candidates.sort();
+        candidates.dedup();
+        candidates
+    }
+    /// Records what `collect` found; the owner runs it under its transaction.
+    pub(crate) fn settle(
+        &mut self,
+        root: &Path,
+        snapshot: &Snapshot,
+        candidates: Vec<PathBuf>,
+        now: i64,
+    ) -> Vec<Suggestion> {
         if candidates.is_empty() {
             return vec![];
         }
@@ -448,8 +578,25 @@ impl Scanner {
                 continue;
             }
             self.unsure.remove(&path);
-            if let Ok(Some(s)) = record(root, snapshot, &repos, &path, now) {
-                found.push(s);
+            match record(root, snapshot, &repos, &path, now) {
+                Ok(Outcome::New(s)) => {
+                    self.unsettled.remove(&path);
+                    self.seen.insert(path);
+                    found.push(s);
+                }
+                Ok(Outcome::NotOurs { settled: false }) => {
+                    if self.unsettled.len() < MAX_UNSETTLED || self.unsettled.contains_key(&path) {
+                        let stamp = config_stamp(&path);
+                        self.unsettled.insert(path.clone(), stamp);
+                    }
+                    self.seen.insert(path);
+                }
+                // A full list or an unreadable file: tried again next pass.
+                Ok(Outcome::Full) | Err(_) => {}
+                Ok(_) => {
+                    self.unsettled.remove(&path);
+                    self.seen.insert(path);
+                }
             }
         }
         found
@@ -586,6 +733,25 @@ mod tests {
         let inside = a.join("sub");
         git(&inside, Some("git@github.com:org/shared.git"));
         assert_eq!(classify(&s, &repos, &inside), None, "already in a project");
+        // A folder around another project's folder (a monorepo root) can never join.
+        let mono = data.join("mono");
+        git(&mono, Some("git@github.com:org/mono.git"));
+        let pkg = mono.join("pkg");
+        git(&pkg, Some("git@github.com:org/pkg.git"));
+        let monos = snapshot(&[("one", &[&a], &["github.com/org"]), ("two", &[&pkg], &[])]);
+        let repos = project_repos(&monos);
+        assert_eq!(
+            classify(&monos, &repos, &mono),
+            None,
+            "contains another project"
+        );
+    }
+
+    fn new(o: Outcome) -> Suggestion {
+        match o {
+            Outcome::New(s) => s,
+            other => panic!("expected a new suggestion, got {other:?}"),
+        }
     }
 
     #[test]
@@ -599,35 +765,46 @@ mod tests {
         let repos = project_repos(&s);
         let copy = data.join("app-2");
         git(&copy, Some("git@github.com:org/app.git"));
-        let first = record(root.path(), &s, &repos, &copy, 10).unwrap().unwrap();
+        let first = new(record(root.path(), &s, &repos, &copy, 10).unwrap());
         assert_eq!(first.state, State::Pending);
         assert_eq!(
             record(root.path(), &s, &repos, &copy, 11).unwrap(),
-            None,
-            "no duplicate"
+            Outcome::Waiting
         );
         assert_eq!(pending(root.path(), &s).unwrap().len(), 1);
         dismiss(root.path(), &first.folder).unwrap();
         assert!(pending(root.path(), &s).unwrap().is_empty());
         assert_eq!(
             record(root.path(), &s, &repos, &copy, 12).unwrap(),
-            None,
-            "dismissed stays"
+            Outcome::Declined
+        );
+        assert_eq!(
+            record(root.path(), &s, &repos, &main, 12).unwrap(),
+            Outcome::InProject
+        );
+        let plain = data.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(
+            record(root.path(), &s, &repos, &plain, 12).unwrap(),
+            Outcome::NotOurs { settled: true }
+        );
+        let fresh = data.join("fresh");
+        git(&fresh, None);
+        assert_eq!(
+            record(root.path(), &s, &repos, &fresh, 12).unwrap(),
+            Outcome::NotOurs { settled: false },
+            "a repository without origin may still become one"
         );
         let other = data.join("app-3");
         git(&other, Some("git@github.com:org/app.git"));
-        let second = record(root.path(), &s, &repos, &other, 13)
-            .unwrap()
-            .unwrap();
+        let second = new(record(root.path(), &s, &repos, &other, 13).unwrap());
         assert_eq!(find_pending(root.path(), &second.folder).unwrap(), second);
         forget(root.path(), &second.folder).unwrap();
         assert!(find_pending(root.path(), &second.folder).is_err());
         // Once the folder is in a project the suggestion is not shown.
         let third = data.join("app-4");
         git(&third, Some("git@github.com:org/app.git"));
-        record(root.path(), &s, &repos, &third, 14)
-            .unwrap()
-            .unwrap();
+        new(record(root.path(), &s, &repos, &third, 14).unwrap());
         let joined = snapshot(&[("p", &[&main, &third], &[])]);
         assert!(pending(root.path(), &joined).unwrap().is_empty());
         switchboard_core::private_fs::private_write(&root.path().join(FILE), b"broken").unwrap();
@@ -635,6 +812,91 @@ mod tests {
             read(root.path()).is_err(),
             "corrupt storage is not an empty list"
         );
+    }
+
+    #[test]
+    fn the_list_never_grows_past_what_it_can_read_back() {
+        let root = tempfile::tempdir().unwrap();
+        let long = format!("/{}", "x".repeat(MAX_FOLDER - 10));
+        let rows: Vec<Suggestion> = (0..MAX_ROWS)
+            .map(|i| Suggestion {
+                folder: format!("{long}{i:05}"),
+                pool: "p".into(),
+                reason: Reason::Ecosystem,
+                repository: "github.com/org".into(),
+                first_seen: i as i64,
+                state: if i < MAX_PENDING {
+                    State::Pending
+                } else {
+                    State::Dismissed
+                },
+            })
+            .collect();
+        write(root.path(), &rows).unwrap();
+        assert_eq!(read(root.path()).unwrap().len(), MAX_ROWS);
+        let mut more = rows.clone();
+        more.push(rows[0].clone());
+        assert!(
+            write(root.path(), &more).is_err(),
+            "never more than read accepts"
+        );
+    }
+
+    #[test]
+    fn a_repository_that_gets_its_origin_later_and_relative_worktrees_are_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let main = data.join("app");
+        git(&main, Some("git@github.com:org/app.git"));
+        std::fs::create_dir_all(main.join(".git/worktrees")).unwrap();
+        let s = snapshot(&[("p", &[&main], &["github.com/org"])]);
+        let mut scan = Scanner::default();
+        assert!(scan.pass(root.path(), &s, 100).is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let service = data.join("new-service");
+        git(&service, None);
+        assert!(scan.pass(root.path(), &s, 130).is_empty(), "no origin yet");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(
+            service.join(".git/config"),
+            "[remote \"origin\"]\n\turl = git@github.com:org/new-service.git\n",
+        )
+        .unwrap();
+        let found = scan.pass(root.path(), &s, 160);
+        assert_eq!(
+            found.iter().map(|f| f.reason).collect::<Vec<_>>(),
+            vec![Reason::Ecosystem]
+        );
+        // A worktree whose admin entry points at it by a relative path (git 2.48+).
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let wt = data.join("app-rel");
+        let admin = main.join(".git/worktrees/app-rel");
+        std::fs::create_dir_all(&admin).unwrap();
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(admin.join("commondir"), "../..\n").unwrap();
+        std::fs::write(admin.join("gitdir"), "../../../../app-rel/.git\n").unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: ../app/.git/worktrees/app-rel\n").unwrap();
+        let found = scan.pass(root.path(), &s, 190);
+        assert_eq!(
+            found.iter().map(|f| f.reason).collect::<Vec<_>>(),
+            vec![Reason::Worktree]
+        );
+        // A project whose only folder is a worktree still watches its repository's worktrees.
+        let only_wt = snapshot(&[("q", &[&wt], &[])]);
+        let mut scan = Scanner::default();
+        let root2 = tempfile::tempdir().unwrap();
+        assert!(scan
+            .pass(root2.path(), &only_wt, 200)
+            .iter()
+            .any(|f| f.folder.ends_with("/app")));
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let elsewhere = data.join("deep").join("app-third");
+        worktree(&main, &elsewhere, "app-third");
+        let found = scan.pass(root2.path(), &only_wt, 230);
+        assert!(found
+            .iter()
+            .any(|f| f.folder.ends_with("app-third") && f.reason == Reason::Worktree));
     }
 
     #[test]

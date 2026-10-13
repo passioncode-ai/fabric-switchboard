@@ -8,6 +8,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
 
 const LOOK_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+/// A folder deleted from disk moves no counter; the list is read again at least this often.
+const READ_AT_LEAST: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// What a notification says, by how many folders are new.
 pub fn notification_text(new: &[(String, String)], ru: bool) -> (String, String) {
@@ -47,13 +49,16 @@ pub fn notification_text(new: &[(String, String)], ru: bool) -> (String, String)
 pub fn watch(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut last: Option<u64> = None;
+        let mut read_at = std::time::Instant::now();
         let mut told: HashSet<String> = HashSet::new();
         loop {
-            if let Ok(runtime) = app.state::<crate::Slot>().runtime().await {
+            if let Some(runtime) = app.state::<crate::Slot>().running().await {
                 let seq = runtime.suggestions_seq();
-                if last != Some(seq) {
-                    last = Some(seq);
+                if last != Some(seq) || read_at.elapsed() >= READ_AT_LEAST {
                     if let Ok(value) = runtime.execute(Operation::ProjectSuggestions).await {
+                        // Only a read that succeeded settles this counter value.
+                        last = Some(seq);
+                        read_at = std::time::Instant::now();
                         let rows = value["suggestions"].as_array().cloned().unwrap_or_default();
                         crate::residency::set_suggestions(&app, rows.len());
                         let new: Vec<(String, String)> = rows

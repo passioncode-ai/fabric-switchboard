@@ -473,7 +473,6 @@ impl Store {
         self.changed();
         Ok(())
     }
-    /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
     /// Replaces a project's sources: the repository owners whose new repositories Switchboard
     /// suggests for it (SB-117). Each is `host/owner`, lowercase.
     pub fn set_project_sources(&self, pool: &str, sources: &[String]) -> Result<Project, String> {
@@ -499,11 +498,13 @@ impl Store {
             .ok_or("Project not found.")?;
         project.sources = list;
         let project = project.clone();
-        append_event(&mut candidate, "project", None, "sources");
+        // Journaled as "updated", a word every 0.6 build accepts (SB-117 seam review).
+        append_event(&mut candidate, "project", None, "updated");
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(project)
     }
+    /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
     pub fn remove_project(&self, pool: &str) -> Result<Project, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();

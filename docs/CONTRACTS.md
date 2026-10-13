@@ -109,7 +109,9 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
   - Background: a real owner's pass runs `suggest::Scanner` under the owner transaction. It reads a parent folder or `.git/worktrees` only when its modification time changed; a new folder without `.git` is looked at again for 10 minutes.
   - `Runtime::suggestions_seq()` moves on every change. The app reads the list only then (every 15 s), sets the tray count (macOS title, tooltip elsewhere, a menu item that opens the window), notifies new folders once per app run, and emits `project-suggestions` to the window.
   - Tauri: `project_suggestions`, `accept_project_suggestion`, `dismiss_project_suggestion`. CLI: `project suggest [--folder|--from-hook]`, `suggestions`, `accept`, `dismiss`, `source`.
-  - Plugin `SessionStart` hook: `switchboard project suggest --from-hook`.
+  - Plugin `SessionStart` hook: `switchboard project suggest --from-hook 2>/dev/null || true`; the StopFailure hook is wrapped the same way, so a CLI older than the plugin stays silent.
+  - Compatibility: `accounts.json` is `schema_version` 5 while a project has sources, so a 0.6.29 or older build says "Unsupported account metadata version" instead of "corrupt". Backups carry sources in `Payload.project_sources`, beside `projects`, so an older build still restores everything else. Sources changes are journaled as `project`/`updated`.
+  - The scanner lists folders outside the owner transaction and records under it. It never watches the home folder or a filesystem root as a parent. A folder that contains another project's folder is never suggested. Accept admits the folder through `project_dir`.
   - Evidence: `suggest::tests`, core `a_project_has_no_folder_limit_and_all_projects_hold_1024`, CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`, the app's `suggestions::tests`.
 
 ## 0.5 additions

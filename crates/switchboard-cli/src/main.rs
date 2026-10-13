@@ -1170,7 +1170,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 from_hook: true, ..
             } => project_suggest_hook_and_exit(&root).await,
             Project::Suggest { folder: path, .. } => Operation::ProjectSuggest {
-                folder: folder(path)?,
+                folder: match path {
+                    Some(p) if !p.is_absolute() => {
+                        return Err("--folder must be an absolute folder.".into())
+                    }
+                    _ => folder(path)?,
+                },
             },
             Project::Suggestions => Operation::ProjectSuggestions,
             Project::Accept { folder } => Operation::ProjectSuggestionAccept {

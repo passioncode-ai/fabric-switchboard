@@ -50,6 +50,11 @@ struct Slot {
 const STARTUP_FAILED: &str = "Switchboard could not start its account service. Retry; if it keeps failing, quit and reopen Switchboard.";
 const STORE_BUSY: &str = "Switchboard's account store is in use by another Switchboard (a second window, 'switchboard serve' or a command still running). Close it, then retry.";
 impl Slot {
+    /// The running owner, if any; never starts one (SB-117's watcher must not double the
+    /// start-up retry).
+    async fn running(&self) -> Option<std::sync::Arc<Runtime>> {
+        self.owner.lock().await.as_ref().map(|o| o.runtime.clone())
+    }
     async fn runtime(&self) -> Result<std::sync::Arc<Runtime>, String> {
         let mut owner = self.owner.lock().await;
         if owner.is_none() {
@@ -778,15 +783,17 @@ fn main() {
                 });
             }
             app.manage(SmokeMode(temporary));
-            // SB-117: folders found for a project — a notification when one appears, the count
-            // next to the tray icon until each is answered, and the window's banner.
-            if !smoke {
-                suggestions::watch(app.handle().clone());
-            }
+
             // Residency (SB-28): the tray keeps Open and Quit reachable while the window is
             // hidden; the login item starts Switchboard in the background.
             if let Err(error) = residency::tray(app.handle()) {
                 eprintln!("Switchboard could not add its menu-bar icon: {error}");
+            }
+            // SB-117: folders found for a project — a notification when one appears, the count
+            // next to the tray icon until each is answered, and the window's banner. Started
+            // after the tray, so the first count has an icon to sit next to.
+            if !smoke {
+                suggestions::watch(app.handle().clone());
             }
             if !smoke {
                 if let Ok(root) = default_root() {

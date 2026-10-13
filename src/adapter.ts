@@ -82,6 +82,8 @@ const safeErrors = new Set([
   // Project suggestions (SB-117).
   'Project suggestions could not be read. Restore the private file before continuing.',
   'No such suggestion. Read the suggestions again.',
+  'This folder is gone. Read the suggestions again.',
+  'Too many folders wait for an answer. Answer some in Switchboard first.',
   // Hermes's model and provider (SB-80): each names the fix.
   'Hermes is not installed. Install it from hermes-agent.nousresearch.com, then try again.',
   'Hermes did not answer. Run hermes config check, then try again.',

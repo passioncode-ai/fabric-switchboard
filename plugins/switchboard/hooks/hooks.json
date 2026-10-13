@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "switchboard recovery hook",
+            "command": "switchboard recovery hook 2>/dev/null || true",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "switchboard project suggest --from-hook",
+            "command": "switchboard project suggest --from-hook 2>/dev/null || true",
             "timeout": 10
           }
         ]
