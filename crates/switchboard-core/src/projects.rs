@@ -198,7 +198,11 @@ pub struct Project {
     pub created_at: i64,
 }
 const MAX_PROJECTS: usize = 64;
-const MAX_FOLDERS: usize = 16;
+/// Folders per project. One product often lives in many clones and worktrees side by side
+/// (operator 2026-10-13: the PassionCode project spans 35). `MAX_ALL_FOLDERS` keeps the
+/// metadata worst case where 64 × 16 had it: 1024 paths × `MAX_PATH`, 1 MiB of the 2 MiB file.
+const MAX_FOLDERS: usize = 64;
+const MAX_ALL_FOLDERS: usize = 1024;
 
 /// `a` inside `b`, by path components: `/a/b` is inside `/a`, `/ab` is not.
 fn inside(a: &str, b: &str) -> bool {
@@ -244,6 +248,9 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
             all.push((p.pool.as_str(), f.as_str()));
         }
     }
+    if all.len() > MAX_ALL_FOLDERS {
+        return Err("Invalid project metadata".into());
+    }
     // A folder belongs to one project: no folder of one project inside another's.
     for (i, (pool_a, a)) in all.iter().enumerate() {
         for (pool_b, b) in &all[i + 1..] {
@@ -285,7 +292,7 @@ impl Store {
             return Err("Name the project.".into());
         }
         if folders.is_empty() || folders.len() > MAX_FOLDERS {
-            return Err("Add between one and sixteen project folders.".into());
+            return Err("Add between one and sixty-four project folders.".into());
         }
         let mut folder_list: Vec<String> = Vec::new();
         for f in folders {
@@ -325,6 +332,15 @@ impl Store {
                 chosen
             }
         };
+        let elsewhere: usize = candidate
+            .projects
+            .iter()
+            .filter(|p| p.pool != pool)
+            .map(|p| p.folders.len())
+            .sum();
+        if elsewhere + folder_list.len() > MAX_ALL_FOLDERS {
+            return Err("Projects hold at most 1024 folders in all.".into());
+        }
         for other in candidate.projects.iter().filter(|p| p.pool != pool) {
             for f in &folder_list {
                 if other.folders.iter().any(|g| inside(f, g) || inside(g, f)) {
