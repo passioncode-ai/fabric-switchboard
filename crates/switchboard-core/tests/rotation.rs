@@ -1671,8 +1671,8 @@ fn publishing_the_held_accounts_keeps_a_refusal_not_yet_taken() {
 }
 
 #[test]
-fn a_project_holds_sixty_four_folders_and_all_projects_1024() {
-    // Operator 2026-10-13: one product spans many clones and worktrees side by side.
+fn a_project_has_no_folder_limit_and_all_projects_hold_1024() {
+    // Operator 2026-10-14 (SB-117): no limit per project; only the storage total remains.
     let (dir, _vault, store) = setup();
     let folders = |prefix: &str, n: usize| -> Vec<std::path::PathBuf> {
         (0..n)
@@ -1680,42 +1680,47 @@ fn a_project_holds_sixty_four_folders_and_all_projects_1024() {
             .collect()
     };
     store
-        .save_project(None, "Wide", &folders("wide", 64), &[])
+        .save_project(None, "Wide", &folders("wide", 1000), &[])
         .unwrap();
-    assert_eq!(
-        store.snapshot().unwrap().projects[0].folders.len(),
-        64,
-        "the only project"
-    );
-    assert_eq!(
-        store
-            .save_project(None, "Wider", &folders("wider", 65), &[])
-            .unwrap_err(),
-        "Add between one and sixty-four project folders."
-    );
-    // 15 more projects of 64 reach 1024 in all; the next folder anywhere is refused.
-    for p in 0..15 {
-        store
-            .save_project(None, &format!("P{p}"), &folders(&format!("p{p}"), 64), &[])
-            .unwrap();
-    }
+    assert_eq!(store.snapshot().unwrap().projects[0].folders.len(), 1000);
+    store
+        .save_project(None, "Small", &folders("small", 24), &[])
+        .unwrap();
     assert_eq!(
         store
             .save_project(None, "One more", &folders("extra", 1), &[])
             .unwrap_err(),
         "Projects hold at most 1024 folders in all."
     );
-    // Updating a full project in place stays inside the total.
+    assert_eq!(
+        store.save_project(None, "Empty", &[], &[]).unwrap_err(),
+        "Add at least one project folder."
+    );
+    // Sources: host/owner, lowercase, kept across an update of folders.
     let pool = store
         .snapshot()
         .unwrap()
         .projects
         .iter()
-        .find(|p| p.name == "Wide")
+        .find(|p| p.name == "Small")
         .unwrap()
         .pool
         .clone();
     store
-        .save_project(Some(&pool), "Wide", &folders("wide", 64), &[])
+        .set_project_sources(&pool, &["GitHub.com/Example/".into()])
         .unwrap();
+    assert!(store
+        .set_project_sources(&pool, &["not a source".into()])
+        .is_err());
+    store
+        .save_project(Some(&pool), "Small", &folders("small", 23), &[])
+        .unwrap();
+    let project = store
+        .snapshot()
+        .unwrap()
+        .projects
+        .into_iter()
+        .find(|p| p.pool == pool)
+        .unwrap();
+    assert_eq!(project.sources, vec!["github.com/example".to_string()]);
 }

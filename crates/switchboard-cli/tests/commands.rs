@@ -65,6 +65,115 @@ fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
     assert_eq!(set["data"]["enabled"], false);
 }
 #[test]
+fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
+    // SB-117: a clone of a project repository is suggested, listed, added or declined.
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let work = work.path().canonicalize().unwrap();
+    let git = |dir: &std::path::Path, remote: &str| {
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::write(
+            dir.join(".git/config"),
+            format!("[remote \"origin\"]\n\turl = {remote}\n"),
+        )
+        .unwrap();
+    };
+    let run = |args: &[&str], stdin: Option<&str>| {
+        let mut child = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        if let Some(text) = stdin {
+            let mut input = input;
+            input.write_all(text.as_bytes()).unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
+        let ok = output.status.success();
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+        (
+            ok,
+            json,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let main = work.join("app");
+    git(&main, "git@github.com:org/app.git");
+    let (ok, _, err) = run(
+        &[
+            "project",
+            "save",
+            "--name",
+            "App",
+            "--folder",
+            main.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert!(ok, "{err}");
+    let copy = work.join("app-review");
+    git(&copy, "https://github.com/org/app");
+    let (ok, json, err) = run(
+        &["project", "suggest", "--folder", copy.to_str().unwrap()],
+        None,
+    );
+    assert!(ok, "{err}");
+    assert_eq!(json["data"]["suggested"], true);
+    assert_eq!(json["data"]["suggestion"]["reason"], "same_repository");
+    let (_, listed, _) = run(&["project", "suggestions"], None);
+    assert_eq!(listed["data"]["suggestions"][0]["project"], "App");
+    let (ok, added, err) = run(&["project", "accept", copy.to_str().unwrap()], None);
+    assert!(ok, "{err}");
+    assert_eq!(
+        added["data"]["project"]["folders"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // A new repository of a source, declined: never suggested again.
+    let (ok, _, err) = run(
+        &[
+            "project",
+            "source",
+            "--pool",
+            "app",
+            "--add",
+            "github.com/org",
+        ],
+        None,
+    );
+    assert!(ok, "{err}");
+    let api = work.join("api");
+    git(&api, "git@github.com:org/api.git");
+    let hook =
+        serde_json::json!({"session_id": "s", "cwd": api, "hook_event_name": "SessionStart"});
+    let (ok, json, err) = run(
+        &["project", "suggest", "--from-hook"],
+        Some(&hook.to_string()),
+    );
+    assert!(ok, "{err}");
+    assert_eq!(json["data"]["suggestion"]["reason"], "ecosystem");
+    let (ok, _, _) = run(&["project", "dismiss", api.to_str().unwrap()], None);
+    assert!(ok);
+    let (_, again, _) = run(
+        &["project", "suggest", "--folder", api.to_str().unwrap()],
+        None,
+    );
+    assert_eq!(again["data"]["suggested"], false);
+    // The hook never fails a session.
+    let (ok, json, _) = run(&["project", "suggest", "--from-hook"], Some("not json"));
+    assert!(ok);
+    assert_eq!(json["data"]["reason"], "malformed_input");
+}
+#[test]
 fn recovery_hook_never_fails_the_session() {
     // SB-115: Claude Code's StopFailure hook runs `switchboard recovery hook`; whatever the
     // input or the owner's state, it exits 0 and says why nothing was registered.

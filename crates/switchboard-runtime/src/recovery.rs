@@ -695,6 +695,7 @@ mod tests {
             name: "Synthetic".into(),
             folders: vec![wait.directory.to_string_lossy().into_owned()],
             created_at: 101,
+            sources: vec![],
         });
         let mut reserved = account("reserved-account");
         reserved.pool = "reserved".into();

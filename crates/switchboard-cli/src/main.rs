@@ -273,6 +273,42 @@ enum Project {
         #[arg(long)]
         pool: String,
     },
+    /// Offer a folder to the project it belongs to (SB-117): a worktree or clone of a project
+    /// repository, or a repository of the project's sources. Nothing joins until a person adds
+    /// it. With --from-hook it reads Claude Code's hook input on stdin and always exits 0.
+    Suggest {
+        /// The folder; default: the current folder.
+        #[arg(long, conflicts_with = "from_hook")]
+        folder: Option<PathBuf>,
+        /// Read the folder (`cwd`) from a Claude Code hook's JSON on stdin.
+        #[arg(long)]
+        from_hook: bool,
+    },
+    /// The folders waiting for a person's Add or Not this one.
+    Suggestions,
+    /// Add a suggested folder to its project.
+    Accept {
+        /// The folder, as `project suggestions` lists it.
+        folder: String,
+    },
+    /// Decline a suggested folder; it is never suggested again.
+    Dismiss {
+        /// The folder, as `project suggestions` lists it.
+        folder: String,
+    },
+    /// The repository owners whose new repositories a project is offered, as host/owner
+    /// (`github.com/example`). Without --add or --remove, prints them.
+    Source {
+        /// The project's pool (`switchboard project list`).
+        #[arg(long)]
+        pool: String,
+        /// An owner to watch; repeat for each.
+        #[arg(long = "add")]
+        add: Vec<String>,
+        /// An owner to stop watching; repeat for each.
+        #[arg(long = "remove")]
+        remove: Vec<String>,
+    },
     /// Apply the folder's rule to the session this command runs in.
     Apply {
         /// An absolute folder; default: the current folder.
@@ -1130,6 +1166,22 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 account_ids: accounts.clone(),
             },
             Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
+            Project::Suggest {
+                from_hook: true, ..
+            } => return Ok(project_suggest_hook(&root).await),
+            Project::Suggest { folder: path, .. } => Operation::ProjectSuggest {
+                folder: folder(path)?,
+            },
+            Project::Suggestions => Operation::ProjectSuggestions,
+            Project::Accept { folder } => Operation::ProjectSuggestionAccept {
+                folder: folder.clone(),
+            },
+            Project::Dismiss { folder } => Operation::ProjectSuggestionDismiss {
+                folder: folder.clone(),
+            },
+            Project::Source { pool, add, remove } => {
+                return project_sources(&root, pool, add, remove).await
+            }
             Project::Remove { path, provider } => Operation::RemoveProjectRule {
                 path: folder(path)?,
                 provider: (*provider).into(),
@@ -1361,6 +1413,62 @@ pub(crate) async fn onboard_status(
         .collect();
     probe.folder = Some(folder);
     Ok(onboarding::steps(&probe))
+}
+/// `switchboard project suggest --from-hook` (SB-117): Claude Code's `SessionStart` hook names
+/// the session's folder as `cwd`. Every refusal is an answer with a reason, never a failed exit.
+async fn project_suggest_hook(root: &std::path::Path) -> Value {
+    use std::io::Read;
+    let mut input = Vec::new();
+    let read = std::io::stdin()
+        .take(HOOK_INPUT_LIMIT)
+        .read_to_end(&mut input);
+    let parsed: Option<Value> = read.ok().and_then(|_| serde_json::from_slice(&input).ok());
+    let Some(cwd) = parsed
+        .as_ref()
+        .and_then(|h| h["cwd"].as_str())
+        .map(std::path::PathBuf::from)
+    else {
+        return json!({"suggested": false, "reason": "malformed_input"});
+    };
+    match call(root, Operation::ProjectSuggest { folder: cwd }).await {
+        Ok(value) => value,
+        Err(error) => json!({"suggested": false, "reason": "refused", "message": error}),
+    }
+}
+/// `switchboard project source`: the project's current sources, changed by --add/--remove.
+async fn project_sources(
+    root: &std::path::Path,
+    pool: &str,
+    add: &[String],
+    remove: &[String],
+) -> Result<Value, String> {
+    let snapshot = call(root, Operation::Snapshot).await?;
+    let project = snapshot["projects"]
+        .as_array()
+        .and_then(|ps| ps.iter().find(|p| p["pool"] == pool))
+        .ok_or("Project not found.")?;
+    let mut sources: Vec<String> = project["sources"]
+        .as_array()
+        .map(|s| {
+            s.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    if add.is_empty() && remove.is_empty() {
+        return Ok(json!({"pool": pool, "sources": sources}));
+    }
+    let key = |s: &str| s.trim().trim_end_matches('/').to_ascii_lowercase();
+    sources.retain(|s| !remove.iter().any(|r| key(r) == *s));
+    sources.extend(add.iter().map(|a| key(a)));
+    call(
+        root,
+        Operation::ProjectSources {
+            pool: pool.to_owned(),
+            sources,
+        },
+    )
+    .await
 }
 /// The largest hook input read; Claude Code's `StopFailure` payload is a few hundred bytes.
 const HOOK_INPUT_LIMIT: u64 = 64 * 1024;

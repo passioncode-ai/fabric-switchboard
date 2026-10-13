@@ -4,7 +4,22 @@
       {
         "matcher": "rate_limit|billing_error",
         "hooks": [
-          { "type": "command", "command": "switchboard recovery hook", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "switchboard recovery hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "switchboard project suggest --from-hook",
+            "timeout": 10
+          }
         ]
       }
     ]

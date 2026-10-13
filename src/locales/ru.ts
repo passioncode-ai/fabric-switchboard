@@ -78,7 +78,7 @@ export const RU: Record<string, string> = {
   "This agent is set up in its own config file; `switchboard agents connect` shows how.": "Этот агент настраивается в собственном файле конфигурации; как это сделать, показывает `switchboard agents connect`.",
   "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.": "Этот аккаунт принадлежит проекту. Обычный Claude Code обслуживает все папки, поэтому аккаунты проекта используются только сессиями, запущенными из папок проекта.",
   "Name the project.": "Укажите название проекта.",
-  "Add between one and sixty-four project folders.": "Добавьте от одной до шестидесяти четырёх папок проекта.",
+  "Add at least one project folder.": "Добавьте хотя бы одну папку проекта.",
   "Projects hold at most 1024 folders in all.": "Во всех проектах вместе — не больше 1024 папок.",
   "Choose absolute project folders.": "Укажите абсолютные пути к папкам проекта.",
   "Project not found.": "Проект не найден.",

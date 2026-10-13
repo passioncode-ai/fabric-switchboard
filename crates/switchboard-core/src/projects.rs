@@ -32,6 +32,21 @@ pub struct RuleResolution {
     pub nearest: Option<ProjectRule>,
 }
 
+/// A repository owner as `host/owner`, lowercase: `github.com/passioncode-ai` (SB-117).
+pub fn source_valid(source: &str) -> bool {
+    let mut parts = source.split('/');
+    let (Some(host), Some(owner), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    let ok = |p: &str| {
+        !p.is_empty()
+            && p.len() <= 100
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_.".contains(&b))
+    };
+    ok(host) && host.contains('.') && ok(owner)
+}
+
 fn path_valid(path: &str) -> bool {
     !path.is_empty()
         && path.len() <= MAX_PATH
@@ -196,12 +211,15 @@ pub struct Project {
     pub name: String,
     pub folders: Vec<String>,
     pub created_at: i64,
+    /// Repository owners whose new repositories Switchboard suggests for this project
+    /// (`github.com/passioncode-ai`, SB-117). Set by a person, never guessed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
 }
 const MAX_PROJECTS: usize = 64;
-/// Folders per project. One product often lives in many clones and worktrees side by side
-/// (operator 2026-10-13: the PassionCode project spans 35). `MAX_ALL_FOLDERS` keeps the
-/// metadata worst case where 64 × 16 had it: 1024 paths × `MAX_PATH`, 1 MiB of the 2 MiB file.
-const MAX_FOLDERS: usize = 64;
+const MAX_SOURCES: usize = 16;
+/// Folders across all projects; a project itself has no folder limit (operator 2026-10-14,
+/// SB-117). 1024 paths × `MAX_PATH` keeps the metadata worst case at 1 MiB of the 2 MiB file.
 const MAX_ALL_FOLDERS: usize = 1024;
 
 /// `a` inside `b`, by path components: `/a/b` is inside `/a`, `/ab` is not.
@@ -238,7 +256,8 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
             || !pools.insert(p.pool.as_str())
             || !crate::label_valid(&p.name)
             || p.folders.is_empty()
-            || p.folders.len() > MAX_FOLDERS
+            || p.sources.len() > MAX_SOURCES
+            || p.sources.iter().any(|s| !source_valid(s))
             || p.folders.iter().any(|f| !path_valid(f))
             || p.created_at <= 0
         {
@@ -291,8 +310,8 @@ impl Store {
         if !crate::label_valid(name) {
             return Err("Name the project.".into());
         }
-        if folders.is_empty() || folders.len() > MAX_FOLDERS {
-            return Err("Add between one and sixty-four project folders.".into());
+        if folders.is_empty() {
+            return Err("Add at least one project folder.".into());
         }
         let mut folder_list: Vec<String> = Vec::new();
         for f in folders {
@@ -411,11 +430,13 @@ impl Store {
             }
         }
         let created_at = existing.map_or_else(now, |i| candidate.projects[i].created_at);
+        let sources = existing.map_or_else(Vec::new, |i| candidate.projects[i].sources.clone());
         let project = Project {
             pool: pool.clone(),
             name: name.to_owned(),
             folders: folder_list,
             created_at,
+            sources,
         };
         match existing {
             Some(i) => candidate.projects[i] = project.clone(),
@@ -453,6 +474,36 @@ impl Store {
         Ok(())
     }
     /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
+    /// Replaces a project's sources: the repository owners whose new repositories Switchboard
+    /// suggests for it (SB-117). Each is `host/owner`, lowercase.
+    pub fn set_project_sources(&self, pool: &str, sources: &[String]) -> Result<Project, String> {
+        let mut list: Vec<String> = Vec::new();
+        for source in sources {
+            let source = source.trim().trim_end_matches('/').to_ascii_lowercase();
+            if !source_valid(&source) {
+                return Err("Name a source as host/owner, for example github.com/example.".into());
+            }
+            if !list.contains(&source) {
+                list.push(source);
+            }
+        }
+        if list.len() > MAX_SOURCES {
+            return Err("A project watches at most 16 sources.".into());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let project = candidate
+            .projects
+            .iter_mut()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        project.sources = list;
+        let project = project.clone();
+        append_event(&mut candidate, "project", None, "sources");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(project)
+    }
     pub fn remove_project(&self, pool: &str) -> Result<Project, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();

@@ -401,7 +401,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
                 | "5xx"
         ),
         "project_rule" => matches!(detail, "saved" | "paused" | "removed" | "applied"),
-        "project" => matches!(detail, "created" | "updated" | "removed"),
+        "project" => matches!(detail, "created" | "updated" | "removed" | "sources"),
         "fallback_chain" => matches!(detail, "set" | "cleared"),
         "fallback" => matches!(detail, "offered" | "failed"),
         "agent_key" => matches!(detail, "saved" | "removed"),

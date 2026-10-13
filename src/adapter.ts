@@ -131,7 +131,7 @@ const safeErrors = new Set([
   'This agent is set up in its own config file; `switchboard agents connect` shows how.',
   "This account belongs to a project. The ordinary Claude Code serves every folder, so a project's accounts are used only by sessions launched from the project's folders.",
   'Name the project.',
-  'Add between one and sixty-four project folders.',
+  'Add at least one project folder.',
   'Projects hold at most 1024 folders in all.',
   'Choose absolute project folders.',
   'Project not found.',

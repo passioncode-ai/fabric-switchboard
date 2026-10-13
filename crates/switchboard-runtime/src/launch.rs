@@ -2349,6 +2349,7 @@ mod tests {
                 name: "Alpha".into(),
                 folders: vec!["/work/web".into(), "/work/api".into()],
                 created_at: 1,
+                sources: vec![],
             }],
             ..Default::default()
         };

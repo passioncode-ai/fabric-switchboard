@@ -181,7 +181,7 @@ export function createDemoAdapter(): Adapter {
       const projects = state.projects ??= [];
       const name = input.name.trim(); if (!name) throw new Error('Name the project.');
       const folders = [...new Set(input.folders.map((f) => f.trim()).filter(Boolean))];
-      if (!folders.length || folders.length > 64) throw new Error('Add between one and sixty-four project folders.');
+      if (!folders.length) throw new Error('Add at least one project folder.');
       if (folders.some((f) => !f.startsWith('/'))) throw new Error('Choose absolute project folders.');
       const existing = input.pool ? projects.find((p) => p.pool === input.pool) : undefined;
       if (input.pool && !existing) throw new Error('Project not found.');

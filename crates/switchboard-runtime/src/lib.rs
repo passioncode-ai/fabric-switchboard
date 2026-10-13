@@ -21,6 +21,7 @@ pub mod oplog;
 pub mod projects;
 pub mod recovery;
 mod refresh;
+pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
 use serde::{Deserialize, Serialize};
@@ -238,6 +239,26 @@ pub enum Operation {
         directory: PathBuf,
         billing: bool,
     },
+    /// The open project suggestions (SB-117): folders Switchboard found that look like a
+    /// project's, waiting for a person's Add or Not this one.
+    ProjectSuggestions,
+    /// Records `folder` when it is a project's (CLI `project suggest`, the plugin's hook).
+    ProjectSuggest {
+        folder: PathBuf,
+    },
+    /// Adds a suggested folder to its project.
+    ProjectSuggestionAccept {
+        folder: String,
+    },
+    /// Declines a suggested folder for good.
+    ProjectSuggestionDismiss {
+        folder: String,
+    },
+    /// Replaces the repository owners whose new repositories a project is offered.
+    ProjectSources {
+        pool: String,
+        sources: Vec<String>,
+    },
     /// The hand-overs waiting for a console (SB-108) and whether Fabric gets them.
     Handovers,
     /// Takes a waiting hand-over once, for the caller's terminal (`handovers run`).
@@ -451,6 +472,10 @@ pub struct Runtime {
     analytics: Mutex<Option<Arc<analytics::Analytics>>>,
     /// The backup restored automatically when this install started with a new data folder.
     restored_at_start: Mutex<Option<Value>>,
+    /// The background search for a project's new folders (SB-117).
+    suggest: Mutex<suggest::Scanner>,
+    /// Moves on every new, added or declined suggestion; the app reads the list only then.
+    suggestions_seq: std::sync::atomic::AtomicU64,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -535,6 +560,8 @@ impl Runtime {
             limits,
             fallback: fallback::FallbackState::default(),
             kimi_watch: kimi::KimiWatch::default(),
+            suggest: Mutex::new(suggest::Scanner::default()),
+            suggestions_seq: std::sync::atomic::AtomicU64::new(0),
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -597,6 +624,34 @@ impl Runtime {
             self.report(&reported);
         }
         result
+    }
+    /// Moves when the open project suggestions may have changed (SB-117): the app reads the
+    /// list, updates the tray count and notifies only then.
+    pub fn suggestions_seq(&self) -> u64 {
+        self.suggestions_seq
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn suggestions_changed(&self) {
+        self.suggestions_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// The background half of SB-117, under the owner transaction like any other write.
+    pub(crate) async fn suggest_pass(&self, time: i64) {
+        let _transaction = self.mutations.lock().await;
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        let found = match self.suggest.lock() {
+            Ok(mut scanner) => scanner.pass(&self.root, &snapshot, time),
+            Err(_) => return,
+        };
+        if !found.is_empty() {
+            oplog::event(
+                "project_suggestion",
+                &[("found", oplog::Field::Number(found.len() as i64))],
+            );
+            self.suggestions_changed();
+        }
     }
     fn begin_login(
         &self,
@@ -1263,6 +1318,20 @@ impl Owner {
     }
 }
 
+/// A suggestion as the window, the CLI and the tray show it (SB-117).
+fn suggestion_view(snapshot: &switchboard_core::Snapshot, s: &suggest::Suggestion) -> Value {
+    let name = Path::new(&s.folder)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| s.folder.clone());
+    let project = snapshot
+        .projects
+        .iter()
+        .find(|p| p.pool == s.pool)
+        .map(|p| p.name.clone());
+    json!({"folder": s.folder, "name": name, "pool": s.pool, "project": project,
+        "reason": s.reason, "repository": s.repository, "first_seen": s.first_seen})
+}
 /// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
 /// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
@@ -1289,6 +1358,7 @@ impl Reported {
                 Self::Project(if pool.is_some() { "updated" } else { "created" })
             }
             Operation::RemoveProject { .. } => Self::Project("removed"),
+            Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
             Operation::Select { provider, .. } => Self::Switch {
                 provider: *provider,
                 target: "managed",
@@ -2043,6 +2113,65 @@ async fn execute(
                 return Err(PROJECT_ACCOUNT_IN_CLI.into());
             }
             let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            Ok(projects::project_view(&store.snapshot()?, &project))
+        }
+        Operation::ProjectSuggestions => {
+            let snapshot = store.snapshot()?;
+            let rows: Vec<Value> = suggest::pending(root, &snapshot)?
+                .into_iter()
+                .map(|s| suggestion_view(&snapshot, &s))
+                .collect();
+            Ok(json!({"suggestions": rows}))
+        }
+        Operation::ProjectSuggest { folder } => {
+            let snapshot = store.snapshot()?;
+            let repos = suggest::project_repos(&snapshot);
+            match suggest::record(root, &snapshot, &repos, &folder, monitor::now())? {
+                Some(s) => {
+                    if let Some(rt) = runtime {
+                        oplog::event("project_suggestion", &[("found", oplog::Field::Number(1))]);
+                        rt.suggestions_changed();
+                    }
+                    Ok(json!({"suggested": true, "suggestion": suggestion_view(&snapshot, &s)}))
+                }
+                None => Ok(json!({"suggested": false, "message": suggest::explain_none()})),
+            }
+        }
+        Operation::ProjectSuggestionAccept { folder } => {
+            let suggestion = suggest::find_pending(root, &folder)?;
+            let snapshot = store.snapshot()?;
+            let project = snapshot
+                .projects
+                .iter()
+                .find(|p| p.pool == suggestion.pool)
+                .ok_or("Project not found.")?;
+            let mut folders: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
+            folders.push(PathBuf::from(&suggestion.folder));
+            let accounts: Vec<String> = snapshot
+                .accounts
+                .iter()
+                .filter(|a| a.pool == project.pool)
+                .map(|a| a.id.clone())
+                .collect();
+            let saved =
+                store.save_project(Some(&project.pool), &project.name, &folders, &accounts)?;
+            suggest::forget(root, &folder)?;
+            if let Some(rt) = runtime {
+                rt.suggestions_changed();
+            }
+            Ok(
+                json!({"added": suggestion.folder, "project": projects::project_view(&store.snapshot()?, &saved)}),
+            )
+        }
+        Operation::ProjectSuggestionDismiss { folder } => {
+            suggest::dismiss(root, &folder)?;
+            if let Some(rt) = runtime {
+                rt.suggestions_changed();
+            }
+            Ok(json!({"dismissed": folder}))
+        }
+        Operation::ProjectSources { pool, sources } => {
+            let project = store.set_project_sources(&pool, &sources)?;
             Ok(projects::project_view(&store.snapshot()?, &project))
         }
         Operation::RemoveProject { pool } => {

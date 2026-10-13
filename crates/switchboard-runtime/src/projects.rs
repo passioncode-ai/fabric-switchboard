@@ -203,7 +203,7 @@ pub(crate) fn project_view(
         .filter(|a| a.pool == project.pool)
         .map(account_view)
         .collect();
-    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "accounts": accounts})
+    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts})
 }
 
 fn outcome(provider: Provider, action: &str, account: Option<&Account>, message: String) -> Value {

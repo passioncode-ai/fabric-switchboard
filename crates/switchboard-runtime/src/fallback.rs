@@ -613,6 +613,7 @@ mod tests {
                 name: "Client Alpha".into(),
                 folders: vec!["/work/alpha".into()],
                 created_at: 1,
+                sources: vec![],
             }],
             ..Default::default()
         };

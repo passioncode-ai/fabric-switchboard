@@ -62,6 +62,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-052 | An agent keeps working when its account hits a limit | draft |
 | SCN-053 | A stopped session gets a capacity notice once | draft |
 | SCN-054 | Take a workflow hand-over in a console | draft |
+| SCN-055 | Add a project's new folder when Switchboard suggests it | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1125,3 +1126,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `handovers::tests`; CLI `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
+
+## SCN-055 — Add a project's new folder when Switchboard suggests it
+**Persona:** P-01
+**Goal:** Keep a project's folder list complete as clones, worktrees and new repositories of the same product appear, without hunting for them and without anything joining by itself.
+**Preconditions:** a project with at least one folder that is a git repository; optionally the project's sources (`switchboard project source --pool <pool> --add github.com/<owner>`).
+**Entry point:** a system notification, the count next to the tray icon, or the banner at the top of the window.
+**Steps:**
+1. An agent creates a worktree of a project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard records a suggestion.
+2. A notification arrives: “Add {folder} to {project}?” The tray icon shows the number of open suggestions until each is answered.
+3. Open the window → a banner above every page: “Add {folder name} to {project}? {reason}” with **Add** and **Not this one**. The reason reads “A worktree of {repository}”, “Another copy of {repository}” or “A new repository of {source}”.
+4. **Add** → the folder joins the project; its accounts now serve it → “{folder name} added to {project}.” The banner shows the next suggestion or disappears; the tray count drops.
+5. **Not this one** → the suggestion closes and is never offered again for that folder.
+**Alt paths:** The CLI answers the same suggestions (`switchboard project suggestions`, `accept`, `dismiss`). A folder that matches two projects equally is not suggested. A folder inside a project already belongs to it and is never suggested. Folders that are not git repositories are never suggested.
+**Expected result:** every new folder of a project is offered once, stays visible until answered, and joins only on a click.
+**UI elements:** system notification, tray count, suggestion banner, Add, Not this one.
+**States covered:** none, one waiting, several waiting, added, declined, refused (the folder now overlaps another project).
+**Errors & recovery:** a refusal on Add (the folder became part of another project, or the 1024-folder total is reached) names the cause and keeps the suggestion.
+**Status:** draft
+**Meaning:** operator request 2026-10-14 (SB-117).
+**Coverage:** `suggest::tests`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; `ui-logic` suggestion cases.
+**Product:** unobserved
+**Traces:** CONTRACTS → Projects (0.6), SB-117 packet
