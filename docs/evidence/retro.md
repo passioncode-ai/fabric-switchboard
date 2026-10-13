@@ -56,9 +56,11 @@
 | 2026-10-04 | SB-41 typed, attributable limit evidence | `64068c0` | yes — entry below |
 | 2026-10-05 | SB-30, SB-43, SB-42, SB-46, SB-29, release v0.5.4-beta.3 | `d918734` | yes — entry below |
 | 2026-10-12 | SB-105 waiting update; SB-99 Kimi sign-ins | `0f4078a` | yes — disk-full gate (Recent log) |
+| 2026-10-13 | SB-115 a limit stop is not a wait, release v0.6.28 | `0678a04` | yes — base moved under the run (Recent log) |
 
 ## Recent log
 
+- **2026-10-13, SB-115.** Symptom: the PR came back `CONFLICTING` at merge. While the run built, a parallel run had published 0.6.27, so this run's CHANGELOG and HANDOFF named a release (0.6.27) that already existed. Surfaced at stage 7, owned by stage 4 (plan): the version was chosen from the base fetched at stage 0. Root cause: same class as 2026-10-02 «a parallel release changed the base under the run», seen a second time. Fix: rebase, the section renamed to 0.6.28, the gate rerun (569 passed). Next time: the version number is chosen only at release time, right after `git fetch`, from `origin/main`'s `package.json`. Until then the change stays under `## Unreleased`. Also: the lean gate from the start (the 2026-10-12 lesson) held with 1.4 GB free; the Windows cross-check (instruction 8) was skipped for disk and the release's own Windows jobs passed first time.
 - **2026-10-12, SB-105.** Symptom: the first full gate failed one storage test (`storage.rs:629`, `record().unwrap()`); the data volume had dropped to 117 MB free during the build. Surfaced at stage 6, owned by stage 0 (no disk check in the autonomy sweep). Root cause: a full debug build of the workspace needs more than the 4.7 GB that was free. Fix: `cargo clean --profile dev` on this checkout (5.1 GB) and the gate rerun with `CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0` under a free-space watchdog — 1.5 GB of `target/`. Next time: stage 0 records `df` of the data volume; under 10 GB free, the gate runs lean from the start.
 
 ### 2026-10-05 — the release found what no gate had compiled
