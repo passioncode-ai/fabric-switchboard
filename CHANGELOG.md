@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.28 — 2026-10-13
+
 **A limit stop is not a wait** (SB-115). A session stopped on a usage or session limit is
 ready for an immediate restart when a compatible account has room. Without one, it is
 ready as a probe after 2, 5, 10, then 15 minutes, never only at the provider's reset time.
