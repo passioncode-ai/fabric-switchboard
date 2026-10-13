@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.29 — 2026-10-13
+
 **A project holds up to 64 folders** (was 16). A product often lives in many clones and
 worktrees side by side: the PassionCode project on the operator's Mac spans 35. All projects
 together keep the old ceiling of 1024 folders, so the saved-data bound is unchanged.
