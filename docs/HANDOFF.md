@@ -28,10 +28,10 @@ Packet: [SB-115](packets/sb-115-limit-stop-resume.md).
 - Live acceptance: whether a subscription session limit arrives as `StopFailure`
   `rate_limit` is undocumented and unobserved.
 - SB-116: silence detection needs the host.
-- Release 0.6.27 is not cut.
+- Release 0.6.28 is not cut (0.6.27 was published by the SB-114 run meanwhile).
 
 **Checks:** `./scripts/check.sh` exited 0 with lean Cargo settings and a shared
-`CARGO_TARGET_DIR`, because only 1.4 GiB of disk was free: 568 Rust tests passed, 3 ignored.
+`CARGO_TARGET_DIR`, because only 1.4 GiB of disk was free: after the rebase on 0.6.27, 569 Rust tests passed, 3 ignored.
 New tests: `recovery::tests`, namely `a_stop_without_capacity_is_probed_on_the_backoff_not_at_the_reset`,
 `a_billing_stop_is_never_probed`, `a_probe_claim_is_checked_by_the_same_rule_and_taken_once`,
 `repeated_stops_of_one_session_raise_the_attempt`, `an_sb114_record_still_loads` and
@@ -39,7 +39,7 @@ New tests: `recovery::tests`, namely `a_stop_without_capacity_is_probed_on_the_b
 `recovery_hook_never_fails_the_session`. `target/` is 2.5 GB, under the cap. The same night,
 two subagents stopped on "session limit · resets 8:10am" and finished after an immediate «resume».
 
-**Exact next task:** merge the SB-115 PR, release 0.6.27 (CHANGELOG Unreleased → 0.6.27;
+**Exact next task:** merge the SB-115 PR, release 0.6.28 (CHANGELOG Unreleased → 0.6.28;
 check the Windows cross-compile first, retro instruction 8), then watch one real `StopFailure`
 on the installed app and record `recovery_hook` from the log.
 
