@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-13 (evening) — FD-62 consumer landed; the live hand-over check waits on two updates
+
+Fabric Dashboards reports that FD-62 is on its main as PR #130 (`0c922cb`) and ships in 0.7.9. The console polls
+`switchboard --json handovers` every 15 s while its window is shown and every 60 s while hidden. It takes each id
+once with `switchboard handovers run <id>` on a PTY after LC-17 admission. A CLI newer than the running app reads as
+unavailable, and nothing is taken.
+
+**State on this Mac (20:50 UTC):**
+- The installed bundle and the CLI are 0.6.28, but the running app (pid 89584) is older. Its update has waited
+  since 17:27 UTC with `update_waiting reason=window_visible`.
+- A restart through the lifecycle broker was refused, `in_use_by_person` / `not_started_by_broker` (operation
+  `6dbc3dec…`), and is not retried. The operator's step: *Restart to update*, or close the window so the idle
+  restart runs.
+- Dashboards is 0.7.7. `handovers` is off.
+
+**Watcher:** a background loop in the fabric-switchboard session checks every 2 min for up to 12 h. When the app
+answers 0.6.28 and Dashboards is 0.7.9 or later, it runs `switchboard handovers set on`. The loop dies with that
+session.
+
+**Exact next task:** if `switchboard --json handovers` shows `enabled: false` while the app is current and Dashboards
+is 0.7.9 or later, run `switchboard handovers set on`. Then rehearse one hand-over end to end
+(`switchboard continue <wf> --account <id>` with the automatic fallback, or a synthetic queue record). Record that
+the console took it once and that no Terminal opened. Then the SB-115 live check: read `recovery_hook` in the log
+at the first real limit stop.
+
+---
+
 ## 2026-10-13 — SB-115: a limit stop is not a wait
 
 **Objective:** the operator's standing rule (relayed by nicegram-business, decision
