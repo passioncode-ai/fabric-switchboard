@@ -69,13 +69,28 @@ failed `handovers::tests::two_consoles_cannot_take_the_same_handover` on Windows
 (job 115083614169) and arm64 (job 115083614116): two successful takes, expected one.
 The release guard must remain closed. The original tag is retained unchanged.
 
-**Correction verified locally, 0.6.27:** exclusive private-file creation replaces rename
+**Correction published, 0.6.27:** exclusive private-file creation replaces rename
 as the hand-over claim. A permanent `.taken` receipt prevents republishing, hides a
 pending record left by a crash, and remains subject to the bounded queue. The existing
 concurrent-taker test and new crash-after-claim test cover this. The final full local gate exited 0: 562 Rust tests passed, three native checks ignored,
 plus clippy, UI, docs, plugin, packaging and notices checks. The plugin-layout check
-now excludes isolated `.worktrees/`; its regression fixture passed. No Windows acceptance
-is claimed until the new exact-tag nightly succeeds. Branch: `docs/sb114-release-receipt`.
+now excludes isolated `.worktrees/`; its regression fixture passed. Exact-tag nightly
+[38333315215](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38333315215)
+passed all five platform jobs. [Release 38333144066](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38333144066)
+finished success on attempt 2 and published [0.6.27](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.27)
+at 2026-10-13T02:36:01Z: 25 assets, seven updater targets, five matching signature files
+and five clean-source receipts for `61a2348ae2441af8d1d2403b955c0c574988fde0`.
+Attempt 1's x64 signing-module cache failure and its bounded retry are recorded in the
+[packet](packets/sb-114-capacity-recovery.md#delivery-receipt--0627). PR #183 (`065afb0`)
+disables that cache for future tags. Neither original tag was rewritten.
+
+**Local acceptance:** after publication, installed bundle and bundled CLI both read
+0.6.25. The last observed running window showed 0.6.20. Native UI later returned
+`cgWindowNotFound`; 0.6.27 installed/running acceptance remains open. Local Lifecycle
+reports Switchboard ready/authenticated but started outside the broker, and Fabric
+ready with zero windows. Neither was manually restarted. The existing enabled app
+updater and idle watcher own activation. The packet retains the 29 import selections,
+partial readback and the remaining board-channel limitation.
 
 **Parallel owner:** the operator supplied the neighboring session's hybrid no-wait
 plan; its checkout is `feat/sb-115-limit-stop-resume`. That session owns SB-115 and
@@ -83,11 +98,11 @@ shared Fabric/orchestration rule and skill updates. SB-114 readiness is not a gl
 prohibition on an independently authorized host retry. See the packet's operator
 coordination update. No neighbor implementation or publication is claimed here.
 
-**Exact next task:** validate and publish corrected 0.6.27 through its guarded release,
-then record the actual outcome. Connect the packet's REQ-5 through the owning Projects
-on Fabric's board, coordinated with SB-115. Obtain Project ids through the supported
-interface and retain message receipts. Complete import UI readback when native UI interaction works again; do not approve
-new agent access as the agent.
+**Exact next task:** connect the packet's REQ-5 through the owning Projects on Fabric's
+board, coordinated with SB-115; FD-62 can consume the released 0.6.27 producer. Obtain
+actual Project ids through the supported interface and retain message receipts.
+Complete installed-version and import readback when native UI interaction works again;
+do not approve new agent access or bypass lifecycle ownership as the agent.
 Keep SB-114 and overall SB-108 open until actual host session evidence exists.
 
 ---
