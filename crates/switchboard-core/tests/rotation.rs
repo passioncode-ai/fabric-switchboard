@@ -1669,3 +1669,53 @@ fn publishing_the_held_accounts_keeps_a_refusal_not_yet_taken() {
         "once taken, the runtime's evidence decides"
     );
 }
+
+#[test]
+fn a_project_holds_sixty_four_folders_and_all_projects_1024() {
+    // Operator 2026-10-13: one product spans many clones and worktrees side by side.
+    let (dir, _vault, store) = setup();
+    let folders = |prefix: &str, n: usize| -> Vec<std::path::PathBuf> {
+        (0..n)
+            .map(|i| dir.path().join(format!("{prefix}-{i}")))
+            .collect()
+    };
+    store
+        .save_project(None, "Wide", &folders("wide", 64), &[])
+        .unwrap();
+    assert_eq!(
+        store.snapshot().unwrap().projects[0].folders.len(),
+        64,
+        "the only project"
+    );
+    assert_eq!(
+        store
+            .save_project(None, "Wider", &folders("wider", 65), &[])
+            .unwrap_err(),
+        "Add between one and sixty-four project folders."
+    );
+    // 15 more projects of 64 reach 1024 in all; the next folder anywhere is refused.
+    for p in 0..15 {
+        store
+            .save_project(None, &format!("P{p}"), &folders(&format!("p{p}"), 64), &[])
+            .unwrap();
+    }
+    assert_eq!(
+        store
+            .save_project(None, "One more", &folders("extra", 1), &[])
+            .unwrap_err(),
+        "Projects hold at most 1024 folders in all."
+    );
+    // Updating a full project in place stays inside the total.
+    let pool = store
+        .snapshot()
+        .unwrap()
+        .projects
+        .iter()
+        .find(|p| p.name == "Wide")
+        .unwrap()
+        .pool
+        .clone();
+    store
+        .save_project(Some(&pool), "Wide", &folders("wide", 64), &[])
+        .unwrap();
+}
