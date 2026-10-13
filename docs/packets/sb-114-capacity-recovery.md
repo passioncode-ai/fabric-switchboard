@@ -171,7 +171,7 @@ The selected project labels were:
 - PassionCode (17; Switchboard was already present): `fabric`, `fabric-agent-adapter`,
   `fabric-agent-contract`, `fabric-dashboards`, `fabric-inbox`, `fabric-vr`,
   `fabric-workspace`, `org-index`, `passioncode`, `passioncode-ai.github.io`,
-  `passioncode-org-profile`, `passioncode-platform`, `passioncode-vesta`,
+  `passioncode-org-profile`, `passioncode-platform`, the first organization server's repository,
   `project-observatory-contract`, `project-observatory-open-source`, `okolos-extension`,
   `relay`.
 - Skills (12): `sshlg-skills`, and its canonical member repositories `agent-stack`,
