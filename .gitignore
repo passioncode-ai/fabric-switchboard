@@ -11,6 +11,7 @@
 __pycache__/
 *.pyc
 .claude/worktrees/
+/.worktrees/
 
 # agent-sync: local state and the credentials file are never committed
 .env.agent-sync

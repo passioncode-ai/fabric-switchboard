@@ -1120,7 +1120,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Expected result:** A queued continuation runs at most once; a launch request is not proof of workflow acceptance.
 **UI elements:** CLI list, setting and run command.
 **States covered:** empty, waiting, taken, expired, error
-**Errors & recovery:** No terminal → refuse before taking; expired offer → never launch; ambiguous taken record → retain for reconciliation.
+**Errors & recovery:** No terminal → refuse before taking; expired offer → never launch; exclusive claim receipt → retain after completion or a crash, hide any leftover pending record and refuse republication. Ambiguous launch → reconcile before any further action.
 **Status:** draft
 **Coverage:** `handovers::tests`; CLI `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
 **Product:** unobserved

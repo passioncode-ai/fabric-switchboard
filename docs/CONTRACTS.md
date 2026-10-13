@@ -831,8 +831,10 @@ host's claim, not independent provider acceptance. Evidence: `recovery::tests`.
 
 The hand-over queue is `<data>/handovers/`, records 0600, at most 16 pending before
 the monitor starts overflow in Terminal; recording refuses at 256 directory entries
-(including ambiguous `.taken` receipts). Individual records are at most 16 KiB.
-The atomic rename chooses one taker; expired/unparseable deadlines never launch.
+(including permanent `.taken` receipts). Individual records are at most 16 KiB.
+Exclusive private-file creation chooses one taker on every platform; the receipt remains
+after completion or a crash and prevents republication. A pending record with a receipt
+is not offered again. Expired/unparseable deadlines never launch.
 `fabric-handovers` absent means off. Pending/taken records and recovery state are
 operational state, excluded from account backups and removed by uninstall. A queue
 record never contains a prompt or credential. Evidence: `handovers::tests`,

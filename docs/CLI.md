@@ -302,6 +302,11 @@ host's receipt. The full private registry is bounded at 1024 records, including
 completed receipts; reaching it requires reconciliation, never silent eviction.
 See [SB-114 packet](packets/sb-114-capacity-recovery.md) and `recovery::tests`.
 
+Recovery status separates `limited_accounts` (active holds) from
+`awaiting_post_limit_probe_accounts` (ended holds awaiting a successful observation
+made after the deadline). `limit_unavailable_accounts` includes both. A quota sample
+made during a hidden hold cannot make the account ready when its timer ends.
+
 ## Console hand-overs (SB-108)
 
 ```sh
@@ -319,8 +324,3 @@ The private queue stores no credential or prompt. Fabric Dashboards' consumer
 (FD-62) is separate from this CLI producer; an available command is not evidence
 that the installed console has consumed it. Checks: `handovers::tests` and
 `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
-
-Recovery status separates `limited_accounts` (active holds) from
-`awaiting_post_limit_probe_accounts` (ended holds awaiting a successful observation
-made after the deadline). `limit_unavailable_accounts` includes both. A quota sample
-made during a hidden hold cannot make the account ready when its timer ends.

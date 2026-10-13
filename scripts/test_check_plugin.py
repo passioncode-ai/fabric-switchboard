@@ -162,6 +162,12 @@ class PlantedDefects(Fixture):
         (self.root / "docs/SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
         self.assertFlags("stray skill")
 
+    def test_an_isolated_worktree_is_not_part_of_the_plugin_layout(self):
+        skill = self.root / ".worktrees/peer/plugins/switchboard/skills/example/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("---\nname: x\n---\n", encoding="utf-8")
+        self.assertEqual(check_plugin.check(self.root), [])
+
     def test_mcp_server_command(self):
         self.edit_json("plugins/switchboard/.mcp.json",
                        lambda d: d["mcpServers"]["switchboard"].update(args=["serve"]))
