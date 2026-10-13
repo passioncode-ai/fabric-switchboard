@@ -99,13 +99,9 @@ session that actually reaches a limit, so it is not claimed from the synthetic
 tests. Next: FD-62 and Fabric consume `mode: probe` rows like `capacity` rows (SB-114
 REQ-5); SB-116, stall detection from the host.
 
-## State at the interruption (2026-10-13, usage limit)
+## Evidence the same night
 
-Done on `feat/sb-115-limit-stop-resume`: `recovery.rs` (kind, attempt, mode, shared
-`readiness`, `register_stop`), `limits::capped_ids`/`bound`, runtime `RecoveryHook`, CLI
-`switchboard recovery hook`, plugin `hooks/hooks.json`. `cargo test -p switchboard-runtime --lib
-recovery`: 13 passed. NOT yet run: `cargo fmt`, the full `./scripts/check.sh`, the CLI test
-`recovery_hook_never_fails_the_session`, docs (CLI.md, CONTRACTS, plugin README,
-switching-accounts skill), backlog row SB-115, HANDOFF, release 0.6.27. Live evidence the
-same night: two background subagents of this session stopped on "session limit · resets
-8:10am" and were resumed at once with «resume».
+Two background subagents of the fabric-switchboard session (the skill releases) stopped on
+"You've hit your session limit · resets 8:10am" (`rate_limit`, HTTP 429). They were sent
+«resume» at once and both went on to finish their releases (agent-stack 0.28.1). The rule
+held before Switchboard shipped anything.

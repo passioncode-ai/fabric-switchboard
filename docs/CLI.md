@@ -307,6 +307,37 @@ Recovery status separates `limited_accounts` (active holds) from
 made after the deadline). `limit_unavailable_accounts` includes both. A quota sample
 made during a hidden hold cannot make the account ready when its timer ends.
 
+### A limit stop is not a wait (SB-115)
+
+A stop is ready in one of two modes, both in each status row as `mode`:
+
+- `capacity`: a compatible account has a fresh successful quota observation (as above);
+- `probe`: no such account, but the stop's backoff has passed. The backoff is 2, 5, 10, then
+  15 minutes after the stop, by its `attempt`. Its `probe_at` says when. The provider's
+  reset time is never waited for. `candidates` lists the accounts a probe may use, those
+  without an active hold first.
+
+A `billing` stop is never probed, and neither is a pool whose every compatible account is
+held by a spend or credit cap: a payment is a person's step. A claim records its `mode` and
+stays claim-once.
+
+```sh
+# Claude Code's StopFailure hook (shipped in the plugin) runs:
+switchboard recovery hook < stop-failure.json
+```
+
+`hook` reads the hook's JSON on stdin and registers only `rate_limit` and
+`billing_error` stops. The account is the one Switchboard charged that session's limit
+to, else the ordinary Claude Code's. A second stop of a waiting session keeps its event,
+one attempt later. A stop after a claim closes that claim as `resumed`, because the
+session ran, and opens a new stop. It always exits 0: `registered: false` with
+`reason` `malformed_input`, `not_a_limit` or `refused` (no owner, unknown account,
+folder not allowed). The owner logs `recovery_hook` with a result code. The rule for
+agents is fabric-workspace
+[principle 10, item 6](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/principles.md#10-a-free-agent-takes-the-next-task).
+See [SB-115 packet](packets/sb-115-limit-stop-resume.md); `recovery::tests` and
+`recovery_hook_never_fails_the_session`.
+
 ## Console hand-overs (SB-108)
 
 ```sh

@@ -847,3 +847,16 @@ candidates (`limit_unavailable_accounts`). Ordinary routing's existing hold dead
 unchanged. `recovery::tests::a_probe_during_a_hidden_hold_cannot_wake_work_after_its_deadline`
 checks this across restart; `simultaneous_host_claims_are_serialized_by_the_owner`
 checks competing runtime callers.
+
+SB-115 (operator decision 2026-10-13, hybrid; [packet](packets/sb-115-limit-stop-resume.md)).
+A stop also becomes ready as a `probe` once `stopped_at + [120, 300, 600, 900][min(attempt, 3)]`
+has passed, on any compatible account (the same provider, pool and folder permission),
+enabled and OAuth, that has no needed sign-in and no active spend-cap hold (`Limit.reason`). Fresh
+quota is not required, and the reset is not consulted. Billing stops (`kind: billing`)
+are never probed. `recovery::readiness` is the one rule that both `status` and `claim`
+read. New record fields `kind`, `attempt` and `mode` default for SB-114 files.
+`Operation::RecoveryHook` registers a session's own stop: the account is
+`LimitState::bound(session)`, else the ordinary Claude Code's. One live stop per session
+holds: a waiting stop moves to now with `attempt + 1`; a claimed one becomes `resumed` and
+a new stop follows; a stop within 1800 s of the session's last resumed stop is one attempt
+later. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.

@@ -157,7 +157,22 @@ What to do with each `results[].action` of `switchboard_project_apply`:
 | `needs_global` | the rule changes the ordinary Claude Code login | ask the operator; call again with `global: true` only after an explicit yes |
 | `failed` | the change was refused or the rule's account is gone | relay the message; suggest editing or removing the rule; do not retry |
 
-## 6. Never
+## 6. A limit stop is not a wait
+
+When a session, workflow lane or subagent stops on *You've hit your session / usage limit ·
+resets <time>* or a rate-limit error, restart it at once. Do not wait for the reset: by the
+time you retry, Switchboard has usually moved the pool to an account with room (SB-98).
+
+- workflow: resume with the same run id and the same args;
+- subagent: send «resume»;
+- session: re-prompt it.
+
+If it stops again at once, retry at 2, 5, 10, then every 15 minutes, and do other work in
+between. A spend, credit or billing limit is the operator's to pay; report it once and do
+not retry it. `switchboard recovery` lists registered stops with `mode` `capacity` or
+`probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
+
+## 7. Never
 
 - Ask for, accept, print or search for a credential, token, auth JSON or Switchboard's
   `control.json`; never read Claude or Codex credential files or managed homes.

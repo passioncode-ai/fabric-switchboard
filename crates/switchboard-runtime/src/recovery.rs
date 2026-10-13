@@ -798,7 +798,16 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
         let none = HashSet::new();
-        register(root.path(), &s, "limit:1", "session-1", "old", root.path(), 100).unwrap();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
         let wait = &read(root.path()).unwrap()[0];
         // The accounts' reset is at 1000; the probe comes 120 s after the stop.
         let early = readiness(wait, &s, &held(), &none, &none, 219);
@@ -809,7 +818,10 @@ mod tests {
         assert_eq!(due.accounts, vec!["new", "old"]);
         // Fresh capacity is still ready at once, and says so.
         let fresh = readiness(wait, &s, &HashSet::from(["old".into()]), &none, &none, 102);
-        assert_eq!((fresh.mode, fresh.accounts), (Some(Mode::Capacity), vec!["new".into()]));
+        assert_eq!(
+            (fresh.mode, fresh.accounts),
+            (Some(Mode::Capacity), vec!["new".into()])
+        );
         let mut later = wait.clone();
         for (attempt, step) in [(1, 300), (2, 600), (3, 900), (9, 900)] {
             later.attempt = attempt;
@@ -824,18 +836,62 @@ mod tests {
         let s = snapshot();
         let none = HashSet::new();
         let stopped = register_stop(
-            root.path(), &s, "session-1", "old", root.path(), StopKind::Billing, 100,
+            root.path(),
+            &s,
+            "session-1",
+            "old",
+            root.path(),
+            StopKind::Billing,
+            100,
         )
         .unwrap();
-        let Stopped::New(event) = stopped else { panic!("a first stop is new") };
+        let Stopped::New(event) = stopped else {
+            panic!("a first stop is new")
+        };
         let wait = &read(root.path()).unwrap()[0];
-        assert_eq!(readiness(wait, &s, &held(), &none, &none, 100_000), Ready::default());
-        assert!(claim(root.path(), &event, "new", &s, &held(), &none, &none, 100_000).is_err());
+        assert_eq!(
+            readiness(wait, &s, &held(), &none, &none, 100_000),
+            Ready::default()
+        );
+        assert!(claim(
+            root.path(),
+            &event,
+            "new",
+            &s,
+            &held(),
+            &none,
+            &none,
+            100_000
+        )
+        .is_err());
         // A limit stop in a pool whose every account is spend-capped is not probed either.
-        register(root.path(), &s, "limit:2", "session-2", "old", root.path(), 100).unwrap();
-        let wait = read(root.path()).unwrap().into_iter().find(|w| w.event == "limit:2").unwrap();
-        assert_eq!(readiness(&wait, &s, &held(), &held(), &none, 100_000), Ready::default());
-        let one_capped = readiness(&wait, &s, &held(), &HashSet::from(["old".into()]), &none, 100_000);
+        register(
+            root.path(),
+            &s,
+            "limit:2",
+            "session-2",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let wait = read(root.path())
+            .unwrap()
+            .into_iter()
+            .find(|w| w.event == "limit:2")
+            .unwrap();
+        assert_eq!(
+            readiness(&wait, &s, &held(), &held(), &none, 100_000),
+            Ready::default()
+        );
+        let one_capped = readiness(
+            &wait,
+            &s,
+            &held(),
+            &HashSet::from(["old".into()]),
+            &none,
+            100_000,
+        );
         assert_eq!(one_capped.accounts, vec!["new"]);
     }
 
@@ -844,20 +900,81 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
         let none = HashSet::new();
-        register(root.path(), &s, "limit:1", "session-1", "old", root.path(), 100).unwrap();
-        assert!(claim(root.path(), "limit:1", "new", &s, &held(), &none, &none, 219).is_err());
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &held(),
+            &none,
+            &none,
+            219
+        )
+        .is_err());
         let status = status(root.path(), &s, &held(), &none, &none, 220).unwrap();
         assert_eq!(status["ready_sessions"], 1);
         assert_eq!(status["sessions"][0]["mode"], "probe");
-        let claimed = claim(root.path(), "limit:1", "new", &s, &held(), &none, &none, 220).unwrap();
-        assert_eq!((claimed.state, claimed.mode), (State::Claimed, Some(Mode::Probe)));
-        assert!(claim(root.path(), "limit:1", "old", &s, &held(), &none, &none, 221).is_err());
+        let claimed = claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &held(),
+            &none,
+            &none,
+            220,
+        )
+        .unwrap();
+        assert_eq!(
+            (claimed.state, claimed.mode),
+            (State::Claimed, Some(Mode::Probe))
+        );
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "old",
+            &s,
+            &held(),
+            &none,
+            &none,
+            221
+        )
+        .is_err());
         assert_eq!(read(root.path()).unwrap()[0].mode, Some(Mode::Probe));
         // A signed-out account is not a probe target.
         let root = tempfile::tempdir().unwrap();
-        register(root.path(), &s, "limit:1", "session-1", "old", root.path(), 100).unwrap();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
         let sign_in = HashSet::from(["new".into()]);
-        assert!(claim(root.path(), "limit:1", "new", &s, &held(), &none, &sign_in, 220).is_err());
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &held(),
+            &none,
+            &sign_in,
+            220
+        )
+        .is_err());
     }
 
     #[test]
@@ -865,31 +982,70 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
         let none = HashSet::new();
-        let at = |t| register_stop(root.path(), &s, "session-1", "old", root.path(), StopKind::Limit, t);
-        let Stopped::New(first) = at(100).unwrap() else { panic!() };
+        let at = |t| {
+            register_stop(
+                root.path(),
+                &s,
+                "session-1",
+                "old",
+                root.path(),
+                StopKind::Limit,
+                t,
+            )
+        };
+        let Stopped::New(first) = at(100).unwrap() else {
+            panic!()
+        };
         // Stopping again while it waits keeps the event, one attempt later, from the new time.
         assert_eq!(at(150).unwrap(), Stopped::Again(first.clone()));
         let rows = read(root.path()).unwrap();
-        assert_eq!((rows.len(), rows[0].attempt, rows[0].stopped_at), (1, 1, 150));
+        assert_eq!(
+            (rows.len(), rows[0].attempt, rows[0].stopped_at),
+            (1, 1, 150)
+        );
         claim(root.path(), &first, "new", &s, &held(), &none, &none, 450).unwrap();
         // A stop after the claim: the session ran, so the claim is closed as resumed.
-        let Stopped::New(second) = at(500).unwrap() else { panic!() };
+        let Stopped::New(second) = at(500).unwrap() else {
+            panic!()
+        };
         let rows = read(root.path()).unwrap();
         assert_eq!(rows[0].state, State::Resumed);
         let row = rows.iter().find(|r| r.event == second).unwrap();
         assert_eq!((row.attempt, row.state.clone()), (2, State::Waiting));
         finish(root.path(), &second, false).unwrap();
         // Cancelled work does not count; a resumed stop within 30 minutes does.
-        let Stopped::New(third) = at(600).unwrap() else { panic!() };
+        let Stopped::New(third) = at(600).unwrap() else {
+            panic!()
+        };
         let rows = read(root.path()).unwrap();
         assert_eq!(rows.iter().find(|r| r.event == third).unwrap().attempt, 2);
         finish(root.path(), &third, false).unwrap();
-        let Stopped::New(fourth) = at(150 + REPEAT_WINDOW + 1).unwrap() else { panic!() };
+        let Stopped::New(fourth) = at(150 + REPEAT_WINDOW + 1).unwrap() else {
+            panic!()
+        };
         let rows = read(root.path()).unwrap();
         assert_eq!(rows.iter().find(|r| r.event == fourth).unwrap().attempt, 0);
         // An unknown session id shape or account registers nothing.
-        assert!(register_stop(root.path(), &s, "bad id", "old", root.path(), StopKind::Limit, 700).is_err());
-        assert!(register_stop(root.path(), &s, "session-2", "missing", root.path(), StopKind::Limit, 700).is_err());
+        assert!(register_stop(
+            root.path(),
+            &s,
+            "bad id",
+            "old",
+            root.path(),
+            StopKind::Limit,
+            700
+        )
+        .is_err());
+        assert!(register_stop(
+            root.path(),
+            &s,
+            "session-2",
+            "missing",
+            root.path(),
+            StopKind::Limit,
+            700
+        )
+        .is_err());
     }
 
     #[test]
@@ -905,6 +1061,38 @@ mod tests {
         )
         .unwrap();
         let rows = read(root.path()).unwrap();
-        assert_eq!((rows[0].kind, rows[0].attempt, rows[0].mode), (StopKind::Limit, 0, None));
+        assert_eq!(
+            (rows[0].kind, rows[0].attempt, rows[0].mode),
+            (StopKind::Limit, 0, None)
+        );
+    }
+
+    #[tokio::test]
+    async fn the_hook_names_the_account_the_sessions_limit_was_charged_to() {
+        use crate::{fixtures, Operation};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), fixtures::signed_out, fixtures::fails).await;
+        let old = fixtures::save(&runtime.store, "old", "default");
+        let op = |billing| Operation::RecoveryHook {
+            session: "s-1".into(),
+            directory: root.path().into(),
+            billing,
+        };
+        // Signed out and no limit charged to the session: nothing to name, nothing written.
+        assert!(runtime.execute(op(false)).await.is_err());
+        assert!(read(root.path()).unwrap().is_empty());
+        runtime
+            .limits
+            .bind("s-1", std::slice::from_ref(&old.id), crate::monitor::now());
+        let first = runtime.execute(op(false)).await.unwrap();
+        assert_eq!(first["result"], "registered");
+        assert_eq!(read(root.path()).unwrap()[0].account, old.id);
+        let again = runtime.execute(op(true)).await.unwrap();
+        assert_eq!(
+            (again["result"].clone(), again["event"].clone()),
+            ("again".into(), first["event"].clone())
+        );
+        let row = &read(root.path()).unwrap()[0];
+        assert_eq!((row.attempt, row.kind), (1, StopKind::Billing));
     }
 }

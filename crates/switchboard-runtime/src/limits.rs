@@ -323,7 +323,7 @@ impl LimitState {
         limited.insert(id.to_owned(), limit);
         true
     }
-    fn bind(&self, session: &str, accounts: &[String], seen: i64) -> bool {
+    pub(crate) fn bind(&self, session: &str, accounts: &[String], seen: i64) -> bool {
         let Ok(mut sessions) = self.sessions.lock() else {
             return false;
         };
