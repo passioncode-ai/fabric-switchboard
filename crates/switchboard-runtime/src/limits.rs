@@ -191,6 +191,19 @@ impl LimitState {
             })
             .unwrap_or_default()
     }
+    /// Accounts held by a spend or credit cap the provider named (`reason`, SB-98): a probe on a
+    /// timer cannot lift those, a payment can (SB-115).
+    pub(crate) fn capped_ids(&self, now: i64) -> HashSet<String> {
+        self.limited
+            .lock()
+            .map(|l| {
+                l.iter()
+                    .filter(|(_, limit)| limit.until > now && limit.reason.is_some())
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
     /// Recovery needs an observation made after the hold ended. A quota probe taken
     /// during a hidden hold can still say 98%; expiration alone must not wake a session.
     pub(crate) fn recovery_blocked(&self, snapshot: &Snapshot, now: i64) -> HashSet<String> {
@@ -346,7 +359,9 @@ impl LimitState {
             }
         }
     }
-    fn bound(&self, session: &str) -> Option<Vec<String>> {
+    /// The accounts a Claude Code session's limits were charged to (its transcript's stem is the
+    /// session id). The `StopFailure` hook names the stopped account by it (SB-115).
+    pub(crate) fn bound(&self, session: &str) -> Option<Vec<String>> {
         self.sessions
             .lock()
             .ok()?

@@ -230,6 +230,14 @@ pub enum Operation {
         event: String,
         resumed: bool,
     },
+    /// A Claude Code session reported its own stop (`StopFailure` hook, SB-115). The account is
+    /// the one its limits were charged to, else the ordinary Claude Code's; `billing` marks a
+    /// spend or credit stop, which is never probed.
+    RecoveryHook {
+        session: String,
+        directory: PathBuf,
+        billing: bool,
+    },
     /// The hand-overs waiting for a console (SB-108) and whether Fabric gets them.
     Handovers,
     /// Takes a waiting hand-over once, for the caller's terminal (`handovers run`).
@@ -1493,7 +1501,9 @@ async fn execute(
             let sign_in = rt.refresh.sign_in_required(&store).into_iter().collect();
             let snapshot = store.snapshot()?;
             let blocked = rt.limits.recovery_blocked(&snapshot, time);
-            let mut status = recovery::status(root, &snapshot, &blocked, &sign_in, time)?;
+            let capped = rt.limits.capped_ids(time);
+            let mut status =
+                recovery::status(root, &snapshot, &blocked, &capped, &sign_in, time)?;
             status["limited_accounts"] = json!(limited.len());
             status["awaiting_post_limit_probe_accounts"] =
                 json!(blocked.difference(&limited).count());
@@ -1525,14 +1535,56 @@ async fn execute(
             let _credential = store.credential(&account)?;
             let snapshot = store.snapshot()?;
             let blocked = rt.limits.recovery_blocked(&snapshot, time);
-            let claimed =
-                recovery::claim(root, &event, &account, &snapshot, &blocked, &sign_in, time)?;
+            let capped = rt.limits.capped_ids(time);
+            let claimed = recovery::claim(
+                root, &event, &account, &snapshot, &blocked, &capped, &sign_in, time,
+            )?;
             Ok(json!({"claimed": claimed, "resumed": false}))
         }
         Operation::RecoveryFinish { event, resumed } => {
             needs_owner()?;
             recovery::finish(root, &event, resumed)?;
             Ok(json!({"recorded": true}))
+        }
+        Operation::RecoveryHook {
+            session,
+            directory,
+            billing,
+        } => {
+            let rt = needs_owner()?;
+            let snapshot = store.snapshot()?;
+            let saved = |id: &String| snapshot.accounts.iter().any(|a| &a.id == id);
+            let account = match rt.limits.bound(&session).and_then(|ids| ids.into_iter().find(saved)) {
+                Some(id) => Some(id),
+                None => rt.current_accounts()?["claude"]["account_id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .filter(saved),
+            };
+            let Some(account) = account else {
+                oplog::event("recovery_hook", &[("result", oplog::Field::Code("no_account"))]);
+                return Err("No saved account matches the stopped session.".into());
+            };
+            let kind = if billing {
+                recovery::StopKind::Billing
+            } else {
+                recovery::StopKind::Limit
+            };
+            let time = monitor::now();
+            match recovery::register_stop(root, &snapshot, &session, &account, &directory, kind, time) {
+                Ok(stopped) => {
+                    let (result, event) = match stopped {
+                        recovery::Stopped::New(e) => ("registered", e),
+                        recovery::Stopped::Again(e) => ("again", e),
+                    };
+                    oplog::event("recovery_hook", &[("result", oplog::Field::Code(result))]);
+                    Ok(json!({"registered": true, "event": event, "result": result}))
+                }
+                Err(e) => {
+                    oplog::event("recovery_hook", &[("result", oplog::Field::Code("refused"))]);
+                    Err(e)
+                }
+            }
         }
         Operation::Handovers => Ok(json!({
             "enabled": handovers::enabled(root),

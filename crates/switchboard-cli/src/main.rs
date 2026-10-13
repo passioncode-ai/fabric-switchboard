@@ -427,6 +427,9 @@ enum RecoveryCommand {
         #[arg(long)]
         account: String,
     },
+    /// Claude Code's `StopFailure` hook (SB-115): reads the hook's JSON on stdin and registers
+    /// the session's own stop. Always exits 0, so the hook never fails the session.
+    Hook,
     /// Record the host's outcome; this command does not run a session.
     Finish {
         /// Stop event whose result the session host observed.
@@ -976,6 +979,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 event: event.clone(),
                 account: account.clone(),
             },
+            Some(RecoveryCommand::Hook) => return Ok(recovery_hook(&root).await),
             Some(RecoveryCommand::Finish { event, outcome }) => Operation::RecoveryFinish {
                 event: event.clone(),
                 resumed: matches!(outcome, RecoveryOutcome::Resumed),
@@ -1357,6 +1361,39 @@ pub(crate) async fn onboard_status(
         .collect();
     probe.folder = Some(folder);
     Ok(onboarding::steps(&probe))
+}
+/// The largest hook input read; Claude Code's `StopFailure` payload is a few hundred bytes.
+const HOOK_INPUT_LIMIT: u64 = 64 * 1024;
+/// `switchboard recovery hook` (SB-115). Only `rate_limit` and `billing_error` register; every
+/// refusal (no owner, malformed input, unknown account, a folder the account may not use)
+/// comes back as `registered: false` with a reason code, never as a failed exit.
+async fn recovery_hook(root: &std::path::Path) -> Value {
+    use std::io::Read;
+    let mut input = Vec::new();
+    let read = std::io::stdin()
+        .take(HOOK_INPUT_LIMIT)
+        .read_to_end(&mut input);
+    let parsed: Option<Value> = read.ok().and_then(|_| serde_json::from_slice(&input).ok());
+    let Some(hook) = parsed else {
+        return json!({"registered": false, "reason": "malformed_input"});
+    };
+    let billing = match hook["error"].as_str() {
+        Some("rate_limit") => false,
+        Some("billing_error") => true,
+        _ => return json!({"registered": false, "reason": "not_a_limit"}),
+    };
+    let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
+        return json!({"registered": false, "reason": "malformed_input"});
+    };
+    let operation = Operation::RecoveryHook {
+        session: session.to_owned(),
+        directory: std::path::PathBuf::from(cwd),
+        billing,
+    };
+    match call(root, operation).await {
+        Ok(value) => value,
+        Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+    }
 }
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
     match control::request(root, &operation).await? {
