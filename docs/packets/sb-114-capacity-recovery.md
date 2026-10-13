@@ -110,3 +110,35 @@ prove a stopped executor: the host must reconcile activity, checkpoint, cancella
 and uncertain launch outcomes before acting. Resume only unfinished work and children;
 never replay an ambiguous launch or completed task. Preserve provider, pool and project
 boundaries for every attempt. REQ-5 remains open until host evidence exists.
+
+## Delivery receipt — 0.6.27
+
+[PR #182](https://github.com/passioncode-ai/fabric-switchboard/pull/182) merged as
+[`61a2348`](https://github.com/passioncode-ai/fabric-switchboard/commit/61a2348ae2441af8d1d2403b955c0c574988fde0),
+the immutable `v0.6.27` tag. Its tree equals the locally verified implementation
+(`291c378`): full gate exit 0, 562 Rust tests passed, three opt-in native checks ignored.
+A clean checkout of the remote tag passed documentation, plugin and release-preflight
+checks without local dependencies or worktrees.
+
+[Exact-tag nightly 38333315215](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38333315215)
+finished **success** on macOS, Windows x64/arm64 and Linux x64/arm64. Both Windows
+architectures passed the concurrent-taker test that rejected 0.6.26; the correction
+uses permanent exclusive claim receipts. The old tag was not rewritten.
+
+[Release 38333144066](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38333144066)
+passed preflight and the exact-commit guard. Attempt 1 built Linux x64/arm64,
+notarized macOS, and signed Windows arm64. Windows x64 built successfully but its
+signing action restored `ArtifactSigning-0.1.8`, skipped module installation and
+failed to resolve `Invoke-ArtifactSigning` (job 115091847317). Only that derived cache
+(id 8861870707) was removed; `gh run rerun 38333144066 --failed` started attempt 2.
+Successful platform jobs were retained. The workflow now disables dependency caching
+for future tags; the original 0.6.27 tag is unchanged. YAML parsing and the full local
+gate passed for this workflow change.
+
+Publication and installed-version readback are still pending. A `gh run watch` at
+60-second cadence tracks attempt 2. The running app was observed at 0.6.20; its own
+updater installed 0.6.25 into the bundle at 01:59 UTC, awaiting its normal restart.
+No installed or running 0.6.27 claim yet.
+
+The separate SB-115 owner must use a later version for its release. This receipt is
+available in Git; it is not proof that the neighboring session read a notification.
