@@ -8,6 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Work in a project's folders on the project's accounts** (SB-118). The ordinary `claude` is one
+sign-in for every folder, so project accounts used to serve only sessions Switchboard launched.
+Now Switchboard writes the project's route into each project folder's Claude Code settings
+(`.claude/settings.local.json`, kept out of Git), with a capability that opens that project's
+pool only. Every Claude Code session started there, by you or an agent, spends the project's
+accounts and keeps all your own settings, skills and plugins. Leaving a project, or
+uninstalling, removes only what Switchboard wrote. `switchboard project bindings` lists the
+folders.
+
 **A project offers its new folders, and has no folder limit** (SB-117). When an agent creates a
 worktree of a project repository, clones one again, or clones a new repository of the project's
 source (`switchboard project source --add github.com/<owner>`), Switchboard finds it. It finds

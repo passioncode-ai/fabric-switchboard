@@ -63,6 +63,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-053 | A stopped session gets a capacity notice once | draft |
 | SCN-054 | Take a workflow hand-over in a console | draft |
 | SCN-055 | Add a project's new folder when Switchboard suggests it | draft |
+| SCN-056 | Work in a project's folder on the project's accounts | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1148,3 +1149,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `suggest::tests`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; `ui-logic` suggestion cases; browser demo in Playwright WebKit 2026-10-14 (create Client Alpha → banner “Add the folder alpha-web-review to Client Alpha? A worktree of …” → Add → “alpha-web-review added to Client Alpha.”, banner gone, folder listed): [screenshot](../evidence/screenshots/sb117-suggestion-banner-demo.png).
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-117 packet
+
+## SCN-056 — Work in a project's folder on the project's accounts
+**Persona:** P-01
+**Goal:** Every Claude Code session started in a project's folders, by the person or an agent, spends the project's subscriptions and not the ordinary sign-in, with every skill, plugin and setting of the ordinary Claude Code still in force.
+**Preconditions:** a project with at least one enabled Claude account; Switchboard (the app or `serve`) running.
+**Entry point:** start `claude` in any of the project's folders or subfolders, or in a worktree inside them.
+**Steps:**
+1. Create the project, or add a folder to it → within one background pass (30 s) the folder's `.claude/settings.local.json` carries the project's route; `switchboard project bindings` lists it.
+2. Start a new session there → its requests go through Switchboard's proxy to the project's pool; rotation moves only among the project's accounts.
+3. Remove the folder or the project → the route goes again; the person's own settings in that file stay.
+**Alt paths:** A running session keeps its account until it is restarted. A folder whose settings file is not valid JSON is left alone and reported. A value the person changed is never overwritten back or removed. When every project account is at its limit, sessions there stop on the limit instead of spending another project's accounts.
+**Expected result:** project work spends project accounts; nothing else changes for the person.
+**UI elements:** none beyond the project card; CLI `project bindings`.
+**States covered:** bound, unchanged, removed, skipped (broken file), port changed.
+**Errors & recovery:** a broken settings file is reported in the log (`claude_binding` skipped) and left for the person to fix.
+**Status:** draft
+**Meaning:** operator 2026-10-14 (SB-118).
+**Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet.
+**Product:** unobserved
+**Traces:** SB-118 packet

@@ -99,6 +99,15 @@ pub fn agent_token(token: &str) -> String {
     let digest = Sha256::digest(format!("switchboard-agents:{token}").as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// A capability for one pool's Claude Code and Codex route only (SB-118): written into a project
+/// folder's Claude Code settings so ordinary sessions there reach the project's accounts. It is
+/// derived from the session token, so it survives a restart with it; knowing it reveals neither
+/// the session token nor any other pool's capability.
+pub fn pool_token(token: &str, pool: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("switchboard-pool:{pool}:{token}").as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
 /// Third-party agents may use only accounts the provider sells for any client: API keys.
 /// Subscription sign-ins (Claude.ai OAuth, a Claude setup token, ChatGPT) belong to the
 /// provider's own client (docs/AGENTS.md → Terms).
@@ -350,7 +359,9 @@ async fn relay(
         .map(|x| x.as_bytes().to_vec())
         .unwrap_or_default();
     // Every comparison runs, whatever matched: no timing tells which header or token was right.
-    let official = bearer.ct_eq(g.token.as_bytes());
+    // SB-118: a project folder's capability counts as the session token, for its pool only.
+    let scoped = bearer.ct_eq(pool_token(&g.token, &pool).as_bytes());
+    let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
     let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
     let agent = bool::from(!official & as_agent);
     let official = bool::from(official);

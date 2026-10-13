@@ -3,6 +3,7 @@ pub mod agent_catalog;
 pub mod agent_keys;
 pub mod agents;
 pub mod analytics;
+mod bindings;
 mod blocking;
 pub mod continuation;
 pub mod control;
@@ -254,6 +255,8 @@ pub enum Operation {
     ProjectSuggestionDismiss {
         folder: String,
     },
+    /// The project folders whose ordinary Claude Code sessions use the project's pool (SB-118).
+    ProjectBindings,
     /// Replaces the repository owners whose new repositories a project is offered.
     ProjectSources {
         pool: String,
@@ -476,6 +479,8 @@ pub struct Runtime {
     suggest: Mutex<suggest::Scanner>,
     /// Moves on every new, added or declined suggestion; the app reads the list only then.
     suggestions_seq: std::sync::atomic::AtomicU64,
+    /// What the project folders' Claude Code route was last synced for (SB-118).
+    bindings_key: Mutex<Option<u64>>,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -562,6 +567,7 @@ impl Runtime {
             kimi_watch: kimi::KimiWatch::default(),
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
+            bindings_key: Mutex::new(None),
             usage_gate,
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -597,6 +603,7 @@ impl Runtime {
                 | Operation::PendingLogins
                 | Operation::Backups
                 | Operation::ProjectSuggestions
+                | Operation::ProjectBindings
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -635,6 +642,42 @@ impl Runtime {
     fn suggestions_changed(&self) {
         self.suggestions_seq
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// SB-118: keeps each project folder's Claude Code route in step with the projects, their
+    /// pools' Claude accounts and the proxy's address. Runs only when that fingerprint moved, so
+    /// an idle pass reads a few stamps and writes nothing.
+    pub(crate) async fn bindings_pass(&self) {
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        let address = self.proxy.address().to_string();
+        let key = bindings::key(&snapshot, &address);
+        if self.bindings_key.lock().ok().and_then(|k| *k) == Some(key) {
+            return;
+        }
+        let _transaction = self.mutations.lock().await;
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        match bindings::sync(&self.root, &snapshot, &address, self.proxy.token()) {
+            Ok(report) => {
+                oplog::event(
+                    "claude_binding",
+                    &[
+                        ("bound", oplog::Field::Number(report.bound as i64)),
+                        ("removed", oplog::Field::Number(report.removed as i64)),
+                        ("skipped", oplog::Field::Number(report.skipped.len() as i64)),
+                    ],
+                );
+                if let Ok(mut k) = self.bindings_key.lock() {
+                    *k = Some(key);
+                }
+            }
+            Err(_) => oplog::event(
+                "claude_binding",
+                &[("result", oplog::Field::Code("unreadable"))],
+            ),
+        }
     }
     /// The background half of SB-117, under the owner transaction like any other write.
     pub(crate) async fn suggest_pass(&self, time: i64) {
@@ -2134,6 +2177,13 @@ async fn execute(
                 rt.suggestions_changed();
             }
             Ok(projects::project_view(&store.snapshot()?, &project))
+        }
+        Operation::ProjectBindings => {
+            let rows: Vec<Value> = bindings::read(root)?
+                .into_iter()
+                .map(|b| json!({"folder": b.folder, "pool": b.pool, "base_url": b.base_url}))
+                .collect();
+            Ok(json!({"bindings": rows}))
         }
         Operation::ProjectSuggestions => {
             let snapshot = store.snapshot()?;

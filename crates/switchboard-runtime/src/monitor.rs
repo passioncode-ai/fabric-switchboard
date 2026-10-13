@@ -126,6 +126,8 @@ impl Pass {
         // SB-117: a project's new folders, found by stamps only (LC-04); a real owner only.
         if native_sources {
             runtime.suggest_pass(time).await;
+            // SB-118: ordinary Claude Code in a project's folders uses the project's accounts.
+            runtime.bindings_pass().await;
         }
         // SB-106: near its limit the account a session works on is checked sooner, and the
         // pool's next account every minute — never one whose checks the provider refused lately.

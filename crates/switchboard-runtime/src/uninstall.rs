@@ -25,6 +25,7 @@ const OWNED: &[&str] = &[
     "limit-evidence.json",
     "recovery.json",
     "project-suggestions.json",
+    "claude-bindings.json",
     "fabric-handovers",
     "handovers",
     "backup-id",
@@ -207,6 +208,8 @@ pub fn uninstall_with(
             LOGIN_ITEM_MACOS
         },
         "data_entries": if keep_data { json!([]) } else { json!(owned) },
+        // SB-118: the project route Switchboard wrote into project folders' Claude Code settings.
+        "claude_bindings": crate::bindings::read(root).map(|r| r.len()).unwrap_or(0),
         "kept": {
             "foreign_entries": foreign,
             "backups": "kept, with their key: a reinstall restores them",
@@ -220,6 +223,8 @@ pub fn uninstall_with(
         return Ok(plan);
     }
     let mut failures = Vec::new();
+    // Before the data folder goes: the record says what was written and where.
+    crate::bindings::unbind_all(root);
     for id in &accounts {
         if let Err(error) = vault.delete(id) {
             failures.push(json!({"account_id": id, "error": error}));
