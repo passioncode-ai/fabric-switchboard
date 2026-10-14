@@ -1072,7 +1072,7 @@ mod tests {
             "limit_month_total": {"used_ratio": 1.4},
         }});
         let me = json!({"nickname": "kimi\u{7} fan", "user_level_name": "Allegretto",
-            "email": "person@example.com", "phone": {"number": "555"}});
+            "email": "person@example.com", "phone": {"number": "+1-555-0100-7319"}});
         let auth = |headers: &HeaderMap| {
             headers.get("authorization").and_then(|v| v.to_str().ok())
                 == Some("Bearer synthetic-access")
@@ -1367,7 +1367,9 @@ mod tests {
             "synthetic-access",
             "synthetic-refresh",
             "person@example.com",
-            "555",
+            // The whole number: a bare "555" also turns up in random account ids and temporary
+            // paths (Windows ARM nightly, 2026-10-14), which is no leak.
+            "555-0100-7319",
         ] {
             assert!(!all.contains(secret), "{secret} reached the store");
         }
