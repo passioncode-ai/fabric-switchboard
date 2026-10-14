@@ -188,7 +188,7 @@ Report rows #16 and #19–#22 were in the working gap table but missing from the
 
 Recorded, not built:
 - **#19** isolated homes stay minimal by contract (SPEC §8). Sharing user-scope settings, skills
-  or MCP servers into them is the operator's decision: board SB-20.
+  or MCP servers into them is the operator's decision: board SB-20. Decided 2026-10-14: only the Fabric board server is carried.
 - **#21** the adoption delay is a live measurement: board SB-06.
 - **#22** a `.prev` copy is declined. Backups keep ten generations, and kept successors cover the
   renewal gap.

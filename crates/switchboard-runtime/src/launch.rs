@@ -78,7 +78,10 @@ pub fn agent_cli() -> Option<PathBuf> {
 /// file named on its command line; Codex reads `[mcp_servers]` from its private config.
 /// Isolated sessions get the read-only set, since a route change cannot reach them. A session
 /// that continues an Observatory workflow (SB-52) also gets the Observatory server there: the
-/// user scope is not visible in an isolated home.
+/// user scope is not visible in an isolated home. Every session also gets the Fabric project
+/// board (`fabric`, SB-20) when the operator registered it for this provider in their user
+/// scope: a runtime or isolated home has a scope of its own, so without it a launched
+/// session never sees the board.
 struct AgentTools {
     claude_config: Option<PathBuf>,
     codex_section: String,
@@ -90,7 +93,8 @@ fn agent_tools(
     provider: Provider,
     session: &str,
     read_only: bool,
-    observatory: Option<&McpServer>,
+    // Servers beside Switchboard's own, by name: Observatory's for a continuation, the board.
+    extra: &[(&str, &McpServer)],
 ) -> Result<AgentTools, String> {
     // (name, command, args, the session variable when the server is Switchboard's own)
     let mut servers: Vec<(&str, String, Vec<String>, Option<&str>)> = Vec::new();
@@ -110,13 +114,8 @@ fn agent_tools(
             Some(session),
         ));
     }
-    if let Some(server) = observatory {
-        servers.push((
-            "observatory",
-            server.command.clone(),
-            server.args.clone(),
-            None,
-        ));
+    for (name, server) in extra {
+        servers.push((name, server.command.clone(), server.args.clone(), None));
     }
     if servers.is_empty() {
         return Ok(AgentTools {
@@ -164,6 +163,75 @@ fn agent_tools(
             })
         }
     }
+}
+/// The name the operator registers Fabric's board server under (`fabric-mcp`, ADR-0134).
+const FABRIC_BOARD: &str = "fabric";
+/// The board server as the operator registered it in the provider's user scope: Claude Code's
+/// `~/.claude.json` `mcpServers.fabric`, Codex's `config.toml` `[mcp_servers.fabric]`. Only a
+/// stdio entry with an absolute command is carried, and only its command and arguments: an
+/// `env` may hold a secret, and a secret is never copied into a launched home. Absent,
+/// unreadable or half-written means no board, never a failed launch.
+fn user_board_server(
+    provider: Provider,
+    home: &Path,
+    codex_home: Option<&Path>,
+) -> Option<McpServer> {
+    let strings = |args: Option<Vec<Option<String>>>| -> Option<Vec<String>> {
+        args.unwrap_or_default().into_iter().collect()
+    };
+    let (command, args) = match provider {
+        Provider::Claude => {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            fs::File::open(home.join(".claude.json"))
+                .ok()?
+                .take(32 * 1024 * 1024)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            let user: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            let entry = user.get("mcpServers")?.get(FABRIC_BOARD)?;
+            if entry.get("type").is_some_and(|t| t != "stdio") {
+                return None;
+            }
+            let args = entry.get("args").map(|a| {
+                a.as_array()
+                    .map(|a| a.iter().map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_else(|| vec![None])
+            });
+            (entry.get("command")?.as_str()?.to_string(), strings(args)?)
+        }
+        Provider::Codex => {
+            let dir = codex_home
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| home.join(".codex"));
+            let config: toml::Table = fs::read_to_string(dir.join("config.toml"))
+                .ok()?
+                .parse()
+                .ok()?;
+            let entry = config.get("mcp_servers")?.get(FABRIC_BOARD)?;
+            // A remote server, or one the operator switched off, is not carried.
+            if entry.get("url").is_some()
+                || entry.get("enabled").and_then(toml::Value::as_bool) == Some(false)
+            {
+                return None;
+            }
+            let args = entry.get("args").map(|a| {
+                a.as_array()
+                    .map(|a| a.iter().map(|v| v.as_str().map(String::from)).collect())
+                    .unwrap_or_else(|| vec![None])
+            });
+            (entry.get("command")?.as_str()?.to_string(), strings(args)?)
+        }
+    };
+    Path::new(&command)
+        .is_absolute()
+        .then_some(McpServer { command, args })
+}
+/// The board server of this machine's operator, read from their real user scope.
+fn board_server(provider: Provider) -> Option<McpServer> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    user_board_server(provider, Path::new(&home), codex_home.as_deref())
 }
 pub(crate) fn private_dir(path: &Path) -> Result<(), String> {
     switchboard_core::private_fs::private_dir(path)
@@ -490,11 +558,13 @@ impl Drop for Reservation {
 struct Host {
     binary: fn(Provider) -> Result<PathBuf, String>,
     agent_cli: fn() -> Option<PathBuf>,
+    board: fn(Provider) -> Option<McpServer>,
     start_terminal: fn(&Path) -> Result<(), String>,
 }
 const NATIVE: Host = Host {
     binary,
     agent_cli,
+    board: board_server,
     start_terminal,
 };
 pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
@@ -2282,6 +2352,7 @@ fn launch_full(
         format!("isolated:{}:{}", account.provider.as_str(), account.id)
     };
     let cli = (host.agent_cli)();
+    let board = (host.board)(account.provider);
     let tools = agent_tools(
         cli.as_deref(),
         root,
@@ -2289,7 +2360,11 @@ fn launch_full(
         account.provider,
         &session,
         mode != "managed",
-        continuation.map(|c| &c.observatory),
+        &continuation
+            .map(|c| ("observatory", &c.observatory))
+            .into_iter()
+            .chain(board.as_ref().map(|b| (FABRIC_BOARD, b)))
+            .collect::<Vec<_>>(),
     )?;
     let mut env = BTreeMap::from([("SWITCHBOARD_SESSION".to_string(), session)]);
     if let Some(c) = continuation {
@@ -2557,7 +2632,7 @@ mod tests {
             Provider::Claude,
             "managed:claude:work",
             false,
-            None,
+            &[],
         )
         .unwrap();
         let config: serde_json::Value =
@@ -2577,7 +2652,7 @@ mod tests {
             Provider::Codex,
             "isolated:codex:x",
             true,
-            None,
+            &[],
         )
         .unwrap();
         let parsed: toml::Value =
@@ -2600,10 +2675,166 @@ mod tests {
             Provider::Claude,
             "managed:claude:work",
             false,
-            None,
+            &[],
         )
         .unwrap();
         assert!(none.claude_config.is_none() && none.codex_section.is_empty());
+    }
+    #[test]
+    fn the_operators_fabric_board_reaches_a_launched_session_without_its_env() {
+        // SB-20: a runtime or isolated home has its own scope, so the board the operator
+        // registered in theirs is carried in; its env is not (it may hold a secret).
+        let temp = tempfile::tempdir().unwrap();
+        let user = temp.path().join("user");
+        fs::create_dir_all(user.join(".codex")).unwrap();
+        fs::write(
+            user.join(".claude.json"),
+            json!({"mcpServers": {
+                "fabric": {"type": "stdio", "command": "/Applications/Board.app/bin/fabric-mcp",
+                           "args": ["--runner", "claude-code"], "env": {"TOKEN": "never-copied"}},
+                "other": {"type": "stdio", "command": "/opt/other", "args": []}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            user.join(".codex/config.toml"),
+            "[mcp_servers.fabric]\ncommand = \"/Applications/Board.app/bin/fabric-mcp\"\nargs = [\"--runner\", \"codex\"]\nenv = { TOKEN = \"never-copied\" }\n",
+        )
+        .unwrap();
+        let claude = user_board_server(Provider::Claude, &user, None).unwrap();
+        assert_eq!(claude.command, "/Applications/Board.app/bin/fabric-mcp");
+        assert_eq!(claude.args, ["--runner", "claude-code"]);
+        let codex = user_board_server(Provider::Codex, &user, None).unwrap();
+        assert_eq!(codex.args, ["--runner", "codex"]);
+        let off = temp.path().join("off");
+        fs::create_dir_all(off.join(".codex")).unwrap();
+        fs::write(
+            off.join(".codex/config.toml"),
+            "[mcp_servers.fabric]\ncommand = \"/Applications/Board.app/bin/fabric-mcp\"\nenabled = false\n",
+        )
+        .unwrap();
+        assert!(
+            user_board_server(Provider::Codex, &off, None).is_none(),
+            "a board the operator switched off stays off"
+        );
+
+        let home = temp.path().join("home");
+        private_dir(&home).unwrap();
+        let cli = temp.path().join("switchboard");
+        let tools = agent_tools(
+            Some(&cli),
+            temp.path(),
+            &home,
+            Provider::Claude,
+            "managed:claude:work",
+            false,
+            &[("fabric", &claude)],
+        )
+        .unwrap();
+        let written = fs::read_to_string(tools.claude_config.unwrap()).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            config["mcpServers"]["fabric"],
+            json!({"type": "stdio", "command": claude.command, "args": claude.args})
+        );
+        assert!(
+            config["mcpServers"]["switchboard"].is_object(),
+            "Switchboard's own tools stay"
+        );
+        assert!(
+            config["mcpServers"].get("other").is_none(),
+            "only the board is carried"
+        );
+        assert!(!written.contains("never-copied"));
+        let tools = agent_tools(
+            Some(&cli),
+            temp.path(),
+            &home,
+            Provider::Codex,
+            "isolated:codex:x",
+            true,
+            &[("fabric", &codex)],
+        )
+        .unwrap();
+        let parsed: toml::Value = toml::from_str(&tools.codex_section).unwrap();
+        assert_eq!(
+            parsed["mcp_servers"]["fabric"]["args"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(!tools.codex_section.contains("never-copied"));
+        // The board alone is enough to write a config: a session without Switchboard's CLI still gets it.
+        let alone = agent_tools(
+            None,
+            temp.path(),
+            &home,
+            Provider::Claude,
+            "managed:claude:work",
+            false,
+            &[("fabric", &claude)],
+        )
+        .unwrap();
+        assert!(alone.claude_config.is_some());
+    }
+    #[test]
+    fn no_registered_board_or_a_doubtful_entry_means_no_board_never_a_failed_launch() {
+        let temp = tempfile::tempdir().unwrap();
+        let user = temp.path();
+        assert!(
+            user_board_server(Provider::Claude, user, None).is_none(),
+            "no ~/.claude.json"
+        );
+        assert!(
+            user_board_server(Provider::Codex, user, None).is_none(),
+            "no config.toml"
+        );
+        for entry in [
+            json!({"type": "http", "url": "https://board.example/mcp"}),
+            json!({"type": "stdio", "command": "fabric-mcp", "args": []}),
+            json!({"type": "stdio", "command": "/opt/fabric-mcp", "args": [1]}),
+            json!({"type": "stdio", "args": []}),
+        ] {
+            fs::write(
+                user.join(".claude.json"),
+                json!({"mcpServers": {"fabric": entry}}).to_string(),
+            )
+            .unwrap();
+            assert!(
+                user_board_server(Provider::Claude, user, None).is_none(),
+                "{entry}"
+            );
+        }
+        fs::write(user.join(".claude.json"), "{\"mcpServers\": {\"fab").unwrap();
+        assert!(
+            user_board_server(Provider::Claude, user, None).is_none(),
+            "half-written"
+        );
+        fs::write(
+            user.join(".claude.json"),
+            json!({"mcpServers": {"fabric": {"command": "/opt/fabric-mcp"}}}).to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            user_board_server(Provider::Claude, user, None)
+                .unwrap()
+                .args,
+            Vec::<String>::new(),
+            "no type is stdio, no args is none"
+        );
+        let codex_home = user.join("elsewhere");
+        fs::create_dir_all(&codex_home).unwrap();
+        fs::write(
+            codex_home.join("config.toml"),
+            "[mcp_servers.fabric]\nurl = \"https://board.example/mcp\"\n",
+        )
+        .unwrap();
+        assert!(
+            user_board_server(Provider::Codex, user, Some(&codex_home)).is_none(),
+            "CODEX_HOME is read, and a URL server is not carried"
+        );
     }
     #[cfg(windows)]
     #[test]
@@ -3405,6 +3636,9 @@ mod tests {
     fn no_agent_cli() -> Option<PathBuf> {
         None
     }
+    fn no_board(_: Provider) -> Option<McpServer> {
+        None
+    }
     fn synthetic_agent_cli() -> Option<PathBuf> {
         Some(PathBuf::from("/opt/Switchboard Tools/switchboard"))
     }
@@ -3417,6 +3651,7 @@ mod tests {
     const TEST_HOST: Host = Host {
         binary: synthetic_program,
         agent_cli: no_agent_cli,
+        board: no_board,
         start_terminal: terminal_opens,
     };
     fn openrouter_key(f: &Fixture, model: Option<&str>) {
@@ -4042,6 +4277,7 @@ mod tests {
         let host = Host {
             binary: synthetic_program,
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             start_terminal: terminal_must_not_open,
         };
         let extra = vec!["--resume".to_string(), "it's; rm -rf ~".to_string()];
@@ -4163,6 +4399,7 @@ mod tests {
         let host = Host {
             binary: synthetic_program,
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             start_terminal: terminal_must_not_open,
         };
         let context = [
@@ -4329,6 +4566,7 @@ mod tests {
         let host = Host {
             binary: synthetic_program,
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             start_terminal: never,
         };
         let resumed = Continuation {
@@ -4361,6 +4599,7 @@ mod tests {
         let host = Host {
             binary: synthetic_program,
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             start_terminal: terminal_opens,
         };
         let resumed = Continuation {
@@ -4548,6 +4787,7 @@ mod tests {
 
         let host = Host {
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             ..TEST_HOST
         };
         assert!(f.launch(&proxy, &selected, "managed", &host).unwrap());
@@ -4622,6 +4862,7 @@ mod tests {
         );
         let host = Host {
             agent_cli: synthetic_agent_cli,
+            board: no_board,
             ..TEST_HOST
         };
         assert!(f.launch(&proxy, &oauth, "isolated", &host).unwrap());
