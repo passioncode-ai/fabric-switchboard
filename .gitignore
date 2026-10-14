@@ -16,3 +16,10 @@ __pycache__/
 # agent-sync: local state and the credentials file are never committed
 .env.agent-sync
 .agent-sync/
+
+# Conversation exports (Claude Code /export, Kimi exports) hold private chat, names and paths;
+# they are never committed. A release once carried one (2026-10-14).
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
+*-exported-*-messages.txt
+conversation-[0-9]*.txt
+kimi-export-session_*.md
