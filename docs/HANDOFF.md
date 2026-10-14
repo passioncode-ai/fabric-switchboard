@@ -2,6 +2,47 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-14 (later) — SB-119/SB-120: agents that take over work, OpenCode, the model picker
+
+**Built on `feat/sb-119-agents`, release 0.6.31 next.** Operator requests 2026-10-14: OpenCode
+in Switchboard and in the session-switching pipelines; OpenRouter models chosen from OpenRouter's
+list with five recommended; an Orca-style Agents page; polish and finish. Packet:
+[sb-119-120-agents](packets/sb-119-120-agents.md); scenarios SCN-057..SCN-060 with WebKit evidence
+in `docs/evidence/design-0.6.31/`; contract: CONTRACTS → *Installed agents, switching and the
+default agent*.
+
+- The Agents page leads with the **default agent** (chips), then **Installed · N detected** (agents
+  that can take over first; command, Enabled/Disabled, Default/Set default, Set up, Details), then
+  **Available to install** with copyable install commands, then the OpenRouter key and *Connect an
+  agent*. The Hermes model moved into its row. "Take over work" is kept apart from account
+  switching in both languages.
+- OpenCode continues workflows (chain step or `continue --account opencode`) on the OpenRouter key
+  with `OPENCODE_CONFIG_CONTENT` only. `continue` without an account uses the default agent:
+  Hermes/OpenCode on the key, Claude Code/Codex/Kimi Code on the account a one-step chain would
+  choose. A disabled agent is skipped first in chains (`agent_disabled`). Unreadable settings fail
+  closed.
+- The model picker: recommended cards, then OpenRouter's tool-capable models as suggestions
+  (public list, 10 s, cached 6 h, never on a timer), any typed id.
+- Checks: `./scripts/check.sh` exit 0 (lean env); new tests named in SCN-057..060. Unit, seam and
+  product verifiers each found real defects (default-agent semantics, picker failure path, search
+  order before Homebrew, Sessions naming OpenCode as Codex, fail-open settings, stale scenarios,
+  Russian wording); all fixed in `4f285ba`.
+
+Also recorded here (another session's receipt, left uncommitted in `.worktrees/sb-118` when it
+stopped; hashes corrected after the 2026-10-14 history purge): **0.6.30 released** — SB-117
+(PR #194 `982d8bc`) and SB-118 (PR #195 `44ff10d`; review fixes squashed into it), version PR
+#196 `91bb89f`, test fixes #197 `e28c060`, #199 `1b20e67`, #200 `bd60530`; release run
+38498498280 succeeded and the installed app updated itself to 0.6.30.
+
+**Exact next task:** release 0.6.31 from this branch: PR, squash merge, bump from `origin/main`
+(CHANGELOG `## Unreleased` → `## 0.6.31`), preflight, tag, watch the release to publish, confirm
+the installed app updates. Then send the Fabric session the `switchboard --json agents status`
+shape (`schema`, `default`, `default_ready`, `agents[]`) for its settings screen. Then the
+operator's live checks: one OpenCode continuation on the real key, one SB-115 StopFailure, one
+FD-62 hand-over (Dashboards 0.7.9+).
+
+---
+
 ## 2026-10-14 — SB-117 project suggestions; SB-118 found
 
 **SB-117 (merged with this entry; release with SB-118).** A project offers its new folders:
