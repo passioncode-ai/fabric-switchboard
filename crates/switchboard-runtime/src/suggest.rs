@@ -1,8 +1,11 @@
-//! SB-117: a project offers its new folders itself (operator request 2026-10-14). A folder is
+//! SB-117: a project finds its new folders itself (operator request 2026-10-14). A folder is
 //! the project's when it is a git worktree of a project repository, a clone with the same
-//! `origin`, or a repository of one of the project's sources (`github.com/<owner>`). Nothing
-//! joins without a person: suggestions wait in `<data>/project-suggestions.json` (0600) until
-//! they are added or dismissed, and a dismissed folder is never suggested again. Only git
+//! `origin`, or a repository of one of the project's sources (`github.com/<owner>`). SB-121
+//! (operator, later the same day): such a folder joins its project at once, without a question,
+//! and the person gets one notification. `<data>/project-suggestions.json` (0600) remembers every
+//! folder it found: `added` (a folder the person later removes from the project is not added
+//! again), `pending` (adding it failed — the person answers, as before) or `dismissed` (declined,
+//! never offered again). Only git
 //! metadata (`.git`, `commondir`, the `origin` url) is read; no file of the repository is.
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,6 +57,8 @@ pub enum Reason {
 pub enum State {
     Pending,
     Dismissed,
+    /// Added to its project by Switchboard (SB-121); `first_seen` is when.
+    Added,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,6 +336,39 @@ impl Outcome {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static CHECK_TRANSIENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// Temporary and cache folders (an agent's scratch worktree, a tool's cache clone) are never a
+/// project's: they come and go, and adding them by themselves (SB-121) would fill a project with
+/// folders that vanish.
+pub(crate) fn transient(folder: &Path) -> bool {
+    // Unit tests build their repositories in the temporary folder; one test turns this back on.
+    #[cfg(test)]
+    if !CHECK_TRANSIENT.with(std::cell::Cell::get) {
+        return false;
+    }
+    let mut roots: Vec<PathBuf> = vec![
+        std::env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/private/tmp"),
+        PathBuf::from("/private/var/folders"),
+        PathBuf::from("/var/tmp"),
+    ];
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        let home = PathBuf::from(home);
+        roots.extend([
+            home.join(".cache"),
+            home.join("Library/Caches"),
+            home.join("AppData/Local/Temp"),
+        ]);
+    }
+    roots
+        .iter()
+        .any(|r| folder.starts_with(r) || r.canonicalize().is_ok_and(|c| folder.starts_with(c)))
+}
+
 /// Records a folder if it is a project's and not already suggested, added or declined.
 pub(crate) fn record(
     root: &Path,
@@ -352,6 +390,9 @@ pub(crate) fn record(
     if snapshot.project_for(&folder).is_some() {
         return Ok(Outcome::InProject);
     }
+    if transient(&folder) {
+        return Ok(Outcome::NotOurs { settled: true });
+    }
     // Decided before the list is read: most folders a pass looks at are no project's.
     let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
         let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
@@ -361,7 +402,8 @@ pub(crate) fn record(
     if let Some(row) = rows.iter().find(|r| r.folder == text) {
         return Ok(match row.state {
             State::Pending => Outcome::Waiting,
-            State::Dismissed => Outcome::Declined,
+            // Added once and since removed from the project by the person: their choice stands.
+            State::Dismissed | State::Added => Outcome::Declined,
         });
     }
     // A label is shown, never parsed: bounded so a row stays small.
@@ -369,12 +411,12 @@ pub(crate) fn record(
     if rows.iter().filter(|r| r.state == State::Pending).count() >= MAX_PENDING {
         return Ok(Outcome::Full);
     }
-    let dismissed = rows.iter().filter(|r| r.state == State::Dismissed).count();
-    if dismissed >= MAX_DISMISSED {
+    let remembered = rows.iter().filter(|r| r.state != State::Pending).count();
+    if remembered >= MAX_DISMISSED {
         if let Some(i) = rows
             .iter()
             .enumerate()
-            .filter(|(_, r)| r.state == State::Dismissed)
+            .filter(|(_, r)| r.state != State::Pending)
             .min_by_key(|(_, r)| r.first_seen)
             .map(|(i, _)| i)
         {
@@ -415,11 +457,27 @@ pub(crate) fn find_pending(root: &Path, folder: &str) -> Result<Suggestion, Stri
         .ok_or_else(|| NOT_FOUND.into())
 }
 
-/// Removes an added suggestion; the folder is now in its project.
-pub(crate) fn forget(root: &Path, folder: &str) -> Result<(), String> {
+/// Marks a folder added to its project (SB-121): remembered, so a folder the person removes from
+/// the project afterwards is not added again. `now` is when it was added.
+pub(crate) fn mark_added(root: &Path, folder: &str, now: i64) -> Result<(), String> {
     let mut rows = read(root)?;
-    rows.retain(|r| r.folder != folder);
+    let row = rows
+        .iter_mut()
+        .find(|r| r.folder == folder)
+        .ok_or(NOT_FOUND)?;
+    row.state = State::Added;
+    row.first_seen = now;
     write(root, &rows)
+}
+
+/// Folders added since `since`, newest last, for the one notification each gets.
+pub(crate) fn added_since(root: &Path, since: i64) -> Result<Vec<Suggestion>, String> {
+    let mut rows: Vec<Suggestion> = read(root)?
+        .into_iter()
+        .filter(|r| r.state == State::Added && r.first_seen >= since)
+        .collect();
+    rows.sort_by_key(|r| r.first_seen);
+    Ok(rows)
 }
 
 /// Declines a suggestion for good.
@@ -792,6 +850,31 @@ mod tests {
     }
 
     #[test]
+    fn temporary_and_cache_folders_never_join_a_project() {
+        CHECK_TRANSIENT.with(|c| c.set(true));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let main = data.join("app");
+        git(&main, Some("git@github.com:org/app.git"));
+        let s = snapshot(&[("p", &[&main], &[])]);
+        let repos = project_repos(&s);
+        let scratch = data.join("scratchpad-wt");
+        git(&scratch, Some("git@github.com:org/app.git"));
+        assert_eq!(
+            record(root.path(), &s, &repos, &scratch, 1).unwrap(),
+            Outcome::NotOurs { settled: true }
+        );
+        assert!(transient(Path::new(
+            "/private/tmp/claude-501/x/scratchpad/wt"
+        )));
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+        assert!(transient(&home.join(".cache/tool/clone")));
+        assert!(!transient(&home.join("DATA/app-2")));
+        CHECK_TRANSIENT.with(|c| c.set(false));
+    }
+
+    #[test]
     fn a_suggestion_is_recorded_once_accepted_or_dismissed_for_good() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -836,8 +919,15 @@ mod tests {
         git(&other, Some("git@github.com:org/app.git"));
         let second = new(record(root.path(), &s, &repos, &other, 13).unwrap());
         assert_eq!(find_pending(root.path(), &second.folder).unwrap(), second);
-        forget(root.path(), &second.folder).unwrap();
+        mark_added(root.path(), &second.folder, 14).unwrap();
+        assert_eq!(added_since(root.path(), 14).unwrap().len(), 1);
+        assert!(added_since(root.path(), 15).unwrap().is_empty());
         assert!(find_pending(root.path(), &second.folder).is_err());
+        // Added, then removed from the project by the person: never added again.
+        assert_eq!(
+            record(root.path(), &s, &repos, &other, 15).unwrap(),
+            Outcome::Declined
+        );
         // Once the folder is in a project the suggestion is not shown.
         let third = data.join("app-4");
         git(&third, Some("git@github.com:org/app.git"));
