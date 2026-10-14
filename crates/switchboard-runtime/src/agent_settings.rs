@@ -7,30 +7,31 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 pub const FILE: &str = "agents-settings.json";
-const MAX_BYTES: u64 = 64 * 1024;
+/// Equal to the backup's per-setting limit, so every file this writes is carried in backups.
+const MAX_BYTES: u64 = 4096;
 pub const NOT_AN_AGENT: &str = "No such agent in the catalog. Run switchboard agents list.";
 pub const CANNOT_CONTINUE: &str =
     "Switchboard cannot hand work to this agent yet, so it cannot be the default.";
 pub const NOT_INSTALLED: &str =
     "This agent is not installed on this computer. Install it, then press Refresh.";
 pub const DISABLED: &str =
-    "This agent is disabled for switching. Enable it on the Agents page, then try again.";
-pub const NAME_AN_ACCOUNT: &str = "Name the account or agent to continue on (--account), or choose a default agent that runs on its own key (OpenCode or Hermes).";
-const UNREADABLE: &str =
-    "Agent settings could not be read. Restore the private file before continuing.";
+    "This agent is disabled for taking over work. Enable it on the Agents page, then try again.";
+pub const NAME_AN_ACCOUNT: &str = "Name the account or agent to continue on (--account), or choose a default agent on the Agents page.";
+pub const UNREADABLE: &str = "Agent settings (agents-settings.json) could not be read. Restore it from a backup, or delete it to start over with every agent enabled and no default.";
 /// OpenRouter's public model list (no key).
 const MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
 const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const MODELS_KEEP: i64 = 6 * 3600;
 const MAX_MODELS_BYTES: usize = 8 * 1024 * 1024;
 
+/// Unknown fields are ignored, so a file a newer Switchboard wrote (or a newer backup restored)
+/// still reads here.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Settings {
     /// The machine's default agent; none is *Auto*.
     #[serde(default)]
     pub default: Option<String>,
-    /// Agents the person took out of switching.
+    /// Agents the person keeps work away from.
     #[serde(default)]
     pub disabled: Vec<String>,
 }
@@ -62,13 +63,21 @@ fn known(id: &str) -> Option<Value> {
 
 /// Whether an agent's program is on this computer (the lookup launches use).
 pub fn installed(agent: &Value) -> Option<std::path::PathBuf> {
-    agent["binary"]
+    let path = agent["binary"]
         .as_str()
         .filter(|b| !b.is_empty())
-        .and_then(crate::launch::find_program)
+        .and_then(crate::launch::find_program)?;
+    // Windows's own programs are never an agent (`cmd` is Command Code's name and cmd.exe's).
+    #[cfg(windows)]
+    if let Some(system) = std::env::var_os("SystemRoot") {
+        if path.starts_with(std::path::PathBuf::from(system)) {
+            return None;
+        }
+    }
+    Some(path)
 }
 
-/// An agent takes part in switching when it is installed, Switchboard can hand it work, and it
+/// An agent can take over work when it is installed, Switchboard can hand it work, and it
 /// was not disabled.
 pub fn usable(root: &Path, id: &str) -> Result<(), String> {
     let agent = known(id).ok_or(NOT_AN_AGENT)?;
@@ -84,9 +93,10 @@ pub fn usable(root: &Path, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether a person disabled this agent (fallback chains skip it; `continue` refuses it).
-pub fn disabled(root: &Path, id: &str) -> bool {
-    read(root).is_ok_and(|s| s.disabled.iter().any(|d| d == id))
+/// Whether a person disabled this agent (fallback chains skip it; `continue` refuses it). An
+/// unreadable file is an error, never "nothing disabled".
+pub fn disabled(root: &Path, id: &str) -> Result<bool, String> {
+    Ok(read(root)?.disabled.iter().any(|d| d == id))
 }
 
 pub fn set_enabled(root: &Path, id: &str, enabled: bool) -> Result<Settings, String> {
@@ -136,8 +146,9 @@ pub fn command(agent: &Value, model: Option<&str>) -> String {
     }
 }
 
-/// Every catalog agent with what the Agents page needs: installed or not, enabled for
-/// switching, default, the command, and its links.
+/// Every catalog agent with what the Agents page needs: installed or not, enabled for taking
+/// over work, default, the command, and its links. Fabric reads it (`agents status --json`):
+/// `schema` changes only when a field changes meaning or goes.
 pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
     let settings = read(root)?;
     let agents: Vec<Value> = crate::agent_catalog::catalog()["agents"]
@@ -168,8 +179,15 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         })
         .collect();
     let installed = agents.iter().filter(|a| a["installed"] == true).count();
+    // Whether the saved default can take work now: installed, enabled and able to continue.
+    let default_ready = settings
+        .default
+        .as_deref()
+        .is_some_and(|id| agents.iter().any(|a| a["id"] == id && a["enabled"] == true));
     Ok(json!({
+        "schema": 1,
         "default": settings.default,
+        "default_ready": default_ready,
         "installed": installed,
         "agents": agents,
         "recommended_models": recommended(),
@@ -191,11 +209,10 @@ pub struct ModelCache {
 
 /// Only what the picker shows: id, name, context, prices. Models that cannot call tools are
 /// left out: a coding agent needs them.
-pub fn parse_models(body: &[u8]) -> Result<Vec<Value>, String> {
-    let value: Value = serde_json::from_slice(body).map_err(|_| "unreadable")?;
+pub fn parse_models(body: &[u8]) -> Option<Vec<Value>> {
+    let value: Value = serde_json::from_slice(body).ok()?;
     let mut out: Vec<Value> = value["data"]
-        .as_array()
-        .ok_or("unreadable")?
+        .as_array()?
         .iter()
         .filter(|m| {
             m["supported_parameters"]
@@ -216,7 +233,7 @@ pub fn parse_models(body: &[u8]) -> Result<Vec<Value>, String> {
         })
         .collect();
     out.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
-    Ok(out)
+    Some(out)
 }
 
 pub async fn models(cache: &std::sync::Mutex<ModelCache>, now: i64) -> Value {
@@ -229,31 +246,38 @@ pub async fn models(cache: &std::sync::Mutex<ModelCache>, now: i64) -> Value {
         let client = reqwest::Client::builder()
             .timeout(MODELS_TIMEOUT)
             .build()
-            .map_err(|_| "unavailable")?;
-        let response = client
-            .get(MODELS_URL)
-            .send()
-            .await
-            .map_err(|_| "unavailable")?;
+            .ok()?;
+        let response = client.get(MODELS_URL).send().await.ok()?;
         if !response.status().is_success() {
-            return Err("unavailable");
+            return None;
         }
-        let body = response.bytes().await.map_err(|_| "unavailable")?;
-        if body.len() > MAX_MODELS_BYTES {
-            return Err("unavailable");
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_MODELS_BYTES as u64)
+        {
+            return None;
         }
-        parse_models(&body).map_err(|_| "unavailable")
+        // Read by chunks so an oversized body is dropped before it is held whole.
+        let mut response = response;
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.ok()? {
+            if body.len() + chunk.len() > MAX_MODELS_BYTES {
+                return None;
+            }
+            body.extend_from_slice(&chunk);
+        }
+        parse_models(&body)
     }
     .await;
     match fetched {
-        Ok(models) => {
+        Some(models) => {
             if let Ok(mut c) = cache.lock() {
                 c.at = now;
                 c.models = models.clone();
             }
             json!({"recommended": recommended(), "models": models, "available": true})
         }
-        Err(_) => json!({"recommended": recommended(), "models": [], "available": false}),
+        None => json!({"recommended": recommended(), "models": [], "available": false}),
     }
 }
 
@@ -295,7 +319,7 @@ mod tests {
         let models = parse_models(body).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0]["id"], "a/tools");
-        assert!(parse_models(b"nope").is_err());
+        assert!(parse_models(b"nope").is_none());
     }
 
     #[test]
@@ -307,14 +331,14 @@ mod tests {
             NOT_AN_AGENT
         );
         set_enabled(root.path(), "hermes", false).unwrap();
-        assert!(disabled(root.path(), "hermes"));
+        assert!(disabled(root.path(), "hermes").unwrap());
         assert_eq!(usable(root.path(), "hermes").unwrap_err(), DISABLED);
         assert_eq!(
             set_default(root.path(), Some("aider")).unwrap_err(),
             CANNOT_CONTINUE
         );
         set_enabled(root.path(), "hermes", true).unwrap();
-        assert!(!disabled(root.path(), "hermes"));
+        assert!(!disabled(root.path(), "hermes").unwrap());
         // The default needs the agent installed: a test machine has none of these CLIs on PATH
         // reliably, so only the refusal path is asserted here; the CLI test sets one up.
         let s = set_default(root.path(), None).unwrap();
@@ -327,6 +351,35 @@ mod tests {
         assert_eq!(s.default, None);
         switchboard_core::private_fs::private_write(&root.path().join(FILE), b"broken").unwrap();
         assert!(read(root.path()).is_err());
+    }
+
+    #[test]
+    fn a_newer_file_still_reads_and_an_unusable_default_is_not_ready() {
+        let root = tempfile::tempdir().unwrap();
+        // A field a newer Switchboard added is ignored, never "unreadable".
+        switchboard_core::private_fs::private_write(
+            &root.path().join(FILE),
+            br#"{"default":"no-such-agent","disabled":["kimi-code"],"later":true}"#,
+        )
+        .unwrap();
+        assert!(disabled(root.path(), "kimi-code").unwrap());
+        let view = overview(root.path(), None).unwrap();
+        assert_eq!(view["schema"], 1);
+        assert_eq!(view["default"], "no-such-agent");
+        assert_eq!(
+            view["default_ready"], false,
+            "the saved default cannot take work"
+        );
+        let kimi = view["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "kimi-code")
+            .unwrap();
+        assert_eq!(
+            (kimi["disabled"].clone(), kimi["enabled"].clone()),
+            (json!(true), json!(false))
+        );
     }
 
     #[test]

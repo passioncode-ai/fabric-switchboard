@@ -69,7 +69,7 @@ pub(crate) struct KimiChoice<'a> {
     /// Whether an `opencode` step can be tried now (SB-119): OpenCode installed, an OpenRouter
     /// key and model saved, the `switchboard` command present.
     pub opencode_ready: bool,
-    /// Agents the person took out of switching on the Agents page (SB-120): skipped.
+    /// Agents the person disabled for taking over work on the Agents page (SB-120): skipped.
     pub disabled: HashSet<String>,
 }
 
@@ -143,7 +143,7 @@ pub(crate) fn resolve_with(
         .executors
         .iter()
         .map(|e| {
-            // SB-120: an agent the person disabled for switching is never handed work.
+            // SB-120: an agent the person disabled for taking over work is never handed one.
             if kimi.disabled.contains(&e.agent) {
                 return Step::Skip {
                     agent: e.agent.clone(),
@@ -398,6 +398,65 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
     .await
 }
 
+pub const NO_DEFAULT_ACCOUNT: &str = "The default agent has no account that can take this workflow now. Name one with --account, or choose another default agent.";
+/// SB-120: `switchboard continue` without an account, on the machine's default agent: the
+/// account a one-step chain of that agent would choose now (`resolve_with`) — never a limited
+/// one, one that needs a new sign-in, or one a project keeps for other folders.
+pub(crate) fn account_for_default(
+    runtime: &Runtime,
+    agent: &str,
+    folder: &std::path::Path,
+    now: i64,
+) -> Result<String, String> {
+    let snapshot = runtime.store.snapshot()?;
+    let kimi_limited = runtime.kimi_watch.limited(now);
+    let mut limited = runtime.limits.limited_ids(now);
+    limited.extend(kimi_limited.iter().cloned());
+    let kimi_usable =
+        |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
+    let kimi_used = |id: &str| runtime.kimi_watch.used(id);
+    let kimi = KimiChoice {
+        ids: snapshot
+            .kimi_accounts
+            .iter()
+            .map(|k| k.id.clone())
+            .collect(),
+        usable: &kimi_usable,
+        used: &kimi_used,
+        hermes_ready: false,
+        opencode_ready: false,
+        disabled: HashSet::new(),
+    };
+    let sign_in: HashSet<String> = runtime
+        .refresh
+        .sign_in_required(&runtime.store)
+        .into_iter()
+        .collect();
+    let chain = Chain {
+        scope: switchboard_core::ChainScope::Machine,
+        executors: vec![switchboard_core::Executor {
+            agent: agent.to_owned(),
+            account_id: None,
+            key: None,
+        }],
+        updated_at: 0,
+    };
+    match resolve_with(
+        &snapshot,
+        &chain,
+        None,
+        &limited,
+        &sign_in,
+        Some(folder),
+        &kimi,
+    )
+    .into_iter()
+    .next()
+    {
+        Some(Step::Run { account_id, .. }) => Ok(account_id),
+        _ => Err(NO_DEFAULT_ACCOUNT.into()),
+    }
+}
 /// The agent and label a hand-over shows: Hermes, a saved Kimi Code account, or a saved account.
 fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
     if account == crate::hermes::HERMES_TARGET {
@@ -444,6 +503,18 @@ where
         .iter()
         .map(|k| k.id.clone())
         .collect();
+    // SB-120: an unreadable agents-settings.json hands nothing over — never "nothing disabled".
+    let Ok(settings) = crate::agent_settings::read(&runtime.root) else {
+        log("agent_settings_unreadable");
+        return;
+    };
+    let disabled: HashSet<String> = settings.disabled.into_iter().collect();
+    let wants = |agent: &str| {
+        snapshot
+            .chains
+            .iter()
+            .any(|c| c.executors.iter().any(|e| e.agent == agent))
+    };
     let kimi_usable =
         |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
     let kimi_used = |id: &str| runtime.kimi_watch.used(id);
@@ -451,11 +522,12 @@ where
         ids: kimi_ids.clone(),
         usable: &kimi_usable,
         used: &kimi_used,
-        hermes_ready: crate::launch::hermes_continuation_ready(&runtime.store),
-        opencode_ready: crate::launch::opencode_continuation_ready(&runtime.store),
-        disabled: crate::agent_settings::read(&runtime.root)
-            .map(|s| s.disabled.into_iter().collect())
-            .unwrap_or_default(),
+        // The OpenRouter key is read only for a chain that has the agent (the idle budget).
+        hermes_ready: wants(crate::hermes::HERMES_TARGET)
+            && crate::launch::hermes_continuation_ready(&runtime.store),
+        opencode_ready: wants(crate::launch::OPENCODE_TARGET)
+            && crate::launch::opencode_continuation_ready(&runtime.store),
+        disabled,
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.

@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, ProjectSuggestion, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -180,7 +180,7 @@ async function reload() {
   void restorePendingLogin();
   void loadBackups();
   void loadSuggestions();
-  void loadAgents();
+  if (page === 'agents') void loadAgents();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   void loadUpdate();
@@ -253,7 +253,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Let coding agents read usage and switch accounts.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -430,7 +430,7 @@ async function loadAgents() {
   backgroundRender();
 }
 const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).agents.find((a) => a.id === id);
-/** SB-120: the Agents page — the default agent, what is installed and takes part in switching,
+/** SB-120: the Agents page — the default agent, what is installed and takes over work,
  * what can be installed, then the OpenRouter key and the tools registration. */
 function renderAgents(main: HTMLElement) {
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
@@ -441,23 +441,23 @@ function renderAgents(main: HTMLElement) {
 function defaultAgentPanel(view: AgentsOverview) {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'default-agent-heading');
   const heading = el('h2', '', t('Default agent')); heading.id = 'default-agent-heading';
-  section.append(heading, el('p', '', t('The agent that continues work when an account runs out and no chain names another. Fabric uses it too, unless a project sets its own.')));
+  section.append(heading, el('p', '', t('The agent that takes over a workflow when none is named: switchboard continue without an account hands it there, and Fabric starts with it unless a project sets its own. Fallback chains keep their own order.')));
   const chips = el('div', 'choice-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', t('Default agent'));
-  const options: [string | null, string][] = [[null, t('Auto')], ...view.agents.filter((a) => a.enabled && a.switchable).map((a): [string | null, string] => [a.id, a.name])];
-  for (const [id, label] of options) {
-    const on = view.default === id;
-    const chip = button(on ? `✓ ${label}` : label, () => { if (!on) void mutate(async () => { await adapter.agentDefault(id); agentsView = await adapter.agentsOverview(); }, id ? t('{agent} is the default agent.', { agent: label }) : t('The default agent is Auto.'), `default-agent-${id ?? 'auto'}`); }, `choice-chip${on ? ' is-on' : ''}`, `default-agent-${id ?? 'auto'}`);
-    chip.setAttribute('aria-pressed', String(on)); chips.append(chip);
+  for (const choice of defaultAgentChoices(view.agents, view.default)) {
+    const key = `default-agent-${choice.id ?? 'auto'}`;
+    const chip = button(choice.on ? `✓ ${choice.label}` : choice.label, () => { if (!choice.on) void mutate(async () => { await adapter.agentDefault(choice.id); agentsView = await adapter.agentsOverview(); }, choice.id ? t('{agent} is the default agent.', { agent: choice.label }) : t('The default agent is Auto.'), key); }, `choice-chip${choice.on ? ' is-on' : ''}`, key);
+    chip.setAttribute('aria-pressed', String(choice.on)); chips.append(chip);
   }
-  section.append(chips, el('p', 'form-note', t('Auto: the chain decides, or the account\'s own coding agent.')));
+  section.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')));
   return section;
 }
 function installedAgentsPanel(view: AgentsOverview) {
   const section = el('section', 'about-panel agents-panel'); section.setAttribute('aria-labelledby', 'installed-agents-heading');
   const head = el('div', 'agents-head'); const heading = el('h2', '', t('Installed')); heading.id = 'installed-agents-heading';
-  const installed = view.agents.filter((a) => a.installed);
+  // Agents that can take over work first, in chain order; tools-only agents after them.
+  const installed = sortAgents(view.agents.filter((a) => a.installed));
   head.append(heading, el('span', 'badge', plural(installed.length, { one: '{n} detected', other: '{n} detected' })), button(t('Refresh'), () => { agentsView = null; render(); void loadAgents(); }, 'button quiet', 'agents-refresh'));
-  section.append(head, el('p', '', t('Enabled agents take over work when an account runs out: in fallback chains and with switchboard continue. Disable one to keep it out.')));
+  section.append(head, el('p', '', t('Enabled agents can take over a workflow whose account ran out: in fallback chains and with switchboard continue. Disable one to keep work away from it; switching accounts is not affected.')));
   const list = el('div', 'agent-list');
   for (const agent of installed) list.append(agentRow(agent));
   section.append(list);
@@ -473,10 +473,10 @@ function agentRow(agent: AgentRow) {
   if (agent.id === 'hermes' && hermesError) info.append(el('span', 'usage-error', t(hermesError)));
   const controls = el('div', 'agent-controls');
   if (agent.switchable) {
-    const seg = el('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', t('{agent} in switching', { agent: agent.name }));
+    const seg = el('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', t('{agent} takes over work', { agent: agent.name }));
     for (const [value, label] of [[true, t('Enabled')], [false, t('Disabled')]] as const) {
       const on = agent.enabled === value;
-      const b = button(label, () => { if (!on) void mutate(async () => { await adapter.agentEnable(agent.id, value); agentsView = await adapter.agentsOverview(); }, value ? t('{agent} takes part in switching.', { agent: agent.name }) : t('{agent} is out of switching.', { agent: agent.name }), `agent-${value ? 'on' : 'off'}-${agent.id}`); }, `segment${on ? ' is-on' : ''}`, `agent-${value ? 'on' : 'off'}-${agent.id}`);
+      const b = button(label, () => { if (!on) void mutate(async () => { await adapter.agentEnable(agent.id, value); agentsView = await adapter.agentsOverview(); }, value ? t('{agent} can take over work again.', { agent: agent.name }) : agent.default ? t('{agent} no longer takes over work. The default agent is Auto again.', { agent: agent.name }) : t('{agent} no longer takes over work.', { agent: agent.name }), `agent-${value ? 'on' : 'off'}-${agent.id}`); }, `segment${on ? ' is-on' : ''}`, `agent-${value ? 'on' : 'off'}-${agent.id}`);
       b.setAttribute('aria-pressed', String(on)); seg.append(b);
     }
     controls.append(seg);
@@ -580,7 +580,7 @@ function openrouterPanel() {
   section.append(facts);
   const actions = el('div', 'management-actions');
   actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
-  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button below. CLI: switchboard agents launch <agent> --openrouter.')));
+  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button in Installed, above. CLI: switchboard agents launch <agent> --openrouter.')));
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
@@ -601,7 +601,6 @@ function openrouterKeyDialog() {
   key.focus();
 }
 let openrouterModelList: OpenrouterModels | null = null;
-const millions = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n % 1_000_000 ? 2 : 0).replace(/\.?0+$/, '')}M` : `${Math.round(n / 1000)}K`;
 /** SB-119: an OpenRouter model field — the recommended models first, every tool-capable
  * OpenRouter model as suggestions while typing, and any id typed by hand. */
 function modelPicker(initial: string, key: string) {
@@ -609,14 +608,15 @@ function modelPicker(initial: string, key: string) {
   const list = el('datalist'); list.id = `${key}-models`;
   const cards = el('div', 'model-cards'); cards.setAttribute('role', 'group'); cards.setAttribute('aria-label', t('Recommended models'));
   const note = el('p', 'form-note', '');
+  // A failed read is shown in this picker only and never kept: the next picker asks again.
+  let data = openrouterModelList;
   const paint = () => {
-    const data = openrouterModelList;
-    const recommended = data?.recommended ?? (agentCatalog as unknown as { openrouter_recommended: OpenrouterModels['recommended'] }).openrouter_recommended;
+    const recommended = data?.recommended.length ? data.recommended : (agentCatalog as unknown as { openrouter_recommended: OpenrouterModels['recommended'] }).openrouter_recommended;
     cards.replaceChildren(...recommended.map((m) => {
       const on = value.value.trim() === m.id;
       const card = button('', () => { value.value = m.id; paint(); }, `model-card${on ? ' is-on' : ''}`, `${key}-model-${m.id}`);
       card.setAttribute('aria-pressed', String(on));
-      card.append(el('strong', '', m.name), el('span', 'form-note', `${m.maker} · ${millions(m.context)} ${t('context')} · $${m.input_usd_per_million.toFixed(2)} / 1M ${t('input')}`), el('code', 'agent-command', m.id));
+      card.append(el('strong', '', m.name), el('span', 'form-note', modelMeta(m)), el('code', 'agent-command', m.id));
       return card;
     }));
     list.replaceChildren(...(data?.models ?? []).map((m) => { const o = el('option'); o.value = m.id; if (m.name) o.label = m.name; return o; }));
@@ -624,9 +624,9 @@ function modelPicker(initial: string, key: string) {
   };
   value.addEventListener('input', paint);
   paint();
-  if (!openrouterModelList) void adapter.openrouterModels().then((m) => { openrouterModelList = m; paint(); }, () => { openrouterModelList = { recommended: [], models: [], available: false }; paint(); });
+  if (!data) void adapter.openrouterModels().then((m) => { if (m.available) openrouterModelList = m; data = m; paint(); }, () => { data = { recommended: [], models: [], available: false }; paint(); });
   const node = el('div', 'model-picker');
-  node.append(el('strong', 'block', t('Recommended')), cards, field(t('Model'), value, ''), list, note);
+  node.append(el('strong', 'block', t('Recommended models')), cards, field(t('Model'), value, ''), list, note);
   return { node, value };
 }
 function openrouterModelDialog() {
@@ -1249,7 +1249,7 @@ function sessionsPanel() {
   const list = el('ul', 'session-list');
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
-    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : session.provider === 'opencode' ? 'OpenCode' : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
     const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }

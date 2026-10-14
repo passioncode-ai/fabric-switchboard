@@ -55,8 +55,6 @@ const ALLOWLIST = {
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
-  'unreadable': 'agent_settings::models: an OpenRouter list it cannot parse becomes available:false, never an error',
-  'unavailable': 'agent_settings::models: a failed OpenRouter request becomes available:false, never an error',
   // runtime bindings.rs (SB-118): read by the background pass, uninstall and `project bindings` (CLI) only.
   'Claude Code bindings could not be read. Restore the private file before continuing.': 'background and CLI only',
   // runtime bindings.rs unbind_all(): surfaces under `failures` in `switchboard uninstall`

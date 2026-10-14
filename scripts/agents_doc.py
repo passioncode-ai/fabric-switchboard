@@ -44,7 +44,7 @@ def render(catalog):
         '',
         '**Recommended OpenRouter models:** ' + ', '.join(f"[`{m['id']}`]({m['url']})" for m in catalog.get('openrouter_recommended', [])) + f". {catalog.get('openrouter_recommended_note', '')}. The model picker shows them first, then every OpenRouter model that can call tools (`switchboard agents models`).",
         '',
-        '**Switching.** ' + ', '.join(f'`{i}`' for i in SWITCHABLE) + ' can take over a workflow (`switchboard continue`, fallback chains). Each is **Enabled** or **Disabled** for switching and one may be the machine\'s **default agent** (`switchboard agents status | enable | disable | default`, or the Agents page); every other agent here uses the tools only.',
+        '**Taking over work.** ' + ', '.join(f'`{i}`' for i in SWITCHABLE) + ' can take over a workflow (`switchboard continue`, fallback chains). Each is **Enabled** or **Disabled** for taking over work (account switching is not affected), and one may be the machine\'s **default agent** (`switchboard agents status | enable | disable | default`, or the Agents page); every other agent here uses the tools only.',
         '',
         '**Accounts.** A subscription sign-in (Claude.ai, a Claude setup token, ChatGPT) is for the provider\'s own client — Claude Code or Codex — by the providers\' terms. Other agents get their own proxy key (`switchboard agents key`, derived from the session capability, never stored in their config), and the proxy serves that key only from **API-key accounts**; a pool whose selected account is a subscription sign-in answers 403. Projects still apply: a project\'s account starts only inside its folders.',
         '',

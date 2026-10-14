@@ -398,7 +398,7 @@ fn agents_are_enabled_disabled_and_made_default_offline() {
     assert_eq!(off["default"], serde_json::Value::Null);
     let refused = run(&["agents", "default", "opencode"]);
     assert_eq!(refused.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("disabled for switching"));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("disabled for taking over work"));
     data(&["agents", "enable", "opencode"]);
     assert_eq!(
         data(&["agents", "default", "opencode"])["default"],

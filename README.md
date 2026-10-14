@@ -26,7 +26,7 @@ and Linux (x64 and ARM), built by
 | See when another account is needed | Reported usage, reset countdowns and explicit unknown or expired states |
 | Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
 | Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |
-| Configure other coding agents | Hermes model/provider settings and OpenRouter launch for supported agents |
+| Choose and configure coding agents | See which agents are installed, which take over work and the default one; OpenCode and Hermes continue workflows on an OpenRouter key; pick the model from OpenRouter's list |
 | Work from your terminal or agent | `switchboard` CLI, MCP tools and `launch --in-place` |
 
 Saved secrets use macOS Keychain, Windows DPAPI or the Linux Secret Service (GNOME Keyring,

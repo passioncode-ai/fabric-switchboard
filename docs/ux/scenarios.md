@@ -64,7 +64,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-054 | Take a workflow hand-over in a console | draft |
 | SCN-055 | Add a project's new folder when Switchboard suggests it | draft |
 | SCN-056 | Work in a project's folder on the project's accounts | draft |
-| SCN-057 | See which coding agents are installed and add them to switching | draft |
+| SCN-057 | See which coding agents are installed and choose which take over work | draft |
 | SCN-058 | Choose the default agent | draft |
 | SCN-059 | Pick an OpenRouter model, starting from the recommended ones | draft |
 | SCN-060 | A workflow continues in OpenCode on the OpenRouter key | draft |
@@ -537,7 +537,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** The switchboard CLI is on PATH or bundled in the macOS app.
 **Entry point:** Agents in navigation.
 **Steps:**
-1. Open Agents → what agents can do, and the CLI location or “not found”.
+1. Open Agents → *Connect an agent* (below the installed agents and the OpenRouter key) shows what agents can do through the tools, and the CLI location or “not found”.
 2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
 3. Copy the Claude Code, Codex or Claude Code plugin command and run it in a terminal.
 **Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3).
@@ -737,14 +737,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** Use Hermes, Kilo Code, Cline, Goose, OpenCode or another popular agent with Switchboard's tools and accounts, not only Claude Code and Codex.
 **Preconditions:** the agent is installed; for model requests through Switchboard, an API-key account selected in the chosen pool.
-**Entry point:** Agents → Other agents → Set up; CLI `switchboard agents`.
+**Entry point:** Agents → Installed → Set up on the agent's row (since 0.6.31, SB-120; before, a grid of every catalog agent); CLI `switchboard agents`.
 **Steps:**
-1. Agents → Other agents lists 30 agents in three groups (Launch from Switchboard, Through Switchboard, Tools only) with their OpenRouter rank.
+1. Agents → *Installed* lists the agents found on this computer (SCN-057); *Available to install* lists the rest with their install commands. Each agent's level (launch, through Switchboard, tools only) is in [AGENT-SUPPORT.md](../AGENT-SUPPORT.md).
 2. Set up on an agent → choose the pool → the dialog shows the command that registers the tools, the endpoints, the key command (`switchboard agents key`) and, for launchable agents, Launch in folder.
 3. Launch → the agent opens in Terminal in the folder, on the pool's API-key account; Switchboard switches accounts for it.
 **Alt paths:** The pool's selected account is a subscription sign-in → “This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.” A project's account outside its folders, or a foreign account inside them, is refused as for any launch. Tools-only agents have no endpoint step.
 **Expected result:** every listed agent gets Switchboard's tools; the ones that accept an endpoint use Switchboard's accounts within the providers' terms.
-**UI elements:** Other agents section, Set up dialog, copyable commands.
+**UI elements:** Installed rows, Set up dialog, copyable commands.
 **States covered:** each level, pool chosen, launch refused (subscription, project), MCP-only.
 **Errors & recovery:** refusals name the fix; nothing is written to the agent's config by Switchboard.
 **Status:** draft
@@ -780,12 +780,12 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** An agent's long task (an Observatory workflow) stops because its account hit its limit; another account picks it up from the last checkpoint — of the same provider, or of the other one (Claude Code ↔ Codex, 0.6.7, SB-70) — without redoing finished steps and without the person copying context.
 **Preconditions:** Project Observatory installed; the workflow open, its executor silent for two minutes; every key it declares in the Observatory vault; another enabled Claude Code or Codex account; the desktop app or `switchboard serve` running.
-**Entry point:** CLI `switchboard continue <wf> --account <id> --dir <checkout>` (a desktop entry and an MCP tool come later).
+**Entry point:** CLI `switchboard continue <wf> --account <id> --dir <checkout>`; without `--account`, the default agent (SCN-058) — on whichever of its accounts has room, or on the OpenRouter key for Hermes and OpenCode (a desktop entry and an MCP tool come later).
 **Steps:**
 1. `project-observatory full workflow list` names the stalled workflow → run `switchboard continue` with it, the account and the checkout.
 2. Switchboard reads the workflow and offers it to the account (reason `limit`) → prints the handoff id and until when it is offered.
 3. Terminal opens the account's session in the checkout → its first message tells it to accept the handoff, continue from the checkpoint in the acceptance answer and obey its constraints → it does, and writes checkpoints as it goes. Across providers (a Claude Code workflow on a Codex account, or back) the same steps run; the first message also says the work comes from another agent and that the checkpoint is the whole context (`a_workflow_moves_to_another_provider_with_its_context`, `the_prompt_of_a_cross_provider_handoff_names_the_previous_agent_safely`).
-**Alt paths:** the executor wrote less than two minutes ago → Observatory's refusal (“…without its lease token a handoff waits until it has been silent for 120 s”), nothing launched; a closed workflow, no checkpoint, a waiting handoff, a key not in the vault (named), a workflow naming no executor, the same account, a folder outside the checkouts → refused before any offer; the session fails to start after the offer → the handoff id and its deadline, the offer lapses on its own.
+**Alt paths:** the executor wrote less than two minutes ago → Observatory's refusal (“…without its lease token a handoff waits until it has been silent for 120 s”), nothing launched; a closed workflow, no checkpoint, a waiting handoff, a key not in the vault (named), a workflow naming no executor, the same account, a folder outside the checkouts → refused before any offer; the session fails to start after the offer → the handoff id and its deadline, the offer lapses on its own; no `--account` and the default is *Auto* → “Name the account or agent to continue on (--account), or choose a default agent on the Agents page.”; the default agent has no account with room → “The default agent has no account that can take this workflow now. …”; the account's agent is disabled for taking over work on the Agents page → “This agent is disabled for taking over work. …” (SB-120).
 **Expected result:** the work continues on the new account from where it stopped; the old session, if it writes again, is refused by Observatory (`LeaseLost`) and its step is kept for review.
 **UI elements:** CLI output (`workflow`, `handoff`, `offeredUntil`); the launched Terminal session.
 **States covered:** ready, refused before the offer (each reason), refused by the engine, offered and launched, offered and launch failed.
@@ -807,7 +807,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. For one project or one task, `switchboard chain set --scope project:<pool>|workflow:<wf_id> <agent>[@account|#key] …` → `chain list --workflow <wf_id>` shows that chain under “applies”.
 3. `switchboard chain clear --scope …` → the next wider chain applies again; with none set, nothing applies.
 **Alt paths:** an agent that loads no MCP server or takes no prompt without a person (Aider) → “aider cannot take over a workflow …”, nothing saved; another agent pinned to a Claude or ChatGPT sign-in → “Another agent runs on an API-key account or a paid key, never on a subscription sign-in.”; a key value instead of a vault name → refused; a removed account or project → the executors and chains that named it are dropped.
-**Expected result:** the order is stored and shown; when an executor hits its limit, the automatic fallback walks it (SCN-040, SB-73 — Claude Code, Codex, since SB-99 Kimi Code on saved Kimi accounts, since SB-107 Hermes on the saved OpenRouter key).
+**Expected result:** the order is stored and shown; when an executor hits its limit, the automatic fallback walks it (SCN-040, SB-73 — Claude Code, Codex, since SB-99 Kimi Code on saved Kimi accounts, since SB-107 Hermes and since SB-119 OpenCode on the saved OpenRouter key). An agent disabled on the Agents page stays in the chain and is skipped (SCN-057).
 **UI elements:** CLI output (`machine  claude-code → codex → …`, `applies: …`, presets); MCP results `{chains, effective, presets}`, `{chain}`.
 **States covered:** none set, machine only, project and task chains over it, cleared, pruned after a removal, refused (agent, pin, key, scope).
 **Errors & recovery:** every refusal names the fix and saves nothing; a wrong chain is replaced by setting it again or cleared.
@@ -827,14 +827,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. The executor hits its limit (Claude Code writes a limit marker, or a managed request is refused) → within a minute Switchboard reads the open workflows and finds it.
 2. Switchboard walks the chain: the first agent with a usable account (not the executor's, not limited, not needing a new sign-in) gets the workflow, offered with reason `limit` once the executor has been silent for two minutes.
 3. Terminal opens that agent's session in the workflow's checkout → it accepts the handoff and continues from the checkpoint (SCN-038).
-**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code in the chain → a saved Kimi Code account takes it (the pinned one, else the least used; never a limited, signed-out or busy one); Terminal runs its first turn as `kimi -p` without approvals, then `kimi -c` resumes it interactively (SB-99); the executor is Kimi Code on a saved account → handed on once Switchboard's background view (every 10 minutes while a chain is set) finds that account at 100 %; Hermes in the chain → Hermes Agent takes it on the saved OpenRouter key, on the model the person's Hermes runs on OpenRouter, else the key's default, the handoff as its first turn in an interactive session listed under Sessions as *Hermes Agent* with its model (SB-107; passed over while Hermes, the key or the `switchboard` command is missing, and refused before the offer — the chain moves on — when neither model is set); a step pinned to a paid key, or Kimi Code on a paid key → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes.
+**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code in the chain → a saved Kimi Code account takes it (the pinned one, else the least used; never a limited, signed-out or busy one); Terminal runs its first turn as `kimi -p` without approvals, then `kimi -c` resumes it interactively (SB-99); the executor is Kimi Code on a saved account → handed on once Switchboard's background view (every 10 minutes while a chain is set) finds that account at 100 %; Hermes in the chain → Hermes Agent takes it on the saved OpenRouter key, on the model the person's Hermes runs on OpenRouter, else the key's default, the handoff as its first turn in an interactive session listed under Sessions as *Hermes Agent* with its model (SB-107; passed over while Hermes, the key or the `switchboard` command is missing, and refused before the offer — the chain moves on — when neither model is set); OpenCode in the chain → OpenCode takes it on the saved OpenRouter key and its default model, the handoff as its first message (SCN-060, SB-119; passed over while OpenCode, the key, the model or the `switchboard` command is missing); an agent disabled for taking over work on the Agents page → skipped as `agent_disabled` before anything else is weighed (SB-120); agents-settings.json unreadable → nothing is handed over in that pass (`agent_settings_unreadable` in the log); a step pinned to a paid key, or Kimi Code on a paid key → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes.
 **Expected result:** the task continues on another agent from where it stopped; the old session is left alone and, if it writes again, Observatory refuses it (`LeaseLost`).
 **UI elements:** the launched Terminal session; log event `fallback` and the store event `fallback` (Activity).
-**States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account).
+**States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account, agent disabled).
 **Errors & recovery:** every outcome is logged with a fixed code; a lapsed offer is retried after the window or by hand with `switchboard continue`.
 **Status:** draft
 **Meaning:** XA-01 decision D-1 (automatic), operator 2026-10-06.
-**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`); Kimi Code (SB-99): `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`, `a_kimi_executor_is_limited_only_by_its_named_saved_account`, `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`; Hermes (SB-107): `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`, `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`.
+**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`); Kimi Code (SB-99): `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`, `a_kimi_executor_is_limited_only_by_its_named_saved_account`, `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`; Hermes (SB-107): `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`, `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`; OpenCode and the disabled skip (SB-119/120): `an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first`, `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`.
 **Product:** unobserved
 **Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md)
 
@@ -991,14 +991,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** Know which model and provider the ordinary Hermes runs on, and change them without editing its config by hand.
 **Preconditions:** Hermes Agent installed.
-**Entry point:** Agents → *Hermes model and provider* · `switchboard agents hermes` · MCP `switchboard_hermes_status`.
+**Entry point:** Agents → Installed → the Hermes Agent row (since 0.6.31; before, a panel of its own) · `switchboard agents hermes` · MCP `switchboard_hermes_status`.
 **Steps:**
-1. Open Agents → the panel reads “Model: deepseek/deepseek-v4-pro-0813”, “Provider: openrouter” and the endpoint.
-2. *Change*, pick a provider from the list and/or type a model, *Save* → Hermes's own `hermes config set` runs; the panel shows the new values: “Hermes settings saved.”
-**Alt paths:** Hermes not installed → the panel says so and offers nothing; Hermes does not answer → “Hermes did not answer. Run hermes config check, then try again.”; a malformed provider or model → refused before Hermes runs; a home with no model section → “not set”.
+1. Open Agents → the Hermes Agent row reads “Model: deepseek/deepseek-v4-pro-0813 · Provider: openrouter”.
+2. *Details* → *Change Hermes's model*, pick a provider from the list and/or type a model, *Save* → Hermes's own `hermes config set` runs; the panel shows the new values: “Hermes settings saved.”
+**Alt paths:** Hermes not installed → it has no row under Installed, only its install command under Available; Hermes does not answer → “Hermes did not answer. Run hermes config check, then try again.”; a malformed provider or model → refused before Hermes runs; a home with no model section → “not set”.
 **Expected result:** only the provider and default model change, in Hermes's own config and format; no key is read, shown or set; sessions already running keep theirs.
-**UI elements:** the panel (model, provider, endpoint, *Change*, *Refresh*), the change dialog (provider list, model field).
-**States covered:** reading, read failed (*Retry*), not installed, not configured, configured, Hermes error, saved.
+**UI elements:** the Hermes row (model, provider, *Details* → *Change Hermes's model*), the change dialog (provider list, model field). The endpoint is in `switchboard agents hermes` and the MCP status.
+**States covered:** reading, read failed (shown in the row), not installed, not configured, configured, Hermes error, saved.
 **Errors & recovery:** every refusal names the fix; a new provider needs its key inside Hermes (the panel says so).
 **Status:** draft
 **Meaning:** Hermes's model and provider visible and changeable from Switchboard (operator request 2026-10-07, XA-02, SB-80).
@@ -1174,83 +1174,84 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-118 packet
 
-## SCN-057 — See which coding agents are installed and add them to switching
+## SCN-057 — See which coding agents are installed and choose which take over work
 **Persona:** P-01
-**Goal:** Know at a glance which coding agents this computer has, and decide which of them Switchboard may hand work to when an account runs out.
+**Goal:** Know at a glance which coding agents this computer has, and decide which of them Switchboard may hand a workflow to when its account runs out.
 **Preconditions:** none.
-**Entry point:** Agents.
+**Entry point:** Agents (the agents are looked up when the page opens and on *Refresh*, never in the background).
 **Steps:**
-1. Open Agents → **Installed · N detected** lists every agent found on this computer: its name, the command Switchboard runs, **Enabled / Disabled** for switching, the default mark or **Set default**, and a link to its documentation.
-2. Press **Disabled** on an agent → it no longer stands in fallback chains or takes `switchboard continue`; the row says so.
-3. Open a row → how Switchboard reaches it (its tools via `switchboard mcp`, its key and model), with copyable commands.
-4. **Available to install · N** lists the agents not found, each with its install command and a copy button; after installing one, **Refresh** moves it up.
-**Alt paths:** An agent that cannot take over a workflow (no MCP or no first-prompt mode) shows *Tools only* instead of Enabled/Disabled and cannot be the default. No agent installed beyond Claude Code and Codex → the list shows those two and the install list.
-**Expected result:** the operator sees the real set of agents and chooses which take part in switching.
-**UI elements:** Installed list, segmented Enabled/Disabled, Set default, docs link, row disclosure, Available list, Refresh.
-**States covered:** detected, not detected, enabled, disabled, tools only, refreshing.
-**Errors & recovery:** a save that fails keeps the previous state and names the cause.
+1. Open Agents → **Installed · N detected** lists every agent found on this computer: agents that can take over work first (Claude Code, Codex, Kimi Code, Hermes, OpenCode), then the tools-only ones. Each row shows its name, the command Switchboard runs (with the OpenRouter model for an OpenRouter agent), **Enabled / Disabled**, **✓ Default** or **Set default**, and **Set up**.
+2. Press **Disabled** on an agent → “Kimi Code CLI no longer takes over work.”; the row dims and says *Disabled*; it is skipped in fallback chains and refused by `switchboard continue`. Account switching is not affected.
+3. **Details** → what Switchboard can do with it and its documentation link; for Hermes, *Change Hermes's model*. **Set up** opens its tools, endpoint and OpenRouter launch with copyable commands (SCN-036).
+4. **Available to install · N** → *Show all* lists the agents not found, each with its install command and **Copy**; after installing one, **Refresh** moves it to Installed.
+**Alt paths:** an agent that cannot take over a workflow shows *Tools only* instead of Enabled/Disabled and cannot be the default; disabling the default agent → “… no longer takes over work. The default agent is Auto again.”; the look-up fails → the error and *Retry*.
+**Expected result:** the operator sees the real set of agents and chooses which take over work.
+**UI elements:** Installed list, segmented Enabled/Disabled, Default mark or Set default, Set up, Details, Available list with Copy, Refresh.
+**States covered:** looking up, detected, not detected, enabled, disabled, tools only, default, look-up failed.
+**Errors & recovery:** a save that fails keeps the previous state and names the cause; an unreadable agents-settings.json is named with how to restore it.
 **Status:** draft
-**Meaning:** operator request 2026-10-14 (SB-120).
-**Coverage:** runtime agents tests; ui-logic; WebKit demo.
+**Meaning:** operator request 2026-10-14 (SB-120), after Orca's agent settings.
+**Coverage:** runtime `enabling_disabling_and_the_default_persist_and_are_checked`, `a_newer_file_still_reads_and_an_unusable_default_is_not_ready`; CLI `agents_are_enabled_disabled_and_made_default_offline`; MCP `switchboard_agents` in the handshake test; ui-logic `sortAgents`; WebKit demo [en](../evidence/design-0.6.31/agents-en-1280.png), [ru](../evidence/design-0.6.31/agents-changed-ru-1280.png), [phone width](../evidence/design-0.6.31/agents-en-390.png), [available](../evidence/design-0.6.31/agents-available-en-1280.png).
 **Product:** unobserved
-**Traces:** SB-119/120 packet
+**Traces:** SB-119/120 packet D-2, D-3, D-6
 
 ## SCN-058 — Choose the default agent
 **Persona:** P-01
-**Goal:** Say which agent continues work by default, for Switchboard and for Fabric.
-**Preconditions:** at least one installed agent that can continue.
+**Goal:** Say which agent takes over a workflow when none is named — for `switchboard continue` and for Fabric.
+**Preconditions:** at least one installed, enabled agent that can take over work.
 **Entry point:** Agents → Default agent.
 **Steps:**
-1. The chips show **Auto** and every installed, enabled agent that can continue; the chosen one is checked.
-2. Choose OpenCode → "OpenCode is the default agent." `switchboard continue` without `--agent` uses it; a new fallback chain starts with it; Fabric reads it.
-3. Choose **Auto** → continuation follows the chain or the account's own provider, as before.
-**Alt paths:** Disabling the default agent returns the default to Auto and says so.
-**Expected result:** one machine-wide default, visible in one place.
-**UI elements:** default-agent chips.
-**States covered:** auto, chosen, chosen then disabled.
-**Errors & recovery:** a save that fails keeps the previous default.
+1. The chips show **Auto** and every installed, enabled agent that can take over work, in chain order; the chosen one is checked.
+2. Choose OpenCode → “OpenCode is the default agent.” `switchboard continue` without `--account` hands work to OpenCode on the OpenRouter key; Fabric reads `default` from `switchboard agents status --json` unless a project sets its own.
+3. Choose Claude Code, Codex or Kimi Code → `continue` without `--account` takes whichever of that agent's accounts has room now (as a one-step chain would).
+4. Choose **Auto** → `continue` asks for an account again.
+**Alt paths:** disabling the default agent returns the default to Auto and says so; a saved default that is no longer installed stays shown as “OpenCode (not installed)”, checked, and `agents status` reports `default_ready: false`; fallback chains keep their own order — the default does not change them.
+**Expected result:** one machine-wide default, visible in one place, and honoured by `continue` and Fabric.
+**UI elements:** default-agent chips, the note under them.
+**States covered:** auto, chosen, chosen then disabled, chosen then uninstalled.
+**Errors & recovery:** a save that fails keeps the previous default; the default with no account that has room → “The default agent has no account that can take this workflow now. …”.
 **Status:** draft
 **Meaning:** operator request 2026-10-14 (SB-120).
-**Coverage:** runtime and CLI tests; WebKit demo.
+**Coverage:** CLI `agents_are_enabled_disabled_and_made_default_offline`; runtime `a_newer_file_still_reads_and_an_unusable_default_is_not_ready`; ui-logic `defaultAgentChoices`; WebKit demo [chosen](../evidence/design-0.6.31/agents-changed-en-1280.png).
 **Product:** unobserved
-**Traces:** SB-119/120 packet
+**Traces:** SB-119/120 packet D-4
 
 ## SCN-059 — Pick an OpenRouter model, starting from the recommended ones
 **Persona:** P-01
 **Goal:** Launch OpenRouter agents on a good model without hunting through hundreds of ids.
 **Preconditions:** an OpenRouter key saved, or about to be.
-**Entry point:** Agents → OpenRouter key → Change model (or an OpenRouter agent's row).
+**Entry point:** Agents → OpenRouter key → *Add OpenRouter key* or *Change model*; or Set up → launch on the OpenRouter key on an agent's row.
 **Steps:**
-1. The picker lists **Recommended** first: MiMo V2.6 Pro, Claude Haiku 5.5, Gemini 3.8 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash, each with its context and price.
-2. Below them, every OpenRouter model that accepts tools, searchable.
+1. The picker lists **Recommended models** first: MiMo V2.6 Pro, Claude Haiku 5.5, Gemini 3.8 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash, each with its maker, context and input price per 1M tokens; pressing one fills the model field.
+2. Typing in the model field suggests every OpenRouter model that can call tools (“N OpenRouter models that can call tools: type to search, or enter any id.”).
 3. Any id can be typed by hand.
-4. Save → "Agents launch on {model}."
-**Alt paths:** OpenRouter's list cannot be read (offline) → the recommended models and typing still work; the picker says the full list is unavailable.
+4. Save → “Agents launch on {model}.”
+**Alt paths:** OpenRouter's list cannot be read (offline, slow) → the recommended models and typing still work and the note says so; the next picker asks again.
 **Expected result:** the chosen model is used by every OpenRouter launch and continuation that names none.
-**UI elements:** model picker, recommended group, search, free entry.
-**States covered:** recommended, full list, offline, typed id.
-**Errors & recovery:** an id OpenRouter does not know is still saved, with a note that the first launch will tell.
+**UI elements:** recommended model cards, model field with suggestions, status note.
+**States covered:** reading, full list, list unavailable, recommended chosen, typed id.
+**Errors & recovery:** an id that is not `vendor/model` is refused with the expected shape; an id OpenRouter does not list is saved as typed and the first launch tells.
 **Status:** draft
 **Meaning:** operator request 2026-10-14 (SB-119).
-**Coverage:** runtime `openrouter_models` tests; ui-logic; WebKit demo.
+**Coverage:** runtime `the_five_recommended_models_lead_and_are_valid_ids`, `only_tool_capable_models_are_listed`; ui-logic `modelMeta`, `tokenCount`; WebKit demo [en](../evidence/design-0.6.31/model-picker-en-1280.png), [ru](../evidence/design-0.6.31/model-picker-ru-1280.png).
 **Product:** unobserved
-**Traces:** SB-119/120 packet
+**Traces:** SB-119/120 packet D-1
 
 ## SCN-060 — A workflow continues in OpenCode on the OpenRouter key
 **Persona:** P-01
-**Goal:** When subscriptions run out, the work goes on in OpenCode with a recommended model, without touching the person's own OpenCode setup.
-**Preconditions:** OpenCode installed and enabled; an OpenRouter key and model saved; an Observatory workflow.
-**Entry point:** a fallback chain step "OpenCode", or `switchboard continue <wf> --account opencode`.
+**Goal:** When subscriptions run out, the work goes on in OpenCode with a chosen model, without touching the person's own OpenCode setup.
+**Preconditions:** OpenCode installed and enabled; an OpenRouter key and model saved; an Observatory workflow; the desktop app or `switchboard serve` running.
+**Entry point:** a fallback chain step `opencode`; `switchboard continue <wf> --account opencode`; or `continue` without an account when OpenCode is the default agent.
 **Steps:**
-1. The workflow's account runs out → the chain offers the next step → OpenCode starts in the workflow's folder with the handoff as its first message and the chosen model.
-2. The session accepts the handoff through Observatory and carries on.
-**Alt paths:** OpenCode not installed or disabled → the step is skipped with its reason; no key or model → refused before any offer.
-**Expected result:** the work continues on OpenRouter; the person's OpenCode login and history stay as they were.
-**UI elements:** chain step, hand-over in Sessions.
-**States covered:** offered, launched, skipped, refused.
+1. The workflow's account runs out → the chain offers the next step → Terminal opens OpenCode in the workflow's folder with the handoff as its first message (`--prompt`) and the chosen model (`-m openrouter/<model>`).
+2. The session accepts the handoff through Observatory (its own configuration declares the server) and carries on; Sessions lists it as *OpenCode* with its model.
+**Alt paths:** OpenCode not installed, no key or no model → the step is passed over (`no_usable_account`), or `continue` refuses before any offer (“OpenCode is not installed. …”); OpenCode disabled → skipped as `agent_disabled`; OpenCode is the executor → not handed to itself; `--mode managed` → refused.
+**Expected result:** the work continues on OpenRouter; the person's OpenCode login, sessions and settings stay as they were — only `OPENCODE_CONFIG_CONTENT` for that session carries the key reference, the model and Observatory.
+**UI elements:** the Terminal session; the hand-over under Sessions.
+**States covered:** offered and launched, skipped, refused before the offer, launch failed after the offer.
 **Errors & recovery:** a launch that fails after the offer lets the offer lapse, as for Hermes.
 **Status:** draft
 **Meaning:** operator request 2026-10-14 (SB-119).
-**Coverage:** launch and fallback tests.
+**Coverage:** `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`, `an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first`. A live run with OpenCode 1.19 and a real key is the operator's.
 **Product:** unobserved
-**Traces:** SB-119/120 packet
+**Traces:** SB-119/120 packet D-5

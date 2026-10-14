@@ -323,7 +323,6 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .choice-chip { padding: var(--space-1) var(--space-3); min-height: 36px; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
 .choice-chip:hover:not(:disabled) { background: var(--panel-2); }
 .choice-chip.is-on { background: var(--accent-weak); border-color: var(--accent); }
-.agents-panel { max-width: 920px; }
 .agents-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .agents-head h2 { margin-bottom: 0; }
 .agents-head .button { margin-left: auto; }
@@ -335,9 +334,9 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .agent-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .agent-command { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
 .agent-controls { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
-.default-slot { display: inline-block; min-width: 92px; }
-.default-badge { min-width: 92px; text-align: center; color: var(--ink); background: var(--accent-weak); border-color: var(--accent); }
-.agent-controls .text-button { min-width: 92px; text-align: center; }
+.agent-controls .badge { white-space: nowrap; }
+.default-slot, .default-badge, .agent-controls .text-button { display: inline-flex; justify-content: center; width: 132px; box-sizing: border-box; }
+.default-badge { color: var(--ink); background: var(--accent-weak); border-color: var(--accent); }
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel-2); }
 .segment { border: 0; background: transparent; padding: var(--space-1) var(--space-3); min-height: 30px; border-radius: calc(var(--r-control) - 2px); color: var(--muted); font-size: var(--t-label); font-weight: 550; }
 .segment.is-on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }

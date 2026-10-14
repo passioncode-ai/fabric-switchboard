@@ -201,28 +201,32 @@ pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
         .unwrap_or_default();
     if let Some(home) = std::env::var_os("HOME") {
         let home = PathBuf::from(home);
-        // Where agents' own installers put their programs; the desktop app's PATH lacks them
-        // (SB-120: OpenCode's is ~/.opencode/bin, Kimi Code's ~/.kimi-code/bin).
         dirs.extend([
             home.join(".local/bin"),
             home.join(".cargo/bin"),
             home.join(".bun/bin"),
             home.join(".npm-global/bin"),
-            home.join(".opencode/bin"),
-            home.join(".kimi-code/bin"),
-            home.join(".hermes/bin"),
-            home.join(".deno/bin"),
-            home.join(".volta/bin"),
-            home.join("Library/pnpm"),
-            home.join(".yarn/bin"),
-            home.join(".local/share/mise/shims"),
-            home.join(".asdf/shims"),
         ]);
     }
     dirs.extend([
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ]);
+    // After Homebrew, so a program found before keeps being the one launched: where agents' own
+    // installers put theirs, which the desktop app's PATH lacks (SB-120: OpenCode's is
+    // ~/.opencode/bin, Kimi Code's ~/.kimi-code/bin). Version-manager shims (Volta, mise, asdf)
+    // are left out: they resolve to the manager, not the agent.
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.extend([
+            home.join(".opencode/bin"),
+            home.join(".kimi-code/bin"),
+            home.join(".hermes/bin"),
+            home.join(".deno/bin"),
+            home.join("Library/pnpm"),
+            home.join(".yarn/bin"),
+        ]);
+    }
     #[cfg(windows)]
     {
         if let Some(home) = std::env::var_os("USERPROFILE") {

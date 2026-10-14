@@ -258,7 +258,7 @@ pub enum Operation {
     },
     /// The project folders whose ordinary Claude Code sessions use the project's pool (SB-118).
     ProjectBindings,
-    /// Every catalog agent: installed or not, enabled for switching, default, command (SB-120).
+    /// Every catalog agent: installed or not, enabled for taking over work, default, command (SB-120).
     AgentsOverview,
     /// Takes an agent into switching, or out of it (SB-120).
     AgentEnable {
@@ -1987,17 +1987,26 @@ async fn execute(
                 launch::start_terminal
             };
             let runtime = needs_owner()?;
-            // SB-120: no account named → the machine's default agent, when it runs on its own key.
+            // SB-120: no account named → the machine's default agent: OpenCode and Hermes run on
+            // the OpenRouter key; Claude Code, Codex and Kimi Code on the account a one-step chain
+            // of that agent would choose now.
             let id = if id.is_empty() {
                 match agent_settings::read(root)?.default.as_deref() {
                     Some(hermes::HERMES_TARGET) => hermes::HERMES_TARGET.to_owned(),
                     Some(launch::OPENCODE_TARGET) => launch::OPENCODE_TARGET.to_owned(),
-                    _ => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
+                    Some(agent) => {
+                        agent_settings::usable(root, agent)?;
+                        let folder = working_directory
+                            .canonicalize()
+                            .map_err(|_| "Choose an existing project directory.")?;
+                        fallback::account_for_default(runtime, agent, &folder, monitor::now())?
+                    }
+                    None => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
                 }
             } else {
                 id
             };
-            // SB-120: an agent the person disabled for switching takes no workflow.
+            // SB-120: an agent the person disabled for taking over work takes no workflow.
             let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
                 Some(id.clone())
             } else if store.kimi_account(&id).is_ok() {
@@ -2010,8 +2019,10 @@ async fn execute(
                     .find(|a| a.id == id)
                     .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
             };
-            if agent.is_some_and(|a| agent_settings::disabled(root, &a)) {
-                return Err(agent_settings::DISABLED.into());
+            if let Some(a) = agent {
+                if agent_settings::disabled(root, &a)? {
+                    return Err(agent_settings::DISABLED.into());
+                }
             }
             // Everything that can refuse runs before the offer, so a refusal leaves the workflow
             // exactly as it was; after the offer, a failed launch leaves it to lapse.

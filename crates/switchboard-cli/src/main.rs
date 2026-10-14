@@ -95,7 +95,7 @@ enum Command {
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account —
     /// of the same provider, or of another agent (Claude Code, Codex, a saved Kimi Code account,
-    /// or Hermes on the saved OpenRouter key) with the same context: reads the workflow, offers
+    /// or Hermes or OpenCode on the saved OpenRouter key) with the same context: reads the workflow, offers
     /// it (reason `limit`) and launches the account's session, which accepts the handoff itself.
     /// Requires a running desktop app or serve.
     Continue {
@@ -103,7 +103,8 @@ enum Command {
         workflow_id: String,
         /// The account that continues it: a saved account's or Kimi Code account's id, `hermes`
         /// for Hermes Agent or `opencode` for OpenCode on the saved OpenRouter key and its model.
-        /// Without it, the default agent (`switchboard agents default`) when it runs on its own key.
+        /// Without it, the default agent (`switchboard agents default`): on the OpenRouter key, or on
+        /// whichever of its accounts has room now.
         #[arg(long, default_value = "")]
         account: String,
         /// `isolated` or `managed`, as for `launch`.
@@ -569,7 +570,7 @@ fn chain_executor(text: &str) -> switchboard_core::Executor {
 enum AgentsCommand {
     /// Every agent in the catalog with what it supports: mcp, proxy or launch.
     List,
-    /// Which agents are installed here, which take part in switching, the default agent and the
+    /// Which agents are installed here, which take over work, the default agent and the
     /// command Switchboard runs for each (SB-120).
     Status,
     /// Let Switchboard hand work to this agent (fallback chains, `continue`).
@@ -577,7 +578,7 @@ enum AgentsCommand {
         /// The agent's catalog id, for example `opencode`.
         agent: String,
     },
-    /// Keep this agent out of switching: chains skip it and `continue` refuses it.
+    /// Keep work away from this agent: chains skip it and `continue` refuses it.
     Disable {
         /// The agent's catalog id.
         agent: String,

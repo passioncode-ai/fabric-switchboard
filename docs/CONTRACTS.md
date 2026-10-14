@@ -76,7 +76,7 @@ Operator request 2026-10-05: support the popular coding agents (OpenRouter's ran
 - **Agent capability.** The proxy accepts a second capability, `agent_token(session token)` = SHA-256 of `switchboard-agents:<token>` in hex: derived, so it survives a restart with the session token and is never stored; knowing it does not reveal the session token. It is accepted as `Authorization: Bearer` or `x-api-key`; the session token only as a bearer. With the agent capability the proxy serves **API-key accounts only**: a subscription sign-in selected in the pool answers 403 `AGENT_SUBSCRIPTION_REFUSED` before any provider call (`agents_reach_api_key_accounts_and_never_a_subscription_sign_in`).
 - **Attribution (fabric-workspace roadmap RM-16, OpenRouter app attribution, 2026-10-05).** Traffic Switchboard forwards for someone else's agent keeps that agent's attribution: the proxy relays only the `REQUEST_HEADERS` allowlist, which has no `HTTP-Referer` or `X-OpenRouter-Title`, and adds neither. Switchboard makes no model call of its own; if it ever does, it attributes as `https://passioncode.ai/switchboard/`.
 - **Chat Completions.** `POST /codex/<pool>/v1/chat/completions` relays to OpenAI `/v1/chat/completions` for an API-key account; a ChatGPT sign-in answers 404 (`chat_completions_reach_openai_with_an_api_key_only`).
-- Operations `AgentCatalog`, `AgentConnect { agent, pool }` (MCP registration, endpoints with the right path suffix, `key_command` — never a key value: `connect_names_the_key_command_and_never_a_key`), `AgentKey`, `LaunchAgent { agent, pool, working_directory }`: a `launch` agent gets its base and key variables; a `proxy` agent with a binary starts with the provider it was given by `connect`; both need the pool's selected Claude account to be an API key, and `project_allows` holds (`a_third_party_agent_never_starts_on_a_subscription_account`). CLI `switchboard agents list|connect|key|launch`; desktop *Agents → Other agents*.
+- Operations `AgentCatalog`, `AgentConnect { agent, pool }` (MCP registration, endpoints with the right path suffix, `key_command` — never a key value: `connect_names_the_key_command_and_never_a_key`), `AgentKey`, `LaunchAgent { agent, pool, working_directory }`: a `launch` agent gets its base and key variables; a `proxy` agent with a binary starts with the provider it was given by `connect`; both need the pool's selected Claude account to be an API key, and `project_allows` holds (`a_third_party_agent_never_starts_on_a_subscription_account`). CLI `switchboard agents list|connect|key|launch`; desktop *Agents → Installed → Set up* (since 0.6.31; before, *Agents → Other agents*).
 
 ## Workflow continuation (SB-52, 2026-10-05)
 
@@ -568,31 +568,42 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
 `switchboard agents status|enable|disable|default|models`, MCP `switchboard_agents` (read), Tauri
 `agents_overview`, `agent_enable`, `agent_default`, `openrouter_models`.
 
-- **Installed** is `launch::find_program(binary)` for the catalog agent: `PATH`, the per-user
-  install folders and Homebrew. It is computed per call (the Agents page opening, *Refresh*,
+- **Installed** is `launch::find_program(binary)` for the catalog agent: `PATH`, `~/.local/bin`,
+  `~/.cargo/bin`, `~/.bun/bin`, `~/.npm-global/bin`, Homebrew, then — after Homebrew, so a
+  program found before keeps being launched — `~/.opencode/bin`, `~/.kimi-code/bin`,
+  `~/.hermes/bin`, `~/.deno/bin`, `~/Library/pnpm`, `~/.yarn/bin`; version-manager shims are not
+  searched (they resolve to the manager). On Windows a program under `%SystemRoot%` is never an
+  agent (`cmd` is Command Code's name and cmd.exe's). It is computed per call (the Agents page opening, *Refresh*,
   `agents status`), never stored and never on a timer.
 - **Switchable** agents are `SWITCHABLE` = `claude-code`, `codex`, `kimi-code`, `hermes`,
-  `opencode`; the others are tools-only rows. `<data>/agents-settings.json` (0600, ≤ 64 KiB,
-  `deny_unknown_fields`) holds `{default: id | null, disabled: [id]}`; absent means *Auto* and
-  nothing disabled. It is a setting file in encrypted backups and in `switchboard uninstall`'s
+  `opencode`; the others are tools-only rows. `<data>/agents-settings.json` (0600, ≤ 4 KiB — the
+  backup's per-setting limit) holds `{default: id | null, disabled: [id]}`; unknown fields are
+  ignored, so a newer file still reads; absent means *Auto* and nothing disabled. It is a setting file in encrypted backups and in `switchboard uninstall`'s
   owned list. Unreadable → `Agent settings could not be read…` and nothing is changed.
 - `AgentEnable{agent, enabled}`: any catalog id (`No such agent in the catalog…` otherwise);
   disabling the default agent sets `default` to null. `AgentDefault{agent: Some(id)}` requires the
   agent to be switchable (`…cannot be the default.`), not disabled (`This agent is disabled for
   switching…`) and installed (`This agent is not installed…`); `None` is *Auto*.
-- `AgentsOverview` answers `{default, installed, agents: [{id, name, maker, url, install,
+- `AgentsOverview` answers `{schema: 1, default, default_ready, installed, agents: [{id, name, maker, url, install,
   installed, switchable, enabled, disabled, default, openrouter, mcp, command}],
   recommended_models}`. `enabled` is `switchable && installed && !disabled`; `command` is the
   program and the arguments of an OpenRouter launch with the key's default model, never a key or
-  an environment value.
-- **Fallback chains** skip a disabled agent first, as `{agent, skipped: agent_disabled}`, before
+  an environment value. `default_ready` says whether the saved default is installed, enabled and
+  able to continue now. Fabric reads this answer; `schema` changes only when a field changes
+  meaning or goes.
+- **Fallback chains** read the settings once per pass; unreadable settings hand nothing over in
+  that pass (`agent_settings_unreadable`), never "nothing disabled". They skip a disabled agent first, as `{agent, skipped: agent_disabled}`, before
   pins, keys or accounts are weighed. An `opencode` step runs like a `hermes` one (SB-107): on the
   saved OpenRouter key and its default model when OpenCode is installed, the key and model are
-  saved and the `switchboard` command exists (`opencode_continuation_ready`); never when the
+  saved and the `switchboard` command exists (`opencode_continuation_ready`, read only while a chain
+  names the agent, like Hermes's); never when the
   executor is OpenCode itself; a step pinning an account or a key is `agent_not_automatic_yet`.
-- **`Continue`**: an empty account id resolves to the default agent when it is `hermes` or
-  `opencode`, else `Name the account or agent to continue on…`; an account or agent that is
-  disabled is refused before the offer. `opencode` with `--mode managed` is refused like Hermes.
+- **`Continue`**: an empty account id resolves to the default agent: `hermes` and `opencode` as
+  themselves; `claude-code`, `codex` and `kimi-code` to the account a one-step chain of that agent
+  would choose now (`fallback::account_for_default`: not limited, not needing a new sign-in,
+  allowed in the folder — else `The default agent has no account that can take this workflow
+  now…`); *Auto* → `Name the account or agent to continue on…`. An account or agent that is
+  disabled is refused before the offer; unreadable settings refuse too. `opencode` with `--mode managed` is refused like Hermes.
   The OpenCode session lives in `runtimes/opencode-continue/<wf>/` (0700; finished ones pruned
   after a week like Hermes's), runs `opencode --prompt <handoff> -m openrouter/<model>` with
   `OPENCODE_CONFIG_CONTENT` = `{provider: {openrouter: {options: {apiKey:
@@ -604,7 +615,7 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
   `owner agent:opencode` and a UUID `sessionId`; the session is listed under Sessions with its
   model as the label.
 - **`OpenrouterModels`** (`agents models`, the Tauri picker): `GET
-  https://openrouter.ai/api/v1/models` (public, no key, 10 s timeout, body ≤ 8 MiB), kept 6 hours
+  https://openrouter.ai/api/v1/models` (public, no key, 10 s timeout, body ≤ 8 MiB, read by chunks and dropped once over), kept 6 hours
   in memory, filtered to models whose `supported_parameters` contain `tools` and whose id passes
   `model_valid`, sorted by id: `{recommended, models: [{id, name, context, prompt, completion}],
   available}`. Any failure is `available: false` with the recommended models, never an error.

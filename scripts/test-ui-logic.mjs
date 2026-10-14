@@ -532,4 +532,24 @@ check(() => {
   }
 });
 
+// SB-120: agents that take over work come first, in chain order; a stale default stays visible.
+check(() => {
+  const rows = [
+    { id: 'hermes', name: 'Hermes Agent', enabled: true, switchable: true, installed: true },
+    { id: 'kilo', name: 'Kilo Code', enabled: false, switchable: false, installed: true },
+    { id: 'claude-code', name: 'Claude Code', enabled: true, switchable: true, installed: true },
+    { id: 'goose', name: 'Goose', enabled: false, switchable: false, installed: true },
+    { id: 'kimi-code', name: 'Kimi Code', enabled: false, switchable: true, installed: true },
+    { id: 'opencode', name: 'OpenCode', enabled: false, switchable: true, installed: false },
+  ];
+  assert.deepEqual(logic.sortAgents(rows).map((r) => r.id), ['claude-code', 'kimi-code', 'hermes', 'opencode', 'kilo', 'goose']);
+  assert.deepEqual(logic.defaultAgentChoices(rows, null).map((c) => [c.id, c.on]), [[null, true], ['claude-code', false], ['hermes', false]]);
+  assert.deepEqual(logic.defaultAgentChoices(rows, 'opencode').map((c) => [c.id, c.label, c.on]), [[null, 'Auto', false], ['claude-code', 'Claude Code', false], ['hermes', 'Hermes Agent', false], ['opencode', 'OpenCode (not installed)', true]]);
+  assert.equal(logic.defaultAgentChoices(rows, 'kimi-code').find((c) => c.on).label, 'Kimi Code (disabled)');
+  assert.equal(logic.tokenCount(1_050_000), '1.05M');
+  assert.equal(logic.tokenCount(10_000_000), '10M');
+  assert.equal(logic.tokenCount(1_000_000), '1M');
+  assert.equal(logic.tokenCount(200_000), '200K');
+  assert.equal(logic.modelMeta({ maker: 'DeepSeek', context: 1_048_576, input_usd_per_million: 0.04 }), 'DeepSeek · 1.05M context · $0.04 per 1M input tokens');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
