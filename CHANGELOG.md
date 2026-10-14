@@ -31,6 +31,10 @@ automatic fallback does with *Open hand-overs in Fabric* on (SB-108).
 A second `switchboard serve --data-dir` no longer writes into the installed app's log; it logs in
 its own data folder (SB-112).
 
+A project whose folder was deleted from disk (a removed worktree) can be saved again: the vanished
+folder is dropped instead of refusing every change to the project — renaming it, adding folders or
+moving accounts into its pool (SB-128).
+
 ### Added
 
 - **Launched sessions reach the Fabric project board** (SB-20). A managed or isolated session has a home of its

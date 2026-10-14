@@ -1829,6 +1829,7 @@ pub(crate) fn opencode_continuation_ready(store: &Store) -> bool {
 /// lacks is not swapped for another; Observatory's MCP server lets the session accept the
 /// handoff. Nothing of the person's OpenCode — `auth.json`, sessions, `opencode.json` — is
 /// written (OpenCode 1.19.0 provider.ts and config.ts, researched 2026-10-14).
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn opencode_config(model: &str, observatory: &crate::continuation::McpServer) -> String {
     let mut command = vec![Value::String(observatory.command.clone())];
     command.extend(observatory.args.iter().cloned().map(Value::String));
@@ -2680,6 +2681,11 @@ mod tests {
         .unwrap();
         assert!(none.claude_config.is_none() && none.codex_section.is_empty());
     }
+    /// An absolute program path on this OS: the board is carried only with an absolute command.
+    #[cfg(windows)]
+    const BOARD: &str = r"C:\Board\fabric-mcp.exe";
+    #[cfg(not(windows))]
+    const BOARD: &str = "/Applications/Board.app/bin/fabric-mcp";
     #[test]
     fn the_operators_fabric_board_reaches_a_launched_session_without_its_env() {
         // SB-20: a runtime or isolated home has its own scope, so the board the operator
@@ -2690,7 +2696,7 @@ mod tests {
         fs::write(
             user.join(".claude.json"),
             json!({"mcpServers": {
-                "fabric": {"type": "stdio", "command": "/Applications/Board.app/bin/fabric-mcp",
+                "fabric": {"type": "stdio", "command": BOARD,
                            "args": ["--runner", "claude-code"], "env": {"TOKEN": "never-copied"}},
                 "other": {"type": "stdio", "command": "/opt/other", "args": []}
             }})
@@ -2699,11 +2705,11 @@ mod tests {
         .unwrap();
         fs::write(
             user.join(".codex/config.toml"),
-            "[mcp_servers.fabric]\ncommand = \"/Applications/Board.app/bin/fabric-mcp\"\nargs = [\"--runner\", \"codex\"]\nenv = { TOKEN = \"never-copied\" }\n",
+            format!("[mcp_servers.fabric]\ncommand = '{BOARD}'\nargs = [\"--runner\", \"codex\"]\nenv = {{ TOKEN = \"never-copied\" }}\n"),
         )
         .unwrap();
         let claude = user_board_server(Provider::Claude, &user, None).unwrap();
-        assert_eq!(claude.command, "/Applications/Board.app/bin/fabric-mcp");
+        assert_eq!(claude.command, BOARD);
         assert_eq!(claude.args, ["--runner", "claude-code"]);
         let codex = user_board_server(Provider::Codex, &user, None).unwrap();
         assert_eq!(codex.args, ["--runner", "codex"]);
@@ -2711,7 +2717,7 @@ mod tests {
         fs::create_dir_all(off.join(".codex")).unwrap();
         fs::write(
             off.join(".codex/config.toml"),
-            "[mcp_servers.fabric]\ncommand = \"/Applications/Board.app/bin/fabric-mcp\"\nenabled = false\n",
+            format!("[mcp_servers.fabric]\ncommand = '{BOARD}'\nenabled = false\n"),
         )
         .unwrap();
         assert!(
@@ -2794,7 +2800,7 @@ mod tests {
         for entry in [
             json!({"type": "http", "url": "https://board.example/mcp"}),
             json!({"type": "stdio", "command": "fabric-mcp", "args": []}),
-            json!({"type": "stdio", "command": "/opt/fabric-mcp", "args": [1]}),
+            json!({"type": "stdio", "command": BOARD, "args": [1]}),
             json!({"type": "stdio", "args": []}),
         ] {
             fs::write(
@@ -2814,7 +2820,7 @@ mod tests {
         );
         fs::write(
             user.join(".claude.json"),
-            json!({"mcpServers": {"fabric": {"command": "/opt/fabric-mcp"}}}).to_string(),
+            json!({"mcpServers": {"fabric": {"command": BOARD}}}).to_string(),
         )
         .unwrap();
         assert_eq!(

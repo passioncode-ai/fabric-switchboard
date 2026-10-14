@@ -909,12 +909,16 @@ mod tests {
             record(root.path(), &s, &repos, &scratch, 1).unwrap(),
             Outcome::NotOurs { settled: true }
         );
+        #[cfg(unix)]
         assert!(transient(Path::new(
             "/private/tmp/claude-501/x/scratchpad/wt"
         )));
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
-        assert!(transient(&home.join(".cache/tool/clone")));
-        assert!(!transient(&home.join("DATA/app-2")));
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap();
+        assert!(transient(&home.join(".cache").join("tool").join("clone")));
+        assert!(!transient(&home.join("DATA").join("app-2")));
         // A question an older version left for a scratch folder is never offered or added.
         CHECK_TRANSIENT.with(|c| c.set(false));
         new(record(root.path(), &s, &repos, &scratch, 2).unwrap());

@@ -2402,6 +2402,18 @@ async fn execute(
             folders,
             account_ids,
         } => {
+            // A folder this project already holds that is gone from disk (a removed worktree) is
+            // dropped, not a refusal: otherwise no edit of the project — a moved account, a
+            // renamed project — could be saved again (SB-128, CALL-07).
+            let before = store.snapshot()?;
+            let held: Vec<String> = pool
+                .as_deref()
+                .and_then(|p| before.projects.iter().find(|x| x.pool == p))
+                .map(|x| x.folders.clone())
+                .unwrap_or_default();
+            let (gone, folders): (Vec<PathBuf>, Vec<PathBuf>) = folders
+                .into_iter()
+                .partition(|f| !f.exists() && held.iter().any(|h| Path::new(h) == f.as_path()));
             let folders = folders
                 .iter()
                 .map(|f| projects::project_dir(root, f))
@@ -2455,7 +2467,11 @@ async fn execute(
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
-            Ok(projects::project_view(&store.snapshot()?, &project))
+            let mut view = projects::project_view(&store.snapshot()?, &project);
+            if !gone.is_empty() {
+                view["dropped_missing"] = json!(gone);
+            }
+            Ok(view)
         }
         Operation::AgentsOverview => {
             let model = store
@@ -3494,6 +3510,49 @@ mod owner_tests {
         assert_eq!(resolved["project"]["pool"], "alpha");
         assert_eq!(resolved["project"]["accounts"][0]["id"], b.id.as_str());
         assert!(!resolved.to_string().contains("synthetic-b-token"));
+    }
+    #[tokio::test]
+    async fn a_project_still_saves_after_one_of_its_folders_is_deleted() {
+        // SB-128 / CALL-07: a removed worktree used to block every later edit of its project.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (a, b) = (work.join("a"), work.join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let save = |name: &str, folders: Vec<PathBuf>| Operation::SaveProject {
+            pool: Some("p".into()),
+            name: name.into(),
+            folders,
+            account_ids: vec![],
+        };
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "P".into(),
+                folders: vec![a.clone(), b.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(&b).unwrap();
+        let saved = runtime
+            .execute(save("P renamed", vec![a.clone(), b.clone()]))
+            .await
+            .unwrap();
+        assert_eq!(saved["name"], "P renamed");
+        assert_eq!(saved["folders"].as_array().unwrap().len(), 1);
+        assert_eq!(saved["dropped_missing"][0], json!(b));
+        // A missing folder that was never the project's is still refused.
+        let never = work.join("never");
+        assert_eq!(
+            runtime
+                .execute(save("P", vec![a.clone(), never]))
+                .await
+                .unwrap_err(),
+            "Choose an existing project folder."
+        );
     }
     #[tokio::test]
     async fn a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out() {

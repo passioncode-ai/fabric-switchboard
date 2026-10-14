@@ -102,6 +102,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 
 - **SB-117 (operator 2026-10-14; [packet](packets/sb-117-project-suggestions.md)).**
   - `Project.sources: [host/owner]`, lowercase, at most 16, omitted when empty; set by `Store::set_project_sources` (event `project`/`sources`) and kept across `save_project`.
+  - `SaveProject` (SB-128): a folder the project already holds that no longer exists on disk is dropped and listed in the answer's `dropped_missing`; any other missing folder is still refused (`Choose an existing project folder.`).
   - A project has no folder limit. All projects together hold at most 1024 folders (`Projects hold at most 1024 folders in all.`), which keeps the metadata worst case at 1 MiB.
   - Suggestions live in `<data>/project-suggestions.json`: 0600, at most 256 waiting and 2048 remembered rows `{folder, pool, reason: worktree|same_repository|ecosystem, repository, first_seen, state: pending|dismissed|added}` (`added`, SB-121: `first_seen` is when it was added; a row in `added` or `dismissed` is never added again). They are operational state: not backed up, and removed by uninstall.
   - Matching reads only git metadata: `.git`, `gitdir:`, `commondir`, and `[remote "origin"] url` normalized to `host/owner/repo`. The strongest match wins; a tie is no suggestion; a folder already in a project is never suggested.
