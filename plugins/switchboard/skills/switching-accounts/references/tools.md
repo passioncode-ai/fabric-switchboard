@@ -190,13 +190,13 @@ its own key inside Hermes, which this server never sets.
 
 ### `switchboard_agents` — (read)
 
-`{default, installed, agents: [...], recommended_models}`. `default` is the machine's default
+`{schema, revision, updated_at, default, default_ready, installed, agents: [...], recommended_models}`. `default` is the machine's default
 agent, `null` for *Auto*; Fabric uses it unless a project sets its own. Each agent row: `id`,
 `name`, `maker`, `url`, `install` (its install command), `installed` (found on this computer
 now), `switchable` (Switchboard can hand it a workflow: Claude Code, Codex, Kimi Code, Hermes,
 OpenCode), `enabled` (switchable, installed and not disabled by the operator), `disabled`,
-`default`, `openrouter` and `mcp` (what it supports) and `command` (the program Switchboard runs
-for it, never a key). `recommended_models`: `[{id, name, maker, context,
+`default`, `openrouter` and `mcp` (what it supports), `path` (the program found) and `command`
+/ `argv` (what Switchboard runs for it, never a key). `revision` changes whenever the answer does. `recommended_models`: `[{id, name, maker, context,
 input_usd_per_million, url}]`. Enabling, disabling and the default are the operator's (the
 Agents page, or `switchboard agents enable|disable|default`).
 

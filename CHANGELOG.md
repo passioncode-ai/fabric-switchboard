@@ -31,6 +31,10 @@ that already names `opencode` now hands work to it instead of skipping it.
 `qwen/qwen3.8-flash`, `deepseek/deepseek-v4.1-flash` — then search every OpenRouter model that can
 call tools (`switchboard agents models`); any id typed by hand still works.
 
+`switchboard --json agents status` (and MCP `switchboard_agents`) carries what another app needs
+to read it: `schema`, a `revision` to cache by, `updated_at`, `default_ready`, and per agent its
+`path` and `argv`.
+
 Agents installed with their own installers (`~/.opencode/bin`, `~/.kimi-code/bin`, Bun, Deno,
 Volta, pnpm, Yarn, mise or asdf) are now found by the desktop app too.
 
