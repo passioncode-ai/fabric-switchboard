@@ -87,6 +87,10 @@ export interface Adapter {
   openrouterRemove(): Promise<unknown>;
   /** The ordinary Hermes's model and provider (SB-80). */
   hermesModel(): Promise<HermesModel>;
+  agentsOverview(): Promise<AgentsOverview>;
+  agentEnable(agent: string, enabled: boolean): Promise<unknown>;
+  agentDefault(agent: string | null): Promise<unknown>;
+  openrouterModels(): Promise<OpenrouterModels>;
   hermesSetModel(provider: string | null, model: string | null): Promise<HermesModel>;
   /** Kimi Code subscription accounts (SB-81) with plan usage asked of Kimi, and the ordinary `kimi`. */
   kimiAccounts(): Promise<KimiAccounts>;
@@ -123,6 +127,13 @@ export interface KimiAccount { id: string; label: string; region: KimiRegion; ad
 /** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
 export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
 export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
+/** SB-120: one catalog agent as this computer has it. */
+export interface AgentRow { id: string; name: string; maker?: string | null; url: string; install?: string | null; installed: boolean; switchable: boolean; enabled: boolean; disabled: boolean; default: boolean; openrouter: boolean; mcp: boolean; command: string }
+export interface RecommendedModel { id: string; name: string; maker: string; context: number; input_usd_per_million: number; url: string }
+export interface AgentsOverview { default: string | null; installed: number; agents: AgentRow[]; recommended_models: RecommendedModel[] }
+/** SB-119: OpenRouter's tool-capable models; `available: false` when its list could not be read. */
+export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }
+export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }

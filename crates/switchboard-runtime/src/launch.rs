@@ -2429,6 +2429,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
         "runtimes",
         "kimi/sessions",
         "runtimes/hermes-continue",
+        "runtimes/opencode-continue",
     ] {
         let Ok(entries) = fs::read_dir(root.join(folder)) else {
             continue;
@@ -3508,6 +3509,95 @@ mod tests {
             .status()
             .unwrap()
             .success());
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key() {
+        // SB-119: OpenCode takes a workflow on the saved OpenRouter key and its model, through
+        // OPENCODE_CONFIG_CONTENT only; the person's own OpenCode files are never written.
+        let f = fixture();
+        let continuation = crate::continuation::Continuation {
+            workflow_id: "wf_00112233445566aa".into(),
+            handoff_id: "ho_synthetic".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/opt/Engine \"Tools\"/python".into(),
+                args: vec!["/opt/engine/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        let session = |f: &Fixture| {
+            opencode_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/opencode"),
+                Path::new("/opt/Switchboard Tools/switch'board"),
+                &f.project,
+                &continuation,
+            )
+        };
+        assert_eq!(
+            session(&f).unwrap_err(),
+            switchboard_core::agent_keys::NO_AGENT_KEY
+        );
+        openrouter_key(&f, None);
+        assert_eq!(session(&f).unwrap_err(), OPENROUTER_MODEL_NEEDED);
+        openrouter_key(&f, Some("xiaomi/mimo-v2.6-pro"));
+        let (path, answer) = session(&f).unwrap();
+        assert_eq!(answer["agent"], "opencode");
+        assert_eq!(answer["model"], "xiaomi/mimo-v2.6-pro");
+        let base = f.root.join("runtimes/opencode-continue");
+        assert!(path.starts_with(base.join("wf_00112233445566aa")));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("sk-or-"), "the key reached the script");
+        assert!(text.contains("exec '/opt/Agent Tools/opencode' '--prompt' "));
+        assert!(text.contains("'-m' 'openrouter/xiaomi/mimo-v2.6-pro'"));
+        assert!(text.contains("export OPENCODE_CONFIG_CONTENT="));
+        assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+        let shell = text.lines().next().unwrap().trim_start_matches("#!");
+        assert!(std::process::Command::new(shell)
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        // The config the script exports: the key by reference, the model declared, Observatory.
+        let config: Value = serde_json::from_str(&opencode_config(
+            "xiaomi/mimo-v2.6-pro",
+            &continuation.observatory,
+        ))
+        .unwrap();
+        assert_eq!(
+            config["provider"]["openrouter"]["options"]["apiKey"],
+            "{env:OPENROUTER_API_KEY}"
+        );
+        assert!(config["provider"]["openrouter"]["models"]["xiaomi/mimo-v2.6-pro"].is_object());
+        assert_eq!(
+            config["mcp"]["observatory"]["command"],
+            json!(["/opt/Engine \"Tools\"/python", "/opt/engine/mcp/server.py"])
+        );
+        assert_eq!(config["mcp"]["observatory"]["type"], "local");
+        let first =
+            fs::read_to_string(base.join("wf_00112233445566aa/handoff-prompt.txt")).unwrap();
+        assert!(first.contains("ho_synthetic") && first.contains("owner agent:opencode"));
+        let id = first
+            .split("sessionId ")
+            .last()
+            .unwrap()
+            .trim_end_matches('.');
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+        // Listed under Sessions with its model.
+        let listed = sessions(&f.root, true);
+        let opencode = listed
+            .iter()
+            .find(|r| r["provider"] == "opencode")
+            .expect("the hand-over is listed");
+        assert_eq!(opencode["continues"], "wf_00112233445566aa");
+        assert_eq!(opencode["label"], "xiaomi/mimo-v2.6-pro");
+        // No OpenCode file of the person's was made: nothing outside the session folder.
+        assert!(!f
+            .root
+            .join("runtimes/opencode-continue/agent-home")
+            .exists());
     }
     #[cfg(not(windows))]
     #[test]

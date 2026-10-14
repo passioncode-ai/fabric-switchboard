@@ -8,6 +8,27 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**Choose which coding agents take over your work, and a default one** (SB-120). The Agents page
+now starts with what matters: the **default agent**, the agents **installed** on this computer —
+each with the command Switchboard runs, **Enabled / Disabled** for switching and **Set default**
+— and the ones **available to install**, with their install command to copy. A disabled agent is
+skipped in fallback chains and refused by `switchboard continue`; without an account,
+`switchboard continue` uses the default agent. Fabric reads the same default. CLI: `switchboard
+agents status | enable | disable | default`; MCP: `switchboard_agents`.
+
+**OpenCode continues your work on OpenRouter** (SB-119). OpenCode joins Claude Code, Codex,
+Kimi Code and Hermes: a fallback chain step or `switchboard continue --account opencode` opens it
+with the handoff as its first message, on your saved OpenRouter key and model. Its configuration
+for that session is its own; your OpenCode login, sessions and settings are not touched.
+
+**Pick the OpenRouter model from a list.** The key and launch dialogs recommend five models first
+— `xiaomi/mimo-v2.6-pro`, `anthropic/claude-haiku-5.5`, `google/gemini-3.8-flash`,
+`qwen/qwen3.8-flash`, `deepseek/deepseek-v4.1-flash` — then search every OpenRouter model that can
+call tools (`switchboard agents models`); any id typed by hand still works.
+
+Agents installed with their own installers (`~/.opencode/bin`, `~/.kimi-code/bin`, Bun, Deno,
+Volta, pnpm, Yarn, mise or asdf) are now found by the desktop app too.
+
 ## 0.6.30 — 2026-10-14
 
 **Work in a project's folders on the project's accounts** (SB-118). The ordinary `claude` is one

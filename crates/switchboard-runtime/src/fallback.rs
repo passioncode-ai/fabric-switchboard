@@ -143,6 +143,13 @@ pub(crate) fn resolve_with(
         .executors
         .iter()
         .map(|e| {
+            // SB-120: an agent the person disabled for switching is never handed work.
+            if kimi.disabled.contains(&e.agent) {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: "agent_disabled",
+                };
+            }
             let kimi_pin = e
                 .account_id
                 .as_deref()
@@ -169,13 +176,6 @@ pub(crate) fn resolve_with(
                         agent: e.agent.clone(),
                         reason: "no_usable_account",
                     },
-                };
-            }
-            // SB-120: an agent the person disabled for switching is never handed work.
-            if kimi.disabled.contains(&e.agent) {
-                return Step::Skip {
-                    agent: e.agent.clone(),
-                    reason: "agent_disabled",
                 };
             }
             // SB-119: OpenCode runs on the saved OpenRouter key and its default model.
@@ -748,6 +748,80 @@ mod tests {
         assert_eq!(
             with(true, Some("claude-a"), &keyed),
             [skip("hermes", "agent_not_automatic_yet")]
+        );
+    }
+    #[test]
+    fn an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first() {
+        // SB-119/SB-120: claude-code → kimi-code → opencode; every Claude account limited.
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("claude-a", Provider::Claude, Some(100.0)),
+                account("claude-b", Provider::Claude, Some(10.0)),
+            ],
+            ..Default::default()
+        };
+        let chained = chain(&[
+            ("claude-code", None),
+            ("kimi-code", None),
+            ("opencode", None),
+        ]);
+        let with = |ready: bool, executor: Option<&str>, disabled: &[&str]| {
+            let kimi = KimiChoice {
+                ids: vec!["kimi-a".into()],
+                usable: &|_| true,
+                used: &|_| 0.0,
+                hermes_ready: false,
+                opencode_ready: ready,
+                disabled: disabled.iter().map(|d| d.to_string()).collect(),
+            };
+            resolve_with(
+                &snapshot,
+                &chained,
+                executor,
+                &HashSet::new(),
+                &HashSet::new(),
+                None,
+                &kimi,
+            )
+        };
+        let skip = |agent: &str, reason: &'static str| Step::Skip {
+            agent: agent.into(),
+            reason,
+        };
+        let run = |agent: &str, id: &str| Step::Run {
+            agent: agent.into(),
+            account_id: id.into(),
+        };
+        // Everything usable and enabled: each step runs on its own account.
+        assert_eq!(
+            with(true, Some("claude-a"), &[]),
+            [
+                run("claude-code", "claude-b"),
+                run("kimi-code", "kimi-a"),
+                run("opencode", "opencode")
+            ]
+        );
+        // Disabled agents are skipped before anything else is weighed, Kimi Code included.
+        assert_eq!(
+            with(true, Some("claude-a"), &["claude-code", "kimi-code"]),
+            [
+                skip("claude-code", "agent_disabled"),
+                skip("kimi-code", "agent_disabled"),
+                run("opencode", "opencode")
+            ]
+        );
+        assert_eq!(
+            with(true, Some("claude-a"), &["opencode"])[2],
+            skip("opencode", "agent_disabled")
+        );
+        // Not ready (no OpenCode, key or model), or OpenCode is the executor: passed over.
+        assert_eq!(
+            with(false, Some("claude-a"), &[])[2],
+            skip("opencode", "no_usable_account")
+        );
+        assert_eq!(
+            with(true, Some("opencode"), &[])[2],
+            skip("opencode", "no_usable_account")
         );
     }
     #[test]

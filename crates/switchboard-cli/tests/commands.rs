@@ -334,6 +334,95 @@ fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("cannot launch on the OpenRouter key"));
 }
+#[cfg(not(windows))]
+#[test]
+fn agents_are_enabled_disabled_and_made_default_offline() {
+    // SB-120: `agents status | enable | disable | default` work without an owner; a disabled
+    // agent cannot stay the default, and only an agent Switchboard can hand work to can be one.
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join(".opencode/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let program = bin.join("opencode");
+    std::fs::write(&program, b"#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .env("HOME", home.path())
+            .env("PATH", "/nonexistent")
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let data = |args: &[&str]| {
+        let output = run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["data"].clone()
+    };
+    let status = data(&["agents", "status"]);
+    assert_eq!(status["default"], serde_json::Value::Null);
+    let opencode = status["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "opencode")
+        .unwrap()
+        .clone();
+    assert_eq!(opencode["installed"], true);
+    assert_eq!(opencode["switchable"], true);
+    assert_eq!(opencode["enabled"], true);
+    assert_eq!(
+        status["recommended_models"][0]["id"],
+        "xiaomi/mimo-v2.6-pro"
+    );
+    assert_eq!(
+        data(&["agents", "default", "opencode"])["default"],
+        "opencode"
+    );
+    assert_eq!(
+        data(&["agents", "status"])["default"],
+        "opencode",
+        "the default persists"
+    );
+    // Disabling the default agent returns the machine to Auto.
+    let off = data(&["agents", "disable", "opencode"]);
+    assert_eq!(off["default"], serde_json::Value::Null);
+    let refused = run(&["agents", "default", "opencode"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("disabled for switching"));
+    data(&["agents", "enable", "opencode"]);
+    assert_eq!(
+        data(&["agents", "default", "opencode"])["default"],
+        "opencode"
+    );
+    assert_eq!(
+        data(&["agents", "default", "auto"])["default"],
+        serde_json::Value::Null
+    );
+    // An agent that can only use the tools, and a name the catalog lacks, are refused.
+    let refused = run(&["agents", "default", "goose"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("cannot be the default"));
+    let refused = run(&["agents", "enable", "no-such-agent"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("No such agent"));
+    // The settings file is private.
+    let mode = std::fs::metadata(tmp.path().join("agents-settings.json"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
 #[test]
 fn kimi_accounts_list_offline_and_refuse_unknown_ids_without_touching_the_ordinary_home() {
     let tmp = tempfile::tempdir().unwrap();

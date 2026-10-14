@@ -567,6 +567,44 @@ async fn openrouter_save(
         })
         .await
 }
+/// SB-120: every catalog agent — installed, enabled for switching, default, command.
+#[tauri::command]
+async fn agents_overview(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentsOverview)
+        .await
+}
+#[tauri::command]
+async fn agent_enable(
+    agent: String,
+    enabled: bool,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentEnable { agent, enabled })
+        .await
+}
+#[tauri::command]
+async fn agent_default(agent: Option<String>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentDefault { agent })
+        .await
+}
+/// SB-119: the recommended OpenRouter models and OpenRouter's tool-capable list.
+#[tauri::command]
+async fn openrouter_models(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OpenrouterModels)
+        .await
+}
 #[tauri::command]
 async fn openrouter_model(model: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -903,6 +941,10 @@ fn main() {
             kimi_launch,
             kimi_remove,
             remove_project,
+            agents_overview,
+            agent_enable,
+            agent_default,
+            openrouter_models,
             project_suggestions,
             accept_project_suggestion,
             dismiss_project_suggestion,

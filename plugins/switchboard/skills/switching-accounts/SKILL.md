@@ -54,6 +54,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend — never the key |
 | `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on — never a key |
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |
+| `switchboard_agents` | no | coding agents installed here, which are enabled for switching, the machine's default agent and the recommended OpenRouter models |
 | `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in — never a token |
 | `switchboard_openrouter_model` | yes | change the model agents start on, only when the operator asks |
 
@@ -62,7 +63,7 @@ first write call, or when a result field is unclear.
 
 **Degraded paths — say it once, then fall back; never loop:**
 
-- **Only the ten read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the eleven read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI

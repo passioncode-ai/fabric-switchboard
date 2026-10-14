@@ -61,7 +61,7 @@ On Windows use an absolute drive or UNC project path, quoted if it contains spac
 
 `launch` opens the session in a new Terminal window. **`--in-place`** (0.6.9, SB-75) prepares exactly the same session — the private home, its tools and `switchboard mcp`, the scrubbed environment, the one-session-per-home marker — and runs it in the terminal the command was started in, for a host with its own console (Fabric Dashboards' panel); the agent's exit status is the command's, and the host never sees a token. It needs a terminal on stdin and stdout and, like every launch, a running owner; macOS and Linux for now. **`--provider claude|codex`** instead of an account id uses the account Switchboard would use for that folder: its project's selected account, else the account of the folder's rule in force, else the default pool's selected account. Arguments after `--` go to the agent after Switchboard's own, each quoted (at most 16, up to 1024 characters, no control characters) — for example `-- --resume <id>` for Claude Code, `-- resume <id>` for Codex; they need `--in-place`.
 
-`continue` hands an [Observatory](CONTRACTS.md#workflow-continuation-sb-52-2026-10-05) workflow whose executor ran out of its limit to another account — of the same provider, or since 0.6.7 of the other one, Claude Code ↔ Codex, with the same checkpoint and constraints (SB-70) (`--mode isolated` by default, or `managed`). Since 0.6.20 `--account` also takes a saved Kimi Code account's id (SB-99) or `hermes` — Hermes Agent on the saved OpenRouter key, on the model your Hermes is set to when it runs on OpenRouter (`switchboard agents hermes status`), else the key's default model (`switchboard agents openrouter model`); in a home Switchboard owns, its first turn the handoff (`hermes chat --query-file`, SB-107). The answer's `modelFrom` says which (`hermes` or `key`). With `--in-place` (0.6.25, SB-108) the continuing session runs in the calling terminal instead of a new Terminal window — the same session, home and first prompt — for an embedded console such as Fabric Dashboards'; it needs a terminal on stdin and stdout and refuses before anything is offered without one. It reads the workflow, refuses before anything changes when it cannot be continued here (closed, no checkpoint, a handoff already waiting, a declared key not in the vault, a workflow that names no executor, the same account, a folder outside the workflow's checkouts), offers it with reason `limit` and opens the account's session in Terminal. That session accepts the handoff itself, through the Observatory tools Switchboard declares in its config. The engine refuses an offer while the executor wrote a checkpoint less than two minutes ago; Switchboard reports that sentence and launches nothing. Set `SWITCHBOARD_OBSERVATORY_BIN` when `project-observatory` is not in `~/.local/bin`, Homebrew or `PATH`. macOS only for now.
+`continue` hands an [Observatory](CONTRACTS.md#workflow-continuation-sb-52-2026-10-05) workflow whose executor ran out of its limit to another account — of the same provider, or since 0.6.7 of the other one, Claude Code ↔ Codex, with the same checkpoint and constraints (SB-70) (`--mode isolated` by default, or `managed`). Since 0.6.31 `--account` also takes `opencode` — OpenCode on the saved OpenRouter key and its default model, with its own configuration for that session only (`OPENCODE_CONFIG_CONTENT`), the handoff as its first message (`opencode --prompt`) and never a change to your own OpenCode (SB-119); without `--account` the default agent continues (`switchboard agents default`). Since 0.6.20 `--account` also takes a saved Kimi Code account's id (SB-99) or `hermes` — Hermes Agent on the saved OpenRouter key, on the model your Hermes is set to when it runs on OpenRouter (`switchboard agents hermes status`), else the key's default model (`switchboard agents openrouter model`); in a home Switchboard owns, its first turn the handoff (`hermes chat --query-file`, SB-107). The answer's `modelFrom` says which (`hermes` or `key`). With `--in-place` (0.6.25, SB-108) the continuing session runs in the calling terminal instead of a new Terminal window — the same session, home and first prompt — for an embedded console such as Fabric Dashboards'; it needs a terminal on stdin and stdout and refuses before anything is offered without one. It reads the workflow, refuses before anything changes when it cannot be continued here (closed, no checkpoint, a handoff already waiting, a declared key not in the vault, a workflow that names no executor, the same account, a folder outside the workflow's checkouts), offers it with reason `limit` and opens the account's session in Terminal. That session accepts the handoff itself, through the Observatory tools Switchboard declares in its config. The engine refuses an offer while the executor wrote a checkpoint less than two minutes ago; Switchboard reports that sentence and launches nothing. Set `SWITCHBOARD_OBSERVATORY_BIN` when `project-observatory` is not in `~/.local/bin`, Homebrew or `PATH`. macOS only for now.
 
 Select another same-pool account while the managed response streams: the current response keeps its snapshot; the next request sees the new account. `Ctrl-C` or `SIGTERM` in `serve` stops the owner within ten seconds. Since 0.5.4 the proxy keeps its port and token across restarts, so a managed client launched earlier works again once an owner is back. Only one owner may hold a data root.
 
@@ -231,8 +231,9 @@ Removing an account or a project drops what pinned it. When a workflow's executo
 the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code and Codex;
 Kimi Code on saved Kimi accounts since SB-99 — its first turn runs as `kimi -p`, without approvals,
 then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
-SB-107; other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
-`--mode managed` applies to Claude Code and Codex only; with Hermes or Kimi Code it is refused.
+SB-107; OpenCode on the same key and its default model since SB-119; an agent disabled on the Agents
+page is skipped as `agent_disabled` (SB-120); other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
+`--mode managed` applies to Claude Code and Codex only; with Hermes, OpenCode or Kimi Code it is refused.
 
 ### Other coding agents
 
@@ -250,6 +251,29 @@ switchboard agents launch goose --pool work --dir /abs/folder
 The agent id comes from `agents list`. `agents key` prints a local proxy key, not a provider
 credential: the proxy accepts it only for the pool's API-key account, never for a Claude
 subscription. Keep it out of shared configuration files.
+
+### Installed agents and the default agent (SB-119/SB-120)
+
+```sh
+switchboard agents status                 # what is installed, enabled for switching, the default, the command run
+switchboard agents disable kimi-code      # keep an agent out of fallback chains and continue
+switchboard agents enable kimi-code
+switchboard agents default opencode       # the machine's default agent; `auto` clears it
+switchboard agents models                 # the recommended OpenRouter models, then every model that can call tools
+```
+
+Installed means the agent's program is found the way launches find it: on `PATH`, in the usual
+per-user folders (`~/.local/bin`, `~/.opencode/bin`, `~/.kimi-code/bin`, `~/.bun/bin`, mise and
+asdf shims, …) and Homebrew's. Claude Code, Codex, Kimi Code, Hermes and OpenCode can take over a
+workflow; each is enabled for switching until you disable it, and a disabled one is skipped in
+fallback chains (`agent_disabled`) and refused by `continue`. The default agent is *Auto* or one
+installed, enabled agent of those five; disabling it returns the machine to *Auto*.
+`switchboard continue` without `--account` continues on the default agent when it runs on its own
+key (OpenCode or Hermes). Fabric reads the default from `agents status` unless a project sets its
+own. The choices are saved in `agents-settings.json` (0600) and carried in encrypted backups.
+`agents models` asks OpenRouter's public model list (no key, 10 s, kept 6 hours); when OpenRouter
+does not answer, the five recommended models and any id you type still work. MCP:
+`switchboard_agents` (read).
 
 ### Hermes's model and provider (SB-80)
 

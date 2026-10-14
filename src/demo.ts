@@ -1,5 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus } from './types';
+import agentCatalogData from '../catalog/agents.json';
+import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -77,6 +78,21 @@ export function createDemoAdapter(): Adapter {
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, checked_at: now(), error: null, needs_permission: false };
   const analytics = { available: true, enabled: true };
+  // SB-120: the agents a synthetic computer has.
+  type CatalogAgent = { id: string; name: string; maker?: string | null; url: string; install?: string | null; binary?: string | null; mcp: { supported: boolean }; openrouter?: unknown };
+  const catalogAgents = (agentCatalogData as unknown as { agents: CatalogAgent[] }).agents;
+  const recommendedModels = (agentCatalogData as unknown as { openrouter_recommended: RecommendedModel[] }).openrouter_recommended;
+  const SWITCHABLE = ['claude-code', 'codex', 'kimi-code', 'hermes', 'opencode'];
+  const demoInstalled = new Set(['claude-code', 'codex', 'opencode', 'hermes', 'kimi-code', 'gemini-cli', 'goose', 'kilo']);
+  const agentDisabled = new Set<string>();
+  let agentDefault: string | null = 'claude-code';
+  const agentsView = (): AgentsOverview => {
+    const agents: AgentRow[] = catalogAgents.map((a) => {
+      const installed = demoInstalled.has(a.id); const switchable = SWITCHABLE.includes(a.id); const disabled = agentDisabled.has(a.id);
+      return { id: a.id, name: a.name, maker: a.maker ?? null, url: a.url, install: a.install ?? null, installed, switchable, enabled: installed && switchable && !disabled, disabled, default: agentDefault === a.id, openrouter: !!a.openrouter, mcp: a.mcp.supported, command: a.id === 'opencode' ? 'opencode -m openrouter/xiaomi/mimo-v2.6-pro' : (a.binary ?? a.id) };
+    });
+    return { default: agentDefault, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
+  };
   // SB-117: shown once a project named Client Alpha (pool client-alpha) exists in the demo.
   let suggestions: ProjectSuggestion[] = [{ folder: '/srv/projects/alpha-web-review', name: 'alpha-web-review', pool: 'client-alpha', project: 'Client Alpha', reason: 'worktree', repository: 'github.com/example/alpha-web', first_seen: now() - 60 }];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
@@ -225,6 +241,10 @@ export function createDemoAdapter(): Adapter {
     async openrouterRemove() { await pause(); Object.assign(openrouter, { saved: false, saved_at: null, model: null, credit: null, credit_error: null }); log('agent_key', '', 'removed'); },
     // SB-80: a synthetic Hermes configuration; changes stay in the demo.
     async hermesModel() { return structuredClone(hermes); },
+    async agentsOverview() { return structuredClone(agentsView()); },
+    async agentEnable(agent, enabled) { await pause(); if (!catalogAgents.some((a) => a.id === agent)) throw new Error('No such agent in the catalog. Run switchboard agents list.'); agentDisabled.delete(agent); if (!enabled) { agentDisabled.add(agent); if (agentDefault === agent) agentDefault = null; } },
+    async agentDefault(agent) { await pause(); if (agent && !SWITCHABLE.includes(agent)) throw new Error('Switchboard cannot hand work to this agent yet, so it cannot be the default.'); if (agent && agentDisabled.has(agent)) throw new Error('This agent is disabled for switching. Enable it on the Agents page, then try again.'); agentDefault = agent; },
+    async openrouterModels() { await pause(); return { recommended: structuredClone(recommendedModels), models: [...recommendedModels.map((m) => ({ id: m.id, name: m.name, context: m.context, prompt: String(m.input_usd_per_million / 1e6) })), { id: 'moonshotai/kimi-k2', name: 'Kimi K2', context: 262144, prompt: '0.0000006' }, { id: 'openai/gpt-5.5-mini', name: 'GPT-5.5 mini', context: 400000, prompt: '0.0000004' }], available: true }; },
     async hermesSetModel(provider, model) { await pause(); if (provider) hermes.provider = provider; if (model) hermes.model = model; return structuredClone(hermes); },
     // SB-81: one synthetic Kimi Code account; signing in and launching need the native app.
     async kimiAccounts() { return structuredClone(kimi); },
