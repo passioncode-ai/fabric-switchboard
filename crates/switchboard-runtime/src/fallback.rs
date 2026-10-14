@@ -368,30 +368,16 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
             })
             .await?;
         if in_fabric {
-            let script = answer["script"]
-                .as_str()
-                .map(PathBuf::from)
-                .ok_or_else(|| "Offered, but the session script is missing.".to_string())?;
             let snapshot = runtime.store.snapshot().ok();
-            let (agent, label) = describe(snapshot.as_ref(), &account);
-            let handover = crate::handovers::Handover {
-                id: crate::handovers::new_id(),
+            queue_handover(
+                &runtime.root,
+                snapshot.as_ref(),
                 workflow,
-                agent,
-                account_label: label,
+                &account,
                 dir,
-                script: script.clone(),
-                offered_until: answer["offeredUntil"].as_str().unwrap_or_default().into(),
-                created_at: now,
-            };
-            if crate::handovers::record(&runtime.root, &handover).is_err() {
-                if !crate::handovers::offer_live(&handover, crate::monitor::now()) {
-                    return Err("The hand-over offer expired before it could be opened.".into());
-                }
-                // Nowhere to wait: Terminal now, as without Fabric.
-                crate::launch::start_terminal(&script)
-                    .map_err(|e| format!("Offered {}: {e}", handover.workflow))?;
-            }
+                &answer,
+                now,
+            )?;
         }
         Ok(())
     })
@@ -521,6 +507,42 @@ pub(crate) fn pick_for_default(
         Some(Step::Run { account_id, .. }) => Ok(account_id),
         _ => Err(NO_DEFAULT_ACCOUNT.into()),
     }
+}
+/// Leaves a prepared continuation (`Continue` with `in_place`) for Fabric's console (SB-108); a
+/// queue that cannot take it opens it in Terminal now, while the offer is live.
+pub(crate) fn queue_handover(
+    root: &std::path::Path,
+    snapshot: Option<&Snapshot>,
+    workflow: String,
+    account: &str,
+    dir: PathBuf,
+    answer: &Value,
+    now: i64,
+) -> Result<crate::handovers::Handover, String> {
+    let script = answer["script"]
+        .as_str()
+        .map(PathBuf::from)
+        .ok_or_else(|| "Offered, but the session script is missing.".to_string())?;
+    let (agent, label) = describe(snapshot, account);
+    let handover = crate::handovers::Handover {
+        id: crate::handovers::new_id(),
+        workflow,
+        agent,
+        account_label: label,
+        dir,
+        script: script.clone(),
+        offered_until: answer["offeredUntil"].as_str().unwrap_or_default().into(),
+        created_at: now,
+    };
+    if crate::handovers::record(root, &handover).is_err() {
+        if !crate::handovers::offer_live(&handover, crate::monitor::now()) {
+            return Err("The hand-over offer expired before it could be opened.".into());
+        }
+        // Nowhere to wait: Terminal now, as without Fabric.
+        crate::launch::start_terminal(&script)
+            .map_err(|e| format!("Offered {}: {e}", handover.workflow))?;
+    }
+    Ok(handover)
 }
 /// The agent and label a hand-over shows: Hermes, a saved Kimi Code account, or a saved account.
 fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
@@ -1463,6 +1485,58 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| e.action == "fallback" && e.detail == "offered"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hand_over_by_hand_waits_for_the_console_and_needs_the_setting() {
+        // SB-108 by hand (`continue --to-console`): refused while the setting is off, before
+        // anything is offered; queued like the automatic fallback's when on.
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let refused = runtime
+            .execute(Operation::ContinueToConsole {
+                workflow_id: WF.into(),
+                id: "opencode".into(),
+                working_directory: root.path().to_owned(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, crate::handovers::OFF);
+        assert!(crate::handovers::pending(root.path()).is_empty());
+        crate::handovers::set_enabled(root.path(), true).unwrap();
+        let script = root.path().join("launch.command");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        let answer = serde_json::json!({"script": script, "offeredUntil": "2099-01-01T00:00:00Z"});
+        let queued = queue_handover(
+            root.path(),
+            None,
+            WF.into(),
+            "opencode",
+            root.path().to_owned(),
+            &answer,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        assert_eq!(queued.agent, "opencode");
+        assert_eq!(queued.account_label, "OpenCode");
+        let waiting = crate::handovers::pending(root.path());
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0].workflow, WF);
+        assert!(
+            queue_handover(
+                root.path(),
+                None,
+                WF.into(),
+                "opencode",
+                root.path().to_owned(),
+                &serde_json::json!({}),
+                0
+            )
+            .is_err(),
+            "no script, nothing queued"
+        );
     }
 
     #[cfg(unix)]

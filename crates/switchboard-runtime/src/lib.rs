@@ -135,6 +135,14 @@ pub enum Operation {
         #[serde(default)]
         in_place: bool,
     },
+    /// SB-108, by hand: offer a workflow like `Continue` and leave its prepared session for
+    /// Fabric's console (`switchboard handovers`) instead of opening Terminal; nobody taking it
+    /// within two minutes opens it in Terminal, as for the automatic fallback.
+    ContinueToConsole {
+        workflow_id: String,
+        id: String,
+        working_directory: PathBuf,
+    },
     BeginLogin {
         provider: Provider,
         label: String,
@@ -600,6 +608,16 @@ impl Runtime {
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        if let Operation::ContinueToConsole {
+            workflow_id,
+            id,
+            working_directory,
+        } = operation
+        {
+            return self
+                .continue_to_console(workflow_id, id, working_directory)
+                .await;
+        }
         // Metadata reads do not wait behind OS credential prompts or network probes.
         // Store snapshot has its own lock; these operations cannot change auth or homes.
         // Current accounts only read native sources and a cache: a usage probe, import or
@@ -712,6 +730,45 @@ impl Runtime {
                 &[("result", oplog::Field::Code("unreadable"))],
             ),
         }
+    }
+    /// `Operation::ContinueToConsole`: the hand-over the automatic fallback makes with "Open
+    /// hand-overs in Fabric" on, for one workflow and account the person names.
+    async fn continue_to_console(
+        &self,
+        workflow_id: String,
+        id: String,
+        working_directory: PathBuf,
+    ) -> Result<Value, String> {
+        if !handovers::enabled(&self.root) {
+            return Err(handovers::OFF.into());
+        }
+        let answer = Box::pin(self.execute(Operation::Continue {
+            workflow_id: workflow_id.clone(),
+            id: id.clone(),
+            mode: "isolated".into(),
+            working_directory: working_directory.clone(),
+            in_place: true,
+        }))
+        .await?;
+        let snapshot = self.store.snapshot().ok();
+        let handover = fallback::queue_handover(
+            &self.root,
+            snapshot.as_ref(),
+            workflow_id,
+            // The account that continues it; with none named, the default agent's own name.
+            &if id.is_empty() {
+                answer["agent"].as_str().unwrap_or_default().to_owned()
+            } else {
+                id.clone()
+            },
+            working_directory,
+            &answer,
+            monitor::now(),
+        )?;
+        Ok(
+            json!({"handover": handover.id, "workflow": handover.workflow, "agent": handover.agent,
+            "folder": handover.dir, "offeredUntil": handover.offered_until}),
+        )
     }
     /// SB-121: found folders join their projects at once; one that cannot (a refused admission,
     /// a full project) stays pending for the person. Runs under the owner transaction.
@@ -2045,6 +2102,10 @@ async fn execute(
                 json!({"message": "Terminal launch requested. Provider response is not yet verified.", "agent_tools": agent_tools}),
             )
         }
+        // Taken by `Runtime::execute` before this point; an offline caller has no owner.
+        Operation::ContinueToConsole { .. } => Err(needs_owner()
+            .err()
+            .unwrap_or_else(|| "Hand-over unavailable.".into())),
         Operation::Continue {
             workflow_id,
             id,

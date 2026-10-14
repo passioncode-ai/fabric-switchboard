@@ -115,8 +115,13 @@ enum Command {
         dir: PathBuf,
         /// Run the continuing session in this terminal instead of opening Terminal (needs a
         /// terminal on stdin and stdout) — for an embedded console such as Fabric's (SB-108).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "to_console")]
         in_place: bool,
+        /// Leave the prepared session for Fabric's console instead of opening Terminal
+        /// (`switchboard handovers`; needs "Open hand-overs in Fabric" on). Nobody taking it
+        /// within two minutes opens it in Terminal.
+        #[arg(long, conflicts_with = "mode")]
+        to_console: bool,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -1020,9 +1025,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Continue {
             workflow_id,
             account,
+            dir,
+            to_console: true,
+            ..
+        } => Operation::ContinueToConsole {
+            workflow_id: workflow_id.clone(),
+            id: account.clone(),
+            working_directory: dir.clone(),
+        },
+        Command::Continue {
+            workflow_id,
+            account,
             mode,
             dir,
             in_place,
+            ..
         } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
         Command::Recovery { command } => match command {
             None => Operation::Recovery,
