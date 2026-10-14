@@ -64,6 +64,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-054 | Take a workflow hand-over in a console | draft |
 | SCN-055 | Add a project's new folder when Switchboard suggests it | draft |
 | SCN-056 | Work in a project's folder on the project's accounts | draft |
+| SCN-057 | See which coding agents are installed and add them to switching | draft |
+| SCN-058 | Choose the default agent | draft |
+| SCN-059 | Pick an OpenRouter model, starting from the recommended ones | draft |
+| SCN-060 | A workflow continues in OpenCode on the OpenRouter key | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1169,3 +1173,84 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet.
 **Product:** unobserved
 **Traces:** SB-118 packet
+
+## SCN-057 — See which coding agents are installed and add them to switching
+**Persona:** P-01
+**Goal:** Know at a glance which coding agents this computer has, and decide which of them Switchboard may hand work to when an account runs out.
+**Preconditions:** none.
+**Entry point:** Agents.
+**Steps:**
+1. Open Agents → **Installed · N detected** lists every agent found on this computer: its name, the command Switchboard runs, **Enabled / Disabled** for switching, the default mark or **Set default**, and a link to its documentation.
+2. Press **Disabled** on an agent → it no longer stands in fallback chains or takes `switchboard continue`; the row says so.
+3. Open a row → how Switchboard reaches it (its tools via `switchboard mcp`, its key and model), with copyable commands.
+4. **Available to install · N** lists the agents not found, each with its install command and a copy button; after installing one, **Refresh** moves it up.
+**Alt paths:** An agent that cannot take over a workflow (no MCP or no first-prompt mode) shows *Tools only* instead of Enabled/Disabled and cannot be the default. No agent installed beyond Claude Code and Codex → the list shows those two and the install list.
+**Expected result:** the operator sees the real set of agents and chooses which take part in switching.
+**UI elements:** Installed list, segmented Enabled/Disabled, Set default, docs link, row disclosure, Available list, Refresh.
+**States covered:** detected, not detected, enabled, disabled, tools only, refreshing.
+**Errors & recovery:** a save that fails keeps the previous state and names the cause.
+**Status:** draft
+**Meaning:** operator request 2026-10-14 (SB-120).
+**Coverage:** runtime agents tests; ui-logic; WebKit demo.
+**Product:** unobserved
+**Traces:** SB-119/120 packet
+
+## SCN-058 — Choose the default agent
+**Persona:** P-01
+**Goal:** Say which agent continues work by default, for Switchboard and for Fabric.
+**Preconditions:** at least one installed agent that can continue.
+**Entry point:** Agents → Default agent.
+**Steps:**
+1. The chips show **Auto** and every installed, enabled agent that can continue; the chosen one is checked.
+2. Choose OpenCode → "OpenCode is the default agent." `switchboard continue` without `--agent` uses it; a new fallback chain starts with it; Fabric reads it.
+3. Choose **Auto** → continuation follows the chain or the account's own provider, as before.
+**Alt paths:** Disabling the default agent returns the default to Auto and says so.
+**Expected result:** one machine-wide default, visible in one place.
+**UI elements:** default-agent chips.
+**States covered:** auto, chosen, chosen then disabled.
+**Errors & recovery:** a save that fails keeps the previous default.
+**Status:** draft
+**Meaning:** operator request 2026-10-14 (SB-120).
+**Coverage:** runtime and CLI tests; WebKit demo.
+**Product:** unobserved
+**Traces:** SB-119/120 packet
+
+## SCN-059 — Pick an OpenRouter model, starting from the recommended ones
+**Persona:** P-01
+**Goal:** Launch OpenRouter agents on a good model without hunting through hundreds of ids.
+**Preconditions:** an OpenRouter key saved, or about to be.
+**Entry point:** Agents → OpenRouter key → Change model (or an OpenRouter agent's row).
+**Steps:**
+1. The picker lists **Recommended** first: MiMo V2.6 Pro, Claude Haiku 5.5, Gemini 3.8 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash, each with its context and price.
+2. Below them, every OpenRouter model that accepts tools, searchable.
+3. Any id can be typed by hand.
+4. Save → "Agents launch on {model}."
+**Alt paths:** OpenRouter's list cannot be read (offline) → the recommended models and typing still work; the picker says the full list is unavailable.
+**Expected result:** the chosen model is used by every OpenRouter launch and continuation that names none.
+**UI elements:** model picker, recommended group, search, free entry.
+**States covered:** recommended, full list, offline, typed id.
+**Errors & recovery:** an id OpenRouter does not know is still saved, with a note that the first launch will tell.
+**Status:** draft
+**Meaning:** operator request 2026-10-14 (SB-119).
+**Coverage:** runtime `openrouter_models` tests; ui-logic; WebKit demo.
+**Product:** unobserved
+**Traces:** SB-119/120 packet
+
+## SCN-060 — A workflow continues in OpenCode on the OpenRouter key
+**Persona:** P-01
+**Goal:** When subscriptions run out, the work goes on in OpenCode with a recommended model, without touching the person's own OpenCode setup.
+**Preconditions:** OpenCode installed and enabled; an OpenRouter key and model saved; an Observatory workflow.
+**Entry point:** a fallback chain step "OpenCode", or `switchboard continue <wf> --account opencode`.
+**Steps:**
+1. The workflow's account runs out → the chain offers the next step → OpenCode starts in the workflow's folder with the handoff as its first message and the chosen model.
+2. The session accepts the handoff through Observatory and carries on.
+**Alt paths:** OpenCode not installed or disabled → the step is skipped with its reason; no key or model → refused before any offer.
+**Expected result:** the work continues on OpenRouter; the person's OpenCode login and history stay as they were.
+**UI elements:** chain step, hand-over in Sessions.
+**States covered:** offered, launched, skipped, refused.
+**Errors & recovery:** a launch that fails after the offer lets the offer lapse, as for Hermes.
+**Status:** draft
+**Meaning:** operator request 2026-10-14 (SB-119).
+**Coverage:** launch and fallback tests.
+**Product:** unobserved
+**Traces:** SB-119/120 packet

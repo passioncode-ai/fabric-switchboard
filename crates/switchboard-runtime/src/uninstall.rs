@@ -26,6 +26,7 @@ const OWNED: &[&str] = &[
     "recovery.json",
     "project-suggestions.json",
     "claude-bindings.json",
+    "agents-settings.json",
     "fabric-handovers",
     "handovers",
     "backup-id",

@@ -101,9 +101,10 @@ enum Command {
     Continue {
         /// The workflow id, `wf_` and 16 hex digits (`project-observatory full workflow list`).
         workflow_id: String,
-        /// The account that continues it: a saved account's or Kimi Code account's id, or
-        /// `hermes` for Hermes Agent on the saved OpenRouter key and its model.
-        #[arg(long)]
+        /// The account that continues it: a saved account's or Kimi Code account's id, `hermes`
+        /// for Hermes Agent or `opencode` for OpenCode on the saved OpenRouter key and its model.
+        /// Without it, the default agent (`switchboard agents default`) when it runs on its own key.
+        #[arg(long, default_value = "")]
         account: String,
         /// `isolated` or `managed`, as for `launch`.
         #[arg(long, value_enum, default_value = "isolated")]
@@ -568,6 +569,27 @@ fn chain_executor(text: &str) -> switchboard_core::Executor {
 enum AgentsCommand {
     /// Every agent in the catalog with what it supports: mcp, proxy or launch.
     List,
+    /// Which agents are installed here, which take part in switching, the default agent and the
+    /// command Switchboard runs for each (SB-120).
+    Status,
+    /// Let Switchboard hand work to this agent (fallback chains, `continue`).
+    Enable {
+        /// The agent's catalog id, for example `opencode`.
+        agent: String,
+    },
+    /// Keep this agent out of switching: chains skip it and `continue` refuses it.
+    Disable {
+        /// The agent's catalog id.
+        agent: String,
+    },
+    /// The machine's default agent (`auto` for none). Fabric reads it too.
+    Default {
+        /// An installed, enabled agent that can continue, or `auto`.
+        agent: String,
+    },
+    /// The OpenRouter models agents can launch on: the recommended ones first, then every
+    /// OpenRouter model that accepts tools.
+    Models,
     /// How to connect one agent: its MCP registration and, when it can, the proxy settings.
     Connect {
         /// The agent's catalog id (`switchboard agents list`), for example `hermes`.
@@ -1058,6 +1080,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
+            AgentsCommand::Status => Operation::AgentsOverview,
+            AgentsCommand::Enable { agent } => Operation::AgentEnable {
+                agent: agent.clone(),
+                enabled: true,
+            },
+            AgentsCommand::Disable { agent } => Operation::AgentEnable {
+                agent: agent.clone(),
+                enabled: false,
+            },
+            AgentsCommand::Default { agent } => Operation::AgentDefault {
+                agent: (agent != "auto").then(|| agent.clone()),
+            },
+            AgentsCommand::Models => Operation::OpenrouterModels,
             AgentsCommand::Connect { agent, pool } => Operation::AgentConnect {
                 agent: agent.clone(),
                 pool: pool.clone(),

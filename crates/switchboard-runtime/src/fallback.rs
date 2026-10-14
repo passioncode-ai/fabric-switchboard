@@ -66,6 +66,11 @@ pub(crate) struct KimiChoice<'a> {
     /// saved, the `switchboard` command present for the session script. Its model is settled at
     /// the hand-over, which refuses before the offer when there is none.
     pub hermes_ready: bool,
+    /// Whether an `opencode` step can be tried now (SB-119): OpenCode installed, an OpenRouter
+    /// key and model saved, the `switchboard` command present.
+    pub opencode_ready: bool,
+    /// Agents the person took out of switching on the Agents page (SB-120): skipped.
+    pub disabled: HashSet<String>,
 }
 
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
@@ -87,6 +92,8 @@ pub(crate) fn resolve(
         usable: &|_| false,
         used: &|_| 0.0,
         hermes_ready: false,
+        opencode_ready: false,
+        disabled: HashSet::new(),
     };
     resolve_with(
         snapshot,
@@ -162,6 +169,34 @@ pub(crate) fn resolve_with(
                         agent: e.agent.clone(),
                         reason: "no_usable_account",
                     },
+                };
+            }
+            // SB-120: an agent the person disabled for switching is never handed work.
+            if kimi.disabled.contains(&e.agent) {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: "agent_disabled",
+                };
+            }
+            // SB-119: OpenCode runs on the saved OpenRouter key and its default model.
+            if e.agent == crate::launch::OPENCODE_TARGET {
+                return if e.account_id.is_some() || e.key.is_some() {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "agent_not_automatic_yet",
+                    }
+                } else if kimi.opencode_ready
+                    && executor_account != Some(crate::launch::OPENCODE_TARGET)
+                {
+                    Step::Run {
+                        agent: e.agent.clone(),
+                        account_id: crate::launch::OPENCODE_TARGET.into(),
+                    }
+                } else {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "no_usable_account",
+                    }
                 };
             }
             // SB-107: Hermes runs on the saved OpenRouter key; a step that pins an account or a
@@ -368,6 +403,9 @@ fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
     if account == crate::hermes::HERMES_TARGET {
         return ("hermes".into(), "Hermes Agent".into());
     }
+    if account == crate::launch::OPENCODE_TARGET {
+        return ("opencode".into(), "OpenCode".into());
+    }
     let Some(snapshot) = snapshot else {
         return ("unknown".into(), String::new());
     };
@@ -414,6 +452,10 @@ where
         usable: &kimi_usable,
         used: &kimi_used,
         hermes_ready: crate::launch::hermes_continuation_ready(&runtime.store),
+        opencode_ready: crate::launch::opencode_continuation_ready(&runtime.store),
+        disabled: crate::agent_settings::read(&runtime.root)
+            .map(|s| s.disabled.into_iter().collect())
+            .unwrap_or_default(),
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
@@ -662,6 +704,8 @@ mod tests {
                 usable: &|_| false,
                 used: &|_| 0.0,
                 hermes_ready: ready,
+                opencode_ready: false,
+                disabled: HashSet::new(),
             };
             resolve_with(
                 &snapshot,
@@ -718,6 +762,8 @@ mod tests {
             usable: &usable,
             used: &used,
             hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
         };
         let run = |id: &str| Step::Run {
             agent: "kimi-code".into(),

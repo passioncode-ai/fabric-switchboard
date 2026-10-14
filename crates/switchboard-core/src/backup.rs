@@ -65,8 +65,9 @@ pub struct Restored {
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
 /// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
-pub const SETTING_FILES: &[&str] = &["login-item", "auto-update"];
-const MAX_SETTING: u64 = 64;
+pub const SETTING_FILES: &[&str] = &["login-item", "auto-update", "agents-settings.json"];
+/// A setting file carried in a backup: a word for the switches, a small JSON for the agents (SB-120).
+const MAX_SETTING: u64 = 4096;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

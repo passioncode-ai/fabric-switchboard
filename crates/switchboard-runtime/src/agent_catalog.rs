@@ -29,6 +29,15 @@ pub fn can_continue(id: &str) -> bool {
     find(id).is_some_and(|a| a["mcp"]["supported"] == true && a["headless"].is_string())
 }
 
+/// The agents Switchboard can hand a workflow to today (continuation and fallback chains):
+/// their own subscriptions, a saved Kimi Code account, or the saved OpenRouter key (SB-107,
+/// SB-119). Other agents connect to `switchboard mcp` or launch on a key, but take no hand-over.
+pub const SWITCHABLE: &[&str] = &["claude-code", "codex", "kimi-code", "hermes", "opencode"];
+
+pub fn switchable(id: &str) -> bool {
+    SWITCHABLE.contains(&id)
+}
+
 /// Ready-made chains (operator, 2026-10-06: subscriptions first, then paid agents). A preset is
 /// only a starting order; nothing applies until the operator sets a chain.
 pub const PRESETS: &[(&str, &[&str])] = &[(

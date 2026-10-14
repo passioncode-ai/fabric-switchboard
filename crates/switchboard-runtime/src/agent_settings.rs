@@ -1,0 +1,345 @@
+//! SB-119/SB-120 (operator 2026-10-14): which coding agents this computer has, which of them
+//! Switchboard may hand work to, the machine's default agent, and the OpenRouter models agents
+//! launch on — the recommended ones first. The choices live in `<data>/agents-settings.json`
+//! (0600, carried in backups as a setting); the installed set is found, never stored.
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::path::Path;
+
+pub const FILE: &str = "agents-settings.json";
+const MAX_BYTES: u64 = 64 * 1024;
+pub const NOT_AN_AGENT: &str = "No such agent in the catalog. Run switchboard agents list.";
+pub const CANNOT_CONTINUE: &str =
+    "Switchboard cannot hand work to this agent yet, so it cannot be the default.";
+pub const NOT_INSTALLED: &str =
+    "This agent is not installed on this computer. Install it, then press Refresh.";
+pub const DISABLED: &str =
+    "This agent is disabled for switching. Enable it on the Agents page, then try again.";
+pub const NAME_AN_ACCOUNT: &str = "Name the account or agent to continue on (--account), or choose a default agent that runs on its own key (OpenCode or Hermes).";
+const UNREADABLE: &str =
+    "Agent settings could not be read. Restore the private file before continuing.";
+/// OpenRouter's public model list (no key).
+const MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
+const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const MODELS_KEEP: i64 = 6 * 3600;
+const MAX_MODELS_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Settings {
+    /// The machine's default agent; none is *Auto*.
+    #[serde(default)]
+    pub default: Option<String>,
+    /// Agents the person took out of switching.
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
+pub fn read(root: &Path) -> Result<Settings, String> {
+    let path = root.join(FILE);
+    match std::fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
+        Err(_) => return Err(UNREADABLE.into()),
+        Ok(_) => {}
+    }
+    let bytes =
+        switchboard_core::private_fs::read_private(&path, MAX_BYTES).map_err(|_| UNREADABLE)?;
+    serde_json::from_slice(&bytes).map_err(|_| UNREADABLE.into())
+}
+
+fn write(root: &Path, settings: &Settings) -> Result<(), String> {
+    let bytes = serde_json::to_vec(settings).map_err(|_| UNREADABLE)?;
+    switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
+}
+
+fn known(id: &str) -> Option<Value> {
+    crate::agent_catalog::catalog()["agents"]
+        .as_array()?
+        .iter()
+        .find(|a| a["id"] == id)
+        .cloned()
+}
+
+/// Whether an agent's program is on this computer (the lookup launches use).
+pub fn installed(agent: &Value) -> Option<std::path::PathBuf> {
+    agent["binary"]
+        .as_str()
+        .filter(|b| !b.is_empty())
+        .and_then(crate::launch::find_program)
+}
+
+/// An agent takes part in switching when it is installed, Switchboard can hand it work, and it
+/// was not disabled.
+pub fn usable(root: &Path, id: &str) -> Result<(), String> {
+    let agent = known(id).ok_or(NOT_AN_AGENT)?;
+    if !crate::agent_catalog::switchable(id) {
+        return Err(CANNOT_CONTINUE.into());
+    }
+    if read(root)?.disabled.iter().any(|d| d == id) {
+        return Err(DISABLED.into());
+    }
+    if installed(&agent).is_none() {
+        return Err(NOT_INSTALLED.into());
+    }
+    Ok(())
+}
+
+/// Whether a person disabled this agent (fallback chains skip it; `continue` refuses it).
+pub fn disabled(root: &Path, id: &str) -> bool {
+    read(root).is_ok_and(|s| s.disabled.iter().any(|d| d == id))
+}
+
+pub fn set_enabled(root: &Path, id: &str, enabled: bool) -> Result<Settings, String> {
+    known(id).ok_or(NOT_AN_AGENT)?;
+    let mut s = read(root)?;
+    s.disabled.retain(|d| d != id);
+    if !enabled {
+        s.disabled.push(id.to_owned());
+        s.disabled.sort();
+        // A disabled agent cannot stay the default (SCN-058).
+        if s.default.as_deref() == Some(id) {
+            s.default = None;
+        }
+    }
+    write(root, &s)?;
+    Ok(s)
+}
+
+pub fn set_default(root: &Path, id: Option<&str>) -> Result<Settings, String> {
+    let mut s = read(root)?;
+    if let Some(id) = id {
+        usable(root, id)?;
+    }
+    s.default = id.map(str::to_owned);
+    write(root, &s)?;
+    Ok(s)
+}
+
+/// The command Switchboard runs for an agent, as the Agents page shows it: the program and the
+/// arguments of an OpenRouter launch with `model` (no key, no environment).
+pub fn command(agent: &Value, model: Option<&str>) -> String {
+    let binary = agent["binary"].as_str().unwrap_or_default();
+    let id = agent["id"].as_str().unwrap_or_default();
+    match (crate::agent_catalog::openrouter(id), model) {
+        (Ok(recipe), Some(model)) if !recipe.model_flag.is_empty() => {
+            let mut parts = vec![binary.to_owned()];
+            parts.extend(recipe.args.iter().cloned());
+            parts.extend(
+                recipe
+                    .model_flag
+                    .iter()
+                    .map(|a| a.replace("{model}", model)),
+            );
+            parts.join(" ")
+        }
+        _ => binary.to_owned(),
+    }
+}
+
+/// Every catalog agent with what the Agents page needs: installed or not, enabled for
+/// switching, default, the command, and its links.
+pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
+    let settings = read(root)?;
+    let agents: Vec<Value> = crate::agent_catalog::catalog()["agents"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|agent| {
+            let id = agent["id"].as_str().unwrap_or_default().to_owned();
+            let path = installed(&agent);
+            let switchable = crate::agent_catalog::switchable(&id);
+            let disabled = settings.disabled.iter().any(|d| d == &id);
+            json!({
+                "id": id,
+                "name": agent["name"],
+                "maker": agent["maker"],
+                "url": agent["url"],
+                "install": agent["install"],
+                "installed": path.is_some(),
+                "switchable": switchable,
+                "enabled": path.is_some() && switchable && !disabled,
+                "disabled": disabled,
+                "default": settings.default.as_deref() == Some(id.as_str()),
+                "openrouter": crate::agent_catalog::openrouter(&id).is_ok(),
+                "mcp": agent["mcp"]["supported"],
+                "command": command(&agent, model),
+            })
+        })
+        .collect();
+    let installed = agents.iter().filter(|a| a["installed"] == true).count();
+    Ok(json!({
+        "default": settings.default,
+        "installed": installed,
+        "agents": agents,
+        "recommended_models": recommended(),
+    }))
+}
+
+/// The OpenRouter models Switchboard recommends, in order (operator 2026-10-14).
+pub fn recommended() -> Value {
+    crate::agent_catalog::catalog()["openrouter_recommended"].clone()
+}
+
+/// OpenRouter's tool-capable models, newest list within six hours; on any failure the answer
+/// says so and the recommended models alone still serve (SCN-059).
+#[derive(Default)]
+pub struct ModelCache {
+    at: i64,
+    models: Vec<Value>,
+}
+
+/// Only what the picker shows: id, name, context, prices. Models that cannot call tools are
+/// left out: a coding agent needs them.
+pub fn parse_models(body: &[u8]) -> Result<Vec<Value>, String> {
+    let value: Value = serde_json::from_slice(body).map_err(|_| "unreadable")?;
+    let mut out: Vec<Value> = value["data"]
+        .as_array()
+        .ok_or("unreadable")?
+        .iter()
+        .filter(|m| {
+            m["supported_parameters"]
+                .as_array()
+                .is_some_and(|p| p.iter().any(|x| x == "tools"))
+        })
+        .filter_map(|m| {
+            let id = m["id"].as_str()?;
+            switchboard_core::agent_keys::model_valid(id).then(|| {
+                json!({
+                    "id": id,
+                    "name": m["name"],
+                    "context": m["context_length"],
+                    "prompt": m["pricing"]["prompt"],
+                    "completion": m["pricing"]["completion"],
+                })
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    Ok(out)
+}
+
+pub async fn models(cache: &std::sync::Mutex<ModelCache>, now: i64) -> Value {
+    if let Ok(c) = cache.lock() {
+        if !c.models.is_empty() && now - c.at < MODELS_KEEP {
+            return json!({"recommended": recommended(), "models": c.models, "available": true});
+        }
+    }
+    let fetched = async {
+        let client = reqwest::Client::builder()
+            .timeout(MODELS_TIMEOUT)
+            .build()
+            .map_err(|_| "unavailable")?;
+        let response = client
+            .get(MODELS_URL)
+            .send()
+            .await
+            .map_err(|_| "unavailable")?;
+        if !response.status().is_success() {
+            return Err("unavailable");
+        }
+        let body = response.bytes().await.map_err(|_| "unavailable")?;
+        if body.len() > MAX_MODELS_BYTES {
+            return Err("unavailable");
+        }
+        parse_models(&body).map_err(|_| "unavailable")
+    }
+    .await;
+    match fetched {
+        Ok(models) => {
+            if let Ok(mut c) = cache.lock() {
+                c.at = now;
+                c.models = models.clone();
+            }
+            json!({"recommended": recommended(), "models": models, "available": true})
+        }
+        Err(_) => json!({"recommended": recommended(), "models": [], "available": false}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_five_recommended_models_lead_and_are_valid_ids() {
+        let r = recommended();
+        let ids: Vec<&str> = r
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "xiaomi/mimo-v2.6-pro",
+                "anthropic/claude-haiku-5.5",
+                "google/gemini-3.8-flash",
+                "qwen/qwen3.8-flash",
+                "deepseek/deepseek-v4.1-flash"
+            ]
+        );
+        assert!(ids
+            .iter()
+            .all(|id| switchboard_core::agent_keys::model_valid(id)));
+    }
+
+    #[test]
+    fn only_tool_capable_models_are_listed() {
+        let body = br#"{"data":[
+            {"id":"a/tools","name":"T","context_length":100,"pricing":{"prompt":"0.1","completion":"0.2"},"supported_parameters":["tools","temperature"]},
+            {"id":"b/plain","name":"P","context_length":100,"pricing":{},"supported_parameters":["temperature"]},
+            {"id":"bad id","supported_parameters":["tools"]}
+        ]}"#;
+        let models = parse_models(body).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["id"], "a/tools");
+        assert!(parse_models(b"nope").is_err());
+    }
+
+    #[test]
+    fn enabling_disabling_and_the_default_persist_and_are_checked() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(read(root.path()).unwrap(), Settings::default());
+        assert_eq!(
+            set_enabled(root.path(), "nope", false).unwrap_err(),
+            NOT_AN_AGENT
+        );
+        set_enabled(root.path(), "hermes", false).unwrap();
+        assert!(disabled(root.path(), "hermes"));
+        assert_eq!(usable(root.path(), "hermes").unwrap_err(), DISABLED);
+        assert_eq!(
+            set_default(root.path(), Some("aider")).unwrap_err(),
+            CANNOT_CONTINUE
+        );
+        set_enabled(root.path(), "hermes", true).unwrap();
+        assert!(!disabled(root.path(), "hermes"));
+        // The default needs the agent installed: a test machine has none of these CLIs on PATH
+        // reliably, so only the refusal path is asserted here; the CLI test sets one up.
+        let s = set_default(root.path(), None).unwrap();
+        assert_eq!(s.default, None);
+        // Disabling the default returns to Auto.
+        let mut with_default = read(root.path()).unwrap();
+        with_default.default = Some("codex".into());
+        write(root.path(), &with_default).unwrap();
+        let s = set_enabled(root.path(), "codex", false).unwrap();
+        assert_eq!(s.default, None);
+        switchboard_core::private_fs::private_write(&root.path().join(FILE), b"broken").unwrap();
+        assert!(read(root.path()).is_err());
+    }
+
+    #[test]
+    fn the_command_shows_the_openrouter_model() {
+        let agent = known("opencode").unwrap();
+        assert_eq!(command(&agent, None), "opencode");
+        assert_eq!(
+            command(&agent, Some("xiaomi/mimo-v2.6-pro")),
+            "opencode -m openrouter/xiaomi/mimo-v2.6-pro"
+        );
+        assert_eq!(
+            command(&known("claude-code").unwrap(), Some("x/y")),
+            "claude"
+        );
+    }
+}
