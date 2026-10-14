@@ -4648,8 +4648,25 @@ mod lifecycle_tests {
         )
         .unwrap();
         first.shutdown(Duration::from_secs(5)).await;
-        // Another program took the port while Switchboard was closed.
-        let squatter = std::net::TcpListener::bind(old).unwrap();
+        // Another program took the port while Switchboard was closed. A parallel test can grab
+        // the freed port first (seen once on Linux x64, nightly 38641898912): then it is taken
+        // all the same, so a bind that keeps failing with AddrInUse still sets up the case.
+        let squatter = {
+            let mut held = None;
+            for _ in 0..50 {
+                match std::net::TcpListener::bind(old) {
+                    Ok(l) => {
+                        held = Some(l);
+                        break;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                        tokio::time::sleep(Duration::from_millis(20)).await
+                    }
+                    Err(e) => panic!("{e}"),
+                }
+            }
+            held
+        };
         let second = owner(tmp.path()).await;
         let new = second.runtime.proxy.address();
         assert_ne!(new.port(), old.port());
