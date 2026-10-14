@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.31 — 2026-10-14
+
 **Choose which coding agents take over your work, and a default one** (SB-120). The Agents page
 now starts with what matters: the **default agent**, the agents **installed** on this computer —
 each with the command Switchboard runs, **Enabled / Disabled** for taking over work and **Set default**
