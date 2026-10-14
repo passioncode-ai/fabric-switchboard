@@ -70,11 +70,24 @@ pub fn installed(agent: &Value) -> Option<std::path::PathBuf> {
     // Windows's own programs are never an agent (`cmd` is Command Code's name and cmd.exe's).
     #[cfg(windows)]
     if let Some(system) = std::env::var_os("SystemRoot") {
-        if path.starts_with(std::path::PathBuf::from(system)) {
+        if under_folder(&path, std::path::Path::new(&system)) {
             return None;
         }
     }
     Some(path)
+}
+
+/// Whether `path` lies in `folder`, compared as Windows does: without the `\\?\` prefix a
+/// canonical path carries, case-insensitively, with either separator.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn under_folder(path: &Path, folder: &Path) -> bool {
+    let plain = |p: &Path| {
+        let text = p.to_string_lossy().replace('/', "\\").to_lowercase();
+        let text = text.strip_prefix("\\\\?\\").unwrap_or(&text).to_owned();
+        text.trim_end_matches('\\').to_owned()
+    };
+    let (path, folder) = (plain(path), plain(folder));
+    !folder.is_empty() && (path == folder || path.starts_with(&format!("{folder}\\")))
 }
 
 /// An agent can take over work when it is installed, Switchboard can hand it work, and it
@@ -351,6 +364,25 @@ mod tests {
         assert_eq!(s.default, None);
         switchboard_core::private_fs::private_write(&root.path().join(FILE), b"broken").unwrap();
         assert!(read(root.path()).is_err());
+    }
+
+    #[test]
+    fn windows_programs_are_recognised_through_the_canonical_prefix_and_any_case() {
+        let system = Path::new(r"C:\Windows");
+        assert!(under_folder(
+            Path::new(r"\\?\C:\WINDOWS\System32\cmd.exe"),
+            system
+        ));
+        assert!(under_folder(
+            Path::new("c:/windows/system32/cmd.exe"),
+            system
+        ));
+        assert!(!under_folder(Path::new(r"C:\WindowsApps\cmd.exe"), system));
+        assert!(!under_folder(
+            Path::new(r"\\?\C:\Users\a\.local\bin\cmd.exe"),
+            system
+        ));
+        assert!(!under_folder(Path::new(r"C:\Windows\x"), Path::new("")));
     }
 
     #[test]

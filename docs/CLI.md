@@ -263,8 +263,9 @@ switchboard agents models                 # the recommended OpenRouter models, t
 ```
 
 Installed means the agent's program is found the way launches find it: on `PATH`, in the usual
-per-user folders (`~/.local/bin`, `~/.opencode/bin`, `~/.kimi-code/bin`, `~/.bun/bin`, mise and
-asdf shims, …) and Homebrew's. Claude Code, Codex, Kimi Code, Hermes and OpenCode can take over a
+per-user folders (`~/.local/bin`, `~/.bun/bin`, …), Homebrew's, then the agents' own install
+folders (`~/.opencode/bin`, `~/.kimi-code/bin`, `~/.hermes/bin`, …); version-manager shims are not
+searched. Claude Code, Codex, Kimi Code, Hermes and OpenCode can take over a
 workflow; each is enabled for taking over work until you disable it (account switching is not affected), and a disabled one is skipped in
 fallback chains (`agent_disabled`) and refused by `continue`. The default agent is *Auto* or one
 installed, enabled agent of those five; disabling it returns the machine to *Auto*.

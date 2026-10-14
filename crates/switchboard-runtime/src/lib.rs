@@ -260,7 +260,7 @@ pub enum Operation {
     ProjectBindings,
     /// Every catalog agent: installed or not, enabled for taking over work, default, command (SB-120).
     AgentsOverview,
-    /// Takes an agent into switching, or out of it (SB-120).
+    /// Lets an agent take over work, or keeps work away from it (SB-120).
     AgentEnable {
         agent: String,
         enabled: bool,
@@ -1996,10 +1996,23 @@ async fn execute(
                     Some(launch::OPENCODE_TARGET) => launch::OPENCODE_TARGET.to_owned(),
                     Some(agent) => {
                         agent_settings::usable(root, agent)?;
+                        if !continuation::valid_workflow_id(&workflow_id) {
+                            return Err(continuation::BAD_WORKFLOW_ID.into());
+                        }
                         let folder = working_directory
                             .canonicalize()
                             .map_err(|_| "Choose an existing project directory.")?;
-                        fallback::account_for_default(runtime, agent, &folder, monitor::now())?
+                        // The executor is read first, so its own exhausted account is never the
+                        // one chosen.
+                        let shown =
+                            continuation::show(&continuation::observatory()?, &workflow_id)?;
+                        fallback::account_for_default(
+                            runtime,
+                            agent,
+                            &continuation::executor_of(&shown),
+                            &folder,
+                            monitor::now(),
+                        )?
                     }
                     None => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
                 }

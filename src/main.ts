@@ -56,7 +56,7 @@ let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KE
 function tourGo(step: number | null) {
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
-  page = tour()[step].page; render(); restoreFocus('tour-title');
+  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title');
 }
 function tourCard(step: number) {
   const item = tour()[step]; const last = step === tour().length - 1;

@@ -579,17 +579,18 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
   `opencode`; the others are tools-only rows. `<data>/agents-settings.json` (0600, ≤ 4 KiB — the
   backup's per-setting limit) holds `{default: id | null, disabled: [id]}`; unknown fields are
   ignored, so a newer file still reads; absent means *Auto* and nothing disabled. It is a setting file in encrypted backups and in `switchboard uninstall`'s
-  owned list. Unreadable → `Agent settings could not be read…` and nothing is changed.
+  owned list. Unreadable → `Agent settings (agents-settings.json) could not be read…` and nothing is changed.
 - `AgentEnable{agent, enabled}`: any catalog id (`No such agent in the catalog…` otherwise);
   disabling the default agent sets `default` to null. `AgentDefault{agent: Some(id)}` requires the
   agent to be switchable (`…cannot be the default.`), not disabled (`This agent is disabled for
-  switching…`) and installed (`This agent is not installed…`); `None` is *Auto*.
+  taking over work…`) and installed (`This agent is not installed…`); `None` is *Auto*.
 - `AgentsOverview` answers `{schema: 1, default, default_ready, installed, agents: [{id, name, maker, url, install,
   installed, switchable, enabled, disabled, default, openrouter, mcp, command}],
   recommended_models}`. `enabled` is `switchable && installed && !disabled`; `command` is the
   program and the arguments of an OpenRouter launch with the key's default model, never a key or
   an environment value. `default_ready` says whether the saved default is installed, enabled and
-  able to continue now. Fabric reads this answer; `schema` changes only when a field changes
+  can take over work; it does not check that the OpenRouter key is saved or that an account has
+  room now — `continue` checks those and refuses by name. Fabric reads this answer; `schema` changes only when a field changes
   meaning or goes.
 - **Fallback chains** read the settings once per pass; unreadable settings hand nothing over in
   that pass (`agent_settings_unreadable`), never "nothing disabled". They skip a disabled agent first, as `{agent, skipped: agent_disabled}`, before

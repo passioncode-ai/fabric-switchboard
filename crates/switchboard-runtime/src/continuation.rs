@@ -367,6 +367,17 @@ pub fn plan(
     )
 }
 
+/// The workflow's executor as the engine shows it: the lease's, else the checkpoint's; `Null`
+/// when it names none.
+pub(crate) fn executor_of(show: &Value) -> Value {
+    show.get("lease")
+        .and_then(|l| l.get("executor"))
+        .filter(|e| e.get("provider").is_some())
+        .or_else(|| show.get("checkpoint").and_then(|c| c.get("executor")))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
 /// `plan` for a target named by its harness (`claude-code`, `codex`, `kimi`), so a saved Kimi
 /// account — not a Switchboard provider — can take a workflow too (SB-99).
 pub fn plan_named(
@@ -419,13 +430,7 @@ pub fn plan_named(
     if !valid_account_ref(account_id) {
         return Err(ACCOUNT_REF_INVALID.into());
     }
-    let executor = show
-        .get("lease")
-        .and_then(|l| l.get("executor"))
-        .filter(|e| e.get("provider").is_some())
-        .or_else(|| checkpoint.get("executor"))
-        .cloned()
-        .unwrap_or(Value::Null);
+    let executor = executor_of(show);
     let executor_provider = executor
         .get("provider")
         .and_then(Value::as_str)

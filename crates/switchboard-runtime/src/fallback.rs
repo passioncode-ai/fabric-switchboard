@@ -400,11 +400,14 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
 
 pub const NO_DEFAULT_ACCOUNT: &str = "The default agent has no account that can take this workflow now. Name one with --account, or choose another default agent.";
 /// SB-120: `switchboard continue` without an account, on the machine's default agent: the
-/// account a one-step chain of that agent would choose now (`resolve_with`) — never a limited
-/// one, one that needs a new sign-in, or one a project keeps for other folders.
+/// account a one-step chain of that agent would choose now — never the workflow's executor or
+/// another saved copy of its login, a limited one, one that needs a new sign-in, or one a project
+/// keeps for other folders. `executor` is the engine's (`continuation::executor_of`); with no
+/// `accountRef`, the ordinary CLI's current accounts of its provider stand in for it.
 pub(crate) fn account_for_default(
     runtime: &Runtime,
     agent: &str,
+    executor: &Value,
     folder: &std::path::Path,
     now: i64,
 ) -> Result<String, String> {
@@ -412,6 +415,8 @@ pub(crate) fn account_for_default(
     let kimi_limited = runtime.kimi_watch.limited(now);
     let mut limited = runtime.limits.limited_ids(now);
     limited.extend(kimi_limited.iter().cloned());
+    let current = runtime.current_accounts().unwrap_or(Value::Null);
+    let excluded = executor_accounts(executor, &snapshot, &current);
     let kimi_usable =
         |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
     let kimi_used = |id: &str| runtime.kimi_watch.used(id);
@@ -432,6 +437,56 @@ pub(crate) fn account_for_default(
         .sign_in_required(&runtime.store)
         .into_iter()
         .collect();
+    pick_for_default(
+        &snapshot, agent, &excluded, &limited, &sign_in, folder, &kimi,
+    )
+}
+
+/// The accounts that are the workflow's executor: the one its `accountRef` names (a saved
+/// account or Kimi Code account), else the ordinary CLI's current accounts of its provider.
+pub(crate) fn executor_accounts(
+    executor: &Value,
+    snapshot: &Snapshot,
+    current: &Value,
+) -> Vec<String> {
+    if let Some(reference) = executor.get("accountRef").and_then(Value::as_str) {
+        return snapshot
+            .accounts
+            .iter()
+            .map(|a| &a.id)
+            .chain(snapshot.kimi_accounts.iter().map(|k| &k.id))
+            .filter(|id| continuation::names_account(reference, id))
+            .cloned()
+            .collect();
+    }
+    let key = match executor
+        .get("provider")
+        .and_then(Value::as_str)
+        .and_then(continuation::executor_provider)
+    {
+        Some(Provider::Claude) => "claude",
+        Some(Provider::Codex) => "codex",
+        None => return Vec::new(),
+    };
+    current[key]["account_ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `account_for_default` without the runtime: a one-step chain of `agent`, every executor account
+/// treated as the executor (so its other saved copies are passed over too).
+pub(crate) fn pick_for_default(
+    snapshot: &Snapshot,
+    agent: &str,
+    executor: &[String],
+    limited: &HashSet<String>,
+    sign_in: &HashSet<String>,
+    folder: &std::path::Path,
+    kimi: &KimiChoice,
+) -> Result<String, String> {
     let chain = Chain {
         scope: switchboard_core::ChainScope::Machine,
         executors: vec![switchboard_core::Executor {
@@ -441,14 +496,18 @@ pub(crate) fn account_for_default(
         }],
         updated_at: 0,
     };
+    // The first executor account is "the executor"; the others count as limited, which also
+    // passes over every saved copy of their logins.
+    let mut limited = limited.clone();
+    limited.extend(executor.iter().skip(1).cloned());
     match resolve_with(
-        &snapshot,
+        snapshot,
         &chain,
-        None,
+        executor.first().map(String::as_str),
         &limited,
-        &sign_in,
+        sign_in,
         Some(folder),
-        &kimi,
+        kimi,
     )
     .into_iter()
     .next()
@@ -895,6 +954,65 @@ mod tests {
             with(true, Some("opencode"), &[])[2],
             skip("opencode", "no_usable_account")
         );
+    }
+    #[test]
+    fn the_default_agent_never_continues_on_the_executor_or_a_copy_of_its_login() {
+        // SB-120: `continue` without an account on Claude Code picks an account with room — not
+        // the workflow's executor, not another saved row of the same login, not a limited one.
+        let mut exec = account("claude-exec", Provider::Claude, Some(1.0));
+        exec.identity = Some("person-a".into());
+        let mut twin = account("claude-twin", Provider::Claude, Some(2.0));
+        twin.identity = Some("person-a".into());
+        let snapshot = Snapshot {
+            accounts: vec![
+                exec,
+                twin,
+                account("claude-free", Provider::Claude, Some(40.0)),
+                account("claude-limited", Provider::Claude, Some(0.0)),
+                account("codex-a", Provider::Codex, Some(0.0)),
+            ],
+            ..Default::default()
+        };
+        let none = KimiChoice {
+            ids: Vec::new(),
+            usable: &|_| false,
+            used: &|_| 0.0,
+            hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
+        };
+        let limited: HashSet<String> = ["claude-limited".to_string()].into();
+        let pick = |executor: &[String], limited: &HashSet<String>| {
+            pick_for_default(
+                &snapshot,
+                "claude-code",
+                executor,
+                limited,
+                &HashSet::new(),
+                std::path::Path::new("/work"),
+                &none,
+            )
+        };
+        let reference = crate::continuation::account_ref("claude-exec");
+        let executor = executor_accounts(
+            &json!({"provider": "claude-code", "accountRef": reference}),
+            &snapshot,
+            &Value::Null,
+        );
+        assert_eq!(executor, ["claude-exec"]);
+        assert_eq!(pick(&executor, &limited).unwrap(), "claude-free");
+        // With no accountRef, the ordinary CLI's current accounts stand in for the executor.
+        let current = json!({"claude": {"account_ids": ["claude-free"]}});
+        let executor = executor_accounts(&json!({"provider": "claude-code"}), &snapshot, &current);
+        assert_eq!(executor, ["claude-free"]);
+        assert_eq!(pick(&executor, &limited).unwrap(), "claude-exec");
+        // Nothing left with room: a named refusal, never the executor.
+        let all: HashSet<String> = ["claude-limited", "claude-free"].map(String::from).into();
+        assert_eq!(
+            pick(&["claude-exec".to_string()], &all).unwrap_err(),
+            NO_DEFAULT_ACCOUNT
+        );
+        assert!(executor_accounts(&json!({"provider": "hermes"}), &snapshot, &current).is_empty());
     }
     #[test]
     fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {
