@@ -859,7 +859,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         return onboard_status(&root, folder, host.map(Into::into)).await;
     }
     if matches!(cli.command, Command::Serve) {
-        if let Some(log) = oplog::Log::default_location() {
+        if let Some(log) = oplog::for_root(&root, default_root().ok().as_deref()) {
             oplog::install(log);
         }
         // SIGTERM (launchd, `kill`, logout) and SIGINT (Ctrl-C) run the same drain with a
