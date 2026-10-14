@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-14 — 0.6.31 released: SB-119/SB-120
+
+**Released.** PR #201 (`db748f2`) and release PR #202 (`f285401`, which also added `revision`,
+`updated_at`, `path` and `argv` to `agents status` at Fabric's request). Tag `v0.6.31`; release
+run 38507040629 succeeded on every job (guard, macOS, Windows x64/arm64, Linux x64/arm64,
+updater, publish), 25 assets. Gate at the release commit: `./scripts/check.sh` exit 0, 603 Rust
+tests passed. A third review round found that `continue` without an account could choose the
+workflow's own account, that the Windows system-folder check missed `\\?\` paths, and that the
+tour's Agents step never loaded; all fixed with tests before the release.
+
+The Fabric session received the `switchboard --json agents status` shape (schema 1) for its
+Settings screen; Fabric falls back to its own detection when Switchboard is absent or `schema` > 1.
+
+The installed app (0.6.30, started 02:51Z) updates itself at its next check (every 6 h, about
+08:52Z) and restarts into 0.6.31 when idle; About → *Check for updates* does it now. The
+lifecycle broker did not restart it: the app was not started by the broker.
+
+**Exact next task:** the operator's live checks — one OpenCode continuation on the real
+OpenRouter key (`switchboard continue <wf> --account opencode`), one SB-115 StopFailure, one FD-62
+hand-over (Dashboards 0.7.9+). Then SB-116 with the Fabric session host.
+
+---
+
 ## 2026-10-14 (later) — SB-119/SB-120: agents that take over work, OpenCode, the model picker
 
 **Built on `feat/sb-119-agents`, release 0.6.31 next.** Operator requests 2026-10-14: OpenCode
