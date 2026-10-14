@@ -2,6 +2,40 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-15 — 0.6.32 published; iteration closed
+
+**Released** [v0.6.32](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.32)
+on 2026-10-14 at 22:49:50Z. Run 38644478397 succeeded on every job: guard, macOS,
+Windows x64/arm64, Linux x64/arm64, updater, publish; 25 assets. The tag is on `b6cf703`.
+
+The guard refused twice before that. Both times the fix went to the cause:
+- nightly failed on Windows on Unix paths in the SB-20 and SB-121 tests (#209);
+- a port-move test was flaky on Linux x64 (#210).
+
+The guard's earlier runs published nothing, so the tag was moved.
+
+**Also on the way.**
+- **Observatory folder (operator question):** `/Users/sshlg/DATA/project-observatory` was in no
+  project. Its origin is `ssheleg/project-observatory`, which matches nothing in PassionCode. It is
+  now in PassionCode and bound to the pool; its session restarts to pick the route up.
+- **SB-128** found and fixed: 10 folders deleted from disk blocked every save of the PassionCode
+  project. This is likely CALL-07.
+- **Live FD-62 hand-overs.**
+  - SB-129: the scratch workflow was handed over twice by the automatic fallback; it is now
+    closed.
+  - SB-130: both console sessions stopped at Claude Code's folder-trust dialog.
+
+**Waiting, with watchers.** The installed app (0.6.31) updates itself to 0.6.32 at its next
+6-hourly check. A background watcher then measures idle CPU for an hour (SB-49).
+
+**Exact next task:**
+1. The operator decides SB-130: pre-accept trust for a continuation's own checkout, or keep the
+   dialog.
+2. Then build SB-129: hand over only workflows whose executor wrote recently or names an account.
+3. Then SB-122: confirm the pool move works on 0.6.32, then the *Move to…* action.
+
+---
+
 ## 2026-10-14 (evening) — closing iteration: everything finishable here is done; 0.6.32
 
 **Objective** (operator: «доделай до конца … закрой все задачи … зафиксируй … задеплой … подведи
