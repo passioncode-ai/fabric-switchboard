@@ -209,7 +209,10 @@ fn user_board_server(
                 .parse()
                 .ok()?;
             let entry = config.get("mcp_servers")?.get(FABRIC_BOARD)?;
-            if entry.get("url").is_some() {
+            // A remote server, or one the operator switched off, is not carried.
+            if entry.get("url").is_some()
+                || entry.get("enabled").and_then(toml::Value::as_bool) == Some(false)
+            {
                 return None;
             }
             let args = entry.get("args").map(|a| {
@@ -2704,6 +2707,17 @@ mod tests {
         assert_eq!(claude.args, ["--runner", "claude-code"]);
         let codex = user_board_server(Provider::Codex, &user, None).unwrap();
         assert_eq!(codex.args, ["--runner", "codex"]);
+        let off = temp.path().join("off");
+        fs::create_dir_all(off.join(".codex")).unwrap();
+        fs::write(
+            off.join(".codex/config.toml"),
+            "[mcp_servers.fabric]\ncommand = \"/Applications/Board.app/bin/fabric-mcp\"\nenabled = false\n",
+        )
+        .unwrap();
+        assert!(
+            user_board_server(Provider::Codex, &off, None).is_none(),
+            "a board the operator switched off stays off"
+        );
 
         let home = temp.path().join("home");
         private_dir(&home).unwrap();
