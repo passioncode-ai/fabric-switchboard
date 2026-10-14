@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.32 — 2026-10-14
+
 ### Added
 
 - **Launched sessions reach the Fabric project board** (SB-20). A managed or isolated session has a home of its
