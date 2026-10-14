@@ -442,6 +442,8 @@ pub(crate) fn pending(root: &Path, snapshot: &Snapshot) -> Result<Vec<Suggestion
         .into_iter()
         .filter(|r| {
             r.state == State::Pending
+                // A row an older version recorded for a scratch folder is never offered or added.
+                && !transient(Path::new(&r.folder))
                 && snapshot.projects.iter().any(|p| p.pool == r.pool)
                 && snapshot.project_for(Path::new(&r.folder)).is_none()
                 && Path::new(&r.folder).is_dir()
@@ -467,6 +469,44 @@ pub(crate) fn mark_added(root: &Path, folder: &str, now: i64) -> Result<(), Stri
         .ok_or(NOT_FOUND)?;
     row.state = State::Added;
     row.first_seen = now;
+    write(root, &rows)
+}
+
+/// Folders the person took out of a project (SB-121): remembered as declined, so they are never
+/// added back by themselves. A folder already remembered keeps its row.
+pub(crate) fn remember_removed(
+    root: &Path,
+    pool: &str,
+    folders: &[String],
+    now: i64,
+) -> Result<(), String> {
+    let mut rows = read(root)?;
+    for folder in folders {
+        match rows.iter_mut().find(|r| &r.folder == folder) {
+            Some(row) => row.state = State::Dismissed,
+            None => rows.push(Suggestion {
+                folder: folder.clone(),
+                pool: pool.to_owned(),
+                reason: Reason::SameRepository,
+                repository: String::new(),
+                first_seen: now,
+                state: State::Dismissed,
+            }),
+        }
+    }
+    // Over the cap the oldest remembered rows go first.
+    while rows.len() > MAX_ROWS {
+        let Some(i) = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.state != State::Pending)
+            .min_by_key(|(_, r)| r.first_seen)
+            .map(|(i, _)| i)
+        else {
+            break;
+        };
+        rows.remove(i);
+    }
     write(root, &rows)
 }
 
@@ -871,6 +911,12 @@ mod tests {
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
         assert!(transient(&home.join(".cache/tool/clone")));
         assert!(!transient(&home.join("DATA/app-2")));
+        // A question an older version left for a scratch folder is never offered or added.
+        CHECK_TRANSIENT.with(|c| c.set(false));
+        new(record(root.path(), &s, &repos, &scratch, 2).unwrap());
+        assert_eq!(pending(root.path(), &s).unwrap().len(), 1);
+        CHECK_TRANSIENT.with(|c| c.set(true));
+        assert!(pending(root.path(), &s).unwrap().is_empty());
         CHECK_TRANSIENT.with(|c| c.set(false));
     }
 

@@ -15,6 +15,8 @@ banner. A folder you later remove from the project stays out. Agents' scratch wo
 temporary and cache folders are never added. Questions left from 0.6.30 are answered by the first
 pass after the update; only a folder Switchboard cannot add (it overlaps another project, say)
 still asks.
+Going back to 0.6.31 or older after this release makes the project-suggestions file unreadable to
+that version; delete `project-suggestions.json` in Switchboard's data folder if you do.
 
 **Launched sessions reach the Fabric project board** (SB-20). Sessions Switchboard launches run
 with their own Claude Code or Codex home, so the board server you registered (`fabric`) never

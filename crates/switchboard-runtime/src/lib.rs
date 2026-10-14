@@ -755,19 +755,20 @@ impl Runtime {
             &self.root,
             snapshot.as_ref(),
             workflow_id,
-            // The account that continues it; with none named, the default agent's own name.
-            &if id.is_empty() {
-                answer["agent"].as_str().unwrap_or_default().to_owned()
-            } else {
-                id.clone()
-            },
+            // The account that continues it, as `Continue` resolved it (the default agent's
+            // account when none was named).
+            answer["account"].as_str().unwrap_or(id.as_str()),
             working_directory,
             &answer,
             monitor::now(),
         )?;
+        // Not queued means the queue could not take it and Terminal opened it instead.
+        let queued = handovers::pending(&self.root)
+            .iter()
+            .any(|h| h.id == handover.id);
         Ok(
-            json!({"handover": handover.id, "workflow": handover.workflow, "agent": handover.agent,
-            "folder": handover.dir, "offeredUntil": handover.offered_until}),
+            json!({"handover": handover.id, "queued": queued, "workflow": handover.workflow,
+            "agent": handover.agent, "folder": handover.dir, "offeredUntil": handover.offered_until}),
         )
     }
     /// SB-121: found folders join their projects at once; one that cannot (a refused admission,
@@ -2220,6 +2221,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                    "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2266,6 +2268,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                    "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2301,6 +2304,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                    "account": id,
                 }));
             }
             let account = store
@@ -2362,6 +2366,7 @@ async fn execute(
                 "workflow": workflow_id,
                 "handoff": offer.handoff_id,
                 "offeredUntil": offer.expires_at,
+                    "account": id,
                 "agent_tools": agent_tools,
             }))
         }
@@ -2424,7 +2429,28 @@ async fn execute(
             }) {
                 return Err(PROJECT_ACCOUNT_IN_CLI.into());
             }
+            // SB-121: the folders this save takes out of an existing project are remembered as
+            // declined, so the automatic adding never brings back a folder the person removed.
+            let removed: Vec<String> = pool
+                .as_deref()
+                .and_then(|p| snapshot.projects.iter().find(|x| x.pool == p))
+                .map(|old| {
+                    old.folders
+                        .iter()
+                        .filter(|f| !folders.iter().any(|n| n == Path::new(f)))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
             let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            if !removed.is_empty()
+                && suggest::remember_removed(root, &project.pool, &removed, monitor::now()).is_err()
+            {
+                oplog::event(
+                    "project_suggestion",
+                    &[("remember", oplog::Field::Code("failed"))],
+                );
+            }
             // A folder added by hand, or a project's folders changed, can answer a suggestion.
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
@@ -3532,6 +3558,34 @@ mod owner_tests {
             .await
             .unwrap();
         assert_eq!(answer["reason"], "declined");
+        assert_eq!(folders(&runtime).len(), 2);
+        // A folder the person added by hand and later removes stays out as well.
+        let manual = work.join("app-manual");
+        git(&manual);
+        let with_manual = vec![main.clone(), older.clone(), manual.clone()];
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: with_manual,
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: vec![main.clone(), older.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        let answer = runtime
+            .execute(Operation::ProjectSuggest { folder: manual })
+            .await
+            .unwrap();
+        assert_eq!(answer["reason"], "declined", "{answer}");
         assert_eq!(folders(&runtime).len(), 2);
     }
     #[tokio::test]

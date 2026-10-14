@@ -140,7 +140,10 @@ fn line(event: &'static str, fields: &[(&'static str, Field)], at: i64) -> Strin
 /// or when `SWITCHBOARD_LOG_DIR` names one, else `<root>/logs`, so a test or a second
 /// `switchboard serve --data-dir` never writes into the installed app's log.
 pub fn for_root(root: &Path, default_root: Option<&Path>) -> Option<Log> {
-    if std::env::var_os("SWITCHBOARD_LOG_DIR").is_some() || default_root == Some(root) {
+    let same = |a: &Path, b: &Path| a == b || a.canonicalize().ok() == b.canonicalize().ok();
+    if std::env::var_os("SWITCHBOARD_LOG_DIR").is_some()
+        || default_root.is_some_and(|d| same(d, root))
+    {
         return Log::default_location();
     }
     Some(Log::at(root.join("logs"), CAP_BYTES, KEEP_FILES))
