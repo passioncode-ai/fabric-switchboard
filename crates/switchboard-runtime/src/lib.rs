@@ -135,6 +135,14 @@ pub enum Operation {
         #[serde(default)]
         in_place: bool,
     },
+    /// SB-108, by hand: offer a workflow like `Continue` and leave its prepared session for
+    /// Fabric's console (`switchboard handovers`) instead of opening Terminal; nobody taking it
+    /// within two minutes opens it in Terminal, as for the automatic fallback.
+    ContinueToConsole {
+        workflow_id: String,
+        id: String,
+        working_directory: PathBuf,
+    },
     BeginLogin {
         provider: Provider,
         label: String,
@@ -493,6 +501,8 @@ pub struct Runtime {
     suggest: Mutex<suggest::Scanner>,
     /// Moves on every new, added or declined suggestion; the app reads the list only then.
     suggestions_seq: std::sync::atomic::AtomicU64,
+    /// SB-121: the suggestions waiting from an earlier version were added this run.
+    suggest_swept: std::sync::atomic::AtomicBool,
     /// OpenRouter's model list, kept six hours (SB-119).
     openrouter_models: Mutex<agent_settings::ModelCache>,
     /// What the project folders' Claude Code route was last synced for (SB-118).
@@ -585,6 +595,7 @@ impl Runtime {
             kimi_watch: kimi::KimiWatch::default(),
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
+            suggest_swept: std::sync::atomic::AtomicBool::new(false),
             bindings_key: Mutex::new(None),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
@@ -597,6 +608,16 @@ impl Runtime {
         }))
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        if let Operation::ContinueToConsole {
+            workflow_id,
+            id,
+            working_directory,
+        } = operation
+        {
+            return self
+                .continue_to_console(workflow_id, id, working_directory)
+                .await;
+        }
         // Metadata reads do not wait behind OS credential prompts or network probes.
         // Store snapshot has its own lock; these operations cannot change auth or homes.
         // Current accounts only read native sources and a cache: a usage probe, import or
@@ -710,6 +731,71 @@ impl Runtime {
             ),
         }
     }
+    /// `Operation::ContinueToConsole`: the hand-over the automatic fallback makes with "Open
+    /// hand-overs in Fabric" on, for one workflow and account the person names.
+    async fn continue_to_console(
+        &self,
+        workflow_id: String,
+        id: String,
+        working_directory: PathBuf,
+    ) -> Result<Value, String> {
+        if !handovers::enabled(&self.root) {
+            return Err(handovers::OFF.into());
+        }
+        let answer = Box::pin(self.execute(Operation::Continue {
+            workflow_id: workflow_id.clone(),
+            id: id.clone(),
+            mode: "isolated".into(),
+            working_directory: working_directory.clone(),
+            in_place: true,
+        }))
+        .await?;
+        let snapshot = self.store.snapshot().ok();
+        let handover = fallback::queue_handover(
+            &self.root,
+            snapshot.as_ref(),
+            workflow_id,
+            // The account that continues it, as `Continue` resolved it (the default agent's
+            // account when none was named).
+            answer["account"].as_str().unwrap_or(id.as_str()),
+            working_directory,
+            &answer,
+            monitor::now(),
+        )?;
+        // Not queued means the queue could not take it and Terminal opened it instead.
+        let queued = handovers::pending(&self.root)
+            .iter()
+            .any(|h| h.id == handover.id);
+        Ok(
+            json!({"handover": handover.id, "queued": queued, "workflow": handover.workflow,
+            "agent": handover.agent, "folder": handover.dir, "offeredUntil": handover.offered_until}),
+        )
+    }
+    /// SB-121: found folders join their projects at once; one that cannot (a refused admission,
+    /// a full project) stays pending for the person. Runs under the owner transaction.
+    fn add_found(&self, found: Vec<suggest::Suggestion>, time: i64) {
+        if found.is_empty() {
+            return;
+        }
+        let mut added = 0;
+        for s in &found {
+            match add_suggested_folder(&self.store, &self.root, s, time) {
+                Ok(_) => added += 1,
+                Err(_) => oplog::event(
+                    "project_suggestion",
+                    &[("add", oplog::Field::Code("refused"))],
+                ),
+            }
+        }
+        oplog::event(
+            "project_suggestion",
+            &[
+                ("found", oplog::Field::Number(found.len() as i64)),
+                ("added", oplog::Field::Number(added)),
+            ],
+        );
+        self.suggestions_changed();
+    }
     /// The background half of SB-117, under the owner transaction like any other write.
     pub(crate) async fn suggest_pass(&self, time: i64) {
         let Ok(snapshot) = self.store.snapshot() else {
@@ -717,6 +803,19 @@ impl Runtime {
         };
         if snapshot.projects.is_empty() {
             return;
+        }
+        // SB-121, once per owner run: folders found before this version still wait as questions;
+        // they join their projects now, as if just found.
+        if !self
+            .suggest_swept
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            if let Ok(waiting) = suggest::pending(&self.root, &snapshot) {
+                if !waiting.is_empty() {
+                    let _transaction = self.mutations.lock().await;
+                    self.add_found(waiting, time);
+                }
+            }
         }
         // Listing folders writes nothing: it runs outside the owner transaction, which only
         // the recording below takes, and only when something changed.
@@ -735,13 +834,7 @@ impl Runtime {
             Ok(mut scanner) => scanner.settle(&self.root, &snapshot, candidates, time),
             Err(_) => return,
         };
-        if !found.is_empty() {
-            oplog::event(
-                "project_suggestion",
-                &[("found", oplog::Field::Number(found.len() as i64))],
-            );
-            self.suggestions_changed();
-        }
+        self.add_found(found, time);
     }
     fn begin_login(
         &self,
@@ -1422,6 +1515,46 @@ fn suggestion_view(snapshot: &switchboard_core::Snapshot, s: &suggest::Suggestio
     json!({"folder": s.folder, "name": name, "pool": s.pool, "project": project,
         "reason": s.reason, "repository": s.repository, "first_seen": s.first_seen})
 }
+/// Adds a found folder to its project (SB-117 Add; SB-121 does it unasked) with the same admission
+/// as a folder added by hand, then remembers it as added. Answers the project's view.
+fn add_suggested_folder(
+    store: &Store,
+    root: &Path,
+    suggestion: &suggest::Suggestion,
+    now: i64,
+) -> Result<Value, String> {
+    if !Path::new(&suggestion.folder).is_dir() {
+        return Err("This folder is gone. Read the suggestions again.".into());
+    }
+    let admitted = projects::project_dir(root, Path::new(&suggestion.folder))?;
+    let snapshot = store.snapshot()?;
+    let project = snapshot
+        .projects
+        .iter()
+        .find(|p| p.pool == suggestion.pool)
+        .ok_or("Project not found.")?;
+    let mut folders: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
+    folders.push(admitted);
+    let accounts: Vec<String> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.pool == project.pool)
+        .map(|a| a.id.clone())
+        .collect();
+    let saved = store.save_project(Some(&project.pool), &project.name, &folders, &accounts)?;
+    // The folder is in its project now; a list that could not be rewritten only loses the memory
+    // that it was added (a later removal by the person might then be undone once).
+    if suggest::mark_added(root, &suggestion.folder, now).is_err() {
+        oplog::event(
+            "project_suggestion",
+            &[("remember", oplog::Field::Code("failed"))],
+        );
+    }
+    Ok(projects::project_view(&store.snapshot()?, &saved))
+}
+/// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
+/// one notification (SB-121).
+const ADDED_SHOWN: i64 = 24 * 3600;
 /// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
 /// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
@@ -1970,6 +2103,10 @@ async fn execute(
                 json!({"message": "Terminal launch requested. Provider response is not yet verified.", "agent_tools": agent_tools}),
             )
         }
+        // Taken by `Runtime::execute` before this point; an offline caller has no owner.
+        Operation::ContinueToConsole { .. } => Err(needs_owner()
+            .err()
+            .unwrap_or_else(|| "Hand-over unavailable.".into())),
         Operation::Continue {
             workflow_id,
             id,
@@ -2084,6 +2221,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2130,6 +2268,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2165,6 +2304,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
+                "account": id,
                 }));
             }
             let account = store
@@ -2226,6 +2366,7 @@ async fn execute(
                 "workflow": workflow_id,
                 "handoff": offer.handoff_id,
                 "offeredUntil": offer.expires_at,
+                "account": id,
                 "agent_tools": agent_tools,
             }))
         }
@@ -2288,7 +2429,28 @@ async fn execute(
             }) {
                 return Err(PROJECT_ACCOUNT_IN_CLI.into());
             }
+            // SB-121: the folders this save takes out of an existing project are remembered as
+            // declined, so the automatic adding never brings back a folder the person removed.
+            let removed: Vec<String> = pool
+                .as_deref()
+                .and_then(|p| snapshot.projects.iter().find(|x| x.pool == p))
+                .map(|old| {
+                    old.folders
+                        .iter()
+                        .filter(|f| !folders.iter().any(|n| n == Path::new(f)))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
             let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            if !removed.is_empty()
+                && suggest::remember_removed(root, &project.pool, &removed, monitor::now()).is_err()
+            {
+                oplog::event(
+                    "project_suggestion",
+                    &[("remember", oplog::Field::Code("failed"))],
+                );
+            }
             // A folder added by hand, or a project's folders changed, can answer a suggestion.
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
@@ -2331,18 +2493,38 @@ async fn execute(
                 .into_iter()
                 .map(|s| suggestion_view(&snapshot, &s))
                 .collect();
-            Ok(json!({"suggestions": rows}))
+            let added: Vec<Value> = suggest::added_since(root, monitor::now() - ADDED_SHOWN)?
+                .into_iter()
+                .map(|s| suggestion_view(&snapshot, &s))
+                .collect();
+            Ok(json!({"suggestions": rows, "added": added}))
         }
         Operation::ProjectSuggest { folder } => {
             let snapshot = store.snapshot()?;
             let repos = suggest::project_repos(&snapshot);
             match suggest::record(root, &snapshot, &repos, &folder, monitor::now())? {
                 suggest::Outcome::New(s) => {
+                    // SB-121: a project's folder joins it at once; only a refused add waits.
+                    let added = add_suggested_folder(&store, root, &s, monitor::now());
                     if let Some(rt) = runtime {
-                        oplog::event("project_suggestion", &[("found", oplog::Field::Number(1))]);
+                        oplog::event(
+                            "project_suggestion",
+                            &[(
+                                if added.is_ok() { "added" } else { "found" },
+                                oplog::Field::Number(1),
+                            )],
+                        );
                         rt.suggestions_changed();
                     }
-                    Ok(json!({"suggested": true, "suggestion": suggestion_view(&snapshot, &s)}))
+                    let view = suggestion_view(&store.snapshot()?, &s);
+                    Ok(match added {
+                        Ok(project) => {
+                            json!({"suggested": false, "added": true, "suggestion": view, "project": project})
+                        }
+                        Err(e) => {
+                            json!({"suggested": true, "added": false, "suggestion": view, "message": e})
+                        }
+                    })
                 }
                 other => Ok(
                     json!({"suggested": false, "reason": other.code(), "message": other.message()}),
@@ -2351,40 +2533,11 @@ async fn execute(
         }
         Operation::ProjectSuggestionAccept { folder } => {
             let suggestion = suggest::find_pending(root, &folder)?;
-            if !Path::new(&suggestion.folder).is_dir() {
-                return Err("This folder is gone. Read the suggestions again.".into());
-            }
-            // The same admission as a folder added by hand (canonical, not the data folder).
-            let admitted = projects::project_dir(root, Path::new(&suggestion.folder))?;
-            let snapshot = store.snapshot()?;
-            let project = snapshot
-                .projects
-                .iter()
-                .find(|p| p.pool == suggestion.pool)
-                .ok_or("Project not found.")?;
-            let mut folders: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
-            folders.push(admitted);
-            let accounts: Vec<String> = snapshot
-                .accounts
-                .iter()
-                .filter(|a| a.pool == project.pool)
-                .map(|a| a.id.clone())
-                .collect();
-            let saved =
-                store.save_project(Some(&project.pool), &project.name, &folders, &accounts)?;
-            // The folder is in its project now; a list that could not be rewritten hides it anyway.
-            if suggest::forget(root, &folder).is_err() {
-                oplog::event(
-                    "project_suggestion",
-                    &[("forget", oplog::Field::Code("failed"))],
-                );
-            }
+            let saved = add_suggested_folder(&store, root, &suggestion, monitor::now())?;
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
-            Ok(
-                json!({"added": suggestion.folder, "project": projects::project_view(&store.snapshot()?, &saved)}),
-            )
+            Ok(json!({"added": suggestion.folder, "project": saved}))
         }
         Operation::ProjectSuggestionDismiss { folder } => {
             suggest::dismiss(root, &folder)?;
@@ -2402,6 +2555,15 @@ async fn execute(
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
+            // SB-121: its folders are not adopted by another project by themselves afterwards.
+            if suggest::remember_removed(root, &project.pool, &project.folders, monitor::now())
+                .is_err()
+            {
+                oplog::event(
+                    "project_suggestion",
+                    &[("remember", oplog::Field::Code("failed"))],
+                );
+            }
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
@@ -3332,6 +3494,129 @@ mod owner_tests {
         assert_eq!(resolved["project"]["pool"], "alpha");
         assert_eq!(resolved["project"]["accounts"][0]["id"], b.id.as_str());
         assert!(!resolved.to_string().contains("synthetic-b-token"));
+    }
+    #[tokio::test]
+    async fn a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out() {
+        // SB-121: no question; one record per folder for the app's notification.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let git = |dir: &Path| {
+            std::fs::create_dir_all(dir.join(".git")).unwrap();
+            std::fs::write(
+                dir.join(".git/config"),
+                "[remote \"origin\"]\n\turl = git@github.com:org/app.git\n",
+            )
+            .unwrap();
+        };
+        let main = work.join("app");
+        git(&main);
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![main.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        // A question left by an earlier version is answered by the first pass.
+        let older = work.join("app-older");
+        git(&older);
+        let snapshot = runtime.store.snapshot().unwrap();
+        let repos = suggest::project_repos(&snapshot);
+        assert!(matches!(
+            suggest::record(root.path(), &snapshot, &repos, &older, 1).unwrap(),
+            suggest::Outcome::New(_)
+        ));
+        // A new clone beside it is found by the same pass.
+        let clone = work.join("app-2");
+        git(&clone);
+        let seq = runtime.suggestions_seq();
+        let now = monitor::now();
+        runtime.suggest_pass(now).await;
+        runtime.suggest_pass(now + 1).await;
+        let folders = |rt: &Runtime| -> Vec<String> {
+            rt.store.snapshot().unwrap().projects[0].folders.clone()
+        };
+        let joined = folders(&runtime);
+        assert_eq!(joined.len(), 3, "{joined:?}");
+        assert!(runtime.suggestions_seq() > seq, "the app is told");
+        let listed = runtime
+            .execute(Operation::ProjectSuggestions)
+            .await
+            .unwrap();
+        assert_eq!(listed["suggestions"], json!([]), "nothing is asked");
+        assert_eq!(listed["added"].as_array().unwrap().len(), 2);
+        assert_eq!(listed["added"][0]["project"], "App");
+        // The person takes the clone out: it does not come back.
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: vec![main.clone(), older.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        let answer = runtime
+            .execute(Operation::ProjectSuggest {
+                folder: clone.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["reason"], "declined");
+        assert_eq!(folders(&runtime).len(), 2);
+        // A folder the person added by hand and later removes stays out as well.
+        let manual = work.join("app-manual");
+        git(&manual);
+        let with_manual = vec![main.clone(), older.clone(), manual.clone()];
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: with_manual,
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: vec![main.clone(), older.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        let answer = runtime
+            .execute(Operation::ProjectSuggest { folder: manual })
+            .await
+            .unwrap();
+        assert_eq!(answer["reason"], "declined", "{answer}");
+        assert_eq!(folders(&runtime).len(), 2);
+        // Removing the whole project remembers its folders too.
+        runtime
+            .execute(Operation::RemoveProject { pool: "app".into() })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App again".into(),
+                folders: vec![main.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        let answer = runtime
+            .execute(Operation::ProjectSuggest {
+                folder: older.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["reason"], "declined", "{answer}");
     }
     #[tokio::test]
     async fn activation_after_claude_logout_proceeds_and_is_journaled() {

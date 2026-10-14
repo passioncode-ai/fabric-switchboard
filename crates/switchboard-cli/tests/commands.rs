@@ -66,9 +66,11 @@ fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
 }
 #[test]
 fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
-    // SB-117: a clone of a project repository is suggested, listed, added or declined.
+    // SB-117/SB-121: a clone of a project repository joins its project at once; one the person
+    // then removes, or one declined while it waited, is never added again.
     let tmp = tempfile::tempdir().unwrap();
-    let work = tempfile::tempdir().unwrap();
+    // Not the system's temporary folder: folders there never join a project (SB-121).
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let work = work.path().canonicalize().unwrap();
     let git = |dir: &std::path::Path, remote: &str| {
         std::fs::create_dir_all(dir.join(".git")).unwrap();
@@ -125,19 +127,43 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
         None,
     );
     assert!(ok, "{err}");
-    assert_eq!(json["data"]["suggested"], true);
+    assert_eq!(json["data"]["added"], true);
     assert_eq!(json["data"]["suggestion"]["reason"], "same_repository");
-    let (_, listed, _) = run(&["project", "suggestions"], None);
-    assert_eq!(listed["data"]["suggestions"][0]["project"], "App");
-    let (ok, added, err) = run(&["project", "accept", copy.to_str().unwrap()], None);
-    assert!(ok, "{err}");
     assert_eq!(
-        added["data"]["project"]["folders"]
-            .as_array()
-            .unwrap()
-            .len(),
+        json["data"]["project"]["folders"].as_array().unwrap().len(),
         2
     );
+    let (_, listed, _) = run(&["project", "suggestions"], None);
+    assert_eq!(
+        listed["data"]["suggestions"],
+        serde_json::json!([]),
+        "nothing waits"
+    );
+    assert_eq!(
+        listed["data"]["added"][0]["project"], "App",
+        "for the one notification"
+    );
+    // The person removes it from the project: it is not added back.
+    let (ok, _, err) = run(
+        &[
+            "project",
+            "save",
+            "--pool",
+            "app",
+            "--name",
+            "App",
+            "--folder",
+            main.to_str().unwrap(),
+        ],
+        None,
+    );
+    assert!(ok, "{err}");
+    let (_, again, _) = run(
+        &["project", "suggest", "--folder", copy.to_str().unwrap()],
+        None,
+    );
+    assert_eq!(again["data"]["added"], serde_json::Value::Null);
+    assert_eq!(again["data"]["reason"], "declined");
     // A new repository of a source, declined: never suggested again.
     let (ok, _, err) = run(
         &[
@@ -177,20 +203,22 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     let said = hooked(&hook.to_string());
-    assert!(said.contains("part of the project \"App\""), "{said}");
+    assert!(said.contains("added to the project \"App\""), "{said}");
     assert_eq!(said.lines().count(), 1);
     let (_, listed, _) = run(&["project", "suggestions"], None);
-    assert_eq!(listed["data"]["suggestions"][0]["reason"], "ecosystem");
-    let (ok, _, _) = run(&["project", "dismiss", api.to_str().unwrap()], None);
-    assert!(ok);
+    // The clone the person removed is declined now; the new repository is the one added.
+    let added = listed["data"]["added"].as_array().unwrap();
+    assert_eq!(added.len(), 1, "{listed}");
+    assert_eq!(added[0]["reason"], "ecosystem");
     let (_, again, _) = run(
         &["project", "suggest", "--folder", api.to_str().unwrap()],
         None,
     );
     assert_eq!(again["data"]["suggested"], false);
+    assert_eq!(again["data"]["reason"], "in_project");
     // The hook never fails a session, and says nothing when nothing was found.
     assert_eq!(hooked("not json"), "");
-    assert_eq!(hooked(&hook.to_string()), "", "already declined");
+    assert_eq!(hooked(&hook.to_string()), "", "already in the project");
 }
 #[test]
 fn recovery_hook_never_fails_the_session() {

@@ -2,6 +2,61 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-14 (evening) — closing iteration: everything finishable here is done; 0.6.32
+
+**Objective** (operator: «доделай до конца … закрой все задачи … зафиксируй … задеплой … подведи
+итог»). The whole repository was swept for unfinished work and one iteration closed what an agent
+can close.
+
+**Done in this iteration**
+- **Repository hygiene.**
+  - 23 squash-merged branches deleted (remote and local).
+  - The abandoned `sb-118` worktree removed; its receipt was already on main.
+  - My expired SB-118 lease released.
+  - The main checkout moved back to `main`.
+  - Commit `829a800` (a fabric-mcp registration for OpenCode, committed here by mistake with
+    `--runner claude-code`) handed to Fabric and its branch deleted (SB-126).
+- **SB-20** (orphaned PR #204: launched sessions reach the Fabric board) reviewed, given one fix
+  (a board switched off in Codex stays off) and merged as `e37602d`.
+- **SB-121** (operator, mid-iteration): a project's new folders join it by themselves.
+  - One system notification per folder; no question.
+  - Removed folders stay out.
+  - Scratch and cache folders never join.
+  - The 11 questions waiting on this Mac were answered by hand: 8 added, 3 scratch declined.
+- **SB-112**: `serve --data-dir` logs inside its own data folder.
+- **`continue --to-console`**: SB-108 by hand, for the FD-62 live check.
+- **Board.** 15 released rows closed with receipts. New rows SB-121…SB-127:
+  - CALL-07, CALL-08, CALL-09 and В-06 from the founders' call;
+  - the fabric-mcp OpenCode runner;
+  - `usage_check` `other`.
+- **SB-85** closed: no `http_error` since 2026-10-09.
+- **Models** per the operator's list: the agents' OpenRouter default and Hermes are now
+  `xiaomi/mimo-v2.6-pro` (were `deepseek-v4-pro`).
+
+**Checks.**
+- `./scripts/check.sh` exit 0 (609 Rust tests).
+- Two review rounds:
+  - round 1 found three real bugs, all fixed with tests: a hand-added folder came back after
+    removal; the sweep ignored scratch folders; `--to-console` without `--account` was
+    "unknown";
+  - round 2 checked the fixes.
+
+**Open, with owners**
+- **FD-62 live hand-over.** Workflow `wf_5e78a8c1a8ee6c19` in `/Users/sshlg/DATA/fd62-live-check`
+  is ready. After 0.6.32 is installed:
+  `switchboard continue wf_5e78a8c1a8ee6c19 --account opencode --dir /Users/sshlg/DATA/fd62-live-check --to-console`.
+  Then tell the fabric-dashboards session the hand-over id.
+- **Fabric's settings screen**: Fabric's work (shape sent).
+- **SB-49 idle CPU**: re-measure on 0.6.32.
+- **The operator's live checks**: SB-115 StopFailure, SB-01/SB-15 acceptance.
+- **SB-122**: reproduce the pool-move conflict with the operator.
+- **Hosts**: SB-02 needs a Windows host; SB-109/110/111 are the RM-28 pilot.
+
+**Exact next task:** watch the 0.6.32 release, confirm the installed app updates, run the FD-62
+hand-over above and report it to fabric-dashboards, then re-measure idle CPU (SB-49).
+
+---
+
 ## 2026-10-14 — 0.6.31 released: SB-119/SB-120
 
 **Released.** PR #201 (`db748f2`) and release PR #202 (`f285401`, which also added `revision`,

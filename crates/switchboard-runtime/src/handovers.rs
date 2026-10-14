@@ -23,6 +23,7 @@ const MAX_WAITING: usize = 16;
 const MAX_RECORD: u64 = 16 * 1024;
 
 pub const NOT_FOUND: &str = "That hand-over is not waiting any more: another console or Terminal took it, or its offer lapsed.";
+pub const OFF: &str = "Open hand-overs in Fabric is off. Turn it on with switchboard handovers set on, or continue without --to-console.";
 pub const BAD_ID: &str = "Not a hand-over id: it looks like ho- and 12 hex digits.";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

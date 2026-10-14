@@ -115,8 +115,13 @@ enum Command {
         dir: PathBuf,
         /// Run the continuing session in this terminal instead of opening Terminal (needs a
         /// terminal on stdin and stdout) — for an embedded console such as Fabric's (SB-108).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "to_console")]
         in_place: bool,
+        /// Leave the prepared session for Fabric's console instead of opening Terminal
+        /// (`switchboard handovers`; needs "Open hand-overs in Fabric" on). Nobody taking it
+        /// within two minutes opens it in Terminal.
+        #[arg(long, conflicts_with = "mode")]
+        to_console: bool,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -859,7 +864,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         return onboard_status(&root, folder, host.map(Into::into)).await;
     }
     if matches!(cli.command, Command::Serve) {
-        if let Some(log) = oplog::Log::default_location() {
+        if let Some(log) = oplog::for_root(&root, default_root().ok().as_deref()) {
             oplog::install(log);
         }
         // SIGTERM (launchd, `kill`, logout) and SIGINT (Ctrl-C) run the same drain with a
@@ -1020,9 +1025,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Continue {
             workflow_id,
             account,
+            dir,
+            to_console: true,
+            ..
+        } => Operation::ContinueToConsole {
+            workflow_id: workflow_id.clone(),
+            id: account.clone(),
+            working_directory: dir.clone(),
+        },
+        Command::Continue {
+            workflow_id,
+            account,
             mode,
             dir,
             in_place,
+            ..
         } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
         Command::Recovery { command } => match command {
             None => Operation::Recovery,
@@ -1461,15 +1478,18 @@ pub(crate) async fn onboard_status(
 }
 /// `switchboard project suggest --from-hook` (SB-117): Claude Code's `SessionStart` hook names
 /// the session's folder as `cwd`. A `SessionStart` hook's output joins the session's context,
-/// so it prints one line only when a folder was suggested, and nothing otherwise; it always
-/// exits 0.
+/// so it prints one line only when the folder was added to a project (SB-121) or waits for the
+/// operator, and nothing otherwise; it always exits 0.
 async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
     let value = project_suggest_hook(root).await;
-    if value["suggested"] == true {
-        let s = &value["suggestion"];
+    let project = value["suggestion"]["project"].as_str().unwrap_or("?");
+    if value["added"] == true {
         println!(
-            "Switchboard: this folder looks like part of the project \"{}\"; the operator was asked to add it.",
-            s["project"].as_str().unwrap_or("?")
+            "Switchboard: this folder was added to the project \"{project}\"; its sessions use the project's accounts from their next start."
+        );
+    } else if value["suggested"] == true {
+        println!(
+            "Switchboard: this folder looks like part of the project \"{project}\" but could not be added by itself; the operator was asked."
         );
     }
     std::process::exit(0)

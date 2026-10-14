@@ -136,25 +136,26 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
-### A project offers its new folders (SB-117)
+### A project's new folders join it by themselves (SB-117, SB-121)
 
-Switchboard finds folders that belong to a project and asks before adding them:
+Switchboard finds folders that belong to a project and adds them to it without asking (SB-121,
+operator 2026-10-14), with one system notification per folder:
 
 - a git worktree of a project repository;
 - a clone with the same `origin`;
 - a repository of one of the project's sources (`host/owner`).
 
-The owner's background pass looks at the parent folder of every project folder and at every project repository's worktree list. It re-reads either only when its modification time changed. The plugin's `SessionStart` hook reports the folder a Claude Code session starts in. A suggestion shows as a notification, as a count next to the tray icon, and as a banner in the window with **Add** and **Not this one**. Nothing joins until a person adds it, and a declined folder is never offered again. A folder two projects match equally is not offered.
+The owner's background pass looks at the parent folder of every project folder and at every project repository's worktree list. It re-reads either only when its modification time changed. The plugin's `SessionStart` hook reports the folder a Claude Code session starts in. A folder the person later removes from the project is not added again. A folder two projects match equally, one in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`) and one that is not a git repository are never added. When adding fails (the folder overlaps another project, the 1024-folder total), the folder waits as a question, as in 0.6.30: a notification, a count next to the tray icon and a banner with **Add** and **Not this one**.
 
 ```sh
-switchboard project suggest --folder /work/app-review   # offer a folder (default: the current one)
-switchboard project suggestions                         # what waits for an answer
-switchboard project accept /work/app-review             # add it to its project
-switchboard project dismiss /work/app-review            # never offer it again
-switchboard project source --pool app --add github.com/example   # also offer new repositories of this owner
+switchboard project suggest --folder /work/app-review   # add a folder to its project now (default: the current one)
+switchboard project suggestions                         # {suggestions: questions waiting, added: folders added in the last 24 h}
+switchboard project accept /work/app-review             # answer a waiting question: add it
+switchboard project dismiss /work/app-review            # answer a waiting question: never add it
+switchboard project source --pool app --add github.com/example   # also adopt new repositories of this owner
 ```
 
-`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when a folder was offered, and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md); `suggest::tests` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
+`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when the folder was added (or could not be and waits), and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md); `suggest::tests`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
@@ -409,10 +410,13 @@ switchboard handovers --json
 switchboard handovers set on
 switchboard handovers run ho-0123456789ab
 switchboard handovers set off
+switchboard continue wf_0123456789abcdef --account opencode --dir ~/src/app --to-console
 ```
 
 Off by default. With the setting on, automatic fallback prepares a continuation
-and queues metadata for the host console. `run` requires a terminal on stdin and
+and queues metadata for the host console; `continue … --to-console` (0.6.32) does the same for one
+workflow and account a person names, and is refused before anything is offered while the setting
+is off. `run` requires a terminal on stdin and
 stdout and takes the record once. After 120 seconds without a taker, the monitor
 requests a Terminal launch while the offer is live. Expired offers never launch.
 The private queue stores no credential or prompt. Fabric Dashboards' consumer

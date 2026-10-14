@@ -136,6 +136,19 @@ fn line(event: &'static str, fields: &[(&'static str, Field)], at: i64) -> Strin
     text
 }
 
+/// The log of an owner over `root` (SB-112): the per-user log for the installed app's data folder
+/// or when `SWITCHBOARD_LOG_DIR` names one, else `<root>/logs`, so a test or a second
+/// `switchboard serve --data-dir` never writes into the installed app's log.
+pub fn for_root(root: &Path, default_root: Option<&Path>) -> Option<Log> {
+    let same = |a: &Path, b: &Path| a == b || a.canonicalize().ok() == b.canonicalize().ok();
+    if std::env::var_os("SWITCHBOARD_LOG_DIR").is_some()
+        || default_root.is_some_and(|d| same(d, root))
+    {
+        return Log::default_location();
+    }
+    Some(Log::at(root.join("logs"), CAP_BYTES, KEEP_FILES))
+}
+
 /// The per-user log folder: `SWITCHBOARD_LOG_DIR` when it is absolute, else
 /// `~/Library/Logs/Fabric Switchboard` on macOS, `%LOCALAPPDATA%\Fabric Switchboard\Logs` on
 /// Windows, `$XDG_STATE_HOME/fabric-switchboard` (`~/.local/state/…`) on Linux (SB-88), and the
@@ -185,6 +198,19 @@ mod tests {
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
             .collect()
+    }
+
+    #[test]
+    fn an_owner_over_another_data_folder_logs_inside_it() {
+        // SB-112: a second `serve --data-dir` never writes into the installed app's log.
+        let other = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        if std::env::var_os("SWITCHBOARD_LOG_DIR").is_none() {
+            let log = for_root(other.path(), Some(installed.path())).unwrap();
+            assert_eq!(log.dir, other.path().join("logs"));
+            let own = for_root(installed.path(), Some(installed.path()));
+            assert_eq!(own.map(|l| l.dir), default_dir());
+        }
     }
 
     #[test]
