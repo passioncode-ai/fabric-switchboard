@@ -8,6 +8,25 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A project's new folders join it by themselves** (SB-121, operator 2026-10-14). A worktree of a
+project repository, another clone of it, or a new repository of the project's source is added to
+the project at once, and you get one notification: “app-2 is now part of App.” No question, no
+banner. A folder you later remove from the project stays out. Agents' scratch worktrees in
+temporary and cache folders are never added. Questions left from 0.6.30 are answered by the first
+pass after the update; only a folder Switchboard cannot add (it overlaps another project, say)
+still asks.
+
+**Launched sessions reach the Fabric project board** (SB-20). Sessions Switchboard launches run
+with their own Claude Code or Codex home, so the board server you registered (`fabric`) never
+reached them. Now it is carried in — its command and arguments, never its environment.
+
+**Hand a workflow to Fabric's console by hand**: `switchboard continue <wf> --account <id> --dir
+<folder> --to-console` offers it and leaves the prepared session for the console, as the
+automatic fallback does with *Open hand-overs in Fabric* on (SB-108).
+
+A second `switchboard serve --data-dir` no longer writes into the installed app's log; it logs in
+its own data folder (SB-112).
+
 ### Added
 
 - **Launched sessions reach the Fabric project board** (SB-20). A managed or isolated session has a home of its

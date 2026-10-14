@@ -62,7 +62,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-052 | An agent keeps working when its account hits a limit | draft |
 | SCN-053 | A stopped session gets a capacity notice once | draft |
 | SCN-054 | Take a workflow hand-over in a console | draft |
-| SCN-055 | Add a project's new folder when Switchboard suggests it | draft |
+| SCN-055 | A project's new folder joins it by itself | draft |
 | SCN-056 | Work in a project's folder on the project's accounts | draft |
 | SCN-057 | See which coding agents are installed and choose which take over work | draft |
 | SCN-058 | Choose the default agent | draft |
@@ -1132,27 +1132,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-055 — Add a project's new folder when Switchboard suggests it
+## SCN-055 — A project's new folder joins it by itself
 **Persona:** P-01
-**Goal:** Keep a project's folder list complete as clones, worktrees and new repositories of the same product appear, without hunting for them and without anything joining by itself.
+**Goal:** Keep a project's folder list complete as worktrees, clones and new repositories of the same product appear, without hunting for them and without being asked about each one (operator 2026-10-14: «не надо у меня ничего спрашивать, просто показывай, что добавлен в проект, и уведомление один раз»).
 **Preconditions:** a project with at least one folder that is a git repository; optionally the project's sources (`switchboard project source --pool <pool> --add github.com/<owner>`).
-**Entry point:** a system notification, the count next to the tray icon, or the banner at the top of the window.
+**Entry point:** none — a system notification tells the person afterwards.
 **Steps:**
-1. An agent creates a worktree of a project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard records a suggestion.
-2. A notification arrives: “Add {folder} to {project}?” The tray icon shows the number of open suggestions until each is answered.
-3. Open the window → a banner above every page: “Add {folder name} to {project}? {reason}” with **Add** and **Not this one**. The reason reads “A worktree of {repository}”, “Another copy of {repository}” or “A new repository of {source}”.
-4. **Add** → the folder joins the project; its accounts now serve it → “{folder name} added to {project}.” The banner shows the next suggestion or disappears; the tray count drops.
-5. **Not this one** → the suggestion closes and is never offered again for that folder.
-**Alt paths:** The CLI answers the same suggestions (`switchboard project suggestions`, `accept`, `dismiss`). A folder that matches two projects equally is not suggested. A folder inside a project already belongs to it and is never suggested. Folders that are not git repositories are never suggested.
-**Expected result:** every new folder of a project is offered once, stays visible until answered, and joins only on a click.
-**UI elements:** system notification, tray count, suggestion banner, Add, Not this one.
-**States covered:** none, one waiting, several waiting, added, declined, refused (the folder now overlaps another project).
-**Errors & recovery:** a refusal on Add (the folder became part of another project, or the 1024-folder total is reached) names the cause and keeps the suggestion.
+1. An agent creates a worktree of a project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard adds the folder to the project (SB-121); its accounts serve it from the next session.
+2. One system notification: “Folder added to a project — {folder} is now part of {project}.” (several at once: “{n} folders added ({projects}).”). Nothing is asked; no banner, no tray count.
+3. A session started there by the hook gets one line in its context: “this folder was added to the project …”.
+**Alt paths:** The person removes the folder from the project (Projects → Edit) → it is never added back. Adding fails (the folder now overlaps another project, the 1024-folder total is reached) → the folder waits as a question: notification “Add {folder} to {project}?”, the tray count and the window banner with **Add** and **Not this one**, as in 0.6.30. Questions left by 0.6.30/0.6.31 are added by the first pass after the update. A folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches` — an agent's scratch worktree) never joins. A folder that matches two projects equally, a folder already in a project and a folder that is not a git repository are never added. The CLI shows what was added (`switchboard project suggestions` → `added`).
+**Expected result:** every new folder of a project joins it once, the person learns it from one notification, and their own removals stand.
+**UI elements:** system notification; for the fallback question: tray count, suggestion banner, Add, Not this one.
+**States covered:** added, several added, added then removed by the person, add refused (question), temporary folder ignored, questions left by an older version.
+**Errors & recovery:** a refused add keeps the folder as a question with the cause; an unreadable suggestions file adds nothing and is logged.
 **Status:** draft
-**Meaning:** operator request 2026-10-14 (SB-117).
-**Coverage:** `suggest::tests`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; `ui-logic` suggestion cases; browser demo in Playwright WebKit 2026-10-14 (create Client Alpha → banner “Add the folder alpha-web-review to Client Alpha? A worktree of …” → Add → “alpha-web-review added to Client Alpha.”, banner gone, folder listed): [screenshot](../evidence/screenshots/sb117-suggestion-banner-demo.png).
+**Meaning:** operator request 2026-10-14 (SB-117), changed the same day (SB-121).
+**Coverage:** `suggest::tests` (incl. `temporary_and_cache_folders_never_join_a_project`); owner `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; the app's `suggestions::tests::one_folder_is_named_and_several_are_counted`. The 0.6.30 banner (now the fallback): [screenshot](../evidence/screenshots/sb117-suggestion-banner-demo.png).
 **Product:** unobserved
-**Traces:** CONTRACTS → Projects (0.6), SB-117 packet
+**Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121
 
 ## SCN-056 — Work in a project's folder on the project's accounts
 **Persona:** P-01
