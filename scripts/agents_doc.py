@@ -5,12 +5,16 @@ this page and the website). `--check` fails when the page is stale.
     python3 scripts/agents_doc.py [--check]
 """
 import json
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / 'catalog/agents.json'
 PAGE = ROOT / 'docs/AGENT-SUPPORT.md'
+# The agents Switchboard can hand a workflow to, read from the runtime's own list so the page
+# cannot drift from it.
+SWITCHABLE = re.findall(r'"([a-z0-9-]+)"', re.search(r'pub const SWITCHABLE: &\[&str\] = &\[(.*?)\];', (ROOT / 'crates/switchboard-runtime/src/agent_catalog.rs').read_text(encoding='utf-8'), re.S).group(1))
 LEVEL = {
     'launch': 'Launch from Switchboard',
     'proxy': 'Through Switchboard (set up once in the agent)',
@@ -34,9 +38,13 @@ def render(catalog):
         '',
         '- **Tools only** — it registers `switchboard mcp`: it reads which account handles requests and how much quota is left, switches the account of a managed session, and knows the project of its folder.',
         '- **Through Switchboard** — it can also send its model requests to Switchboard\'s local proxy (`http://127.0.0.1:<port>/claude/<pool>` for the Anthropic Messages API, `…/codex/<pool>/v1` for the OpenAI Responses and Chat Completions APIs), which serves the pool\'s selected account and switches accounts for it. It is set up once in the agent\'s own config; `switchboard agents connect <id>` prints the exact lines.',
-        '- **Launch from Switchboard** — configured by environment alone, so `switchboard agents launch <id> --pool <pool> --dir <folder>` (or *Agents → Other agents → Set up → Launch*) starts it in Terminal. Agents set up once in their config launch the same way.',
+        '- **Launch from Switchboard** — configured by environment alone, so `switchboard agents launch <id> --pool <pool> --dir <folder>` (or *Agents → Installed → Set up → Launch*) starts it in Terminal. Agents set up once in their config launch the same way.',
         '',
         '**OpenRouter key.** Agents with an OpenRouter recipe also launch on one OpenRouter key saved in Switchboard (`switchboard agents openrouter set --key-stdin`, or *Agents → OpenRouter key for agents*): `switchboard agents launch <id> --openrouter [--model <id>]`. The key reaches the agent only through its environment, read by the session script when it starts; no config file, argument or script holds it.',
+        '',
+        '**Recommended OpenRouter models:** ' + ', '.join(f"[`{m['id']}`]({m['url']})" for m in catalog.get('openrouter_recommended', [])) + f". {catalog.get('openrouter_recommended_note', '')}. The model picker shows them first, then every OpenRouter model that can call tools (`switchboard agents models`).",
+        '',
+        '**Taking over work.** ' + ', '.join(f'`{i}`' for i in SWITCHABLE) + ' can take over a workflow (`switchboard continue`, fallback chains). Each is **Enabled** or **Disabled** for taking over work (account switching is not affected), and one may be the machine\'s **default agent** (`switchboard agents status | enable | disable | default`, or the Agents page); every other agent here uses the tools only.',
         '',
         '**Accounts.** A subscription sign-in (Claude.ai, a Claude setup token, ChatGPT) is for the provider\'s own client — Claude Code or Codex — by the providers\' terms. Other agents get their own proxy key (`switchboard agents key`, derived from the session capability, never stored in their config), and the proxy serves that key only from **API-key accounts**; a pool whose selected account is a subscription sign-in answers 403. Projects still apply: a project\'s account starts only inside its folders.',
         '',

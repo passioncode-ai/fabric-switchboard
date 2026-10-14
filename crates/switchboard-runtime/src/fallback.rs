@@ -66,6 +66,11 @@ pub(crate) struct KimiChoice<'a> {
     /// saved, the `switchboard` command present for the session script. Its model is settled at
     /// the hand-over, which refuses before the offer when there is none.
     pub hermes_ready: bool,
+    /// Whether an `opencode` step can be tried now (SB-119): OpenCode installed, an OpenRouter
+    /// key and model saved, the `switchboard` command present.
+    pub opencode_ready: bool,
+    /// Agents the person disabled for taking over work on the Agents page (SB-120): skipped.
+    pub disabled: HashSet<String>,
 }
 
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
@@ -87,6 +92,8 @@ pub(crate) fn resolve(
         usable: &|_| false,
         used: &|_| 0.0,
         hermes_ready: false,
+        opencode_ready: false,
+        disabled: HashSet::new(),
     };
     resolve_with(
         snapshot,
@@ -136,6 +143,13 @@ pub(crate) fn resolve_with(
         .executors
         .iter()
         .map(|e| {
+            // SB-120: an agent the person disabled for taking over work is never handed one.
+            if kimi.disabled.contains(&e.agent) {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: "agent_disabled",
+                };
+            }
             let kimi_pin = e
                 .account_id
                 .as_deref()
@@ -162,6 +176,27 @@ pub(crate) fn resolve_with(
                         agent: e.agent.clone(),
                         reason: "no_usable_account",
                     },
+                };
+            }
+            // SB-119: OpenCode runs on the saved OpenRouter key and its default model.
+            if e.agent == crate::launch::OPENCODE_TARGET {
+                return if e.account_id.is_some() || e.key.is_some() {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "agent_not_automatic_yet",
+                    }
+                } else if kimi.opencode_ready
+                    && executor_account != Some(crate::launch::OPENCODE_TARGET)
+                {
+                    Step::Run {
+                        agent: e.agent.clone(),
+                        account_id: crate::launch::OPENCODE_TARGET.into(),
+                    }
+                } else {
+                    Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: "no_usable_account",
+                    }
                 };
             }
             // SB-107: Hermes runs on the saved OpenRouter key; a step that pins an account or a
@@ -363,10 +398,137 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
     .await
 }
 
+pub const NO_DEFAULT_ACCOUNT: &str = "The default agent has no account that can take this workflow now. Name one with --account, or choose another default agent.";
+/// SB-120: `switchboard continue` without an account, on the machine's default agent: the
+/// account a one-step chain of that agent would choose now — never the workflow's executor or
+/// another saved copy of its login, a limited one, one that needs a new sign-in, or one a project
+/// keeps for other folders. `executor` is the engine's (`continuation::executor_of`); with no
+/// `accountRef`, the ordinary CLI's current accounts of its provider stand in for it.
+pub(crate) fn account_for_default(
+    runtime: &Runtime,
+    agent: &str,
+    executor: &Value,
+    folder: &std::path::Path,
+    now: i64,
+) -> Result<String, String> {
+    let snapshot = runtime.store.snapshot()?;
+    let kimi_limited = runtime.kimi_watch.limited(now);
+    let mut limited = runtime.limits.limited_ids(now);
+    limited.extend(kimi_limited.iter().cloned());
+    // Without an accountRef the ordinary CLI's accounts are the executor: an unreadable answer
+    // refuses rather than risk choosing the account that just ran out.
+    let current = if executor.get("accountRef").is_some() {
+        Value::Null
+    } else {
+        runtime.current_accounts()?
+    };
+    let excluded = executor_accounts(executor, &snapshot, &current);
+    let kimi_usable =
+        |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
+    let kimi_used = |id: &str| runtime.kimi_watch.used(id);
+    let kimi = KimiChoice {
+        ids: snapshot
+            .kimi_accounts
+            .iter()
+            .map(|k| k.id.clone())
+            .collect(),
+        usable: &kimi_usable,
+        used: &kimi_used,
+        hermes_ready: false,
+        opencode_ready: false,
+        disabled: HashSet::new(),
+    };
+    let sign_in: HashSet<String> = runtime
+        .refresh
+        .sign_in_required(&runtime.store)
+        .into_iter()
+        .collect();
+    pick_for_default(
+        &snapshot, agent, &excluded, &limited, &sign_in, folder, &kimi,
+    )
+}
+
+/// The accounts that are the workflow's executor: the one its `accountRef` names (a saved
+/// account or Kimi Code account), else the ordinary CLI's current accounts of its provider.
+pub(crate) fn executor_accounts(
+    executor: &Value,
+    snapshot: &Snapshot,
+    current: &Value,
+) -> Vec<String> {
+    if let Some(reference) = executor.get("accountRef").and_then(Value::as_str) {
+        return snapshot
+            .accounts
+            .iter()
+            .map(|a| &a.id)
+            .chain(snapshot.kimi_accounts.iter().map(|k| &k.id))
+            .filter(|id| continuation::names_account(reference, id))
+            .cloned()
+            .collect();
+    }
+    let key = match executor
+        .get("provider")
+        .and_then(Value::as_str)
+        .and_then(continuation::executor_provider)
+    {
+        Some(Provider::Claude) => "claude",
+        Some(Provider::Codex) => "codex",
+        None => return Vec::new(),
+    };
+    current[key]["account_ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect()
+}
+
+/// `account_for_default` without the runtime: a one-step chain of `agent`, every executor account
+/// treated as the executor (so its other saved copies are passed over too).
+pub(crate) fn pick_for_default(
+    snapshot: &Snapshot,
+    agent: &str,
+    executor: &[String],
+    limited: &HashSet<String>,
+    sign_in: &HashSet<String>,
+    folder: &std::path::Path,
+    kimi: &KimiChoice,
+) -> Result<String, String> {
+    let chain = Chain {
+        scope: switchboard_core::ChainScope::Machine,
+        executors: vec![switchboard_core::Executor {
+            agent: agent.to_owned(),
+            account_id: None,
+            key: None,
+        }],
+        updated_at: 0,
+    };
+    // The first executor account is "the executor"; the others count as limited, which also
+    // passes over every saved copy of their logins.
+    let mut limited = limited.clone();
+    limited.extend(executor.iter().skip(1).cloned());
+    match resolve_with(
+        snapshot,
+        &chain,
+        executor.first().map(String::as_str),
+        &limited,
+        sign_in,
+        Some(folder),
+        kimi,
+    )
+    .into_iter()
+    .next()
+    {
+        Some(Step::Run { account_id, .. }) => Ok(account_id),
+        _ => Err(NO_DEFAULT_ACCOUNT.into()),
+    }
+}
 /// The agent and label a hand-over shows: Hermes, a saved Kimi Code account, or a saved account.
 fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
     if account == crate::hermes::HERMES_TARGET {
         return ("hermes".into(), "Hermes Agent".into());
+    }
+    if account == crate::launch::OPENCODE_TARGET {
+        return ("opencode".into(), "OpenCode".into());
     }
     let Some(snapshot) = snapshot else {
         return ("unknown".into(), String::new());
@@ -406,6 +568,18 @@ where
         .iter()
         .map(|k| k.id.clone())
         .collect();
+    // SB-120: an unreadable agents-settings.json hands nothing over — never "nothing disabled".
+    let Ok(settings) = crate::agent_settings::read(&runtime.root) else {
+        log("agent_settings_unreadable");
+        return;
+    };
+    let disabled: HashSet<String> = settings.disabled.into_iter().collect();
+    let wants = |agent: &str| {
+        snapshot
+            .chains
+            .iter()
+            .any(|c| c.executors.iter().any(|e| e.agent == agent))
+    };
     let kimi_usable =
         |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
     let kimi_used = |id: &str| runtime.kimi_watch.used(id);
@@ -413,7 +587,12 @@ where
         ids: kimi_ids.clone(),
         usable: &kimi_usable,
         used: &kimi_used,
-        hermes_ready: crate::launch::hermes_continuation_ready(&runtime.store),
+        // The OpenRouter key is read only for a chain that has the agent (the idle budget).
+        hermes_ready: wants(crate::hermes::HERMES_TARGET)
+            && crate::launch::hermes_continuation_ready(&runtime.store),
+        opencode_ready: wants(crate::launch::OPENCODE_TARGET)
+            && crate::launch::opencode_continuation_ready(&runtime.store),
+        disabled,
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
@@ -662,6 +841,8 @@ mod tests {
                 usable: &|_| false,
                 used: &|_| 0.0,
                 hermes_ready: ready,
+                opencode_ready: false,
+                disabled: HashSet::new(),
             };
             resolve_with(
                 &snapshot,
@@ -707,6 +888,139 @@ mod tests {
         );
     }
     #[test]
+    fn an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first() {
+        // SB-119/SB-120: claude-code → kimi-code → opencode; every Claude account limited.
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("claude-a", Provider::Claude, Some(100.0)),
+                account("claude-b", Provider::Claude, Some(10.0)),
+            ],
+            ..Default::default()
+        };
+        let chained = chain(&[
+            ("claude-code", None),
+            ("kimi-code", None),
+            ("opencode", None),
+        ]);
+        let with = |ready: bool, executor: Option<&str>, disabled: &[&str]| {
+            let kimi = KimiChoice {
+                ids: vec!["kimi-a".into()],
+                usable: &|_| true,
+                used: &|_| 0.0,
+                hermes_ready: false,
+                opencode_ready: ready,
+                disabled: disabled.iter().map(|d| d.to_string()).collect(),
+            };
+            resolve_with(
+                &snapshot,
+                &chained,
+                executor,
+                &HashSet::new(),
+                &HashSet::new(),
+                None,
+                &kimi,
+            )
+        };
+        let skip = |agent: &str, reason: &'static str| Step::Skip {
+            agent: agent.into(),
+            reason,
+        };
+        let run = |agent: &str, id: &str| Step::Run {
+            agent: agent.into(),
+            account_id: id.into(),
+        };
+        // Everything usable and enabled: each step runs on its own account.
+        assert_eq!(
+            with(true, Some("claude-a"), &[]),
+            [
+                run("claude-code", "claude-b"),
+                run("kimi-code", "kimi-a"),
+                run("opencode", "opencode")
+            ]
+        );
+        // Disabled agents are skipped before anything else is weighed, Kimi Code included.
+        assert_eq!(
+            with(true, Some("claude-a"), &["claude-code", "kimi-code"]),
+            [
+                skip("claude-code", "agent_disabled"),
+                skip("kimi-code", "agent_disabled"),
+                run("opencode", "opencode")
+            ]
+        );
+        assert_eq!(
+            with(true, Some("claude-a"), &["opencode"])[2],
+            skip("opencode", "agent_disabled")
+        );
+        // Not ready (no OpenCode, key or model), or OpenCode is the executor: passed over.
+        assert_eq!(
+            with(false, Some("claude-a"), &[])[2],
+            skip("opencode", "no_usable_account")
+        );
+        assert_eq!(
+            with(true, Some("opencode"), &[])[2],
+            skip("opencode", "no_usable_account")
+        );
+    }
+    #[test]
+    fn the_default_agent_never_continues_on_the_executor_or_a_copy_of_its_login() {
+        // SB-120: `continue` without an account on Claude Code picks an account with room — not
+        // the workflow's executor, not another saved row of the same login, not a limited one.
+        let mut exec = account("claude-exec", Provider::Claude, Some(1.0));
+        exec.identity = Some("person-a".into());
+        let mut twin = account("claude-twin", Provider::Claude, Some(2.0));
+        twin.identity = Some("person-a".into());
+        let snapshot = Snapshot {
+            accounts: vec![
+                exec,
+                twin,
+                account("claude-free", Provider::Claude, Some(40.0)),
+                account("claude-limited", Provider::Claude, Some(0.0)),
+                account("codex-a", Provider::Codex, Some(0.0)),
+            ],
+            ..Default::default()
+        };
+        let none = KimiChoice {
+            ids: Vec::new(),
+            usable: &|_| false,
+            used: &|_| 0.0,
+            hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
+        };
+        let limited: HashSet<String> = ["claude-limited".to_string()].into();
+        let pick = |executor: &[String], limited: &HashSet<String>| {
+            pick_for_default(
+                &snapshot,
+                "claude-code",
+                executor,
+                limited,
+                &HashSet::new(),
+                std::path::Path::new("/work"),
+                &none,
+            )
+        };
+        let reference = crate::continuation::account_ref("claude-exec");
+        let executor = executor_accounts(
+            &json!({"provider": "claude-code", "accountRef": reference}),
+            &snapshot,
+            &Value::Null,
+        );
+        assert_eq!(executor, ["claude-exec"]);
+        assert_eq!(pick(&executor, &limited).unwrap(), "claude-free");
+        // With no accountRef, the ordinary CLI's current accounts stand in for the executor.
+        let current = json!({"claude": {"account_ids": ["claude-free"]}});
+        let executor = executor_accounts(&json!({"provider": "claude-code"}), &snapshot, &current);
+        assert_eq!(executor, ["claude-free"]);
+        assert_eq!(pick(&executor, &limited).unwrap(), "claude-exec");
+        // Nothing left with room: a named refusal, never the executor.
+        let all: HashSet<String> = ["claude-limited", "claude-free"].map(String::from).into();
+        assert_eq!(
+            pick(&["claude-exec".to_string()], &all).unwrap_err(),
+            NO_DEFAULT_ACCOUNT
+        );
+        assert!(executor_accounts(&json!({"provider": "hermes"}), &snapshot, &current).is_empty());
+    }
+    #[test]
     fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {
         // SB-99: no Kimi account saved reads as no usable account; then the pin, then the choice.
         let snapshot = Snapshot::default();
@@ -718,6 +1032,8 @@ mod tests {
             usable: &usable,
             used: &used,
             hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
         };
         let run = |id: &str| Step::Run {
             agent: "kimi-code".into(),

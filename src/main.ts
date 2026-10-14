@@ -6,9 +6,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, ProjectSuggestion, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, ProjectSuggestion, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -56,7 +56,7 @@ let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KE
 function tourGo(step: number | null) {
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
-  page = tour()[step].page; render(); restoreFocus('tour-title');
+  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title');
 }
 function tourCard(step: number) {
   const item = tour()[step]; const last = step === tour().length - 1;
@@ -180,6 +180,7 @@ async function reload() {
   void restorePendingLogin();
   void loadBackups();
   void loadSuggestions();
+  if (page === 'agents') void loadAgents();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   void loadUpdate();
@@ -238,7 +239,7 @@ function render(options: { background?: boolean } = {}): boolean {
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
   for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
@@ -252,7 +253,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Let coding agents read usage and switch accounts.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -422,50 +423,120 @@ function copyable(label: string, command: string, key: string) {
   row.append(content, button(t('Copy'), () => { void navigator.clipboard?.writeText(command).then(() => announce(t('{label} command copied.', { label })), () => announce(t('Copy is unavailable here. Select the command text instead.'))); }, 'text-button', key));
   return row;
 }
+let agentsView: AgentsOverview | null = null;
+let agentsError = '';
+async function loadAgents() {
+  try { agentsView = await adapter.agentsOverview(); agentsError = ''; } catch (error) { agentsError = safeError(error); }
+  backgroundRender();
+}
+const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).agents.find((a) => a.id === id);
+/** SB-120: the Agents page — the default agent, what is installed and takes over work,
+ * what can be installed, then the OpenRouter key and the tools registration. */
 function renderAgents(main: HTMLElement) {
-  const panel = el('section', 'about-panel');
-  panel.append(el('h2', '', t('What agents can do')), el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a project rule when they start work in a project. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.')));
-  panel.append(el('p', 'form-note', t('Sessions you launch from Switchboard get these tools automatically when the command-line tool is available. Isolated sessions get the read-only tools.')));
-  main.append(panel);
-  const setup = el('section', 'about-panel'); setup.append(el('h2', '', t('Connect an agent')));
-  if (agentSetupError || !agentSetup) setup.append(el('p', 'form-note', agentSetupError ? t('Agent setup is unavailable. Refresh to retry.') : t('Reading agent setup…')));
-  else {
-    if (agentSetup.translocated) setup.append(el('p', 'form-note', runtime?.platform === 'linux' ? t('This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.') : t('macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.')));
-    // SB-93: the coding agent sets Switchboard up itself (switchboard onboard); the window shows where it stands.
-    if (agentSetup.agent_prompt) {
-      setup.append(el('h3', '', t('Set up with your coding agent')), el('p', 'form-note', t('Give this to Claude Code or Codex. It does every setup step it can and tells you the ones that are yours: opening Switchboard and signing in.')), copyable(t('Prompt for your agent'), agentSetup.agent_prompt, 'copy-onboard'));
-      const facts = el('ul', 'setup-facts');
-      for (const fact of agentSetupFacts(agentSetup)) facts.append(el('li', fact.done ? 'is-done' : '', fact.text));
-      setup.append(facts, el('h3', '', t('Or register the tools yourself')));
-    }
-    setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command-line tool was not found on PATH.')));
-    if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
-    setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
+  if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
+  else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
+  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), availableAgentsPanel(agentsView));
+  main.append(openrouterPanel(), connectPanel());
+}
+function defaultAgentPanel(view: AgentsOverview) {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'default-agent-heading');
+  const heading = el('h2', '', t('Default agent')); heading.id = 'default-agent-heading';
+  section.append(heading, el('p', '', t('The agent that takes over a workflow when none is named: switchboard continue without an account hands it there, and Fabric starts with it unless a project sets its own. Fallback chains keep their own order.')));
+  const chips = el('div', 'choice-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', t('Default agent'));
+  for (const choice of defaultAgentChoices(view.agents, view.default)) {
+    const key = `default-agent-${choice.id ?? 'auto'}`;
+    const chip = button(choice.on ? `✓ ${choice.label}` : choice.label, () => { if (!choice.on) void mutate(async () => { await adapter.agentDefault(choice.id); agentsView = await adapter.agentsOverview(); }, choice.id ? t('{agent} is the default agent.', { agent: choice.label }) : t('The default agent is Auto.'), key); }, `choice-chip${choice.on ? ' is-on' : ''}`, key);
+    chip.setAttribute('aria-pressed', String(choice.on)); chips.append(chip);
   }
-  main.append(setup, openrouterPanel(), hermesPanel(), otherAgents());
+  section.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')));
+  return section;
+}
+function installedAgentsPanel(view: AgentsOverview) {
+  const section = el('section', 'about-panel agents-panel'); section.setAttribute('aria-labelledby', 'installed-agents-heading');
+  const head = el('div', 'agents-head'); const heading = el('h2', '', t('Installed')); heading.id = 'installed-agents-heading';
+  // Agents that can take over work first, in chain order; tools-only agents after them.
+  const installed = sortAgents(view.agents.filter((a) => a.installed));
+  head.append(heading, el('span', 'badge', plural(installed.length, { one: '{n} detected', other: '{n} detected' })), button(t('Refresh'), () => { agentsView = null; render(); void loadAgents(); }, 'button quiet', 'agents-refresh'));
+  section.append(head, el('p', '', t('Enabled agents can take over a workflow whose account ran out: in fallback chains and with switchboard continue. Disable one to keep work away from it; switching accounts is not affected.')));
+  const list = el('div', 'agent-list');
+  for (const agent of installed) list.append(agentRow(agent));
+  section.append(list);
+  return section;
+}
+function agentRow(agent: AgentRow) {
+  const row = el('div', `agent-row${agent.switchable && !agent.enabled ? ' is-off' : ''}`); row.dataset.agent = agent.id;
+  const info = el('div', 'agent-info'); const title = el('div', 'agent-title');
+  title.append(el('strong', '', agent.name));
+  if (agent.switchable && agent.disabled) title.append(el('span', 'badge muted', t('Disabled')));
+  info.append(title, el('code', 'agent-command', agent.command));
+  if (agent.id === 'hermes' && hermes?.installed) info.append(el('span', 'form-note', `${t('Model: {model}', { model: hermes.model ?? t('not set') })} · ${t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })}`));
+  if (agent.id === 'hermes' && hermesError) info.append(el('span', 'usage-error', t(hermesError)));
+  const controls = el('div', 'agent-controls');
+  if (agent.switchable) {
+    const seg = el('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', t('{agent} takes over work', { agent: agent.name }));
+    for (const [value, label] of [[true, t('Enabled')], [false, t('Disabled')]] as const) {
+      const on = agent.enabled === value;
+      const b = button(label, () => { if (!on) void mutate(async () => { await adapter.agentEnable(agent.id, value); agentsView = await adapter.agentsOverview(); }, value ? t('{agent} can take over work again.', { agent: agent.name }) : agent.default ? t('{agent} no longer takes over work. The default agent is Auto again.', { agent: agent.name }) : t('{agent} no longer takes over work.', { agent: agent.name }), `agent-${value ? 'on' : 'off'}-${agent.id}`); }, `segment${on ? ' is-on' : ''}`, `agent-${value ? 'on' : 'off'}-${agent.id}`);
+      b.setAttribute('aria-pressed', String(on)); seg.append(b);
+    }
+    controls.append(seg);
+    if (agent.default) controls.append(el('span', 'badge default-badge', `✓ ${t('Default')}`));
+    else if (agent.enabled) controls.append(button(t('Set default'), () => void mutate(async () => { await adapter.agentDefault(agent.id); agentsView = await adapter.agentsOverview(); }, t('{agent} is the default agent.', { agent: agent.name }), `agent-default-${agent.id}`), 'text-button', `agent-default-${agent.id}`));
+    else controls.append(el('span', 'default-slot'));
+  } else controls.append(el('span', 'badge muted', t('Tools only')), el('span', 'default-slot'));
+  const info2 = catalogAgent(agent.id);
+  controls.append(info2 ? button(t('Set up'), () => void agentDialog(info2), 'button quiet', `agent-${agent.id}`) : el('span'));
+  row.append(info, controls);
+  const more = el('details', 'agent-more'); const summary = el('summary', '', t('Details')); summary.dataset.focus = `agent-more-${agent.id}`;
+  more.append(summary);
+  more.append(el('p', 'form-note', agent.switchable ? t('Switchboard can hand a workflow to it and launch it from Agents.') : t('It can use Switchboard\'s tools (switchboard mcp); Switchboard cannot hand it a workflow yet.')));
+  if (agent.id === 'hermes') { const actions = el('div', 'management-actions'); actions.append(button(t('Change Hermes\'s model'), () => hermes ? hermesDialog() : void loadHermes(), 'button', 'hermes-change')); more.append(actions); }
+  more.append(address(agent.url));
+  const wrap = el('div', 'agent-item'); wrap.append(row, more);
+  return wrap;
+}
+function availableAgentsPanel(view: AgentsOverview) {
+  const section = el('section', 'about-panel agents-panel'); section.setAttribute('aria-labelledby', 'available-agents-heading');
+  const missing = view.agents.filter((a) => !a.installed);
+  const head = el('div', 'agents-head'); const heading = el('h2', '', t('Available to install')); heading.id = 'available-agents-heading';
+  head.append(heading, el('span', 'badge', plural(missing.length, { one: '{n} agent', other: '{n} agents' })));
+  section.append(head, el('p', '', t('Install one with its command, then press Refresh above: it moves to Installed.')));
+  const details = el('details', 'agent-more available-list'); const summary = el('summary', '', t('Show all')); summary.dataset.focus = 'agents-available';
+  details.append(summary);
+  const list = el('div', 'agent-list');
+  for (const agent of missing) {
+    const row = el('div', 'agent-row'); const info = el('div', 'agent-info'); const title = el('div', 'agent-title');
+    title.append(el('strong', '', agent.name)); if (agent.maker) title.append(el('span', 'form-note', agent.maker));
+    info.append(title);
+    if (agent.install) info.append(el('code', 'agent-command', agent.install)); else info.append(address(agent.url));
+    const controls = el('div', 'agent-controls');
+    if (agent.install) controls.append(button(t('Copy'), () => { void navigator.clipboard?.writeText(agent.install!).then(() => announce(t('{label} command copied.', { label: agent.name })), () => announce(t('Copy is unavailable here. Select the command text instead.'))); }, 'text-button', `install-${agent.id}`));
+    row.append(info, controls); list.append(row);
+  }
+  details.append(list); section.append(details, el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents status | enable | disable | default | launch.')));
+  return section;
+}
+/** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
+function connectPanel() {
+  const setup = el('section', 'about-panel'); setup.append(el('h2', '', t('Connect an agent')));
+  setup.append(el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a project rule when they start work in a project. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.')));
+  if (agentSetupError || !agentSetup) { setup.append(el('p', 'form-note', agentSetupError ? t('Agent setup is unavailable. Refresh to retry.') : t('Reading agent setup…'))); return setup; }
+  if (agentSetup.translocated) setup.append(el('p', 'form-note', runtime?.platform === 'linux' ? t('This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.') : t('macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.')));
+  if (agentSetup.agent_prompt) {
+    setup.append(el('h3', '', t('Set up with your coding agent')), el('p', 'form-note', t('Give this to Claude Code or Codex. It does every setup step it can and tells you the ones that are yours: opening Switchboard and signing in.')), copyable(t('Prompt for your agent'), agentSetup.agent_prompt, 'copy-onboard'));
+    const facts = el('ul', 'setup-facts');
+    for (const fact of agentSetupFacts(agentSetup)) facts.append(el('li', fact.done ? 'is-done' : '', fact.text));
+    setup.append(facts, el('h3', '', t('Or register the tools yourself')));
+  }
+  setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command-line tool was not found on PATH.')));
+  if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
+  setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
+  setup.append(el('p', 'form-note', t('Sessions you launch from Switchboard get these tools automatically when the command-line tool is available. Isolated sessions get the read-only tools.')));
+  return setup;
 }
 async function loadHermes() {
   try { hermes = await adapter.hermesModel(); hermesError = ''; } catch (error) { hermesError = safeError(error); }
   backgroundRender();
-}
-/** SB-80: the model and provider the ordinary Hermes runs on, changed through hermes config set. */
-function hermesPanel() {
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'hermes-heading');
-  const heading = el('h2', '', t('Hermes model and provider')); heading.id = 'hermes-heading'; section.append(heading);
-  if (hermesError && !hermes) { section.append(el('p', 'usage-error', t(hermesError)), button(t('Retry'), () => void loadHermes(), 'text-button', 'hermes-retry')); return section; }
-  if (!hermes) { section.append(el('p', 'form-note', t('Reading Hermes settings…'))); return section; }
-  if (!hermes.installed) { section.append(el('p', 'form-note', t('Hermes is not installed on this computer.'))); return section; }
-  if (hermes.error) section.append(el('p', 'usage-error', t(hermes.error)));
-  else {
-    const facts = el('div', 'openrouter-facts');
-    facts.append(el('p', '', t('Model: {model}', { model: hermes.model ?? t('not set') })), el('p', '', t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })));
-    if (hermes.base_url) facts.append(el('p', 'form-note', hermes.base_url));
-    section.append(facts);
-  }
-  const actions = el('div', 'management-actions');
-  actions.append(button(t('Change'), () => hermesDialog(), 'button', 'hermes-change'), button(t('Refresh'), () => { hermes = null; render(); void loadHermes(); }, 'button quiet', 'hermes-refresh'));
-  section.append(actions, el('p', 'form-note', t('Switchboard changes these only when you ask, through Hermes\'s own hermes config set. A new provider needs its own key in Hermes.')));
-  return section;
 }
 function hermesDialog() {
   const current = hermes!;
@@ -509,7 +580,7 @@ function openrouterPanel() {
   section.append(facts);
   const actions = el('div', 'management-actions');
   actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
-  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button below. CLI: switchboard agents launch <agent> --openrouter.')));
+  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button in Installed, above. CLI: switchboard agents launch <agent> --openrouter.')));
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
@@ -517,10 +588,10 @@ function openrouterKeyDialog() {
   const replacing = !!openrouter?.saved;
   const context = openDialog(replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.'));
   const key = input('', 'password'); key.placeholder = 'sk-or-…';
-  const model = input(openrouter?.model ?? ''); model.required = false; model.placeholder = 'moonshotai/kimi-k2';
+  const picker = modelPicker(openrouter?.model ?? '', 'key-model'); const model = picker.value;
   const grid = el('div', 'form-grid');
-  grid.append(field(t('Key'), key, t('Starts with sk-or-. Switchboard never shows it again.')), field(t('Default model'), model, t('An OpenRouter model id. Optional: a launch can name its own.')));
-  context.body.append(grid);
+  grid.append(field(t('Key'), key, t('Starts with sk-or-. Switchboard never shows it again.')));
+  context.body.append(grid, el('h3', 'pool-heading', t('Default model')), picker.node);
   context.actions.append(submit(replacing ? t('Replace key') : t('Save key')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -529,42 +600,48 @@ function openrouterKeyDialog() {
   });
   key.focus();
 }
+let openrouterModelList: OpenrouterModels | null = null;
+/** SB-119: an OpenRouter model field — the recommended models first, every tool-capable
+ * OpenRouter model as suggestions while typing, and any id typed by hand. */
+function modelPicker(initial: string, key: string) {
+  const value = input(initial); value.required = false; value.placeholder = 'xiaomi/mimo-v2.6-pro'; value.setAttribute('list', `${key}-models`); value.autocomplete = 'off';
+  const list = el('datalist'); list.id = `${key}-models`;
+  const cards = el('div', 'model-cards'); cards.setAttribute('role', 'group'); cards.setAttribute('aria-label', t('Recommended models'));
+  const note = el('p', 'form-note', '');
+  // A failed read is shown in this picker only and never kept: the next picker asks again.
+  let data = openrouterModelList;
+  const paint = () => {
+    const recommended = data?.recommended.length ? data.recommended : (agentCatalog as unknown as { openrouter_recommended: OpenrouterModels['recommended'] }).openrouter_recommended;
+    cards.replaceChildren(...recommended.map((m) => {
+      const on = value.value.trim() === m.id;
+      const card = button('', () => { value.value = m.id; paint(); }, `model-card${on ? ' is-on' : ''}`, `${key}-model-${m.id}`);
+      card.setAttribute('aria-pressed', String(on));
+      card.append(el('strong', '', m.name), el('span', 'form-note', modelMeta(m)), el('code', 'agent-command', m.id));
+      return card;
+    }));
+    list.replaceChildren(...(data?.models ?? []).map((m) => { const o = el('option'); o.value = m.id; if (m.name) o.label = m.name; return o; }));
+    note.textContent = !data ? t('Reading OpenRouter\'s models…') : data.available ? t('{n} OpenRouter models that can call tools: type to search, or enter any id.', { n: data.models.length }) : t('OpenRouter\'s list is unavailable now; the recommended models and typed ids still work.');
+  };
+  value.addEventListener('input', paint);
+  paint();
+  if (!data) void adapter.openrouterModels().then((m) => { if (m.available) openrouterModelList = m; data = m; paint(); }, () => { data = { recommended: [], models: [], available: false }; paint(); });
+  const node = el('div', 'model-picker');
+  node.append(el('strong', 'block', t('Recommended models')), cards, field(t('Model'), value, ''), list, note);
+  return { node, value };
+}
 function openrouterModelDialog() {
   const context = openDialog(t('Default model'), t('The OpenRouter model agents start on unless a launch names another.'));
-  const model = input(openrouter?.model ?? ''); model.placeholder = 'moonshotai/kimi-k2';
-  context.body.append(field(t('Model'), model, t('An OpenRouter model id: vendor/model, as listed on openrouter.ai/models.')));
+  const picker = modelPicker(openrouter?.model ?? '', 'default-model');
+  context.body.append(picker.node);
   context.actions.append(submit(t('Save model')));
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterModel(model.value.trim()); await loadOpenrouter(); }, t('Default model saved.')); });
-  model.focus();
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); const model = picker.value.value.trim(); void dialogSave(context, async () => { await adapter.openrouterModel(model); await loadOpenrouter(); agentsView = await adapter.agentsOverview().catch(() => agentsView); }, t('Agents launch on {model}.', { model })); });
+  picker.value.focus();
 }
 function openrouterRemoveDialog() {
   const context = openDialog(t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(); await loadOpenrouter(); }, t('OpenRouter key removed.')); });
   context.actions.querySelector('button')?.focus();
-}
-/** Third-party agents (catalog/agents.json, operator request 2026-10-05): how each connects. */
-function otherAgents() {
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'other-agents-heading');
-  const heading = el('h2', '', t('Other agents')); heading.id = 'other-agents-heading';
-  section.append(heading, el('p', '', t('Hermes, Kilo Code, Cline, Goose, OpenCode and the other popular agents connect to switchboard mcp. Those that accept a custom endpoint can also send their requests through Switchboard, which switches accounts for them. Subscription sign-ins stay with Claude Code and Codex, as the providers require: other agents use API-key accounts.')));
-  const groups: [AgentInfo['level'], string][] = [['launch', t('Launch from Switchboard')], ['proxy', t('Through Switchboard, set up once in the agent')], ['mcp', t('Tools only (switchboard mcp)')]];
-  const agents = (agentCatalog as { agents: AgentInfo[] }).agents;
-  for (const [level, title] of groups) {
-    const items = agents.filter((agent) => agent.level === level); if (!items.length) continue;
-    section.append(el('h3', 'pool-heading', `${title} · ${items.length}`));
-    const list = el('div', 'agent-grid');
-    for (const agent of items) {
-      const card = el('div', 'agent-chip');
-      const name = el('strong', '', agent.name); card.append(name);
-      if (agent.openrouter_rank) card.append(el('span', 'badge muted', t('#{rank} on OpenRouter', { rank: agent.openrouter_rank })));
-      card.append(button(t('Set up'), () => void agentDialog(agent), 'text-button', `agent-${agent.id}`));
-      list.append(card);
-    }
-    section.append(list);
-  }
-  section.append(el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents list | connect | launch.')));
-  return section;
 }
 async function agentDialog(agent: AgentInfo) {
   const context = openDialog(t('Set up {agent}', { agent: agent.name }), agent.level === 'mcp' ? t('This agent can use Switchboard\'s tools; its model requests go to its own service.') : t('Register Switchboard\'s tools, then point the agent at Switchboard\'s proxy for one pool.'));
@@ -623,9 +700,9 @@ function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () =
   part.append(el('h3', 'pool-heading', t('On the OpenRouter key')));
   if (!openrouter?.saved) { part.append(el('p', 'form-note', t('Save an OpenRouter key on the Agents screen first; then {agent} launches on it.', { agent: agent.name }))); return { part, run: null }; }
   const picksItself = !agent.openrouter?.model_flag?.length && !agent.openrouter?.model_env;
-  const model = input(openrouter.model ?? ''); model.required = false; model.placeholder = 'moonshotai/kimi-k2';
+  const picker = modelPicker(openrouter.model ?? '', `launch-${agent.id}`); const model = picker.value;
   if (picksItself) part.append(el('p', 'form-note', t('{agent} picks its model in its own interface; the key comes from Switchboard.', { agent: agent.name })));
-  else part.append(field(t('Model for this launch'), model, openrouter.model ? t('Default: {model}.', { model: openrouter.model }) : t('No default model is saved: name one.')));
+  else part.append(el('p', 'form-note', openrouter.model ? t('Model for this launch. Default: {model}.', { model: openrouter.model }) : t('Model for this launch. No default model is saved: name one.')), picker.node);
   if (agent.openrouter?.notes) part.append(el('p', 'form-note', agent.openrouter.notes));
   const run = () => {
     const value = folder(); if (!value) return;
@@ -1172,7 +1249,7 @@ function sessionsPanel() {
   const list = el('ul', 'session-list');
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
-    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : session.provider === 'opencode' ? 'OpenCode' : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
     const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }

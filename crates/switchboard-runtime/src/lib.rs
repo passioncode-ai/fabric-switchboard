@@ -1,6 +1,7 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod agent_catalog;
 pub mod agent_keys;
+pub mod agent_settings;
 pub mod agents;
 pub mod analytics;
 mod bindings;
@@ -257,6 +258,19 @@ pub enum Operation {
     },
     /// The project folders whose ordinary Claude Code sessions use the project's pool (SB-118).
     ProjectBindings,
+    /// Every catalog agent: installed or not, enabled for taking over work, default, command (SB-120).
+    AgentsOverview,
+    /// Lets an agent take over work, or keeps work away from it (SB-120).
+    AgentEnable {
+        agent: String,
+        enabled: bool,
+    },
+    /// The machine's default agent; none is Auto (SB-120).
+    AgentDefault {
+        agent: Option<String>,
+    },
+    /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
+    OpenrouterModels,
     /// Replaces the repository owners whose new repositories a project is offered.
     ProjectSources {
         pool: String,
@@ -479,6 +493,8 @@ pub struct Runtime {
     suggest: Mutex<suggest::Scanner>,
     /// Moves on every new, added or declined suggestion; the app reads the list only then.
     suggestions_seq: std::sync::atomic::AtomicU64,
+    /// OpenRouter's model list, kept six hours (SB-119).
+    openrouter_models: Mutex<agent_settings::ModelCache>,
     /// What the project folders' Claude Code route was last synced for (SB-118).
     bindings_key: Mutex<Option<u64>>,
     /// The project folders' resolved repositories, re-read only when a `.git` stamp moves.
@@ -570,6 +586,7 @@ impl Runtime {
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
             bindings_key: Mutex::new(None),
+            openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
             usage_gate,
             backup_key: Mutex::new(None),
@@ -607,6 +624,8 @@ impl Runtime {
                 | Operation::Backups
                 | Operation::ProjectSuggestions
                 | Operation::ProjectBindings
+                | Operation::AgentsOverview
+                | Operation::OpenrouterModels
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -1968,6 +1987,56 @@ async fn execute(
                 launch::start_terminal
             };
             let runtime = needs_owner()?;
+            // SB-120: no account named → the machine's default agent: OpenCode and Hermes run on
+            // the OpenRouter key; Claude Code, Codex and Kimi Code on the account a one-step chain
+            // of that agent would choose now.
+            let id = if id.is_empty() {
+                match agent_settings::read(root)?.default.as_deref() {
+                    Some(hermes::HERMES_TARGET) => hermes::HERMES_TARGET.to_owned(),
+                    Some(launch::OPENCODE_TARGET) => launch::OPENCODE_TARGET.to_owned(),
+                    Some(agent) => {
+                        agent_settings::usable(root, agent)?;
+                        if !continuation::valid_workflow_id(&workflow_id) {
+                            return Err(continuation::BAD_WORKFLOW_ID.into());
+                        }
+                        let folder = working_directory
+                            .canonicalize()
+                            .map_err(|_| "Choose an existing project directory.")?;
+                        // The executor is read first, so its own exhausted account is never the
+                        // one chosen.
+                        let shown =
+                            continuation::show(&continuation::observatory()?, &workflow_id)?;
+                        fallback::account_for_default(
+                            runtime,
+                            agent,
+                            &continuation::executor_of(&shown),
+                            &folder,
+                            monitor::now(),
+                        )?
+                    }
+                    None => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
+                }
+            } else {
+                id
+            };
+            // SB-120: an agent the person disabled for taking over work takes no workflow.
+            let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
+                Some(id.clone())
+            } else if store.kimi_account(&id).is_ok() {
+                Some("kimi-code".to_owned())
+            } else {
+                store
+                    .snapshot()?
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == id)
+                    .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
+            };
+            if let Some(a) = agent {
+                if agent_settings::disabled(root, &a)? {
+                    return Err(agent_settings::DISABLED.into());
+                }
+            }
             // Everything that can refuse runs before the offer, so a refusal leaves the workflow
             // exactly as it was; after the offer, a failed launch leaves it to lapse.
             if !continuation::valid_workflow_id(&workflow_id) {
@@ -1979,9 +2048,45 @@ async fn execute(
                 .map_err(|_| "Choose an existing project directory.")?;
             // SB-107: Hermes Agent on the saved OpenRouter key, with the same order — every
             // refusal before the offer, a failed launch after it left to lapse.
-            let other_agent = id == hermes::HERMES_TARGET || store.kimi_account(&id).is_ok();
+            let other_agent = id == hermes::HERMES_TARGET
+                || id == launch::OPENCODE_TARGET
+                || store.kimi_account(&id).is_ok();
             if other_agent && mode == "managed" {
                 return Err(continuation::MANAGED_NOT_FOR_AGENT.into());
+            }
+            // SB-119: OpenCode on the saved OpenRouter key and its default model, as Hermes.
+            if id == launch::OPENCODE_TARGET {
+                let shown = continuation::show(&bin, &workflow_id)?;
+                let plan = continuation::plan_named(
+                    &shown,
+                    &workflow_id,
+                    launch::OPENCODE_TARGET,
+                    &id,
+                    true,
+                    &directory,
+                )?;
+                launch::opencode_continuation_preflight(&store)?;
+                launch::agent_folder(root, &directory)?;
+                let observatory = continuation::observatory_mcp(&bin)?;
+                let offer = continuation::offer(&bin, &plan, &id)?;
+                let resumed = continuation::Continuation {
+                    workflow_id: workflow_id.clone(),
+                    handoff_id: offer.handoff_id.clone(),
+                    observatory,
+                    previous_provider: plan.from_provider.clone(),
+                };
+                let launched =
+                    launch::opencode_continuation(root, &store, &directory, &resumed, start)
+                        .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                return Ok(json!({
+                    "script": if in_place { launched["script"].clone() } else { Value::Null },
+                    "message": "Terminal launch requested; the OpenCode session accepts the handoff itself. Provider response is not yet verified.",
+                    "workflow": workflow_id,
+                    "handoff": offer.handoff_id,
+                    "offeredUntil": offer.expires_at,
+                    "model": launched["model"],
+                    "modelFrom": launched["model_from"],
+                }));
             }
             if id == hermes::HERMES_TARGET {
                 let shown = continuation::show(&bin, &workflow_id)?;
@@ -2190,6 +2295,29 @@ async fn execute(
             }
             Ok(projects::project_view(&store.snapshot()?, &project))
         }
+        Operation::AgentsOverview => {
+            let model = store
+                .agent_key("openrouter")
+                .ok()
+                .flatten()
+                .and_then(|k| k.model);
+            agent_settings::overview(root, model.as_deref())
+        }
+        Operation::AgentEnable { agent, enabled } => {
+            let s = agent_settings::set_enabled(root, &agent, enabled)?;
+            Ok(json!({"agent": agent, "enabled": enabled, "default": s.default}))
+        }
+        Operation::AgentDefault { agent } => {
+            let s = agent_settings::set_default(root, agent.as_deref())?;
+            Ok(json!({"default": s.default}))
+        }
+        Operation::OpenrouterModels => match runtime {
+            Some(rt) => Ok(agent_settings::models(&rt.openrouter_models, monitor::now()).await),
+            None => {
+                let cache = Mutex::new(agent_settings::ModelCache::default());
+                Ok(agent_settings::models(&cache, monitor::now()).await)
+            }
+        },
         Operation::ProjectBindings => {
             let rows: Vec<Value> = bindings::read(root)?
                 .into_iter()

@@ -188,6 +188,18 @@ lowercase letters, digits and `- . _ :`; a model is letters, digits and `/ . _ :
 provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs
 its own key inside Hermes, which this server never sets.
 
+### `switchboard_agents` — (read)
+
+`{default, installed, agents: [...], recommended_models}`. `default` is the machine's default
+agent, `null` for *Auto*; Fabric uses it unless a project sets its own. Each agent row: `id`,
+`name`, `maker`, `url`, `install` (its install command), `installed` (found on this computer
+now), `switchable` (Switchboard can hand it a workflow: Claude Code, Codex, Kimi Code, Hermes,
+OpenCode), `enabled` (switchable, installed and not disabled by the operator), `disabled`,
+`default`, `openrouter` and `mcp` (what it supports) and `command` (the program Switchboard runs
+for it, never a key). `recommended_models`: `[{id, name, maker, context,
+input_usd_per_million, url}]`. Enabling, disabling and the default are the operator's (the
+Agents page, or `switchboard agents enable|disable|default`).
+
 ### `switchboard_kimi_accounts` — (read)
 
 `{accounts: [{account, status}], current, installed}`. `account`: `id`, `label`, `region`

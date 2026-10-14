@@ -911,10 +911,12 @@
         ],
         "model_env": null,
         "args": [],
-        "extra_env": {},
+        "extra_env": {
+          "OPENCODE_CONFIG_CONTENT": "{\"provider\":{\"openrouter\":{\"options\":{\"apiKey\":\"{env:OPENROUTER_API_KEY}\"},\"models\":{\"{model}\":{}}}}}"
+        },
         "isolate_env": null,
         "default": true,
-        "notes": "A key saved with `/connect` (auth.json) likely wins over the launch's key (unverified at runtime)."
+        "notes": "A key saved with `/connect` (auth.json) wins over OPENROUTER_API_KEY, and an id outside OpenCode's model list falls back silently in the TUI; the launch passes OPENCODE_CONFIG_CONTENT, the top config layer, with the key from the environment and the chosen model declared, for that process only (OpenCode 1.19.0 provider.ts, config.ts; researched 2026-10-14). The person's auth.json, sessions and opencode.json are never written."
       },
       "proxy_ok": true,
       "level": "proxy",
@@ -1600,5 +1602,48 @@
       ]
     }
   ],
-  "ranking_source": "https://openrouter.ai/apps (global ranking, read 2026-10-05)"
+  "ranking_source": "https://openrouter.ai/apps (global ranking, read 2026-10-05)",
+  "openrouter_recommended": [
+    {
+      "id": "xiaomi/mimo-v2.6-pro",
+      "name": "MiMo V2.6 Pro",
+      "maker": "Xiaomi",
+      "context": 1050000,
+      "input_usd_per_million": 0.435,
+      "url": "https://openrouter.ai/xiaomi/mimo-v2.6-pro"
+    },
+    {
+      "id": "anthropic/claude-haiku-5.5",
+      "name": "Claude Haiku 5.5",
+      "maker": "Anthropic",
+      "context": 1000000,
+      "input_usd_per_million": 0.1,
+      "url": "https://openrouter.ai/anthropic/claude-haiku-5.5"
+    },
+    {
+      "id": "google/gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "maker": "Google",
+      "context": 1048576,
+      "input_usd_per_million": 0.75,
+      "url": "https://openrouter.ai/google/gemini-3.8-flash"
+    },
+    {
+      "id": "qwen/qwen3.8-flash",
+      "name": "Qwen3.8 Flash",
+      "maker": "Qwen",
+      "context": 1000000,
+      "input_usd_per_million": 0.15,
+      "url": "https://openrouter.ai/qwen/qwen3.8-flash"
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "maker": "DeepSeek",
+      "context": 1048576,
+      "input_usd_per_million": 0.0369,
+      "url": "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+    }
+  ],
+  "openrouter_recommended_note": "Operator's choice, 2026-10-14; ids, context and input prices read from https://openrouter.ai/api/v1/models the same day. Agent ranking reference: https://artificialanalysis.ai/agents/coding-agents"
 }

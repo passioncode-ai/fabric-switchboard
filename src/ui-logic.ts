@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, AgentSetup, OpenrouterCredit, ProjectSuggestion, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, ProjectSuggestion, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -493,4 +493,32 @@ export function ordinaryKimiNote(status: { signed_in: boolean; error: string | n
   if (!status.signed_in) return t('Not signed in. Run kimi login in Terminal.');
   if (status.error === 'Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.') return t('Run kimi once in Terminal to renew its sign-in, then refresh.');
   return status.error ? t(status.error) : null;
+}
+
+/** SB-120: the order agents take over work in — the subscriptions-first preset (Claude Code,
+ * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order. */
+export const TAKEOVER_ORDER = ['claude-code', 'codex', 'kimi-code', 'hermes', 'opencode'];
+const takeoverRank = (id: string) => { const i = TAKEOVER_ORDER.indexOf(id); return i < 0 ? TAKEOVER_ORDER.length : i; };
+export function sortAgents<T extends Pick<AgentRow, 'id'>>(agents: T[]): T[] {
+  return agents.map((agent, index) => ({ agent, index })).sort((a, b) => takeoverRank(a.agent.id) - takeoverRank(b.agent.id) || a.index - b.index).map((x) => x.agent);
+}
+/** The default-agent choices: Auto, then every enabled agent that can take over work. A saved
+ * default that is no longer usable (uninstalled, say) stays listed and selected, marked, so the
+ * person sees why `continue` refuses and can pick another. */
+export function defaultAgentChoices(agents: Pick<AgentRow, 'id' | 'name' | 'enabled' | 'switchable' | 'installed'>[], current: string | null): { id: string | null; label: string; on: boolean }[] {
+  const choices: { id: string | null; label: string; on: boolean }[] = [{ id: null, label: t('Auto'), on: current === null }];
+  for (const agent of sortAgents(agents)) {
+    if (agent.switchable && agent.enabled) choices.push({ id: agent.id, label: agent.name, on: current === agent.id });
+    else if (agent.id === current) choices.push({ id: agent.id, label: agent.installed ? t('{agent} (disabled)', { agent: agent.name }) : t('{agent} (not installed)', { agent: agent.name }), on: true });
+  }
+  return choices;
+}
+/** A token count as OpenRouter shows context: 1.05M, 200K, 10M. */
+export function tokenCount(n: number): string {
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(2))}M`;
+  return `${Math.round(n / 1000)}K`;
+}
+/** A recommended model's line: maker, context and the input price per million tokens. */
+export function modelMeta(m: Pick<RecommendedModel, 'maker' | 'context' | 'input_usd_per_million'>): string {
+  return t('{maker} · {context} context · ${price} per 1M input tokens', { maker: m.maker, context: tokenCount(m.context), price: m.input_usd_per_million.toFixed(2) });
 }

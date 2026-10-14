@@ -212,6 +212,21 @@ pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ]);
+    // After Homebrew, so a program found before keeps being the one launched: where agents' own
+    // installers put theirs, which the desktop app's PATH lacks (SB-120: OpenCode's is
+    // ~/.opencode/bin, Kimi Code's ~/.kimi-code/bin). Version-manager shims (Volta, mise, asdf)
+    // are left out: they resolve to the manager, not the agent.
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.extend([
+            home.join(".opencode/bin"),
+            home.join(".kimi-code/bin"),
+            home.join(".hermes/bin"),
+            home.join(".deno/bin"),
+            home.join("Library/pnpm"),
+            home.join(".yarn/bin"),
+        ]);
+    }
     #[cfg(windows)]
     {
         if let Some(home) = std::env::var_os("USERPROFILE") {
@@ -1713,6 +1728,152 @@ fn hermes_continuation_session(
         ))
     }
 }
+/// The continuation target name for OpenCode on the saved OpenRouter key (SB-119).
+pub const OPENCODE_TARGET: &str = "opencode";
+pub const OPENCODE_NOT_INSTALLED: &str =
+    "OpenCode is not installed. Install it from opencode.ai, then try again.";
+/// What an OpenCode continuation needs before anything is offered (SB-119): not Windows,
+/// OpenCode installed, an OpenRouter key and model saved, the `switchboard` command present for
+/// the session script.
+pub(crate) fn opencode_continuation_preflight(store: &Store) -> Result<(), String> {
+    if cfg!(windows) {
+        return Err(crate::continuation::UNIX_ONLY.into());
+    }
+    find_program("opencode").ok_or(OPENCODE_NOT_INSTALLED)?;
+    let saved = store
+        .agent_key("openrouter")?
+        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+    if saved.model.is_none() {
+        return Err(OPENROUTER_MODEL_NEEDED.into());
+    }
+    agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    Ok(())
+}
+/// Whether an `opencode` chain step can be tried now.
+pub(crate) fn opencode_continuation_ready(store: &Store) -> bool {
+    opencode_continuation_preflight(store).is_ok()
+}
+/// OpenCode's configuration for one continuation (SB-119), given as `OPENCODE_CONFIG_CONTENT`,
+/// the layer OpenCode merges last: the key from the session's environment wins over a key the
+/// person saved with `/connect`; the chosen model is declared, so an id OpenCode's own list
+/// lacks is not swapped for another; Observatory's MCP server lets the session accept the
+/// handoff. Nothing of the person's OpenCode — `auth.json`, sessions, `opencode.json` — is
+/// written (OpenCode 1.19.0 provider.ts and config.ts, researched 2026-10-14).
+pub(crate) fn opencode_config(model: &str, observatory: &crate::continuation::McpServer) -> String {
+    let mut command = vec![Value::String(observatory.command.clone())];
+    command.extend(observatory.args.iter().cloned().map(Value::String));
+    json!({
+        "provider": {"openrouter": {
+            "options": {"apiKey": "{env:OPENROUTER_API_KEY}"},
+            "models": {model: {}},
+        }},
+        "mcp": {"observatory": {"type": "local", "command": command, "enabled": true}},
+    })
+    .to_string()
+}
+/// Continues an Observatory workflow on OpenCode with the saved OpenRouter key and its default
+/// model (SB-119), the handoff prompt as the session's first message (`--prompt`).
+pub(crate) fn opencode_continuation(
+    root: &Path,
+    store: &Store,
+    working_directory: &Path,
+    continuation: &crate::continuation::Continuation,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
+    opencode_continuation_preflight(store)?;
+    let program = find_program("opencode").ok_or(OPENCODE_NOT_INSTALLED)?;
+    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let (path, result) = opencode_continuation_session(
+        root,
+        store,
+        &program,
+        &cli,
+        working_directory,
+        continuation,
+    )?;
+    start(&path)?;
+    Ok(result)
+}
+#[cfg_attr(windows, allow(unused_variables))]
+pub(crate) fn opencode_continuation_session(
+    root: &Path,
+    store: &Store,
+    program: &Path,
+    cli: &Path,
+    working_directory: &Path,
+    continuation: &crate::continuation::Continuation,
+) -> Result<(PathBuf, Value), String> {
+    #[cfg(windows)]
+    {
+        Err(crate::continuation::UNIX_ONLY.into())
+    }
+    #[cfg(not(windows))]
+    {
+        let working_directory = agent_folder(root, working_directory)?;
+        if !crate::continuation::valid_workflow_id(&continuation.workflow_id) {
+            return Err(crate::continuation::BAD_WORKFLOW_ID.into());
+        }
+        let saved = store
+            .agent_key("openrouter")?
+            .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+        let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
+        if !switchboard_core::agent_keys::model_valid(&model) {
+            return Err(switchboard_core::agent_keys::MODEL_INVALID.into());
+        }
+        let base = root.join("runtimes").join("opencode-continue");
+        private_dir(&root.join("runtimes"))?;
+        private_dir(&base)?;
+        prune_hermes_sessions(&base, SystemTime::now());
+        let session = base.join(&continuation.workflow_id);
+        private_dir(&session)?;
+        let session_id = uuid::Uuid::new_v4();
+        let first = format!(
+            "{} In every Observatory call use owner agent:opencode and sessionId {session_id}.",
+            crate::continuation::prompt(continuation)
+        );
+        private_write(&session.join("handoff-prompt.txt"), first.as_bytes(), false)?;
+        let mut env = BTreeMap::new();
+        env.insert(
+            "OPENCODE_CONFIG_CONTENT".to_string(),
+            opencode_config(&model, &continuation.observatory),
+        );
+        let model_arg = format!("openrouter/{model}");
+        let args = ["--prompt", first.as_str(), "-m", model_arg.as_str()];
+        let key_command = [
+            "--data-dir".to_string(),
+            root.to_string_lossy().into_owned(),
+            "agents".into(),
+            "key".into(),
+            "--service".into(),
+            "openrouter".into(),
+        ];
+        let content = script_with(
+            &session,
+            program,
+            &args,
+            &env,
+            Some(("OPENROUTER_API_KEY", cli, &key_command)),
+            false,
+            &working_directory,
+        );
+        let path = write_launch_script(&session, &content)?;
+        let record = json!({
+            "account_id": OPENCODE_TARGET, "provider": "opencode", "pool": "openrouter",
+            "mode": "isolated", "working_directory": working_directory, "in_place": false,
+            "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
+            "label": model,
+        });
+        private_write(
+            &session.join(SESSION_RECORD),
+            record.to_string().as_bytes(),
+            false,
+        )?;
+        Ok((
+            path.clone(),
+            json!({"launched": true, "agent": "opencode", "via": "openrouter", "model": model, "model_from": "key", "script": path}),
+        ))
+    }
+}
 #[cfg_attr(windows, allow(dead_code))]
 /// How long a finished Hermes hand-over's folder (its script, prompt and record) is kept.
 #[cfg(not(windows))]
@@ -1812,7 +1973,15 @@ fn openrouter_session(
     if let (Some(model_env), Some(model)) = (&recipe.model_env, &model) {
         env.insert(model_env.clone(), model.clone());
     }
-    env.extend(recipe.extra_env.clone());
+    // `{model}` inside a value names the chosen model there too (OpenCode declares it in its
+    // config, SB-119); ids are validated, so they are safe inside the JSON it sits in.
+    env.extend(recipe.extra_env.iter().map(|(k, v)| {
+        let v = match &model {
+            Some(m) => v.replace("{model}", m),
+            None => v.clone(),
+        };
+        (k.clone(), v)
+    }));
     if let Some(isolate) = &recipe.isolate_env {
         let own = home.join("agent-home");
         private_dir(&own)?;
@@ -2264,6 +2433,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
         "runtimes",
         "kimi/sessions",
         "runtimes/hermes-continue",
+        "runtimes/opencode-continue",
     ] {
         let Ok(entries) = fs::read_dir(root.join(folder)) else {
             continue;
@@ -3343,6 +3513,95 @@ mod tests {
             .status()
             .unwrap()
             .success());
+    }
+    #[cfg(not(windows))]
+    #[test]
+    fn an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key() {
+        // SB-119: OpenCode takes a workflow on the saved OpenRouter key and its model, through
+        // OPENCODE_CONFIG_CONTENT only; the person's own OpenCode files are never written.
+        let f = fixture();
+        let continuation = crate::continuation::Continuation {
+            workflow_id: "wf_00112233445566aa".into(),
+            handoff_id: "ho_synthetic".into(),
+            observatory: crate::continuation::McpServer {
+                command: "/opt/Engine \"Tools\"/python".into(),
+                args: vec!["/opt/engine/mcp/server.py".into()],
+            },
+            previous_provider: Some("claude".into()),
+        };
+        let session = |f: &Fixture| {
+            opencode_continuation_session(
+                &f.root,
+                &f.store,
+                Path::new("/opt/Agent Tools/opencode"),
+                Path::new("/opt/Switchboard Tools/switch'board"),
+                &f.project,
+                &continuation,
+            )
+        };
+        assert_eq!(
+            session(&f).unwrap_err(),
+            switchboard_core::agent_keys::NO_AGENT_KEY
+        );
+        openrouter_key(&f, None);
+        assert_eq!(session(&f).unwrap_err(), OPENROUTER_MODEL_NEEDED);
+        openrouter_key(&f, Some("xiaomi/mimo-v2.6-pro"));
+        let (path, answer) = session(&f).unwrap();
+        assert_eq!(answer["agent"], "opencode");
+        assert_eq!(answer["model"], "xiaomi/mimo-v2.6-pro");
+        let base = f.root.join("runtimes/opencode-continue");
+        assert!(path.starts_with(base.join("wf_00112233445566aa")));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("sk-or-"), "the key reached the script");
+        assert!(text.contains("exec '/opt/Agent Tools/opencode' '--prompt' "));
+        assert!(text.contains("'-m' 'openrouter/xiaomi/mimo-v2.6-pro'"));
+        assert!(text.contains("export OPENCODE_CONFIG_CONTENT="));
+        assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+        let shell = text.lines().next().unwrap().trim_start_matches("#!");
+        assert!(std::process::Command::new(shell)
+            .arg("-n")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        // The config the script exports: the key by reference, the model declared, Observatory.
+        let config: Value = serde_json::from_str(&opencode_config(
+            "xiaomi/mimo-v2.6-pro",
+            &continuation.observatory,
+        ))
+        .unwrap();
+        assert_eq!(
+            config["provider"]["openrouter"]["options"]["apiKey"],
+            "{env:OPENROUTER_API_KEY}"
+        );
+        assert!(config["provider"]["openrouter"]["models"]["xiaomi/mimo-v2.6-pro"].is_object());
+        assert_eq!(
+            config["mcp"]["observatory"]["command"],
+            json!(["/opt/Engine \"Tools\"/python", "/opt/engine/mcp/server.py"])
+        );
+        assert_eq!(config["mcp"]["observatory"]["type"], "local");
+        let first =
+            fs::read_to_string(base.join("wf_00112233445566aa/handoff-prompt.txt")).unwrap();
+        assert!(first.contains("ho_synthetic") && first.contains("owner agent:opencode"));
+        let id = first
+            .split("sessionId ")
+            .last()
+            .unwrap()
+            .trim_end_matches('.');
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+        // Listed under Sessions with its model.
+        let listed = sessions(&f.root, true);
+        let opencode = listed
+            .iter()
+            .find(|r| r["provider"] == "opencode")
+            .expect("the hand-over is listed");
+        assert_eq!(opencode["continues"], "wf_00112233445566aa");
+        assert_eq!(opencode["label"], "xiaomi/mimo-v2.6-pro");
+        // No OpenCode file of the person's was made: nothing outside the session folder.
+        assert!(!f
+            .root
+            .join("runtimes/opencode-continue/agent-home")
+            .exists());
     }
     #[cfg(not(windows))]
     #[test]

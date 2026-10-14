@@ -65,8 +65,9 @@ pub struct Restored {
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
 /// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
-pub const SETTING_FILES: &[&str] = &["login-item", "auto-update"];
-const MAX_SETTING: u64 = 64;
+pub const SETTING_FILES: &[&str] = &["login-item", "auto-update", "agents-settings.json"];
+/// A setting file carried in a backup: a word for the switches, a small JSON for the agents (SB-120).
+const MAX_SETTING: u64 = 4096;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -849,6 +850,9 @@ mod tests {
         original.select(Provider::Claude, "default", &b.id).unwrap();
         original.select(Provider::Claude, "alpha", &a.id).unwrap();
         std::fs::write(original.root().join("login-item"), "off\n").unwrap();
+        // SB-120: the agents' settings travel as a setting too.
+        let agents = r#"{"default":"opencode","disabled":["kimi-code"]}"#;
+        std::fs::write(original.root().join("agents-settings.json"), agents).unwrap();
         original
             .set_agent_key(
                 "openrouter",
@@ -868,7 +872,13 @@ mod tests {
                 restored.routes,
                 restored.settings
             ),
-            (2, 1, 1, 2, 1)
+            (2, 1, 1, 2, 2)
+        );
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("agents-settings.json"))
+                .unwrap()
+                .trim_end(),
+            agents
         );
         assert_eq!(restored.agent_keys, 1);
         assert_eq!(

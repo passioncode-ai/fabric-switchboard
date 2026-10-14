@@ -181,10 +181,16 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_openrouter_status",
             "switchboard_hermes_status",
             "switchboard_hermes_set",
+            "switchboard_agents",
             "switchboard_kimi_accounts",
             "switchboard_openrouter_model"
         ]
     );
+    // SB-120: the agents overview reads; the default is Auto until the operator picks one.
+    let (error, agents) = agent.tool("switchboard_agents", json!({}));
+    assert!(!error, "{agents}");
+    assert_eq!(agents["default"], Value::Null);
+    assert!(agents["agents"].as_array().is_some_and(|a| a.len() > 20));
     // SB-95: the session list reads; nothing was launched here.
     let (error, sessions) = agent.tool("switchboard_sessions", json!({"all": true}));
     assert!(!error, "{sessions}");
