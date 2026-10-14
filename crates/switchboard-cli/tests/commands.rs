@@ -206,7 +206,10 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
     assert!(said.contains("added to the project \"App\""), "{said}");
     assert_eq!(said.lines().count(), 1);
     let (_, listed, _) = run(&["project", "suggestions"], None);
-    assert_eq!(listed["data"]["added"][1]["reason"], "ecosystem");
+    // The clone the person removed is declined now; the new repository is the one added.
+    let added = listed["data"]["added"].as_array().unwrap();
+    assert_eq!(added.len(), 1, "{listed}");
+    assert_eq!(added[0]["reason"], "ecosystem");
     let (_, again, _) = run(
         &["project", "suggest", "--folder", api.to_str().unwrap()],
         None,
