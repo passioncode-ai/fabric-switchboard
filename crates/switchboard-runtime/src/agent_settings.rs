@@ -141,11 +141,16 @@ pub fn set_default(root: &Path, id: Option<&str>) -> Result<Settings, String> {
 /// The command Switchboard runs for an agent, as the Agents page shows it: the program and the
 /// arguments of an OpenRouter launch with `model` (no key, no environment).
 pub fn command(agent: &Value, model: Option<&str>) -> String {
+    argv(agent, model).join(" ")
+}
+
+/// `command` as an argument vector: the program, then its arguments (SB-120, for Fabric).
+pub fn argv(agent: &Value, model: Option<&str>) -> Vec<String> {
     let binary = agent["binary"].as_str().unwrap_or_default();
     let id = agent["id"].as_str().unwrap_or_default();
-    match (crate::agent_catalog::openrouter(id), model) {
-        (Ok(recipe), Some(model)) if !recipe.model_flag.is_empty() => {
-            let mut parts = vec![binary.to_owned()];
+    let mut parts = vec![binary.to_owned()];
+    if let (Ok(recipe), Some(model)) = (crate::agent_catalog::openrouter(id), model) {
+        if !recipe.model_flag.is_empty() {
             parts.extend(recipe.args.iter().cloned());
             parts.extend(
                 recipe
@@ -153,10 +158,9 @@ pub fn command(agent: &Value, model: Option<&str>) -> String {
                     .iter()
                     .map(|a| a.replace("{model}", model)),
             );
-            parts.join(" ")
         }
-        _ => binary.to_owned(),
     }
+    parts
 }
 
 /// Every catalog agent with what the Agents page needs: installed or not, enabled for taking
@@ -181,6 +185,7 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
                 "url": agent["url"],
                 "install": agent["install"],
                 "installed": path.is_some(),
+                "path": path.as_ref().map(|p| p.to_string_lossy().into_owned()),
                 "switchable": switchable,
                 "enabled": path.is_some() && switchable && !disabled,
                 "disabled": disabled,
@@ -188,6 +193,7 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
                 "openrouter": crate::agent_catalog::openrouter(&id).is_ok(),
                 "mcp": agent["mcp"]["supported"],
                 "command": command(&agent, model),
+                "argv": argv(&agent, model),
             })
         })
         .collect();
@@ -197,8 +203,28 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         .default
         .as_deref()
         .is_some_and(|id| agents.iter().any(|a| a["id"] == id && a["enabled"] == true));
+    // A cache key for readers such as Fabric: it changes whenever anything in the answer does.
+    let revision = {
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(
+            json!([&settings.default, default_ready, &agents])
+                .to_string()
+                .as_bytes(),
+        );
+        digest
+            .iter()
+            .take(8)
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    let updated_at = std::fs::metadata(root.join(FILE))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
     Ok(json!({
         "schema": 1,
+        "revision": revision,
+        "updated_at": updated_at,
         "default": settings.default,
         "default_ready": default_ready,
         "installed": installed,
@@ -397,6 +423,15 @@ mod tests {
         assert!(disabled(root.path(), "kimi-code").unwrap());
         let view = overview(root.path(), None).unwrap();
         assert_eq!(view["schema"], 1);
+        assert_eq!(view["revision"].as_str().map(str::len), Some(16));
+        assert!(view["updated_at"].as_u64().is_some());
+        let again = overview(root.path(), None).unwrap();
+        assert_eq!(again["revision"], view["revision"], "a revision is stable");
+        set_enabled(root.path(), "kimi-code", true).unwrap();
+        assert_ne!(
+            overview(root.path(), None).unwrap()["revision"],
+            view["revision"]
+        );
         assert_eq!(view["default"], "no-such-agent");
         assert_eq!(
             view["default_ready"], false,
@@ -417,6 +452,10 @@ mod tests {
     #[test]
     fn the_command_shows_the_openrouter_model() {
         let agent = known("opencode").unwrap();
+        assert_eq!(
+            argv(&agent, Some("a/b")),
+            ["opencode", "-m", "openrouter/a/b"]
+        );
         assert_eq!(command(&agent, None), "opencode");
         assert_eq!(
             command(&agent, Some("xiaomi/mimo-v2.6-pro")),

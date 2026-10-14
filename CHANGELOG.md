@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.31 — 2026-10-14
+
 **Choose which coding agents take over your work, and a default one** (SB-120). The Agents page
 now starts with what matters: the **default agent**, the agents **installed** on this computer —
 each with the command Switchboard runs, **Enabled / Disabled** for taking over work and **Set default**
@@ -28,6 +30,10 @@ that already names `opencode` now hands work to it instead of skipping it.
 — `xiaomi/mimo-v2.6-pro`, `anthropic/claude-haiku-5.5`, `google/gemini-3.8-flash`,
 `qwen/qwen3.8-flash`, `deepseek/deepseek-v4.1-flash` — then search every OpenRouter model that can
 call tools (`switchboard agents models`); any id typed by hand still works.
+
+`switchboard --json agents status` (and MCP `switchboard_agents`) carries what another app needs
+to read it: `schema`, a `revision` to cache by, `updated_at`, `default_ready`, and per agent its
+`path` and `argv`.
 
 Agents installed with their own installers (`~/.opencode/bin`, `~/.kimi-code/bin`, Bun, Deno,
 Volta, pnpm, Yarn, mise or asdf) are now found by the desktop app too.

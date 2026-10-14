@@ -584,14 +584,19 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
   disabling the default agent sets `default` to null. `AgentDefault{agent: Some(id)}` requires the
   agent to be switchable (`…cannot be the default.`), not disabled (`This agent is disabled for
   taking over work…`) and installed (`This agent is not installed…`); `None` is *Auto*.
-- `AgentsOverview` answers `{schema: 1, default, default_ready, installed, agents: [{id, name, maker, url, install,
-  installed, switchable, enabled, disabled, default, openrouter, mcp, command}],
-  recommended_models}`. `enabled` is `switchable && installed && !disabled`; `command` is the
-  program and the arguments of an OpenRouter launch with the key's default model, never a key or
+- `AgentsOverview` answers `{schema: 1, revision, updated_at, default, default_ready, installed, agents: [{id, name,
+  maker, url, install, installed, path, switchable, enabled, disabled, default, openrouter, mcp,
+  command, argv}],
+  recommended_models}`. `enabled` is `switchable && installed && !disabled`; `path` is the program found (null when not installed); `argv` is the
+  argument vector and `command` the same joined for display: the program and the arguments of an OpenRouter launch with the key's default model, never a key or
   an environment value. `default_ready` says whether the saved default is installed, enabled and
   can take over work; it does not check that the OpenRouter key is saved or that an account has
-  room now — `continue` checks those and refuses by name. Fabric reads this answer; `schema` changes only when a field changes
-  meaning or goes.
+  room now — `continue` checks those and refuses by name. `revision` (16 hex digits of a SHA-256 over the default, `default_ready` and the
+  rows) changes whenever the answer does, so a reader can cache by it; `updated_at` is when the
+  person last changed the settings (Unix seconds, null before the first change). Fabric reads
+  this answer; `schema` changes only when a field changes meaning or goes. `id`s are the catalog's
+  (`switchboard agents list`). The agent's own version is not read (it would start every agent's
+  program); a reader that needs it runs `<path> --version` itself.
 - **Fallback chains** read the settings once per pass; unreadable settings hand nothing over in
   that pass (`agent_settings_unreadable`), never "nothing disabled". They skip a disabled agent first, as `{agent, skipped: agent_disabled}`, before
   pins, keys or accounts are weighed. An `opencode` step runs like a `hermes` one (SB-107): on the
