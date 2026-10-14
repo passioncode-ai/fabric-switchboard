@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+### Added
+
+- **Launched sessions reach the Fabric project board** (SB-20). A managed or isolated session has a home of its
+  own, so the board server (`fabric`) the operator registered for Claude Code or Codex never reached it. Launch now
+  carries that one server in beside Switchboard's own: its command and arguments only, never its environment. No
+  board registered means none carried; the launch never fails over it.
+
 ## 0.6.31 — 2026-10-14
 
 **Choose which coding agents take over your work, and a default one** (SB-120). The Agents page
