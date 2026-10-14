@@ -483,7 +483,11 @@ pub(crate) fn remember_removed(
     let mut rows = read(root)?;
     for folder in folders {
         match rows.iter_mut().find(|r| &r.folder == folder) {
-            Some(row) => row.state = State::Dismissed,
+            Some(row) => {
+                row.state = State::Dismissed;
+                // Newest, so the cap below never drops the folder just declined.
+                row.first_seen = now;
+            }
             None => rows.push(Suggestion {
                 folder: folder.clone(),
                 pool: pool.to_owned(),

@@ -2221,7 +2221,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
-                    "account": id,
+                "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2268,7 +2268,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
-                    "account": id,
+                "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
                 }));
@@ -2304,7 +2304,7 @@ async fn execute(
                     "workflow": workflow_id,
                     "handoff": offer.handoff_id,
                     "offeredUntil": offer.expires_at,
-                    "account": id,
+                "account": id,
                 }));
             }
             let account = store
@@ -2366,7 +2366,7 @@ async fn execute(
                 "workflow": workflow_id,
                 "handoff": offer.handoff_id,
                 "offeredUntil": offer.expires_at,
-                    "account": id,
+                "account": id,
                 "agent_tools": agent_tools,
             }))
         }
@@ -2555,6 +2555,15 @@ async fn execute(
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
+            // SB-121: its folders are not adopted by another project by themselves afterwards.
+            if suggest::remember_removed(root, &project.pool, &project.folders, monitor::now())
+                .is_err()
+            {
+                oplog::event(
+                    "project_suggestion",
+                    &[("remember", oplog::Field::Code("failed"))],
+                );
+            }
             if let Some(rt) = runtime {
                 rt.suggestions_changed();
             }
@@ -3587,6 +3596,27 @@ mod owner_tests {
             .unwrap();
         assert_eq!(answer["reason"], "declined", "{answer}");
         assert_eq!(folders(&runtime).len(), 2);
+        // Removing the whole project remembers its folders too.
+        runtime
+            .execute(Operation::RemoveProject { pool: "app".into() })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App again".into(),
+                folders: vec![main.clone()],
+                account_ids: vec![],
+            })
+            .await
+            .unwrap();
+        let answer = runtime
+            .execute(Operation::ProjectSuggest {
+                folder: older.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["reason"], "declined", "{answer}");
     }
     #[tokio::test]
     async fn activation_after_claude_logout_proceeds_and_is_journaled() {
