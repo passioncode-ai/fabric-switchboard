@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.32 — 2026-10-14
+
 **A project's new folders join it by themselves** (SB-121, operator 2026-10-14). A worktree of a
 project repository, another clone of it, or a new repository of the project's source is added to
 the project at once, and you get one notification: “app-2 is now part of App.” No question, no
