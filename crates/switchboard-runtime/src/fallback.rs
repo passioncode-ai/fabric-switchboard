@@ -415,7 +415,13 @@ pub(crate) fn account_for_default(
     let kimi_limited = runtime.kimi_watch.limited(now);
     let mut limited = runtime.limits.limited_ids(now);
     limited.extend(kimi_limited.iter().cloned());
-    let current = runtime.current_accounts().unwrap_or(Value::Null);
+    // Without an accountRef the ordinary CLI's accounts are the executor: an unreadable answer
+    // refuses rather than risk choosing the account that just ran out.
+    let current = if executor.get("accountRef").is_some() {
+        Value::Null
+    } else {
+        runtime.current_accounts()?
+    };
     let excluded = executor_accounts(executor, &snapshot, &current);
     let kimi_usable =
         |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
