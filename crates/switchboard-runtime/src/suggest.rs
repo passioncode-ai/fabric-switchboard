@@ -966,7 +966,12 @@ mod tests {
         assert!(scan
             .pass(root2.path(), &only_wt, 200)
             .iter()
-            .any(|f| f.folder.ends_with("/app")));
+            .any(|f| {
+                std::path::Path::new(&f.folder)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    == Some("app")
+            }));
         std::thread::sleep(std::time::Duration::from_millis(1100));
         let elsewhere = data.join("deep").join("app-third");
         worktree(&main, &elsewhere, "app-third");
