@@ -112,7 +112,8 @@ struct RenewSchedule {
 impl Pass {
     pub(crate) async fn run(&mut self, runtime: &Runtime, native_sources: bool, time: i64) {
         // With no saved Claude OAuth account there is nothing of Claude Code's to keep
-        // current: no Keychain read, no Claude Swap read, no transcript scan.
+        // current: no Keychain read, no Claude Swap read, no limit scan of transcripts (the
+        // work scan of SB-131 reads them only while a project exists).
         let claude = native_sources && claude_oauth_saved(&runtime.store);
         if native_sources
             && (time - self.last_source_sync >= INTERVAL_SECONDS || time < self.last_source_sync)
@@ -647,7 +648,7 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         (&p.identity, ids)
     });
     let files = if native.is_some() {
-        (runtime.native.transcripts)(time)
+        runtime.transcripts(time)
     } else {
         vec![]
     };

@@ -6,9 +6,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, suggestionQuestion, suggestionReason, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, ProjectSuggestion, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -31,8 +31,6 @@ let dialogSequence = 0;
 const REPOSITORY = 'https://github.com/passioncode-ai/fabric-switchboard';
 let adapter: Adapter = nativeAdapter;
 let snapshot: Snapshot | null = null;
-/** SB-117: folders found for a project, waiting for Add or Not this one. */
-let suggestions: ProjectSuggestion[] = [];
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
@@ -179,7 +177,6 @@ async function reload() {
   void loadSessions();
   void restorePendingLogin();
   void loadBackups();
-  void loadSuggestions();
   if (page === 'agents') void loadAgents();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -203,8 +200,6 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
     showNotice(restoredText || success); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
-    // A project saved or removed can answer a waiting folder suggestion (SB-117).
-    try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* the next refresh reads them */ }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
   finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
 }
@@ -263,7 +258,6 @@ function render(options: { background?: boolean } = {}): boolean {
     header.append(actions);
   }
   main.append(header);
-  suggestionBanner(main);
   if (busy) { const progress = el('p', 'operation-progress', t('Working…')); progress.setAttribute('role', 'status'); main.append(progress); }
   if (!native && !demo) {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
@@ -286,26 +280,6 @@ function render(options: { background?: boolean } = {}): boolean {
 }
 const ruleAccount = (rule: ProjectRule) => snapshot?.accounts.find((account) => account.id === rule.account_id);
 const ruleTarget = (rule: ProjectRule) => rule.target === 'managed' ? t('Managed sessions') : t('Claude Code login (all claude sessions)');
-async function loadSuggestions() {
-  if (!native && !demo) return;
-  try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* the next refresh reads them again */ }
-  backgroundRender();
-}
-/** SB-117: a found folder stays on screen, above every page, until it is added or declined. */
-function suggestionBanner(main: HTMLElement) {
-  const first = suggestions[0];
-  if (!first) return;
-  const strip = el('section', 'notice suggestion-strip'); strip.setAttribute('aria-label', t('A folder for a project'));
-  const text = el('div', 'suggestion-text');
-  const question = el('strong', '', suggestionQuestion(first)); question.title = first.folder;
-  text.append(question, el('span', '', ` ${suggestionReason(first)}`));
-  if (suggestions.length > 1) text.append(el('span', 'account-meta', ` ${plural(suggestions.length - 1, { one: '{n} more folder is waiting.', other: '{n} more folders are waiting.' })}`));
-  const project = first.project ?? first.pool;
-  const add = button(t('Add'), () => void mutate(async () => { await adapter.acceptProjectSuggestion(first.folder); await loadSuggestions(); }, t('{folder} added to {project}.', { folder: first.name, project }), 'suggestion-add'), 'button primary', 'suggestion-add');
-  const skip = button(t('Not this one'), () => void mutate(async () => { await adapter.dismissProjectSuggestion(first.folder); await loadSuggestions(); }, t('{folder} will not be suggested again.', { folder: first.name }), 'suggestion-add'), 'text-button', 'suggestion-skip');
-  const actions = el('div', 'management-actions'); actions.append(add, skip);
-  strip.append(text, actions); main.append(strip);
-}
 /** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
 function rulesStrip(main: HTMLElement) {
   const live = activeRules(snapshot?.rules, Date.now() / 1000);
@@ -335,7 +309,7 @@ function projectsSection() {
     const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${project.name}, ${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`);
     const details = el('div', 'account-details'); const title = el('div', 'account-title');
     title.append(el('h2', '', project.name), el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
-    const folders = el('ul', 'project-folders'); for (const folder of project.folders) { const item = el('li', 'account-meta', folder); item.title = folder; folders.append(item); }
+    const folders = projectFolderList(project);
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet — sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
     const actions = el('div', 'management-actions');
@@ -343,6 +317,24 @@ function projectsSection() {
     card.append(details, actions); list.append(card);
   }
   section.append(list); return section;
+}
+/** Folders shown on a project's card before *Show all*: a project an agent works in gathers dozens (SB-131). */
+const FOLDERS_SHOWN = 6;
+const expandedProjects = new Set<string>();
+function projectFolderList(project: Project) {
+  const wrap = el('div', 'project-folder-block');
+  const folders = el('ul', 'project-folders');
+  const open = expandedProjects.has(project.pool);
+  const shown = open ? project.folders : project.folders.slice(0, FOLDERS_SHOWN);
+  for (const folder of shown) { const item = el('li', 'account-meta', folder); item.title = folder; folders.append(item); }
+  wrap.append(folders);
+  if (project.folders.length > FOLDERS_SHOWN) {
+    const label = open ? t('Show fewer folders') : t('Show all folders ({n})', { n: project.folders.length });
+    const toggle = button(label, () => { if (open) expandedProjects.delete(project.pool); else expandedProjects.add(project.pool); render(); restoreFocus(`folders-${project.pool}`); }, 'text-button', `folders-${project.pool}`);
+    toggle.setAttribute('aria-expanded', String(open));
+    wrap.append(toggle);
+  }
+  return wrap;
 }
 function projectDialog(existing?: Project) {
   const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New project'), t('Add the project\'s folders and choose the accounts that belong to it. An account belongs to one project at a time.'));
@@ -357,14 +349,14 @@ function projectDialog(existing?: Project) {
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     option.append(box, el('span', '', `${account.label} · ${providerName(account.provider)}${note}`)); picker.append(option);
   }
-  const grid = el('div', 'form-grid'); grid.append(field(t('Project name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this project. Subfolders are included.')));
+  const grid = el('div', 'form-grid'); grid.append(field(t('Project name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this project. Subfolders are included. Repositories its agents work in join it by themselves, and folders deleted from disk leave it.')));
   context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default pool.')));
   context.actions.append(submit(existing ? t('Save project') : t('Create project')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
     const list = folders.require(); if (!list) return;
-    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds }), existing ? t('Project “{name}” saved.', { name: name.value.trim() }) : t('Project “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
+    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders }), existing ? t('Project “{name}” saved.', { name: name.value.trim() }) : t('Project “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
 function rulesSection() {
@@ -1487,7 +1479,7 @@ function folderPicker(context: DialogContext, initial: string, key: string, lock
     require: () => { if (value) return value; context.error.textContent = t('Choose a folder.'); choose.focus(); return null; },
   };
 }
-/** Several folders, each added with the system picker and removable; never typed. */
+/** Several folders, each added or changed with the system picker and removable; never typed. */
 function foldersPicker(context: DialogContext, initial: string[], key: string) {
   let folders = [...initial];
   const node = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
@@ -1497,8 +1489,10 @@ function foldersPicker(context: DialogContext, initial: string[], key: string) {
     if (!folders.length) list.append(el('li', 'folder-path is-empty', t('No folder chosen')));
     folders.forEach((folder) => {
       const item = el('li', 'folder-item'); const path = el('span', 'folder-path', folder); path.title = folder;
+      const change = button(t('Change…'), () => void chooseFolder(folder, (text) => { context.error.textContent = text; }).then((chosen) => { if (chosen && chosen !== folder) { folders = replaceFolder(folders, folder, chosen); context.error.textContent = ''; paint(); } }), 'text-button', '');
+      change.setAttribute('aria-label', t('Change {folder}', { folder }));
       const remove = button('×', () => { folders = folders.filter((entry) => entry !== folder); paint(); add.focus(); }, 'icon-button', '');
-      remove.setAttribute('aria-label', t('Remove {folder}', { folder })); item.append(path, remove); list.append(item);
+      remove.setAttribute('aria-label', t('Remove {folder}', { folder })); item.append(path, change, remove); list.append(item);
     });
   };
   node.append(list, add); paint();
@@ -1512,7 +1506,7 @@ function select(options: [string, string][]) { const node = el('select'); option
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
 async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string) {
   context.error.textContent = ''; context.setBusy(true); clock.begin();
-  try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } try { suggestions = (await adapter.projectSuggestions()).suggestions; } catch { /* SB-117: the next refresh reads them */ } render(); context.setBusy(false); context.close(); }
+  try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
   catch (error) { context.error.textContent = t(safeError(error)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
@@ -1639,14 +1633,14 @@ function backgroundRefresh() {
     snapshot = data; applyContext(context); backgroundRender();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
-    void loadSuggestions();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
 }
 setInterval(backgroundRefresh, 60_000);
-// SB-117: the owner says when a project folder was found, added or declined.
-onProjectSuggestions(() => void loadSuggestions());
+// SB-117/SB-131: the owner says when it added a folder to a project or took a deleted one out;
+// the project list is read again at once.
+onProjectSuggestions(() => backgroundRefresh());
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });

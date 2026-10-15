@@ -68,6 +68,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-058 | Choose the default agent | draft |
 | SCN-059 | Pick an OpenRouter model, starting from the recommended ones | draft |
 | SCN-060 | A workflow continues in OpenCode on the OpenRouter key | draft |
+| SCN-061 | A deleted folder leaves its project by itself | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -699,7 +700,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. Launch one of them (isolated or managed) from any of its folders or subfolders → the session starts; managed rotation moves only among the project's accounts.
 3. From a folder outside the project → refused: “This account belongs to a project. Launch it from one of the project's folders.”
 4. Inside the project's folders, an account of another pool for a provider the project has → refused: “This folder belongs to a project. Launch one of the project's accounts.”
-5. Edit → change folders or accounts; an account left out goes back to the default pool. Delete → the accounts stay in their pool, no longer reserved.
+5. Edit → add a folder (*Add folder…*), change one (*Change…* opens the system picker at it; the new folder takes its place) or remove one (×) — every folder is chosen with the system picker, never typed (SB-131) — and change accounts; an account left out goes back to the default pool. A card with more than six folders shows the first six and *Show all {n} folders*. Delete → the accounts stay in their pool, no longer reserved.
 **Alt paths:** The account the ordinary Claude Code or Codex is signed in to cannot join (“…Switch the CLI to another account first…”). A folder already in another project is refused. Switching the ordinary Claude Code to a project account, a native rule or native rotation on a project pool are refused: the ordinary Claude Code serves every folder. A provider the project has no account for keeps using the other accounts in its folders.
 **Expected result:** a project's accounts serve only its folders; other projects' sessions, rotation and switches never reach them.
 **UI elements:** Projects section, project dialog, project cards, “Project · {name}” pool heading.
@@ -707,7 +708,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** every refusal names what to change; nothing moves on a refusal.
 **Status:** draft
 **Meaning:** operator request 2026-10-05.
-**Coverage:** core `a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out`, `projects_never_share_a_folder_or_an_account_identity`, `a_project_pool_never_drives_the_ordinary_claude_code`; runtime `a_project_account_starts_only_in_its_folders_and_its_folders_use_only_its_accounts`, `a_project_account_never_becomes_the_ordinary_claude_code`, `the_account_the_cli_uses_cannot_join_a_project`; CLI `project_commands_work_offline_from_the_cli`; browser demo 2026-10-05 (create, CLI-account refusal, “Project · Client Alpha” heading, Select on a project account).
+**Coverage:** core `a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out`, `projects_never_share_a_folder_or_an_account_identity`, `a_project_pool_never_drives_the_ordinary_claude_code`; runtime `a_project_account_starts_only_in_its_folders_and_its_folders_use_only_its_accounts`, `a_project_account_never_becomes_the_ordinary_claude_code`, `the_account_the_cli_uses_cannot_join_a_project`; CLI `project_commands_work_offline_from_the_cli`; browser demo 2026-10-05 (create, CLI-account refusal, “Project · Client Alpha” heading, Select on a project account).; `scripts/test-ui-logic.mjs` (SB-131 `replaceFolder`: *Change…* puts the new folder in the old one's place); owner `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither` (an Edit dialog opened before a folder joined keeps it on Save)
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6)
 
@@ -762,7 +763,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Install and open Switchboard → about 90 s after start, and every six hours after, it reads `latest.json` of the newest GitHub release.
 2. A newer version is announced → it downloads in the background and is checked against the update key compiled into the app and the version its signature names; a package that fails is discarded (“The downloaded update did not pass its signature check and was discarded. Switchboard tries again within the hour.”).
 3. macOS: the verified version replaces the app bundle at once; Windows: the installer waits for the app to quit. About reads “Version {version} is ready. It starts the next time Switchboard opens, or restart now.”; the menu-bar menu gains *Restart to update to {version}*.
-4. Do nothing → when the window is hidden and nothing is running through Switchboard (no managed request, no sign-in) on two looks five minutes apart, it restarts into the new version in the background; otherwise the next start (a reboot, a login, a Quit and reopen) runs it. A newer release published meanwhile replaces the waiting one, and About names the newer version (SB-105). Or press *Restart to update* → the owner drains (LC-01) and the new version starts — in the background if the window was hidden.
+4. Do nothing → when nobody is looking at the window (it is hidden, or open but out of focus for 30 minutes — SB-131: a window simply left open no longer holds an update back for days; the window then closes and Switchboard comes back in the menu bar, and an unsaved dialog in it is lost) and nothing is running through Switchboard (no managed request, no sign-in) on two looks five minutes apart, it restarts into the new version in the background; otherwise the next start (a reboot, a login, a Quit and reopen) runs it. A newer release published meanwhile replaces the waiting one, and About names the newer version (SB-105). Or press *Restart to update* → the owner drains (LC-01) and the new version starts — in the background if the window was hidden.
 5. About → *Check for updates* checks at once, with automatic updates off too. The check runs in the background — the rest of the window stays usable while it downloads — and ends with a notice saying how it went; a failed check shows its sentence even with automatic updates off (SB-104).
 6. About → uncheck *Install updates automatically* → “Automatic updates are off. Switchboard will not check for new versions.”; the choice is saved in `<data>/auto-update` and travels with backups.
 **Alt paths:** An app the person cannot replace without an administrator password (macOS) is not installed in the background; About says “Restarting asks for an administrator password to replace the app.” and *Restart to update* asks for it; a refused password reads “The update needs an administrator password to replace Switchboard in this folder. It was not installed.” No network, a GitHub outage or a failed download reads “Could not check for updates…” / “Could not download the update…” and retries within the hour. A quit by logout or shutdown (a signal) starts no installer on Windows; the next ordinary quit does. A copy run from a translocated path reads “Move Fabric Switchboard to the Applications folder to receive updates.”
@@ -1134,23 +1135,44 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 
 ## SCN-055 — A project's new folder joins it by itself
 **Persona:** P-01
-**Goal:** Keep a project's folder list complete as worktrees, clones and new repositories of the same product appear, without hunting for them and without being asked about each one (operator 2026-10-14: «не надо у меня ничего спрашивать, просто показывай, что добавлен в проект, и уведомление один раз»).
+**Goal:** Keep a project's folder list complete — its worktrees, clones, new repositories of the same product and every repository its agents work in — without hunting for them and without being asked about any of them (operator 2026-10-14: «не надо у меня ничего спрашивать, просто показывай, что добавлен в проект, и уведомление один раз»; 2026-10-15: «автодобавление всех репозиториев нужных в проект, когда там агент работает … чтобы не показывать подтверждения»).
 **Preconditions:** a project with at least one folder that is a git repository; optionally the project's sources (`switchboard project source --pool <pool> --add github.com/<owner>`).
 **Entry point:** none — a system notification tells the person afterwards.
 **Steps:**
 1. An agent creates a worktree of a project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard adds the folder to the project (SB-121); its accounts serve it from the next session.
-2. One system notification: “Folder added to a project — {folder} is now part of {project}.” (several at once: “{n} folders added ({projects}).”). Nothing is asked; no banner, no tray count.
-3. A session started there by the hook gets one line in its context: “this folder was added to the project …”.
-**Alt paths:** The person removes the folder from the project (Projects → Edit) → it is never added back. Adding fails (the folder now overlaps another project, the 1024-folder total is reached) → the folder waits as a question: notification “Add {folder} to {project}?”, the tray count and the window banner with **Add** and **Not this one**, as in 0.6.30. Questions left by 0.6.30/0.6.31 are added by the first pass after the update. A folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches` — an agent's scratch worktree) never joins. A folder that matches two projects equally, a folder already in a project and a folder that is not a git repository are never added. The CLI shows what was added (`switchboard project suggestions` → `added`).
-**Expected result:** every new folder of a project joins it once, the person learns it from one notification, and their own removals stand.
-**UI elements:** system notification; for the fallback question: tray count, suggestion banner, Add, Not this one.
-**States covered:** added, several added, added then removed by the person, add refused (question), temporary folder ignored, questions left by an older version.
-**Errors & recovery:** a refused add keeps the folder as a question with the cause; an unreadable suggestions file adds nothing and is logged.
+2. An agent working in a project's folder changes another repository — edits or writes a file in it, or commits, pushes, stages, merges, rebases or makes a worktree there, or creates it with `git init` → within one pass that repository joins the project (SB-131). Reading a repository never counts.
+3. One system notification: “Folder added to a project — {folder} is now part of {project}.” (several at once: “{n} folders added ({projects}).”). Nothing is asked: no question, no banner, no tray count.
+4. A session started there by the hook gets one line in its context: “this folder was added to the project …”.
+**Alt paths:** The person removes the folder from the project (Projects → Edit) → it is never added back, whatever agents do there. Adding fails (the folder now overlaps another project, the 1024-folder total is reached) → nothing is asked: Switchboard tries again every ten minutes and logs `project_suggestion add: refused`; the hook's line says it “could not be added yet; Switchboard tries again by itself”. Questions left by 0.6.30/0.6.31 are added by the first pass after the update. A folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`) never joins. A tool's own folder (`~/Library`, a hidden folder of the home folder such as `~/.claude`) never joins because an agent worked there; a worktree of a project repository kept there (`~/.codex/worktrees/…`) still joins as a worktree. A repository agents of two projects work in (an organisation wiki, a common docs repository) belongs to neither: if it joined one project by work and another project's agent then works in it, it leaves the first one, and it is never added by work again (log `worked: shared`). A folder the person added is never taken out this way. Saving an Edit dialog opened before a folder joined keeps that folder. A folder already in a project, a folder that contains another project's folder, the home folder and a folder that is not a git repository are never added. Read: Claude Code sessions and their subagents; Codex sessions and sessions Switchboard launches isolated are not read yet (SB-132). A repository that joins is routed to the project's accounts (SCN-056) and refuses other accounts there (SCN-034): an agent should change only the repositories its task needs. The CLI shows what was added (`switchboard project suggestions` → `added`).
+**Expected result:** every new folder of a project, and every repository its Claude Code agents work in, joins it once; the person learns it from one notification, and their own removals stand.
+**UI elements:** system notification only.
+**States covered:** added (found, worked in), several added, added then removed by the person, add refused (retried, never asked), temporary or hidden folder ignored, two projects' work, questions left by an older version.
+**Errors & recovery:** a refused add is retried every ten minutes; an unreadable suggestions file adds nothing and is logged.
 **Status:** draft
-**Meaning:** operator request 2026-10-14 (SB-117), changed the same day (SB-121).
-**Coverage:** `suggest::tests` (incl. `temporary_and_cache_folders_never_join_a_project`); owner `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; the app's `suggestions::tests::one_folder_is_named_and_several_are_counted`. The 0.6.30 banner (now the fallback): [screenshot](../evidence/screenshots/sb117-suggestion-banner-demo.png).
+**Meaning:** operator request 2026-10-14 (SB-117), changed the same day (SB-121) and on 2026-10-15 (SB-131).
+**Coverage:** `suggest::tests` (incl. `temporary_and_cache_folders_never_join_a_project`, `a_worked_repository_is_recorded_once_and_a_deleted_one_is_found_again`, `a_repository_is_the_nearest_folder_with_git_and_never_the_home_folder`); `activity::tests` (`a_shell_command_names_the_folders_it_commits_in_and_nothing_it_only_reads`, `edits_and_commits_count_with_the_sessions_folder_and_reads_do_not`, `a_transcript_is_read_only_where_it_grew_and_a_line_being_written_waits`); owner `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`, `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither`; CLI `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; the app's `suggestions::tests::one_folder_is_named_and_several_are_counted`.
 **Product:** unobserved
-**Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121
+**Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121, SB-131
+
+## SCN-061 — A deleted folder leaves its project by itself
+**Persona:** P-01
+**Goal:** A project lists only folders that exist: a repository or worktree deleted from disk leaves its project without the person cleaning up (operator 2026-10-15: «следить, чтобы репы, которые в проекте, если они удаляются, то и из свитчера тоже удалять»).
+**Preconditions:** a project with two or more folders; Switchboard (the app or `serve`) running.
+**Entry point:** none — a system notification tells the person afterwards.
+**Steps:**
+1. Delete one of the project's folders (`git worktree remove`, `rm -rf`, Finder) → the next look (every five minutes) sees it missing.
+2. Still missing five minutes later → it leaves the project; its accounts no longer serve it.
+3. One system notification: “Folder removed from a project — {folder} was deleted and is no longer part of {project}.” (several: “{n} deleted folders are no longer part of their projects.”).
+**Alt paths:** A folder renamed or moved counts as deleted: add the new place with *Add folder…* (its old route stays in the moved folder's `.claude/settings.local.json` until SB-133). The folder is back before the second look (a checkout being recreated) → it stays. A folder deleted while Switchboard was not running leaves at the first two looks after it starts. A folder whose nearest remaining folder is now another device than it was on (a share or FUSE mount that went away) is not taken as deleted. A folder on a drive that may only be unmounted (`/Volumes/…`, `/media/…`, `/mnt/…`) or whose whole tree is gone up to the filesystem root is not taken as deleted and stays. A project keeps its last folder (log `project_folder_gone kept_last`). A deleted folder that comes back is found again like a new one (SCN-055) — unlike a folder the person removed, which never returns.
+**Expected result:** project folder lists follow the disk; nothing the person removed comes back, and nothing merely unmounted is lost.
+**UI elements:** system notification; the project card shows the shorter list.
+**States covered:** deleted and confirmed, back before confirmation, unmounted drive, last folder, deleted then back.
+**Errors & recovery:** a refused save leaves the folder and logs `project_folder_gone refused`; the next look tries again.
+**Status:** draft
+**Meaning:** operator request 2026-10-15 (SB-131).
+**Coverage:** owner `a_deleted_project_folder_leaves_its_project_once_it_stays_gone`; `projects::tests::only_a_folder_really_deleted_counts_as_deleted`; `suggestions::tests::one_folder_is_named_and_several_are_counted` (the notification's words).
+**Product:** unobserved
+**Traces:** CONTRACTS → Projects (0.6), SB-131
 
 ## SCN-056 — Work in a project's folder on the project's accounts
 **Persona:** P-01

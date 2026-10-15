@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, ProjectSuggestion, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -75,16 +75,6 @@ export type RuleState = 'active' | 'paused' | 'expired';
 export function ruleState(rule: Pick<ProjectRule, 'enabled' | 'expires_at'>, nowSeconds: number): RuleState {
   if (!rule.enabled) return 'paused';
   return typeof rule.expires_at === 'number' && rule.expires_at <= nowSeconds ? 'expired' : 'active';
-}
-/** SB-117: why a folder is offered to a project, in the person's words. */
-export function suggestionReason(s: Pick<ProjectSuggestion, 'reason' | 'repository'>): string {
-  if (s.reason === 'worktree') return t('A worktree of {repository}.', { repository: s.repository });
-  if (s.reason === 'same_repository') return t('Another copy of {repository}.', { repository: s.repository });
-  return t('A new repository of {source}.', { source: s.repository });
-}
-/** SB-117: the banner's question for the first open suggestion. */
-export function suggestionQuestion(s: Pick<ProjectSuggestion, 'name' | 'project' | 'pool'>): string {
-  return t('Add the folder {folder} to {project}?', { folder: s.name, project: s.project ?? s.pool });
 }
 export function activeRules<T extends Pick<ProjectRule, 'enabled' | 'expires_at'>>(rules: T[] | undefined, nowSeconds: number): T[] {
   return (rules ?? []).filter((rule) => ruleState(rule, nowSeconds) === 'active');
@@ -441,6 +431,12 @@ export function launchChoice(selectedInPool: boolean, proxyRunning: boolean): { 
 /** A picked folder joins the list once; the order the person picked them in is kept. */
 export function withFolder(folders: string[], folder: string): string[] {
   return !folder || folders.includes(folder) ? folders : [...folders, folder];
+}
+/** SB-131: a folder changed with the picker takes the old one's place; one already listed is not added twice. */
+export function replaceFolder(folders: string[], old: string, folder: string): string[] {
+  if (!folder || !folders.includes(old)) return folders;
+  if (folders.includes(folder)) return folders.filter((entry) => entry !== old);
+  return folders.map((entry) => (entry === old ? folder : entry));
 }
 /** The last launch folder, remembered across restarts as a per-window convenience; anything but a non-empty string reads as none. */
 export const LAST_FOLDER_KEY = 'switchboard.last-folder';

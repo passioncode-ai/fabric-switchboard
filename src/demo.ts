@@ -93,8 +93,8 @@ export function createDemoAdapter(): Adapter {
     });
     return { default: agentDefault, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
   };
-  // SB-117: shown once a project named Client Alpha (pool client-alpha) exists in the demo.
-  let suggestions: ProjectSuggestion[] = [{ folder: '/srv/projects/alpha-web-review', name: 'alpha-web-review', pool: 'client-alpha', project: 'Client Alpha', reason: 'worktree', repository: 'github.com/example/alpha-web', first_seen: now() - 60 }];
+  // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
+  let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   return {
     async currentAccounts() { return structuredClone(current); },

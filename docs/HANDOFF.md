@@ -2,6 +2,44 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-15 (day) — SB-131: projects keep their repositories by themselves, nothing is asked
+
+Operator request 2026-10-15: «автодобавление всех репозиториев нужных в проект, когда там агент
+работает … без подтверждений; в настройках проекта смотреть, удалять, добавлять, редактировать
+репозитории пикерами папок; если репы удаляются — удалять и из свитчера».
+
+- **Why questions still showed:** the running app was 0.6.31 (started 2026-10-14 12:23 UTC) with
+  0.6.32 and 0.6.33 already installed. Its update was waiting behind a window that had been left
+  open, logging `update_waiting window_visible` every hour.
+- **Done on `feat/sb-131-auto-projects`** (`dddff8b`, `ed99f49`, `9f89d8c` and the final-review fix):
+  - **Repositories join by work.** `activity.rs` reads recent Claude Code transcripts (sessions
+    and subagents), only where they grew, and keeps paths only. A repository an agent of project
+    P edits or commits in joins P. A repository two projects work in is `shared` and joins
+    neither.
+  - **Nothing is asked.** There is no banner, no tray count and no question notification. A
+    folder that cannot be added is retried every 10 minutes.
+  - **Deleted folders leave.** A deleted project folder leaves its project after two looks
+    5 minutes apart, checked by device; an empty folder left where it was (an unmounted mount
+    point) keeps it after a restart. Unmounted drives and the last folder stay.
+  - **Dialog.** Each folder has *Change…* in the project dialog. Save keeps folders Switchboard
+    added in the meantime (`base_folders`).
+  - **Updates.** An update no longer waits behind a window that has been out of focus for
+    30 minutes.
+- **Checks:**
+  - `./scripts/check.sh` exit 0 on `9f89d8c`;
+  - `cargo xwin check` for the runtime and CLI crates;
+  - three independent review rounds: seam, then unit and product, then a final pass on the
+    delta. All their `breaks` findings are fixed.
+- **Open:**
+  - SB-132: Codex sessions and isolated launched sessions are not read.
+  - SB-133 (P2): a renamed folder keeps its binding.
+  - A copy already waiting behind an open window needs one manual restart to reach the release
+    that carries this.
+
+**Exact next task:** release this as 0.6.34. Then restart the operator's installed app once (About → *Restart to update*). Then watch the log for `project_suggestion worked` and `project_folder_gone`, and check that the 10 missing PassionCode folders leave the project.
+
+---
+
 ## 2026-10-15 (morning) — 0.6.33 published: SB-129; SB-127, SB-49 closed
 
 - **SB-129** released in [v0.6.33](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.33)

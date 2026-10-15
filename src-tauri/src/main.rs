@@ -392,6 +392,7 @@ async fn save_project(
     name: String,
     folders: Vec<std::path::PathBuf>,
     account_ids: Vec<String>,
+    base_folders: Option<Vec<std::path::PathBuf>>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -402,10 +403,11 @@ async fn save_project(
             name,
             folders,
             account_ids,
+            base_folders,
         })
         .await
 }
-/// SB-117: folders found for a project, waiting for Add or Not this one.
+/// SB-117/SB-131: folders added to projects or taken out as deleted, and those still being added.
 #[tauri::command]
 async fn project_suggestions(state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -880,11 +882,19 @@ fn main() {
             Ok(())
         })
         // Closing the window hides it; only Quit ends Switchboard (SB-28).
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 residency::hide(window);
             }
+            // SB-131: focus gained or lost is the person's attention; an update waits for a
+            // window that has had none for half an hour, not for one merely left open.
+            tauri::WindowEvent::Focused(_) => {
+                if let Some(updates) = window.app_handle().try_state::<updates::Updates>() {
+                    updates.note_attention();
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             frontend_ready,

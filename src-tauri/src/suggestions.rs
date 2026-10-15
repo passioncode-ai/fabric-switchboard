@@ -1,8 +1,8 @@
-//! SB-117/SB-121: folders the owner found for a project reach the person. A folder joins its
-//! project by itself, and the person gets one system notification saying so; a folder that could
-//! not be added waits as a question (the tray count and the window's banner) and is notified
-//! once too. The lists are read only when the owner's counter moved, so an idle app reads nothing
-//! (LC-04).
+//! SB-117/SB-121/SB-131: what the owner did to a project's folders reaches the person as one
+//! system notification each — a folder that joined its project by itself, and a folder taken out
+//! because it was deleted from disk. Nothing is ever asked (SB-131): a folder that could not be
+//! added is tried again by the owner, with no question, no tray count and no banner. The lists are
+//! read only when the owner's counter moved, so an idle app reads nothing (LC-04).
 use std::collections::HashSet;
 use switchboard_runtime::Operation;
 use tauri::{AppHandle, Emitter, Manager};
@@ -53,35 +53,34 @@ pub fn added_text(new: &[(String, String)], ru: bool) -> (String, String) {
     }
 }
 
-/// What a notification says about folders that could not be added by themselves.
-pub fn notification_text(new: &[(String, String)], ru: bool) -> (String, String) {
-    match new {
+/// What a notification says about folders taken out of their project because they were deleted
+/// (SB-131): (folder, project).
+pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
+    match gone {
         [(folder, project)] => {
             if ru {
                 (
-                    "Новая папка проекта".into(),
-                    format!("Добавить {folder} в проект {project}? Откройте Switchboard."),
+                    "Папка исключена из проекта".into(),
+                    format!("Папка {folder} удалена с диска и исключена из проекта {project}."),
                 )
             } else {
                 (
-                    "A new project folder".into(),
-                    format!("Add {folder} to {project}? Open Switchboard to answer."),
+                    "Folder removed from a project".into(),
+                    format!("{folder} was deleted and is no longer part of {project}."),
                 )
             }
         }
         _ => {
-            let n = new.len();
+            let n = gone.len();
             if ru {
                 (
-                    "Новые папки проектов".into(),
-                    format!("Папок ждут ответа: {n}. Откройте Switchboard."),
+                    "Папки исключены из проектов".into(),
+                    format!("Папки, удалённые с диска, исключены из проектов: {n}."),
                 )
             } else {
                 (
-                    "New project folders".into(),
-                    format!(
-                        "{n} folders wait to be added to projects. Open Switchboard to answer."
-                    ),
+                    "Folders removed from projects".into(),
+                    format!("{n} deleted folders are no longer part of their projects."),
                 )
             }
         }
@@ -115,7 +114,7 @@ pub fn watch(app: AppHandle) {
             .map_or(0, |d| d.as_secs() as i64);
         let mut last: Option<u64> = None;
         let mut read_at = std::time::Instant::now();
-        let mut told: HashSet<String> = HashSet::new();
+        let mut told_removed: HashSet<String> = HashSet::new();
         let mut told_added: HashSet<String> = HashSet::new();
         loop {
             if let Some(runtime) = app.state::<crate::Slot>().running().await {
@@ -126,30 +125,30 @@ pub fn watch(app: AppHandle) {
                         last = Some(seq);
                         read_at = std::time::Instant::now();
                         let ru = crate::residency::in_russian();
-                        let rows = value["suggestions"].as_array().cloned().unwrap_or_default();
-                        crate::residency::set_suggestions(&app, rows.len());
-                        let waiting = named(&rows, &mut told);
-                        if !waiting.is_empty() {
-                            let (title, body) = notification_text(&waiting, ru);
-                            let _ = app.notification().builder().title(title).body(body).show();
-                        }
-                        let added: Vec<serde_json::Value> = value["added"]
-                            .as_array()
-                            .cloned()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|r| {
-                                r["first_seen"]
-                                    .as_i64()
-                                    .is_some_and(|t| t >= started - ANNOUNCE_SINCE_START)
-                            })
-                            .collect();
-                        let added = named(&added, &mut told_added);
+                        let recent = |key: &str| -> Vec<serde_json::Value> {
+                            value[key]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default()
+                                .into_iter()
+                                .filter(|r| {
+                                    r["first_seen"]
+                                        .as_i64()
+                                        .is_some_and(|t| t >= started - ANNOUNCE_SINCE_START)
+                                })
+                                .collect()
+                        };
+                        let added = named(&recent("added"), &mut told_added);
                         if !added.is_empty() {
                             let (title, body) = added_text(&added, ru);
                             let _ = app.notification().builder().title(title).body(body).show();
                         }
-                        let _ = app.emit("project-suggestions", rows.len());
+                        let removed = named(&recent("removed"), &mut told_removed);
+                        if !removed.is_empty() {
+                            let (title, body) = removed_text(&removed, ru);
+                            let _ = app.notification().builder().title(title).body(body).show();
+                        }
+                        let _ = app.emit("project-suggestions", 0);
                     }
                 }
             }
@@ -163,9 +162,10 @@ mod tests {
     use super::*;
     #[test]
     fn one_folder_is_named_and_several_are_counted() {
-        let one = notification_text(&[("app-2".into(), "App".into())], false);
-        assert_eq!(one.1, "Add app-2 to App? Open Switchboard to answer.");
-        let two = notification_text(&[("a".into(), "A".into()), ("b".into(), "B".into())], true);
+        // SB-131: a deleted folder taken out of its project is announced once too.
+        let one = removed_text(&[("app-wt".into(), "App".into())], false);
+        assert_eq!(one.1, "app-wt was deleted and is no longer part of App.");
+        let two = removed_text(&[("a".into(), "A".into()), ("b".into(), "B".into())], true);
         assert!(two.1.contains("2"));
         // SB-121: an added folder is announced, not asked about.
         let added = added_text(&[("app-2".into(), "App".into())], false);

@@ -33,8 +33,8 @@ export interface AgentSetup { cli_path: string | null; bundled_cli: string | nul
 /** A project's folders and the pool of accounts reserved for them (0.6). */
 export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[] }
 /** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
-export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem'; repository: string; first_seen: number }
-export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[] }
+export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem' | 'worked'; repository: string; first_seen: number }
+export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[] }
 export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -74,7 +74,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
-  projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[] }>;
+  /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */
+  projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[]; added?: ProjectSuggestion[]; removed?: ProjectSuggestion[] }>;
   acceptProjectSuggestion(folder: string): Promise<unknown>;
   dismissProjectSuggestion(folder: string): Promise<unknown>;
   agentConnect(agent: string, pool: string): Promise<AgentConnection>;

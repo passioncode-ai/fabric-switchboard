@@ -24,7 +24,7 @@ else identifies the machine or the person.
 | `app_active` | once per UTC day while the app runs, window open or not | `accounts`, `enabled`, `claude`, `codex`, `oauth`, `api_key`, `setup_token`, `pools` (a count), `rotation_on` (enabled policies), `project_rules`, `projects` |
 | `account_added` | an account appears | `provider`, `kind`, `method` (`sign_in`, `capture`, `import_claude_swap`, `manual`, `restore`, `sync`), `accounts` (total after) |
 | `account_removed` | an account disappears | `provider`, `kind`, `accounts` |
-| `project_changed` | a project created, changed or removed | `change` (`created`, `updated`, `removed`), `projects`, `folders`, `project_accounts` — counts, never a name or a path |
+| `project_changed` | a project created, changed or removed by the person (folders Switchboard adds or takes out by itself, SB-131, send nothing; the next person's change carries the current counts) | `change` (`created`, `updated`, `removed`), `projects`, `folders`, `project_accounts` — counts, never a name or a path |
 | `account_switched` | the account in use or a pool's managed route changes | `provider`, `target` (`native`, `managed`), `cause` (`manual`, `rotation`, `limit`) |
 
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,
