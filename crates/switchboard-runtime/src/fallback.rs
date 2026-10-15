@@ -295,6 +295,23 @@ pub(crate) fn executor_limited(
         .map(|id| (provider, Some(id.clone())))
 }
 
+/// How long a workflow whose executor names no account may have been silent and still be taken
+/// for the ordinary CLI's work (SB-129): an executor that is working writes a checkpoint after
+/// every step, so one silent longer than this is not the session that just hit the limit.
+pub(crate) const UNNAMED_EXECUTOR_SILENCE: i64 = 3600;
+/// A workflow whose executor names no account and has been silent too long (or says nothing of
+/// its silence) — the ordinary CLI's limit is not its own (SB-129, live 2026-10-14: a scratch
+/// workflow silent for two hours was handed over twice).
+pub(crate) fn unnamed_and_stale(workflow: &Value, executor: &Value) -> bool {
+    if executor.get("accountRef").and_then(Value::as_str).is_some() {
+        return false;
+    }
+    workflow
+        .get("silentSeconds")
+        .and_then(Value::as_i64)
+        .is_none_or(|s| s > UNNAMED_EXECUTOR_SILENCE)
+}
+
 /// A workflow run by Kimi Code on a saved Kimi account that the background view finds limited
 /// (SB-99). Only `accountRef` decides: the ordinary `kimi` is shown, not watched.
 pub(crate) fn kimi_executor_limited(
@@ -665,6 +682,11 @@ where
             .pointer("/lease/executor")
             .cloned()
             .unwrap_or(Value::Null);
+        // SB-129: an executor named by no account is taken to be the ordinary CLI only while the
+        // workflow is being worked — it wrote within the hour.
+        if unnamed_and_stale(workflow, &executor) {
+            continue;
+        }
         let executor_account = match kimi_executor_limited(&executor, &kimi_ids, &kimi_limited) {
             Some(id) => Some(id),
             None => match executor_limited(&executor, &snapshot, &current, &limited, &launched) {
@@ -1409,6 +1431,24 @@ mod tests {
     }
     #[cfg(unix)]
     const WF: &str = "wf_0123456789abcdef";
+
+    #[test]
+    fn an_unnamed_executor_counts_only_while_its_workflow_is_worked() {
+        // SB-129: no accountRef → the ordinary CLI is the executor only within the hour.
+        let unnamed = json!({"provider": "claude-code"});
+        let named = json!({"provider": "claude-code", "accountRef": "sb-0123456789ab"});
+        let silent = |s: i64| json!({"silentSeconds": s});
+        assert!(!unnamed_and_stale(&silent(600), &unnamed));
+        assert!(
+            unnamed_and_stale(&silent(7200), &unnamed),
+            "the 2026-10-14 scratch workflow"
+        );
+        assert!(unnamed_and_stale(&json!({}), &unnamed), "silence unknown");
+        assert!(
+            !unnamed_and_stale(&silent(7200), &named),
+            "a named account decides itself"
+        );
+    }
 
     #[cfg(unix)]
     #[tokio::test]
