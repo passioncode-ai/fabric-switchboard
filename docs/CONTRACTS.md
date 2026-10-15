@@ -468,6 +468,8 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
 
+- **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
+
 ## Launch in place (SB-75, 2026-10-06)
 
 Asked for by Fabric Dashboards (an embedded console beside each service, operator decision

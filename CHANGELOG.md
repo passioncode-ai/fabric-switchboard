@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+**A forgotten workflow is no longer handed over** (SB-129). A workflow whose executor names no
+account was treated as the ordinary Claude Code's work, so every limit on that account handed it
+to the next agent of the chain — even when nobody had worked on it for hours. It is now handed
+over only while it is worked: its last checkpoint is at most an hour old.
+
 ## 0.6.32 — 2026-10-14
 
 **A project's new folders join it by themselves** (SB-121, operator 2026-10-14). A worktree of a
