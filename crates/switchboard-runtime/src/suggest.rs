@@ -7,6 +7,10 @@
 //! again), `pending` (adding it failed — the person answers, as before) or `dismissed` (declined,
 //! never offered again). Only git
 //! metadata (`.git`, `commondir`, the `origin` url) is read; no file of the repository is.
+//! SB-131 (operator, 2026-10-15): a repository an agent of the project changes joins it too
+//! (`worked`, found by `activity`), nothing is ever asked, and a project folder deleted from disk
+//! leaves its project by itself (`gone`: remembered only for the one notification, so a folder
+//! that comes back is found again).
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -50,6 +54,8 @@ pub enum Reason {
     Worktree,
     SameRepository,
     Ecosystem,
+    /// SB-131: an agent working in the project changed files or committed in it.
+    Worked,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,6 +65,9 @@ pub enum State {
     Dismissed,
     /// Added to its project by Switchboard (SB-121); `first_seen` is when.
     Added,
+    /// Taken out of its project by Switchboard because the folder was deleted (SB-131);
+    /// `first_seen` is when. Found again like a new folder if it comes back.
+    Gone,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,13 +369,54 @@ pub(crate) fn transient(folder: &Path) -> bool {
         let home = PathBuf::from(home);
         roots.extend([
             home.join(".cache"),
-            home.join("Library/Caches"),
-            home.join("AppData/Local/Temp"),
+            home.join("Library"),
+            home.join("AppData"),
         ]);
+        // SB-131: a hidden folder in the home folder (`~/.claude`, `~/.codex`, a tool's own
+        // clones) is a tool's configuration, never a project's repository.
+        for base in std::iter::once(home.clone()).chain(home.canonicalize().ok()) {
+            if let Ok(rest) = folder.strip_prefix(&base) {
+                if rest
+                    .components()
+                    .next()
+                    .is_some_and(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+                {
+                    return true;
+                }
+            }
+        }
     }
     roots
         .iter()
         .any(|r| folder.starts_with(r) || r.canonicalize().is_ok_and(|c| folder.starts_with(c)))
+}
+
+/// The repository a path is in (SB-131): the nearest folder at or above it with a `.git` entry,
+/// never the home folder or a filesystem root. The path itself may be gone (a deleted file):
+/// the walk starts at its nearest existing ancestor.
+pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
+    let home: Vec<PathBuf> = ["HOME", "USERPROFILE"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .flat_map(|h| {
+            let h = PathBuf::from(h);
+            let c = h.canonicalize().ok();
+            std::iter::once(h).chain(c)
+        })
+        .collect();
+    let mut at = Some(path);
+    // Bounded: a path deeper than this is not a working tree anyone opens.
+    for _ in 0..64 {
+        let dir = at?;
+        if dir.parent().is_none() || home.iter().any(|h| h == dir) {
+            return None;
+        }
+        if dir.join(".git").symlink_metadata().is_ok() {
+            return Some(dir.to_owned());
+        }
+        at = dir.parent();
+    }
+    None
 }
 
 /// Records a folder if it is a project's and not already suggested, added or declined.
@@ -398,13 +448,62 @@ pub(crate) fn record(
         let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
         return Ok(Outcome::NotOurs { settled });
     };
+    record_row(root, text, pool, reason, repository, now)
+}
+
+/// Records a repository an agent of the project `pool` changed (SB-131), with the same rules as
+/// a found folder: never a temporary folder, a folder in a project or one around a project's.
+pub(crate) fn record_worked(
+    root: &Path,
+    snapshot: &Snapshot,
+    folder: &Path,
+    pool: &str,
+    now: i64,
+) -> Result<Outcome, String> {
+    let Ok(folder) = folder.canonicalize() else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    let Some(text) = folder
+        .to_str()
+        .filter(|t| t.len() <= MAX_FOLDER)
+        .map(str::to_owned)
+    else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    if snapshot.project_for(&folder).is_some() {
+        return Ok(Outcome::InProject);
+    }
+    if transient(&folder)
+        || contains_project(snapshot, &folder)
+        || !snapshot.projects.iter().any(|p| p.pool == pool)
+    {
+        return Ok(Outcome::NotOurs { settled: true });
+    }
+    let repository = repo(&folder)
+        .and_then(|r| r.remote)
+        .unwrap_or_else(|| text.clone());
+    record_row(root, text, pool.to_owned(), Reason::Worked, repository, now)
+}
+
+fn record_row(
+    root: &Path,
+    text: String,
+    pool: String,
+    reason: Reason,
+    repository: String,
+    now: i64,
+) -> Result<Outcome, String> {
     let mut rows = read(root)?;
-    if let Some(row) = rows.iter().find(|r| r.folder == text) {
-        return Ok(match row.state {
-            State::Pending => Outcome::Waiting,
+    if let Some(i) = rows.iter().position(|r| r.folder == text) {
+        match rows[i].state {
+            State::Pending => return Ok(Outcome::Waiting),
             // Added once and since removed from the project by the person: their choice stands.
-            State::Dismissed | State::Added => Outcome::Declined,
-        });
+            State::Dismissed | State::Added => return Ok(Outcome::Declined),
+            // Deleted and back again: a new folder like any other.
+            State::Gone => {
+                rows.remove(i);
+            }
+        }
     }
     // A label is shown, never parsed: bounded so a row stays small.
     let repository: String = repository.chars().take(MAX_LABEL).collect();
@@ -524,6 +623,58 @@ pub(crate) fn added_since(root: &Path, since: i64) -> Result<Vec<Suggestion>, St
     Ok(rows)
 }
 
+/// Folders Switchboard took out of their project because they were deleted (SB-131), for the
+/// one notification each gets. A folder already remembered as declined stays declined.
+pub(crate) fn mark_gone(
+    root: &Path,
+    pool: &str,
+    folders: &[String],
+    now: i64,
+) -> Result<(), String> {
+    let mut rows = read(root)?;
+    for folder in folders {
+        match rows.iter_mut().find(|r| &r.folder == folder) {
+            Some(row) if row.state == State::Dismissed => {}
+            Some(row) => {
+                row.state = State::Gone;
+                row.pool = pool.to_owned();
+                row.first_seen = now;
+            }
+            None => rows.push(Suggestion {
+                folder: folder.clone(),
+                pool: pool.to_owned(),
+                reason: Reason::SameRepository,
+                repository: String::new(),
+                first_seen: now,
+                state: State::Gone,
+            }),
+        }
+    }
+    while rows.len() > MAX_ROWS {
+        let Some(i) = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.state != State::Pending)
+            .min_by_key(|(_, r)| r.first_seen)
+            .map(|(i, _)| i)
+        else {
+            break;
+        };
+        rows.remove(i);
+    }
+    write(root, &rows)
+}
+
+/// Folders taken out of their project since `since` because they were deleted, newest last.
+pub(crate) fn gone_since(root: &Path, since: i64) -> Result<Vec<Suggestion>, String> {
+    let mut rows: Vec<Suggestion> = read(root)?
+        .into_iter()
+        .filter(|r| r.state == State::Gone && r.first_seen >= since)
+        .collect();
+    rows.sort_by_key(|r| r.first_seen);
+    Ok(rows)
+}
+
 /// Declines a suggestion for good.
 pub(crate) fn dismiss(root: &Path, folder: &str) -> Result<(), String> {
     let mut rows = read(root)?;
@@ -554,7 +705,7 @@ pub(crate) struct Scanner {
     pub(crate) reads: usize,
 }
 
-fn projects_key(snapshot: &Snapshot) -> u64 {
+pub(crate) fn projects_key(snapshot: &Snapshot) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for p in &snapshot.projects {
@@ -993,6 +1144,62 @@ mod tests {
             read(root.path()).is_err(),
             "corrupt storage is not an empty list"
         );
+    }
+
+    #[test]
+    fn a_worked_repository_is_recorded_once_and_a_deleted_one_is_found_again() {
+        // SB-131: work recorded for the session's project; a folder taken out because it was
+        // deleted is a new folder when it comes back, unlike one the person took out.
+        let data = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let (app, lib) = (work.path().join("app"), work.path().join("lib"));
+        git(&app, Some("git@github.com:org/app.git"));
+        git(&lib, None);
+        let app_folder = app.canonicalize().unwrap();
+        let s = snapshot(&[("app", &[&app_folder], &[])]);
+        let first = record_worked(data.path(), &s, &lib, "app", 1).unwrap();
+        let Outcome::New(row) = first else {
+            panic!("{first:?}")
+        };
+        assert_eq!((row.reason, row.state), (Reason::Worked, State::Pending));
+        assert_eq!(row.repository, row.folder, "no origin: the folder names it");
+        assert_eq!(
+            record_worked(data.path(), &s, &lib, "app", 2).unwrap(),
+            Outcome::Waiting
+        );
+        assert_eq!(
+            record_worked(data.path(), &s, &app, "app", 2).unwrap(),
+            Outcome::InProject
+        );
+        assert!(matches!(
+            record_worked(data.path(), &s, &lib, "nobody", 2).unwrap(),
+            Outcome::Waiting | Outcome::NotOurs { .. }
+        ));
+        mark_gone(data.path(), "app", std::slice::from_ref(&row.folder), 3).unwrap();
+        assert_eq!(gone_since(data.path(), 3).unwrap().len(), 1);
+        assert!(matches!(
+            record_worked(data.path(), &s, &lib, "app", 4).unwrap(),
+            Outcome::New(_)
+        ));
+        remember_removed(data.path(), "app", std::slice::from_ref(&row.folder), 5).unwrap();
+        mark_gone(data.path(), "app", std::slice::from_ref(&row.folder), 6).unwrap();
+        assert_eq!(
+            record_worked(data.path(), &s, &lib, "app", 7).unwrap(),
+            Outcome::Declined,
+            "declined by the person stays declined"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_repository_is_the_nearest_folder_with_git_and_never_the_home_folder() {
+        let work = tempfile::tempdir().unwrap();
+        let repo = work.path().join("app");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("src/deep")).unwrap();
+        assert_eq!(repo_root(&repo.join("src/deep/new.rs")), Some(repo.clone()));
+        assert_eq!(repo_root(&repo), Some(repo.clone()));
+        assert_eq!(repo_root(&work.path().join("plain/file")), None);
     }
 
     #[test]

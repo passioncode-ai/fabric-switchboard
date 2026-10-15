@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- **Projects find their repositories and nothing is asked (SB-131).** A repository a project's agent works in — edits or writes a file there, commits, pushes, stages, merges, rebases, makes a worktree or runs `git init` — joins the project by itself within half a minute, with one notification. Switchboard reads only the paths from recent Claude Code transcripts, never their text; reading a repository does not count, and a repository two projects work in joins neither. The question banner, the tray count and the question notifications are gone: a folder that cannot be added is tried again every ten minutes.
+- **A deleted folder leaves its project (SB-131).** A project folder deleted from disk and still missing five minutes later is taken out of its project, with one notification. Folders on an unmounted drive stay, a project keeps its last folder, and a deleted folder that comes back is found again.
+- **Edit a project's folders with the picker (SB-131).** Each folder in the project dialog has *Change…*, which opens the system folder picker. A project card with many folders shows the first six and *Show all*.
+- **An update no longer waits behind a window left open (SB-131).** A window open but out of focus for 30 minutes counts as nobody looking, so an update restarts into place; Switchboard comes back in the menu bar. Before, an app left open ran an old version for a day.
+
 The operations log names every way a quota check can fail before it asks the provider (an account
 removed meanwhile, a non-OAuth account, a disabled one, an unreadable sign-in or store) instead of
 `other` (SB-127).

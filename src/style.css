@@ -316,6 +316,9 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .folder-picker-list { display: grid; gap: var(--space-2); justify-items: start; }
 .folder-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); width: 100%; }
 .folder-item { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+/* SB-131: a project an agent works in gathers dozens of folders; the editor's list scrolls on its own. */
+.folder-picker-list .folder-list { max-height: min(50vh, 420px); overflow-y: auto; }
+.project-folder-block { display: grid; justify-items: start; }
 .terms-notice { background: var(--panel-2); border: 1px solid var(--border); }
 
 /* SB-119/120: the Agents page — default-agent chips, agent rows, model picker. */

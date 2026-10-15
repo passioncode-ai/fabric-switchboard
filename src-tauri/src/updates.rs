@@ -38,6 +38,10 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// While an update waits to start (and only then), how often the app looks for an idle moment to
 /// start it (LC-16 activation). No other timer runs while nothing is ready.
 pub const IDLE_LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
+/// SB-131: a window left open but out of focus this long counts as nobody looking. Before it, an
+/// update waited behind a window the person had simply left open: 0.6.31 ran for a day with
+/// 0.6.32 and 0.6.33 installed (`update_waiting window_visible` every hour, 2026-10-15).
+pub const UNATTENDED_SECONDS: i64 = 30 * 60;
 /// How often the idle watch says, at most, what keeps a ready update from starting (SB-105): the
 /// first look that finds a reason logs it, later ones only once this much time has passed.
 pub const IDLE_REPORT_EVERY: i64 = 60 * 60;
@@ -278,9 +282,25 @@ pub struct Updates {
     /// committed (SB-105): a restart never exits in the middle of a swap, and a swap never starts
     /// once a restart is under way.
     swap: tokio::sync::Mutex<()>,
+    /// When the window last had the person's attention: shown, focused or losing focus (SB-131).
+    attention: std::sync::atomic::AtomicI64,
+}
+
+/// Whether nobody is looking at the window (SB-131): it is hidden (or there is none), or it has
+/// been open without focus for UNATTENDED_SECONDS since it last had the person's attention.
+pub fn nobody_looking(visible: Option<bool>, focused: bool, attention: i64, now: i64) -> bool {
+    match visible {
+        Some(true) => !focused && now - attention >= UNATTENDED_SECONDS,
+        _ => true,
+    }
 }
 
 impl Updates {
+    /// The window was shown, gained or lost focus: the person's attention is now (SB-131).
+    pub fn note_attention(&self) {
+        self.attention
+            .store(now(), std::sync::atomic::Ordering::Relaxed);
+    }
     pub fn new(available: Result<(), &'static str>, root: Option<PathBuf>) -> Self {
         Updates {
             available,
@@ -299,6 +319,7 @@ impl Updates {
             }),
             wake: tokio::sync::Notify::new(),
             swap: tokio::sync::Mutex::new(()),
+            attention: std::sync::atomic::AtomicI64::new(now()),
         }
     }
 
@@ -823,11 +844,25 @@ pub fn replaceable_without_password(bundle: &Path) -> bool {
     }
 }
 
+/// Nobody is looking at the window: hidden, or open and out of focus for UNATTENDED_SECONDS
+/// (SB-131). A focused window is attention now.
 fn window_hidden(app: &AppHandle) -> bool {
-    app.get_webview_window("main")
-        .and_then(|window| window.is_visible().ok())
-        .map(|visible| !visible)
-        .unwrap_or(true)
+    let window = app.get_webview_window("main");
+    let visible = window.as_ref().and_then(|w| w.is_visible().ok());
+    let focused = window
+        .as_ref()
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false);
+    let state = app.state::<Updates>();
+    if visible == Some(true) && focused {
+        state.note_attention();
+    }
+    nobody_looking(
+        visible,
+        focused,
+        state.attention.load(std::sync::atomic::Ordering::Relaxed),
+        now(),
+    )
 }
 
 /// "Restart to update": install what still needs the person (macOS, an administrator password),
@@ -1032,6 +1067,23 @@ mod tests {
             idle_blocker(true, true, true, false, Some("sign_in_waiting")),
             Some("sign_in_waiting")
         );
+    }
+
+    #[test]
+    fn a_window_left_open_out_of_focus_stops_holding_an_update_back() {
+        // SB-131: hidden or missing — nobody looking; focused — someone is; open and out of focus
+        // — someone may glance back for half an hour, then it no longer holds the update.
+        let t = 1_791_800_000;
+        assert!(nobody_looking(Some(false), false, t, t));
+        assert!(nobody_looking(None, false, t, t));
+        assert!(!nobody_looking(Some(true), true, t - 86_400, t));
+        assert!(!nobody_looking(
+            Some(true),
+            false,
+            t - UNATTENDED_SECONDS + 1,
+            t
+        ));
+        assert!(nobody_looking(Some(true), false, t - UNATTENDED_SECONDS, t));
     }
 
     #[test]

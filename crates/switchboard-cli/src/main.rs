@@ -1489,7 +1489,7 @@ async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
         );
     } else if value["suggested"] == true {
         println!(
-            "Switchboard: this folder looks like part of the project \"{project}\" but could not be added by itself; the operator was asked."
+            "Switchboard: this folder looks like part of the project \"{project}\" but could not be added yet; Switchboard tries again by itself."
         );
     }
     std::process::exit(0)

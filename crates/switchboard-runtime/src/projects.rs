@@ -117,6 +117,32 @@ pub(crate) fn project_dir(root: &Path, path: &Path) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
+/// Whether a project folder was deleted (SB-131): it is missing, its nearest existing ancestor is
+/// an ordinary folder below the filesystem root, and it is not on a drive that may simply be
+/// unmounted (`/Volumes`, `/media`, `/mnt`, `/run/media`, or a Windows drive that is not there).
+/// Anything Switchboard cannot read is not deleted.
+pub(crate) fn deleted(path: &Path) -> bool {
+    match path.symlink_metadata() {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return false,
+    }
+    if !path.is_absolute()
+        || ["/Volumes/", "/media/", "/mnt/", "/run/media/"]
+            .iter()
+            .any(|m| path.starts_with(m))
+    {
+        return false;
+    }
+    let mut at = path.parent();
+    while let Some(dir) = at {
+        match dir.symlink_metadata() {
+            Ok(meta) => return meta.is_dir() && dir.parent().is_some(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => at = dir.parent(),
+            Err(_) => return false,
+        }
+    }
+    false
+}
 /// A removed project folder can still have its rule deleted.
 pub(crate) fn rule_path(root: &Path, path: &Path) -> Result<PathBuf, String> {
     project_dir(root, path).or_else(|error| {
@@ -664,5 +690,26 @@ mod tests {
         let resolved = resolve(&store, &alpha, monitor::now()).unwrap();
         assert_eq!(resolved["rules"][0]["nearest"]["state"], "paused");
         assert!(resolved["rules"][0]["effective"].is_null());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn only_a_folder_really_deleted_counts_as_deleted() {
+        // SB-131: a missing folder under an existing ordinary folder is deleted; one on a drive
+        // that may be unmounted, or with nothing left of its tree but the root, is not.
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().join("app");
+        std::fs::create_dir(&here).unwrap();
+        assert!(!deleted(&here), "a folder that is there");
+        assert!(deleted(&dir.path().join("gone")));
+        assert!(deleted(&dir.path().join("gone/deeper/still")));
+        assert!(!deleted(Path::new("/Volumes/Synthetic Drive 9/app")));
+        assert!(!deleted(Path::new("/media/synthetic/app")));
+        assert!(!deleted(Path::new("/no-such-top-folder-sb131/app")));
+        assert!(!deleted(Path::new("relative/app")));
+        // A file where the folder was is not "deleted" either: something is there.
+        let file = dir.path().join("file");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(!deleted(&file));
     }
 }
