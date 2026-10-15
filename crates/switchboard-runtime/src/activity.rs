@@ -18,9 +18,10 @@ use std::{
 
 /// A first read, or growth past this, reads only the last this many bytes of a transcript.
 const TAIL_BYTES: u64 = 512 * 1024;
-/// Evidence pairs kept per pass; a session that changes more repositories than this in one pass
-/// is read again on its next growth.
-const MAX_EVIDENCE: usize = 256;
+/// Evidence pairs kept per pass, after folding edits in one folder into one (a file edit counts
+/// as work in its folder). Far more than the folders a pass of agents' work touches; past it the
+/// rest of that pass is not counted.
+const MAX_EVIDENCE: usize = 4096;
 /// A command longer than this is not read (a pasted script, not a `cd … && git commit`).
 const MAX_COMMAND: usize = 16 * 1024;
 /// Git subcommands that change a repository: work, not a look.
@@ -181,6 +182,8 @@ pub(crate) fn evidence(line: &[u8]) -> Vec<Worked> {
                 .as_str()
                 .or_else(|| input["notebook_path"].as_str())
                 .and_then(|p| resolve(p, &cwd))
+                // Work in a file is work in its folder: many edits fold into one.
+                .and_then(|p| p.parent().map(Path::to_path_buf))
                 .into_iter()
                 .collect(),
             Some("Bash") => input["command"]
@@ -338,6 +341,7 @@ pub(crate) fn resolve(raw: &str, dir: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn line(cwd: &str, calls: serde_json::Value) -> Vec<u8> {
         let mut text = serde_json::to_vec(&serde_json::json!({
             "type": "assistant", "cwd": cwd,
@@ -347,6 +351,7 @@ mod tests {
         text.push(b'\n');
         text
     }
+    #[cfg(unix)]
     fn tool(name: &str, input: serde_json::Value) -> serde_json::Value {
         serde_json::json!({"type": "tool_use", "name": name, "input": input})
     }
@@ -429,8 +434,8 @@ mod tests {
         assert_eq!(
             found,
             [
-                ("/w/app".into(), "/w/lib/src/a.rs".into()),
-                ("/w/app".into(), "/w/app/notes/b.md".into()),
+                ("/w/app".into(), "/w/lib/src".into()),
+                ("/w/app".into(), "/w/app/notes".into()),
                 ("/w/app".into(), "/w/lib".into()),
             ]
         );

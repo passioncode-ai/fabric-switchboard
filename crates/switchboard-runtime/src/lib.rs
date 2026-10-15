@@ -185,6 +185,12 @@ pub enum Operation {
         name: String,
         folders: Vec<PathBuf>,
         account_ids: Vec<String>,
+        /// SB-131: the folders the edit started from (the window's dialog). With it, only the
+        /// folders the person took out count as removed; folders Switchboard added or took out
+        /// meanwhile are kept as Switchboard left them. Without it (the CLI), `folders` is the
+        /// whole list.
+        #[serde(default)]
+        base_folders: Option<Vec<PathBuf>>,
     },
     RemoveProject {
         pool: String,
@@ -511,7 +517,13 @@ pub struct Runtime {
     worked: Mutex<(u64, HashSet<PathBuf>)>,
     /// SB-131: project folders seen missing, and since when; one still missing a while later
     /// leaves its project.
-    vanished: Mutex<HashMap<String, i64>>,
+    vanished: Mutex<Vanish>,
+    /// SB-131: refusals already logged this run (a folder that cannot be added, a project's
+    /// last folder gone), so a retry every few minutes logs each once.
+    told: Mutex<HashSet<String>>,
+    /// The recent transcript list, walked once per pass and shared by the limit scan and the
+    /// work scan (SB-131): `(when, files)`.
+    transcript_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
     vanish_at: std::sync::atomic::AtomicI64,
     /// OpenRouter's model list, kept six hours (SB-119).
     openrouter_models: Mutex<agent_settings::ModelCache>,
@@ -608,7 +620,9 @@ impl Runtime {
             suggest_retry_at: std::sync::atomic::AtomicI64::new(0),
             activity: Mutex::new(activity::Activity::default()),
             worked: Mutex::new((0, HashSet::new())),
-            vanished: Mutex::new(HashMap::new()),
+            vanished: Mutex::new(Vanish::default()),
+            told: Mutex::new(HashSet::new()),
+            transcript_list: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
@@ -796,20 +810,34 @@ impl Runtime {
         for s in &found {
             match add_suggested_folder(&self.store, &self.root, s, time) {
                 Ok(_) => added += 1,
-                Err(_) => oplog::event(
-                    "project_suggestion",
-                    &[("add", oplog::Field::Code("refused"))],
-                ),
+                Err(_) => {
+                    if self.first_time(&format!("add:{}", s.folder)) {
+                        oplog::event(
+                            "project_suggestion",
+                            &[("add", oplog::Field::Code("refused"))],
+                        );
+                    }
+                }
             }
         }
-        oplog::event(
-            "project_suggestion",
-            &[
-                ("found", oplog::Field::Number(found.len() as i64)),
-                ("added", oplog::Field::Number(added)),
-            ],
-        );
-        self.suggestions_changed();
+        // A retry that adds nothing changes nothing the app shows: no log line, no refresh.
+        if added > 0 {
+            oplog::event(
+                "project_suggestion",
+                &[
+                    ("found", oplog::Field::Number(found.len() as i64)),
+                    ("added", oplog::Field::Number(added)),
+                ],
+            );
+            self.suggestions_changed();
+        }
+    }
+    /// Whether `key` is logged for the first time this run (SB-131).
+    fn first_time(&self, key: &str) -> bool {
+        self.told
+            .lock()
+            .map(|mut told| told.len() < 4096 && told.insert(key.to_owned()))
+            .unwrap_or(false)
     }
     /// The background half of SB-117/SB-121/SB-131, under the owner transaction like any other
     /// write: folders found next to a project's, repositories its agents changed, folders that
@@ -862,8 +890,23 @@ impl Runtime {
     /// projects in one pass joins neither.
     async fn worked_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
         // A synthetic owner reads no transcript of the machine it runs on.
-        let files = (self.native.transcripts)(time);
+        let files = self.transcripts(time);
         self.worked_from(snapshot, &files, time).await;
+    }
+    /// The recent Claude Code transcripts, walked at most once per background pass (SB-131).
+    pub(crate) fn transcripts(&self, time: i64) -> Vec<PathBuf> {
+        if let Ok(list) = self.transcript_list.lock() {
+            if let Some((at, files)) = list.as_ref() {
+                if (time - at).abs() < 20 {
+                    return files.clone();
+                }
+            }
+        }
+        let files = (self.native.transcripts)(time);
+        if let Ok(mut list) = self.transcript_list.lock() {
+            *list = Some((time, files.clone()));
+        }
+        files
     }
     pub(crate) async fn worked_from(
         &self,
@@ -880,6 +923,8 @@ impl Runtime {
         }
         let key = suggest::projects_key(snapshot);
         let mut claims: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+        // Folders of one project another project's agent works in: (folder, its project).
+        let mut contested: HashMap<String, String> = HashMap::new();
         {
             let Ok(mut worked) = self.worked.lock() else {
                 return;
@@ -891,8 +936,19 @@ impl Runtime {
                 let Some(project) = snapshot.project_for(&w.cwd) else {
                     continue;
                 };
-                // Work inside a project folder is that project's already.
-                if snapshot.project_for(&w.target).is_some() {
+                // Work inside a project folder is that project's already — unless another
+                // project's agent did it: a folder that joined by work is then shared (below).
+                if let Some(owner) = snapshot.project_for(&w.target) {
+                    if owner.pool != project.pool {
+                        if let Some(folder) = owner
+                            .folders
+                            .iter()
+                            .filter(|f| w.target.starts_with(f))
+                            .max_by_key(|f| f.len())
+                        {
+                            contested.insert(folder.clone(), owner.pool.clone());
+                        }
+                    }
                     continue;
                 }
                 let Some(root) = suggest::repo_root(&w.target) else {
@@ -904,7 +960,7 @@ impl Runtime {
                 claims.entry(root).or_default().insert(project.pool.clone());
             }
         }
-        if claims.is_empty() {
+        if claims.is_empty() && contested.is_empty() {
             return;
         }
         let _transaction = self.mutations.lock().await;
@@ -913,12 +969,22 @@ impl Runtime {
         };
         let mut found = Vec::new();
         let mut settled = Vec::new();
+        let mut changed = self.unshare(&snapshot, &contested, time);
         for (root, pools) in claims {
             if pools.len() != 1 {
+                // Two projects' work: it joins neither, now or later.
                 oplog::event(
                     "project_suggestion",
                     &[("worked", oplog::Field::Code("two_projects"))],
                 );
+                if let Ok(text) = root
+                    .canonicalize()
+                    .map(|r| r.to_string_lossy().into_owned())
+                {
+                    if suggest::mark_shared(&self.root, &text, time).is_ok() {
+                        changed = true;
+                    }
+                }
                 settled.push(root);
                 continue;
             }
@@ -939,7 +1005,71 @@ impl Runtime {
         if let Ok(mut worked) = self.worked.lock() {
             worked.1.extend(settled);
         }
+        if found.is_empty() && changed {
+            self.suggestions_changed();
+        }
         self.add_found(found, time);
+    }
+    /// SB-131: a folder that joined its project because that project's agents worked in it, and
+    /// that another project's agents now work in too, is a shared repository (an organisation
+    /// wiki, a common docs repository): it leaves the project and is never added by work again.
+    /// A folder the person added, or one found as a worktree or clone, is never touched. Under
+    /// the owner transaction. Answers whether anything changed.
+    fn unshare(
+        &self,
+        snapshot: &switchboard_core::Snapshot,
+        contested: &HashMap<String, String>,
+        time: i64,
+    ) -> bool {
+        if contested.is_empty() {
+            return false;
+        }
+        let Ok(rows) = suggest::read(&self.root) else {
+            return false;
+        };
+        let mut changed = false;
+        for (folder, pool) in contested {
+            let joined_by_work = rows.iter().any(|r| {
+                &r.folder == folder
+                    && &r.pool == pool
+                    && r.state == suggest::State::Added
+                    && r.reason == suggest::Reason::Worked
+            });
+            if !joined_by_work {
+                continue;
+            }
+            let Some(project) = snapshot.projects.iter().find(|p| &p.pool == pool) else {
+                continue;
+            };
+            let kept: Vec<PathBuf> = project
+                .folders
+                .iter()
+                .filter(|f| *f != folder)
+                .map(PathBuf::from)
+                .collect();
+            if kept.is_empty() || kept.len() == project.folders.len() {
+                continue;
+            }
+            let accounts: Vec<String> = snapshot
+                .accounts
+                .iter()
+                .filter(|a| &a.pool == pool)
+                .map(|a| a.id.clone())
+                .collect();
+            if self
+                .store
+                .save_project(Some(pool), &project.name, &kept, &accounts)
+                .is_ok()
+                && suggest::mark_shared(&self.root, folder, time).is_ok()
+            {
+                oplog::event(
+                    "project_suggestion",
+                    &[("worked", oplog::Field::Code("shared"))],
+                );
+                changed = true;
+            }
+        }
+        changed
     }
     /// SB-131: a project folder deleted from disk leaves its project once it is still missing
     /// VANISH_CONFIRM later. A folder whose drive is not mounted, or whose whole tree up to the
@@ -953,16 +1083,26 @@ impl Runtime {
             .store(time + VANISH_LOOK, std::sync::atomic::Ordering::Relaxed);
         let mut confirmed: Vec<(String, String)> = Vec::new();
         {
-            let Ok(mut vanished) = self.vanished.lock() else {
+            let Ok(mut vanish) = self.vanished.lock() else {
                 return;
             };
             let mut still: HashMap<String, i64> = HashMap::new();
+            let mut devices: HashMap<String, u64> = HashMap::new();
             for project in &snapshot.projects {
                 for folder in &project.folders {
-                    if !projects::deleted(Path::new(folder)) {
+                    let path = Path::new(folder);
+                    if let Some(dev) = projects::device(path) {
+                        devices.insert(folder.clone(), dev);
                         continue;
                     }
-                    let since = vanished.get(folder).copied().unwrap_or(time);
+                    let known = vanish.devices.get(folder).copied();
+                    if !projects::deleted(path, known) {
+                        continue;
+                    }
+                    if let Some(dev) = known {
+                        devices.insert(folder.clone(), dev);
+                    }
+                    let since = vanish.missing.get(folder).copied().unwrap_or(time);
                     if time - since >= VANISH_CONFIRM {
                         confirmed.push((project.pool.clone(), folder.clone()));
                     } else {
@@ -970,7 +1110,8 @@ impl Runtime {
                     }
                 }
             }
-            *vanished = still;
+            vanish.missing = still;
+            vanish.devices = devices;
         }
         if confirmed.is_empty() {
             return;
@@ -998,10 +1139,12 @@ impl Runtime {
             let mut gone = gone;
             if kept.is_empty() {
                 // A project keeps its last folder: it has to have one.
-                oplog::event(
-                    "project_folder_gone",
-                    &[("outcome", oplog::Field::Code("kept_last"))],
-                );
+                if self.first_time(&format!("last:{}", project.pool)) {
+                    oplog::event(
+                        "project_folder_gone",
+                        &[("outcome", oplog::Field::Code("kept_last"))],
+                    );
+                }
                 let Some(last) = gone.pop() else {
                     continue;
                 };
@@ -1762,6 +1905,13 @@ fn add_suggested_folder(
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
+/// SB-131: what the deletion check remembers between looks: since when each folder is missing,
+/// and the device each folder was on when last seen.
+#[derive(Default)]
+struct Vanish {
+    missing: HashMap<String, i64>,
+    devices: HashMap<String, u64>,
+}
 /// SB-131: folders that could not be added are tried again this often.
 const RETRY_PENDING: i64 = 600;
 /// SB-131: project folders are checked for deletion this often, and one is taken out of its
@@ -2614,23 +2764,51 @@ async fn execute(
             name,
             folders,
             account_ids,
+            base_folders,
         } => {
-            // A folder this project already holds that is gone from disk (a removed worktree) is
-            // dropped, not a refusal: otherwise no edit of the project — a moved account, a
-            // renamed project — could be saved again (SB-128, CALL-07).
             let before = store.snapshot()?;
             let held: Vec<String> = pool
                 .as_deref()
                 .and_then(|p| before.projects.iter().find(|x| x.pool == p))
                 .map(|x| x.folders.clone())
                 .unwrap_or_default();
-            let (gone, folders): (Vec<PathBuf>, Vec<PathBuf>) = folders
-                .into_iter()
-                .partition(|f| !f.exists() && held.iter().any(|h| Path::new(h) == f.as_path()));
-            let folders = folders
-                .iter()
-                .map(|f| projects::project_dir(root, f))
-                .collect::<Result<Vec<_>, _>>()?;
+            let is_held = |f: &Path| held.iter().any(|h| Path::new(h) == f);
+            let in_base = |f: &Path| {
+                base_folders
+                    .as_ref()
+                    .is_some_and(|b| b.iter().any(|x| x == f))
+            };
+            // SB-131: folders Switchboard added while the dialog was open stay, unless the person
+            // took them out in it (they were never in the dialog, so they cannot have been).
+            let mut folders = folders;
+            if base_folders.is_some() {
+                for h in &held {
+                    let h = PathBuf::from(h);
+                    if !in_base(&h) && !folders.contains(&h) {
+                        folders.push(h);
+                    }
+                }
+            }
+            // A folder this project already holds that is gone from disk (a removed worktree) is
+            // dropped, not a refusal: otherwise no edit of the project — a moved account, a
+            // renamed project — could be saved again (SB-128, CALL-07). One on a drive that may
+            // only be unmounted is kept as it is (SB-131); one Switchboard took out while the
+            // dialog was open is dropped quietly.
+            let mut gone: Vec<PathBuf> = Vec::new();
+            let mut kept: Vec<PathBuf> = Vec::new();
+            for f in folders {
+                if f.exists() {
+                    kept.push(projects::project_dir(root, &f)?);
+                } else if is_held(&f) && projects::maybe_unmounted(&f) {
+                    kept.push(f);
+                } else if is_held(&f) || in_base(&f) {
+                    gone.push(f);
+                } else {
+                    // Admission names the problem: a folder that never existed is refused.
+                    kept.push(projects::project_dir(root, &f)?);
+                }
+            }
+            let folders = kept;
             // The account the ordinary CLI is signed in to would keep serving every folder.
             let current = match runtime {
                 Some(runtime) => runtime.current_accounts()?,
@@ -2654,8 +2832,10 @@ async fn execute(
             }) {
                 return Err(PROJECT_ACCOUNT_IN_CLI.into());
             }
-            // SB-121: the folders this save takes out of an existing project are remembered as
-            // declined, so the automatic adding never brings back a folder the person removed.
+            // SB-121: the folders the person takes out of an existing project are remembered as
+            // declined, so the automatic adding never brings back a folder the person removed. A
+            // folder dropped because it is gone from disk is remembered as gone (SB-131): it is
+            // found again if it comes back.
             let removed: Vec<String> = pool
                 .as_deref()
                 .and_then(|p| snapshot.projects.iter().find(|x| x.pool == p))
@@ -2663,13 +2843,22 @@ async fn execute(
                     old.folders
                         .iter()
                         .filter(|f| !folders.iter().any(|n| n == Path::new(f)))
+                        .filter(|f| !gone.iter().any(|g| g == Path::new(f)))
                         .cloned()
                         .collect()
                 })
                 .unwrap_or_default();
             let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
-            if !removed.is_empty()
-                && suggest::remember_removed(root, &project.pool, &removed, monitor::now()).is_err()
+            let gone_text: Vec<String> = gone
+                .iter()
+                .filter(|g| is_held(g))
+                .map(|g| g.to_string_lossy().into_owned())
+                .collect();
+            if (!removed.is_empty()
+                && suggest::remember_removed(root, &project.pool, &removed, monitor::now())
+                    .is_err())
+                || (!gone_text.is_empty()
+                    && suggest::mark_gone(root, &project.pool, &gone_text, monitor::now()).is_err())
             {
                 oplog::event(
                     "project_suggestion",
@@ -3657,6 +3846,7 @@ mod owner_tests {
             name: "Alpha".into(),
             folders: vec![repo.path().to_owned()],
             account_ids: ids,
+            base_folders: None,
         };
         assert_eq!(
             runtime
@@ -3704,6 +3894,7 @@ mod owner_tests {
                 name: "Alpha".into(),
                 folders: vec![repo.path().to_owned()],
                 account_ids: vec![b.id.clone()],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -3744,6 +3935,7 @@ mod owner_tests {
             name: name.into(),
             folders,
             account_ids: vec![],
+            base_folders: None,
         };
         runtime
             .execute(Operation::SaveProject {
@@ -3751,6 +3943,7 @@ mod owner_tests {
                 name: "P".into(),
                 folders: vec![a.clone(), b.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -3807,6 +4000,7 @@ mod owner_tests {
                     name: name.into(),
                     folders: vec![folder.clone()],
                     account_ids: vec![],
+                    base_folders: None,
                 })
                 .await
                 .unwrap();
@@ -3869,25 +4063,33 @@ mod owner_tests {
         assert_eq!(listed["suggestions"], json!([]), "nothing is asked");
         assert_eq!(listed["added"][0]["reason"], "worked");
         assert_eq!(listed["added"][0]["project"], "App");
-        // The person takes it out again: more work there never brings it back.
+        // The person's Edit dialog was opened before `lib` joined: saving it keeps `lib`, and
+        // `lib` is not taken for a folder the person removed.
         runtime
             .execute(Operation::SaveProject {
                 pool: Some("app".into()),
                 name: "App".into(),
                 folders: vec![app.clone()],
                 account_ids: vec![],
+                base_folders: Some(vec![app.clone()]),
             })
             .await
             .unwrap();
-        let mut more = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&transcript)
-            .unwrap();
-        std::io::Write::write_all(
-            &mut more,
-            (entry(&app, "Edit", json!({"file_path": lib.join("src/c.rs")})) + "\n").as_bytes(),
-        )
-        .unwrap();
+        assert!(folders("app").contains(&lib_text), "{:?}", folders("app"));
+        let append = |line: String| {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&transcript)
+                .unwrap();
+            std::io::Write::write_all(&mut file, (line + "\n").as_bytes()).unwrap();
+        };
+        // Another project's agent works in `lib` too: it is shared, leaves App, and work never
+        // brings it back.
+        append(entry(
+            &other,
+            "Edit",
+            json!({"file_path": lib.join("src/d.rs")}),
+        ));
         let snapshot = runtime.store.snapshot().unwrap();
         runtime
             .worked_from(
@@ -3897,6 +4099,34 @@ mod owner_tests {
             )
             .await;
         assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
+        assert_eq!(folders("other").len(), 1);
+        append(entry(
+            &app,
+            "Edit",
+            json!({"file_path": lib.join("src/e.rs")}),
+        ));
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime
+            .worked_from(
+                &snapshot,
+                std::slice::from_ref(&transcript),
+                monitor::now() + 2,
+            )
+            .await;
+        assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
+        let rows = suggest::read(root.path()).unwrap();
+        assert!(rows
+            .iter()
+            .any(|r| r.folder == lib_text && r.state == suggest::State::Shared));
+        // `shared`, claimed by both projects in one pass, is remembered the same way.
+        let shared_text = shared
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(rows
+            .iter()
+            .any(|r| r.folder == shared_text && r.state == suggest::State::Shared));
     }
 
     #[tokio::test]
@@ -3918,13 +4148,16 @@ mod owner_tests {
                 name: "App".into(),
                 folders: vec![main.clone(), worktree.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
         let folders = |rt: &Runtime| rt.store.snapshot().unwrap().projects[0].folders.clone();
-        std::fs::remove_dir_all(&worktree).unwrap();
         let t = monitor::now();
         let snapshot = runtime.store.snapshot().unwrap();
+        // Seen present first: its device is what a later disappearance is checked against.
+        runtime.vanish_pass(&snapshot, t - VANISH_LOOK).await;
+        std::fs::remove_dir_all(&worktree).unwrap();
         runtime.vanish_pass(&snapshot, t).await;
         assert_eq!(folders(&runtime).len(), 2, "one look is not enough");
         // Back before the second look (a checkout being recreated): it stays.
@@ -3991,6 +4224,7 @@ mod owner_tests {
                 name: "App".into(),
                 folders: vec![main.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -4030,6 +4264,7 @@ mod owner_tests {
                 name: "App".into(),
                 folders: vec![main.clone(), older.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -4051,6 +4286,7 @@ mod owner_tests {
                 name: "App".into(),
                 folders: with_manual,
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -4060,6 +4296,7 @@ mod owner_tests {
                 name: "App".into(),
                 folders: vec![main.clone(), older.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();
@@ -4080,6 +4317,7 @@ mod owner_tests {
                 name: "App again".into(),
                 folders: vec![main.clone()],
                 account_ids: vec![],
+                base_folders: None,
             })
             .await
             .unwrap();

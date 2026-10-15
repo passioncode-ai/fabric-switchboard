@@ -117,32 +117,57 @@ pub(crate) fn project_dir(root: &Path, path: &Path) -> Result<PathBuf, String> {
     }
     Ok(path)
 }
-/// Whether a project folder was deleted (SB-131): it is missing, its nearest existing ancestor is
-/// an ordinary folder below the filesystem root, and it is not on a drive that may simply be
-/// unmounted (`/Volumes`, `/media`, `/mnt`, `/run/media`, or a Windows drive that is not there).
-/// Anything Switchboard cannot read is not deleted.
-pub(crate) fn deleted(path: &Path) -> bool {
+/// Places where a drive or share may be mounted and unmounted (SB-131).
+const DETACHABLE: [&str; 4] = ["/Volumes", "/media", "/mnt", "/run/media"];
+
+/// Whether a missing folder may only be on a drive that is not mounted now (SB-131): under a
+/// usual mount place, or on a Windows drive that is not there.
+pub(crate) fn maybe_unmounted(path: &Path) -> bool {
+    if DETACHABLE.iter().any(|m| path.starts_with(m)) {
+        return true;
+    }
+    path.ancestors()
+        .last()
+        .is_some_and(|root| !root.as_os_str().is_empty() && !root.exists())
+}
+
+/// The device a present folder is on, recorded so a later disappearance can be told apart from
+/// an unmount (SB-131). Windows has no stable device number in std: every folder reads as one.
+pub(crate) fn device(path: &Path) -> Option<u64> {
+    let meta = path.metadata().ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(meta.dev())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        Some(0)
+    }
+}
+
+/// Whether a project folder was deleted (SB-131): it is missing, its parent folder is there, the
+/// parent is on the same device the folder was on when last seen (`known_device`, so a mount
+/// point whose share went away is not a deletion), and it is not on a drive that may simply be
+/// unmounted. A folder never seen present, or anything Switchboard cannot read, is not deleted.
+pub(crate) fn deleted(path: &Path, known_device: Option<u64>) -> bool {
     match path.symlink_metadata() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         _ => return false,
     }
-    if !path.is_absolute()
-        || ["/Volumes/", "/media/", "/mnt/", "/run/media/"]
-            .iter()
-            .any(|m| path.starts_with(m))
-    {
+    if !path.is_absolute() || maybe_unmounted(path) {
         return false;
     }
-    let mut at = path.parent();
-    while let Some(dir) = at {
-        match dir.symlink_metadata() {
-            Ok(meta) => return meta.is_dir() && dir.parent().is_some(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => at = dir.parent(),
-            Err(_) => return false,
-        }
+    let Some(parent) = path.parent().filter(|p| p.parent().is_some()) else {
+        return false;
+    };
+    if !parent.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+        return false;
     }
-    false
+    known_device.is_some_and(|known| device(parent) == Some(known))
 }
+
 /// A removed project folder can still have its rule deleted.
 pub(crate) fn rule_path(root: &Path, path: &Path) -> Result<PathBuf, String> {
     project_dir(root, path).or_else(|error| {
@@ -695,21 +720,34 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn only_a_folder_really_deleted_counts_as_deleted() {
-        // SB-131: a missing folder under an existing ordinary folder is deleted; one on a drive
-        // that may be unmounted, or with nothing left of its tree but the root, is not.
+        // SB-131: a missing folder whose parent is there, on the device it was on, is deleted;
+        // one on a drive that may be unmounted, one whose parent is gone too (an unmounted
+        // tree), one never seen present, or one whose parent is now another device, is not.
         let dir = tempfile::tempdir().unwrap();
         let here = dir.path().join("app");
         std::fs::create_dir(&here).unwrap();
-        assert!(!deleted(&here), "a folder that is there");
-        assert!(deleted(&dir.path().join("gone")));
-        assert!(deleted(&dir.path().join("gone/deeper/still")));
-        assert!(!deleted(Path::new("/Volumes/Synthetic Drive 9/app")));
-        assert!(!deleted(Path::new("/media/synthetic/app")));
-        assert!(!deleted(Path::new("/no-such-top-folder-sb131/app")));
-        assert!(!deleted(Path::new("relative/app")));
+        let dev = device(&here);
+        assert!(dev.is_some());
+        assert!(!deleted(&here, dev), "a folder that is there");
+        std::fs::remove_dir(&here).unwrap();
+        assert!(deleted(&here, dev));
+        assert!(!deleted(&here, None), "never seen present");
+        assert!(
+            !deleted(&here, dev.map(|d| d.wrapping_add(1))),
+            "another device now"
+        );
+        assert!(
+            !deleted(&dir.path().join("gone/deeper"), dev),
+            "its parent is gone too"
+        );
+        assert!(!deleted(Path::new("/Volumes/Synthetic Drive 9/app"), dev));
+        assert!(!deleted(Path::new("/media/synthetic/app"), dev));
+        assert!(!deleted(Path::new("relative/app"), dev));
+        assert!(maybe_unmounted(Path::new("/Volumes/Synthetic Drive 9/app")));
+        assert!(!maybe_unmounted(&here));
         // A file where the folder was is not "deleted" either: something is there.
         let file = dir.path().join("file");
         std::fs::write(&file, b"x").unwrap();
-        assert!(!deleted(&file));
+        assert!(!deleted(&file, dev));
     }
 }

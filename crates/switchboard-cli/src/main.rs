@@ -1220,6 +1220,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .map(|f| folder(&Some(f.clone())))
                     .collect::<Result<Vec<_>, _>>()?,
                 account_ids: accounts.clone(),
+                base_folders: None,
             },
             Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
             Project::Suggest {

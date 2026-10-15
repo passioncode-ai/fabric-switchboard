@@ -652,7 +652,8 @@ fn watch_for_idle(app: &AppHandle) {
             idle_before = idle;
             if start {
                 event("update_restart", &[("outcome", Field::Code("idle"))]);
-                if restart(app.clone()).await.is_err() {
+                // Nobody was looking: the relaunch keeps the window out of the way (SB-131).
+                if restart_as(app.clone(), true).await.is_err() {
                     event("update_restart", &[("outcome", Field::Code("refused"))]);
                 }
                 break;
@@ -844,6 +845,13 @@ pub fn replaceable_without_password(bundle: &Path) -> bool {
     }
 }
 
+/// Whether the window is shown now; a missing window is not.
+fn window_visible(app: &AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+}
+
 /// Nobody is looking at the window: hidden, or open and out of focus for UNATTENDED_SECONDS
 /// (SB-131). A focused window is attention now.
 fn window_hidden(app: &AppHandle) -> bool {
@@ -868,6 +876,13 @@ fn window_hidden(app: &AppHandle) -> bool {
 /// "Restart to update": install what still needs the person (macOS, an administrator password),
 /// then quit through the exit path, which drains the owner and relaunches.
 pub async fn restart(app: AppHandle) -> Result<Value, String> {
+    // The person asked: the window comes back as they left it, shown or hidden.
+    let background = !window_visible(&app);
+    restart_as(app, background).await
+}
+
+/// The restart itself; `background` relaunches with the window hidden.
+async fn restart_as(app: AppHandle, background: bool) -> Result<Value, String> {
     let state = app.state::<Updates>();
     state.available.map_err(str::to_string)?;
     // Waits out a swap in progress (SB-105), then reads the waiting update, which that swap may
@@ -878,7 +893,6 @@ pub async fn restart(app: AppHandle) -> Result<Value, String> {
         let ready = inner.ready.as_ref().ok_or(NOT_READY)?;
         (ready.update.clone(), ready.bytes.clone())
     };
-    let background = window_hidden(&app);
     #[cfg(target_os = "macos")]
     if let Some(bytes) = bytes {
         let installing = update.clone();

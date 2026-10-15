@@ -68,6 +68,8 @@ pub enum State {
     /// Taken out of its project by Switchboard because the folder was deleted (SB-131);
     /// `first_seen` is when. Found again like a new folder if it comes back.
     Gone,
+    /// A repository agents of two projects work in (SB-131): never added by itself again.
+    Shared,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -369,26 +371,38 @@ pub(crate) fn transient(folder: &Path) -> bool {
         let home = PathBuf::from(home);
         roots.extend([
             home.join(".cache"),
-            home.join("Library"),
-            home.join("AppData"),
+            home.join("Library/Caches"),
+            home.join("AppData/Local/Temp"),
         ]);
-        // SB-131: a hidden folder in the home folder (`~/.claude`, `~/.codex`, a tool's own
-        // clones) is a tool's configuration, never a project's repository.
-        for base in std::iter::once(home.clone()).chain(home.canonicalize().ok()) {
-            if let Ok(rest) = folder.strip_prefix(&base) {
-                if rest
-                    .components()
-                    .next()
-                    .is_some_and(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-                {
-                    return true;
-                }
-            }
-        }
     }
     roots
         .iter()
         .any(|r| folder.starts_with(r) || r.canonicalize().is_ok_and(|c| folder.starts_with(c)))
+}
+
+/// A tool's own folder (SB-131): `~/Library`, `AppData`, or a hidden folder directly in the home
+/// folder (`~/.claude`, `~/.codex`, a plugin cache). An agent editing its settings or a plugin's
+/// clone there is not working on a project, so such a folder never joins by work. A worktree of
+/// a project repository a tool keeps there (`~/.codex/worktrees/…`) still joins as a worktree.
+pub(crate) fn tool_folder(folder: &Path) -> bool {
+    #[cfg(test)]
+    if !CHECK_TRANSIENT.with(std::cell::Cell::get) {
+        return false;
+    }
+    let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
+        return false;
+    };
+    let home = PathBuf::from(home);
+    std::iter::once(home.clone())
+        .chain(home.canonicalize().ok())
+        .any(|base| {
+            folder.strip_prefix(&base).is_ok_and(|rest| {
+                rest.components().next().is_some_and(|c| {
+                    let name = c.as_os_str().to_string_lossy();
+                    name.starts_with('.') || name == "Library" || name == "AppData"
+                })
+            })
+        })
 }
 
 /// The repository a path is in (SB-131): the nearest folder at or above it with a `.git` entry,
@@ -474,6 +488,7 @@ pub(crate) fn record_worked(
         return Ok(Outcome::InProject);
     }
     if transient(&folder)
+        || tool_folder(&folder)
         || contains_project(snapshot, &folder)
         || !snapshot.projects.iter().any(|p| p.pool == pool)
     {
@@ -498,7 +513,7 @@ fn record_row(
         match rows[i].state {
             State::Pending => return Ok(Outcome::Waiting),
             // Added once and since removed from the project by the person: their choice stands.
-            State::Dismissed | State::Added => return Ok(Outcome::Declined),
+            State::Dismissed | State::Added | State::Shared => return Ok(Outcome::Declined),
             // Deleted and back again: a new folder like any other.
             State::Gone => {
                 rows.remove(i);
@@ -661,6 +676,41 @@ pub(crate) fn mark_gone(
             break;
         };
         rows.remove(i);
+    }
+    write(root, &rows)
+}
+
+/// Remembers a repository two projects' agents work in (SB-131): it is never added by itself
+/// again. A folder the person declined stays declined.
+pub(crate) fn mark_shared(root: &Path, folder: &str, now: i64) -> Result<(), String> {
+    let mut rows = read(root)?;
+    match rows.iter_mut().find(|r| r.folder == folder) {
+        Some(row) if row.state == State::Dismissed => return Ok(()),
+        Some(row) => {
+            row.state = State::Shared;
+            row.first_seen = now;
+        }
+        None => {
+            if rows.len() >= MAX_ROWS {
+                if let Some(i) = rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.state != State::Pending)
+                    .min_by_key(|(_, r)| r.first_seen)
+                    .map(|(i, _)| i)
+                {
+                    rows.remove(i);
+                }
+            }
+            rows.push(Suggestion {
+                folder: folder.to_owned(),
+                pool: String::new(),
+                reason: Reason::Worked,
+                repository: String::new(),
+                first_seen: now,
+                state: State::Shared,
+            });
+        }
     }
     write(root, &rows)
 }
@@ -1070,6 +1120,19 @@ mod tests {
             .unwrap();
         assert!(transient(&home.join(".cache").join("tool").join("clone")));
         assert!(!transient(&home.join("DATA").join("app-2")));
+        // SB-131: a tool's own folder never joins by work, but a worktree a tool keeps there
+        // (`~/.codex/worktrees/…`) is not temporary: it still joins as a worktree.
+        assert!(!transient(&home.join(".codex").join("worktrees").join("x")));
+        assert!(tool_folder(
+            &home.join(".codex").join("worktrees").join("x")
+        ));
+        assert!(tool_folder(
+            &home.join(".claude").join("plugins").join("cache")
+        ));
+        assert!(tool_folder(
+            &home.join("Library").join("Application Support")
+        ));
+        assert!(!tool_folder(&home.join("DATA").join("app-2")));
         // A question an older version left for a scratch folder is never offered or added.
         CHECK_TRANSIENT.with(|c| c.set(false));
         new(record(root.path(), &s, &repos, &scratch, 2).unwrap());

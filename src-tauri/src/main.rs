@@ -392,6 +392,7 @@ async fn save_project(
     name: String,
     folders: Vec<std::path::PathBuf>,
     account_ids: Vec<String>,
+    base_folders: Option<Vec<std::path::PathBuf>>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -402,6 +403,7 @@ async fn save_project(
             name,
             folders,
             account_ids,
+            base_folders,
         })
         .await
 }
