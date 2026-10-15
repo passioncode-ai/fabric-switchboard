@@ -1926,19 +1926,21 @@ fn with_subagents(files: &[PathBuf], time: i64) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(file.with_extension("").join("subagents")) else {
             continue;
         };
-        for entry in entries.flatten().take(256) {
-            let path = entry.path();
-            let recent = path.extension().is_some_and(|e| e == "jsonl")
-                && entry
-                    .metadata()
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                    .is_some_and(|m| time - (m.as_secs() as i64) <= limits::WINDOW_SECONDS);
-            if recent {
-                all.push(path);
-            }
-        }
+        // Only recent ones count; a long session has hundreds of finished subagents.
+        let recent = entries
+            .flatten()
+            .filter(|entry| {
+                entry.path().extension().is_some_and(|e| e == "jsonl")
+                    && entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                        .is_some_and(|m| time - (m.as_secs() as i64) <= limits::WINDOW_SECONDS)
+            })
+            .map(|entry| entry.path())
+            .take(64);
+        all.extend(recent);
     }
     all
 }

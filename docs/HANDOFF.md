@@ -11,7 +11,7 @@ Operator request 2026-10-15: «автодобавление всех репоз�
 - **Why questions still showed:** the running app was 0.6.31 (started 2026-10-14 12:23 UTC) with
   0.6.32 and 0.6.33 already installed. Its update was waiting behind a window that had been left
   open, logging `update_waiting window_visible` every hour.
-- **Done on `feat/sb-131-auto-projects`** (`dddff8b`, `ed99f49`, `9f89d8c`):
+- **Done on `feat/sb-131-auto-projects`** (`dddff8b`, `ed99f49`, `9f89d8c` and the final-review fix):
   - **Repositories join by work.** `activity.rs` reads recent Claude Code transcripts (sessions
     and subagents), only where they grew, and keeps paths only. A repository an agent of project
     P edits or commits in joins P. A repository two projects work in is `shared` and joins
@@ -19,7 +19,8 @@ Operator request 2026-10-15: «автодобавление всех репоз�
   - **Nothing is asked.** There is no banner, no tray count and no question notification. A
     folder that cannot be added is retried every 10 minutes.
   - **Deleted folders leave.** A deleted project folder leaves its project after two looks
-    5 minutes apart, checked by device. Unmounted drives and the last folder stay.
+    5 minutes apart, checked by device; an empty folder left where it was (an unmounted mount
+    point) keeps it after a restart. Unmounted drives and the last folder stay.
   - **Dialog.** Each folder has *Change…* in the project dialog. Save keeps folders Switchboard
     added in the meantime (`base_folders`).
   - **Updates.** An update no longer waits behind a window that has been out of focus for

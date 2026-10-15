@@ -208,7 +208,19 @@ pub(crate) fn evidence(line: &[u8]) -> Vec<Worked> {
 pub(crate) fn git_targets(command: &str, cwd: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut dir = cwd.to_owned();
+    // A `cd` inside `( … )` or `$( … )` ends with it.
+    let mut outer: Vec<PathBuf> = Vec::new();
     for words in commands(command) {
+        if words.len() == 1 && words[0] == OPEN {
+            outer.push(dir.clone());
+            continue;
+        }
+        if words.len() == 1 && words[0] == CLOSE {
+            if let Some(back) = outer.pop() {
+                dir = back;
+            }
+            continue;
+        }
         // `VAR=value git …`, `env … git …`, `command git …`: the command is the first plain word.
         let start = words
             .iter()
@@ -269,6 +281,10 @@ pub(crate) fn git_targets(command: &str, cwd: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Markers `commands` puts where a subshell opens and closes (never a word a shell would see).
+const OPEN: &str = "\u{0}(";
+const CLOSE: &str = "\u{0})";
+
 /// What the next finished word is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Next {
@@ -308,10 +324,30 @@ fn commands(command: &str) -> Vec<Vec<String>> {
             Next::Redirect => {}
         }
     };
+    let mut nested = 0usize;
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
+        if nested > 0 {
+            // Inside `"$( … )"`: a command substitution, text for this purpose, whose quotes
+            // (a commit message's) do not end the outer quote.
+            match c {
+                '(' => nested += 1,
+                ')' => nested -= 1,
+                _ => {}
+            }
+            word.push(c);
+            i += 1;
+            continue;
+        }
         if let Some(q) = quote {
+            if q == '"' && c == '$' && chars.get(i + 1) == Some(&'(') {
+                nested = 1;
+                word.push('$');
+                word.push('(');
+                i += 2;
+                continue;
+            }
             if c == q {
                 quote = None;
             } else if q == '"' && c == '\\' && i + 1 < chars.len() {
@@ -366,7 +402,7 @@ fn commands(command: &str) -> Vec<Vec<String>> {
                 );
                 while chars
                     .get(i + 1)
-                    .is_some_and(|n| matches!(n, '>' | '&' | '|'))
+                    .is_some_and(|n| matches!(n, '>' | '&' | '|' | '<'))
                 {
                     i += 1;
                 }
@@ -383,6 +419,11 @@ fn commands(command: &str) -> Vec<Vec<String>> {
                 next = Next::Word;
                 if !words.is_empty() {
                     out.push(std::mem::take(&mut words));
+                }
+                if c == '(' {
+                    out.push(vec![OPEN.to_owned()]);
+                } else if c == ')' {
+                    out.push(vec![CLOSE.to_owned()]);
                 }
                 if c == '\n' {
                     // Each heredoc started on this line: skip its body to its end line.
@@ -539,6 +580,20 @@ mod tests {
         assert_eq!(targets("cd /w/x >/dev/null && git push"), ["/w/x"]);
         assert_eq!(targets("env GIT_X=1 git commit -m y"), ["/w/app"]);
         assert!(targets("cd && git commit -m x").is_empty());
+        // A here-string, a commit message written with `"$(cat <<'EOF' … )"` and a `cd` inside a
+        // subshell (SB-131 final review).
+        assert_eq!(targets("cat <<< hi\ncd /w/b && git push"), ["/w/b"]);
+        assert_eq!(
+            targets(
+                "git commit -m \"$(cat <<'EOF'\nfix 12\" screen\ncd /etc && git push\nEOF\n)\""
+            ),
+            ["/w/app"]
+        );
+        assert_eq!(targets("(cd /w/b && ls); git commit -m x"), ["/w/app"]);
+        assert_eq!(
+            targets("(cd /w/b && git push); git push"),
+            ["/w/b", "/w/app"]
+        );
         assert_eq!(
             resolve("../b/./c", Path::new("/w/a")),
             Some(PathBuf::from("/w/b/c"))

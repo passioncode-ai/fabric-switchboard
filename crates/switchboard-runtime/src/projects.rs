@@ -172,6 +172,13 @@ pub(crate) fn deleted(path: &Path, known_device: Option<u64>) -> bool {
                     return false;
                 }
                 let here = device(dir);
+                // An unmounted mount point is an empty folder on its parent's device: a folder
+                // never seen present under one is not taken as deleted.
+                if known_device.is_none()
+                    && std::fs::read_dir(dir).is_ok_and(|mut e| e.next().is_none())
+                {
+                    return false;
+                }
                 return match known_device {
                     Some(known) => here == Some(known),
                     // Not a mount point: on the same device as the folder above it.
@@ -749,6 +756,7 @@ mod tests {
         assert!(!deleted(&here, dev), "a folder that is there");
         std::fs::remove_dir(&here).unwrap();
         assert!(deleted(&here, dev));
+        std::fs::create_dir(dir.path().join("sibling")).unwrap();
         assert!(
             deleted(&here, None),
             "deleted while Switchboard was not running"
@@ -768,6 +776,10 @@ mod tests {
             !deleted(Path::new("/no-such-top-folder-sb131/app"), dev),
             "only the root is left"
         );
+        // An empty folder where the folder was is what an unmounted mount point leaves.
+        let mount = dir.path().join("share");
+        std::fs::create_dir(&mount).unwrap();
+        assert!(!deleted(&mount.join("app"), None), "an empty mount point");
         assert!(maybe_unmounted(Path::new("/Volumes/Synthetic Drive 9/app")));
         assert!(!maybe_unmounted(&here));
         // A file where the folder was is not "deleted" either: something is there.
