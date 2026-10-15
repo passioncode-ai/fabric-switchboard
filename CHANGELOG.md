@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.34 — 2026-10-15
 
 - **Projects find their repositories and nothing is asked (SB-131).** A repository a project's agent works in — edits or writes a file there, commits, pushes, stages, merges, rebases, makes a worktree or runs `git init` — joins the project by itself within half a minute, with one notification. Switchboard reads only the paths from recent Claude Code transcripts (sessions and their subagents), never their text; reading a repository does not count, and a repository two projects work in belongs to neither. A repository that joins is routed to the project's accounts. Codex sessions are not read yet (SB-132). The question banner, the tray count and the question notifications are gone: a folder that cannot be added is tried again every ten minutes.
 - **A deleted folder leaves its project (SB-131).** A project folder deleted from disk — also while Switchboard was not running — and still missing five minutes later is taken out of its project, with one notification. Folders on an unmounted drive or share stay, a project keeps its last folder, a renamed or moved folder counts as deleted, and a deleted folder that comes back is found again.
