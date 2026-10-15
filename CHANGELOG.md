@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+The operations log names every way a quota check can fail before it asks the provider (an account
+removed meanwhile, a non-OAuth account, a disabled one, an unreadable sign-in or store) instead of
+`other` (SB-127).
+
 ## 0.6.33 — 2026-10-15
 
 **A forgotten workflow is no longer handed over** (SB-129). A workflow whose executor names no

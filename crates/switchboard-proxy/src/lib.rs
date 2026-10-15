@@ -674,6 +674,9 @@ pub struct ProbeFailure {
     /// The HTTP status of an answer that was neither success, 401 nor 429 (`http_error`): a number
     /// for the operations log, so a 403 and a 502 are told apart without the provider's text.
     pub status: Option<u16>,
+    /// The log's code for a refusal whose message is another layer's (the store's, the vault's):
+    /// its text still reaches the person; the log gets `store` or `vault` (SB-127).
+    pub code: Option<&'static str>,
 }
 impl From<String> for ProbeFailure {
     fn from(message: String) -> Self {
@@ -681,6 +684,7 @@ impl From<String> for ProbeFailure {
             message,
             rate_limited: None,
             status: None,
+            code: None,
         }
     }
 }
@@ -698,6 +702,11 @@ const USAGE_INTERRUPTED: &str = "Usage response interrupted.";
 const USAGE_TOO_LARGE: &str = "Usage response too large.";
 const USAGE_UNSUPPORTED: &str = "Usage response unsupported.";
 const USAGE_RESET_UNSUPPORTED: &str = "Usage reset unsupported.";
+// Refusals before any request (SB-127: logged as `other` until 2026-10-15).
+const USAGE_ACCOUNT_GONE: &str = "Account not found.";
+const USAGE_NOT_OAUTH: &str = "Usage unavailable for this credential type.";
+const USAGE_DISABLED: &str = "Account is disabled";
+
 impl ProbeFailure {
     /// A fixed code for the operations log (LC-12): which way the check failed, never the
     /// provider's text or a token. A message this crate does not produce is `other`.
@@ -711,7 +720,10 @@ impl ProbeFailure {
             USAGE_TOO_LARGE => "too_large",
             USAGE_UNSUPPORTED | USAGE_RESET_UNSUPPORTED => "unsupported",
             USAGE_UNAVAILABLE => "unavailable",
-            _ => "other",
+            USAGE_ACCOUNT_GONE => "account_gone",
+            USAGE_NOT_OAUTH => "not_oauth",
+            USAGE_DISABLED => "disabled",
+            _ => self.code.unwrap_or("other"),
         }
     }
 }
@@ -783,21 +795,27 @@ async fn probe_usage_from(
     origins: (&str, &str),
     credential: Option<switchboard_core::Credential>,
 ) -> Result<Usage, ProbeFailure> {
-    let snapshot = store.snapshot()?;
+    let snapshot = store.snapshot().map_err(|e| ProbeFailure {
+        code: Some("store"),
+        ..e.into()
+    })?;
     let account = snapshot
         .accounts
         .into_iter()
         .find(|a| a.id == id)
-        .ok_or("Account not found.")?;
+        .ok_or(USAGE_ACCOUNT_GONE)?;
     if account.kind != AuthKind::OAuth {
-        return Err("Usage unavailable for this credential type.".into());
+        return Err(USAGE_NOT_OAUTH.into());
     }
     let credential = match credential {
         Some(credential) => credential,
-        None => store.stored_credential(&id)?,
+        None => store.stored_credential(&id).map_err(|e| ProbeFailure {
+            code: Some("vault"),
+            ..e.into()
+        })?,
     };
     if !account.enabled {
-        return Err("Account is disabled".into());
+        return Err(USAGE_DISABLED.into());
     }
     if credential.expires_at.is_some_and(|t| t <= now()) {
         return Err(REJECTED.into());
@@ -831,6 +849,7 @@ async fn probe_usage_from(
             message: USAGE_RATE_LIMITED.into(),
             rate_limited: Some(retry_after_seconds(response.headers(), now())),
             status: None,
+            code: None,
         });
     }
     if !response.status().is_success() {

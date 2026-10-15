@@ -1016,6 +1016,7 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
             message: USAGE_RATE_LIMITED.into(),
             rate_limited: Some(Some(1200)),
             status: None,
+            code: None,
         }
     );
     // An HTTP-date is a deadline too (RFC 9110 §10.2.3), not a missing value.
@@ -1048,7 +1049,32 @@ async fn usage_checks_report_the_providers_wait_and_never_its_body() {
     .await
     .unwrap_err();
     assert_eq!(unreachable.kind(), "unreachable");
-    assert_eq!(ProbeFailure::from("Account not found.").kind(), "other");
+    // SB-127: refusals before any request have codes of their own; `other` is only text this
+    // crate never produces.
+    assert_eq!(
+        ProbeFailure::from("Account not found.").kind(),
+        "account_gone"
+    );
+    assert_eq!(
+        ProbeFailure::from("Usage unavailable for this credential type.").kind(),
+        "not_oauth"
+    );
+    let vault = ProbeFailure {
+        code: Some("vault"),
+        ..ProbeFailure::from("Keychain unavailable. Unlock it and allow access, then retry.")
+    };
+    assert_eq!(
+        vault.kind(),
+        "vault",
+        "the vault's own text stays for the person"
+    );
+    assert_eq!(ProbeFailure::from("anything else").kind(), "other");
+    let gone = probe_usage_from(store.clone(), "no-such-id".into(), (&base, &base), None)
+        .await
+        .unwrap_err();
+    assert_eq!(gone.kind(), "account_gone");
+    store.update(&a.id, "a".into(), false).unwrap();
+    assert_eq!(probe("ok").await.unwrap_err().kind(), "disabled");
 }
 
 /// RFC 9110 §10.2.3 and §5.6.7: delay-seconds and the three HTTP-date forms, measured against
