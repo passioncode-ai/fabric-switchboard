@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.6.33 — 2026-10-15
+
 **A forgotten workflow is no longer handed over** (SB-129). A workflow whose executor names no
 account was treated as the ordinary Claude Code's work, so every limit on that account handed it
 to the next agent of the chain — even when nobody had worked on it for hours. It is now handed
