@@ -55,6 +55,8 @@ const ALLOWLIST = {
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
+  'store': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the store\'s own message',
+  'vault': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the vault\'s own message',
   // runtime bindings.rs (SB-118): read by the background pass, uninstall and `project bindings` (CLI) only.
   'Claude Code bindings could not be read. Restore the private file before continuing.': 'background and CLI only',
   // runtime bindings.rs unbind_all(): surfaces under `failures` in `switchboard uninstall`
