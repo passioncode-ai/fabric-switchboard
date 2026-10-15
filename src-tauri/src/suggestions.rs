@@ -60,8 +60,8 @@ pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
         [(folder, project)] => {
             if ru {
                 (
-                    "Папка убрана из проекта".into(),
-                    format!("{folder} удалена с диска и больше не в проекте {project}."),
+                    "Папка исключена из проекта".into(),
+                    format!("Папка {folder} удалена с диска и исключена из проекта {project}."),
                 )
             } else {
                 (
@@ -74,8 +74,8 @@ pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
             let n = gone.len();
             if ru {
                 (
-                    "Папки убраны из проектов".into(),
-                    format!("Удалены с диска и убраны из проектов папок: {n}."),
+                    "Папки исключены из проектов".into(),
+                    format!("Папки, удалённые с диска, исключены из проектов: {n}."),
                 )
             } else {
                 (

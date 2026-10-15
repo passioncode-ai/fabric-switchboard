@@ -280,9 +280,11 @@ enum Project {
         #[arg(long)]
         pool: String,
     },
-    /// Offer a folder to the project it belongs to (SB-117): a worktree or clone of a project
-    /// repository, or a repository of the project's sources. Nothing joins until a person adds
-    /// it. With --from-hook it reads Claude Code's hook input on stdin and always exits 0.
+    /// Add a folder to the project it belongs to now (SB-117/SB-121): a worktree or clone of a
+    /// project repository, or a repository of the project's sources. Nothing is asked; the
+    /// background pass does the same within 30 s, and also adds repositories a project's agents
+    /// work in (SB-131). With --from-hook it reads Claude Code's hook input on stdin and always
+    /// exits 0.
     Suggest {
         /// The folder; default: the current folder.
         #[arg(long, conflicts_with = "from_hook")]
@@ -291,17 +293,18 @@ enum Project {
         #[arg(long)]
         from_hook: bool,
     },
-    /// The folders waiting for a person's Add or Not this one.
+    /// Folders added to projects or taken out as deleted in the last day, and folders still
+    /// being added (retried every ten minutes, never asked; SB-131).
     Suggestions,
     /// The project folders whose ordinary Claude Code sessions use the project's accounts
     /// (SB-118): Switchboard keeps the route in each folder's `.claude/settings.local.json`.
     Bindings,
-    /// Add a suggested folder to its project.
+    /// Add a folder that is still being added now.
     Accept {
         /// The folder, as `project suggestions` lists it.
         folder: String,
     },
-    /// Decline a suggested folder; it is never suggested again.
+    /// Never add this folder to its project.
     Dismiss {
         /// The folder, as `project suggestions` lists it.
         folder: String,

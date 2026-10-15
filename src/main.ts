@@ -329,7 +329,7 @@ function projectFolderList(project: Project) {
   for (const folder of shown) { const item = el('li', 'account-meta', folder); item.title = folder; folders.append(item); }
   wrap.append(folders);
   if (project.folders.length > FOLDERS_SHOWN) {
-    const label = open ? t('Show fewer folders') : plural(project.folders.length, { one: 'Show all {n} folder', other: 'Show all {n} folders' });
+    const label = open ? t('Show fewer folders') : t('Show all folders ({n})', { n: project.folders.length });
     const toggle = button(label, () => { if (open) expandedProjects.delete(project.pool); else expandedProjects.add(project.pool); render(); restoreFocus(`folders-${project.pool}`); }, 'text-button', `folders-${project.pool}`);
     toggle.setAttribute('aria-expanded', String(open));
     wrap.append(toggle);

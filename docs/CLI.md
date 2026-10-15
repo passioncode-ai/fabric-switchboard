@@ -136,26 +136,53 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
-### A project's new folders join it by themselves (SB-117, SB-121)
+### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
-Switchboard finds folders that belong to a project and adds them to it without asking (SB-121,
-operator 2026-10-14), with one system notification per folder:
+Switchboard keeps a project's folder list by itself and never asks (SB-121, SB-131; operator
+2026-10-14 and 2026-10-15). One system notification tells the person about each change.
+
+A folder joins its project when it is:
 
 - a git worktree of a project repository;
 - a clone with the same `origin`;
-- a repository of one of the project's sources (`host/owner`).
+- a repository of one of the project's sources (`host/owner`);
+- a repository an agent working in the project changes (SB-131). An agent changes it when it edits or writes a file there (Claude Code `Edit`/`Write`), or commits, pushes, stages, merges, rebases, runs `git init` or makes a worktree there. Reading it does not count.
 
-The owner's background pass looks at the parent folder of every project folder and at every project repository's worktree list. It re-reads either only when its modification time changed. The plugin's `SessionStart` hook reports the folder a Claude Code session starts in. A folder the person later removes from the project is not added again. A folder two projects match equally, one in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`) and one that is not a git repository are never added. When adding fails (the folder overlaps another project, the 1024-folder total), the folder waits as a question, as in 0.6.30: a notification, a count next to the tray icon and a banner with **Add** and **Not this one**.
+Where the signals come from:
+
+- **Background pass.** It looks at the parent folder of every project folder and at every project repository's worktree list, re-reading either only when its modification time changed.
+- **Recent Claude Code transcripts.** These are the sessions and their subagents of the last 15 minutes. They are read only where they grew, and only the paths are kept.
+- **The plugin's `SessionStart` hook.** It reports the folder a Claude Code session starts in.
+
+Folders that never join:
+
+- a folder the person removed from the project;
+- a folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`);
+- a folder that is not a git repository;
+- a folder two projects match equally.
+
+Codex sessions and sessions Switchboard launches isolated are not read yet (SB-132).
+
+- **Tools' own folders.** A folder of a tool (`~/Library`, a hidden folder in the home folder such as `~/.claude`) never joins because an agent worked there. A worktree of a project repository kept there (`~/.codex/worktrees/…`) still joins as a worktree.
+- **Shared repositories.** Suppose agents of two projects work in one repository, an organisation wiki for example. If it joined one project by work, it leaves that project and is never added by work again.
+- **Effect of joining.** A repository that joins is routed to the project's accounts (SB-118), and other accounts are refused there.
+- **When adding fails.** If the folder overlaps another project or the 1024-folder total is reached, nothing is asked. Switchboard tries again every ten minutes and logs `project_suggestion add: refused`.
+
+A project folder deleted from disk leaves its project once it is still missing five minutes later (SCN-061).
+
+- **Stays:** a folder on a drive that may only be unmounted (`/Volumes`, `/media`, `/mnt`), a folder behind a share that went away, and the project's last folder.
+- **Renamed or moved:** a renamed or moved folder counts as deleted; add the new place with *Add folder…*.
+- **Comes back:** a deleted folder that comes back is found again.
 
 ```sh
 switchboard project suggest --folder /work/app-review   # add a folder to its project now (default: the current one)
-switchboard project suggestions                         # {suggestions: questions waiting, added: folders added in the last 24 h}
-switchboard project accept /work/app-review             # answer a waiting question: add it
-switchboard project dismiss /work/app-review            # answer a waiting question: never add it
+switchboard project suggestions                         # {suggestions: still being added, added: last 24 h, removed: taken out as deleted, last 24 h}
+switchboard project accept /work/app-review             # add a folder still being added now
+switchboard project dismiss /work/app-review            # never add it
 switchboard project source --pool app --add github.com/example   # also adopt new repositories of this owner
 ```
 
-`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when the folder was added (or could not be and waits), and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md); `suggest::tests`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
+`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when the folder was added (or could not be added yet), and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md), SCN-055 and SCN-061; `suggest::tests`, `activity::tests`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`, `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither`, `a_deleted_project_folder_leaves_its_project_once_it_stays_gone` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 

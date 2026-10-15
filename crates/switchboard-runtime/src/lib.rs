@@ -257,7 +257,8 @@ pub enum Operation {
         billing: bool,
     },
     /// The open project suggestions (SB-117): folders Switchboard found that look like a
-    /// project's, waiting for a person's Add or Not this one.
+    /// project's: those still being added (retried, never asked; SB-131), and those added or taken
+    /// out as deleted in the last day.
     ProjectSuggestions,
     /// Records `folder` when it is a project's (CLI `project suggest`, the plugin's hook).
     ProjectSuggest {
@@ -854,7 +855,8 @@ impl Runtime {
         let retry_at = self
             .suggest_retry_at
             .load(std::sync::atomic::Ordering::Relaxed);
-        if time >= retry_at {
+        // A clock set back far is a fresh start, not a long wait.
+        if time >= retry_at || time < retry_at - 2 * RETRY_PENDING {
             self.suggest_retry_at
                 .store(time + RETRY_PENDING, std::sync::atomic::Ordering::Relaxed);
             if let Ok(waiting) = suggest::pending(&self.root, &snapshot) {
@@ -890,7 +892,7 @@ impl Runtime {
     /// projects in one pass joins neither.
     async fn worked_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
         // A synthetic owner reads no transcript of the machine it runs on.
-        let files = self.transcripts(time);
+        let files = with_subagents(&self.transcripts(time), time);
         self.worked_from(snapshot, &files, time).await;
     }
     /// The recent Claude Code transcripts, walked at most once per background pass (SB-131).
@@ -933,6 +935,11 @@ impl Runtime {
                 *worked = (key, HashSet::new());
             }
             for w in &evidence {
+                // One spelling per folder: `/tmp/x` and `/private/tmp/x`, a symlinked checkout.
+                let w = activity::Worked {
+                    cwd: canonical_near(&w.cwd),
+                    target: canonical_near(&w.target),
+                };
                 let Some(project) = snapshot.project_for(&w.cwd) else {
                     continue;
                 };
@@ -1076,7 +1083,8 @@ impl Runtime {
     /// filesystem root is gone, is not deleted as far as Switchboard can tell, and stays; a
     /// project keeps its last folder.
     async fn vanish_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
-        if time < self.vanish_at.load(std::sync::atomic::Ordering::Relaxed) {
+        let at = self.vanish_at.load(std::sync::atomic::Ordering::Relaxed);
+        if time < at && time >= at - 2 * VANISH_LOOK {
             return;
         }
         self.vanish_at
@@ -1102,7 +1110,12 @@ impl Runtime {
                     if let Some(dev) = known {
                         devices.insert(folder.clone(), dev);
                     }
-                    let since = vanish.missing.get(folder).copied().unwrap_or(time);
+                    let since = vanish
+                        .missing
+                        .get(folder)
+                        .copied()
+                        .filter(|since| *since <= time)
+                        .unwrap_or(time);
                     if time - since >= VANISH_CONFIRM {
                         confirmed.push((project.pool.clone(), folder.clone()));
                     } else {
@@ -1905,6 +1918,47 @@ fn add_suggested_folder(
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
+/// SB-131: the recent sessions' transcripts and their subagents' (`<session>/subagents/*.jsonl`,
+/// where implementer subagents record their edits), each written within the limit scan's window.
+fn with_subagents(files: &[PathBuf], time: i64) -> Vec<PathBuf> {
+    let mut all = files.to_vec();
+    for file in files {
+        let Ok(entries) = std::fs::read_dir(file.with_extension("").join("subagents")) else {
+            continue;
+        };
+        for entry in entries.flatten().take(256) {
+            let path = entry.path();
+            let recent = path.extension().is_some_and(|e| e == "jsonl")
+                && entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                    .is_some_and(|m| time - (m.as_secs() as i64) <= limits::WINDOW_SECONDS);
+            if recent {
+                all.push(path);
+            }
+        }
+    }
+    all
+}
+/// A path with its nearest existing ancestor resolved (symlinks, `/tmp` → `/private/tmp`) and the
+/// missing rest joined back (SB-131).
+fn canonical_near(path: &Path) -> PathBuf {
+    let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut at = Some(path);
+    while let Some(dir) = at {
+        if let Ok(real) = dir.canonicalize() {
+            return rest.iter().rev().fold(real, |p, part| p.join(part));
+        }
+        match dir.file_name() {
+            Some(name) => rest.push(name),
+            None => break,
+        }
+        at = dir.parent();
+    }
+    path.to_owned()
+}
 /// SB-131: what the deletion check remembers between looks: since when each folder is missing,
 /// and the device each folder was on when last seen.
 #[derive(Default)]
@@ -2797,11 +2851,15 @@ async fn execute(
             let mut gone: Vec<PathBuf> = Vec::new();
             let mut kept: Vec<PathBuf> = Vec::new();
             for f in folders {
-                if f.exists() {
+                if base_folders.is_some() && in_base(&f) && !is_held(&f) {
+                    // Switchboard took it out while the dialog was open (deleted, or shared
+                    // between projects): the person did not choose it in this dialog.
+                    gone.push(f);
+                } else if f.exists() {
                     kept.push(projects::project_dir(root, &f)?);
                 } else if is_held(&f) && projects::maybe_unmounted(&f) {
                     kept.push(f);
-                } else if is_held(&f) || in_base(&f) {
+                } else if is_held(&f) {
                     gone.push(f);
                 } else {
                     // Admission names the problem: a folder that never existed is refused.
@@ -4127,6 +4185,38 @@ mod owner_tests {
         assert!(rows
             .iter()
             .any(|r| r.folder == shared_text && r.state == suggest::State::Shared));
+        // A dialog opened while `lib` was still in App does not bring it back on Save.
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some("app".into()),
+                name: "App".into(),
+                folders: vec![app.clone(), lib.clone()],
+                account_ids: vec![],
+                base_folders: Some(vec![app.clone(), lib.clone()]),
+            })
+            .await
+            .unwrap();
+        assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
+    }
+
+    #[test]
+    fn a_sessions_subagents_count_as_its_work() {
+        // SB-131: implementer subagents record their edits under `<session>/subagents/`.
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("s1.jsonl");
+        std::fs::write(&session, b"").unwrap();
+        std::fs::create_dir_all(dir.path().join("s1/subagents")).unwrap();
+        let agent = dir.path().join("s1/subagents/agent-a.jsonl");
+        std::fs::write(&agent, b"").unwrap();
+        std::fs::write(dir.path().join("s1/subagents/notes.txt"), b"").unwrap();
+        let files = with_subagents(std::slice::from_ref(&session), monitor::now());
+        assert_eq!(files, [session.clone(), agent]);
+        // Written long ago: not part of the recent work.
+        let later = monitor::now() + 2 * limits::WINDOW_SECONDS;
+        assert_eq!(
+            with_subagents(std::slice::from_ref(&session), later),
+            [session]
+        );
     }
 
     #[tokio::test]

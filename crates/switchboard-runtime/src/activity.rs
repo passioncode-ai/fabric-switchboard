@@ -202,28 +202,35 @@ pub(crate) fn evidence(line: &[u8]) -> Vec<Worked> {
 }
 
 /// The folders a shell command changes with git: each `git <write>` in it, in the folder its
-/// `cd` and `-C` lead to. Anything the shell would expand at run time is skipped, never guessed.
+/// `cd` and `-C` lead to. Separators inside quotes and heredoc bodies (a commit message, a pull
+/// request text) are text, not commands, and `git` counts only as a command's first word.
+/// Anything the shell would expand at run time is skipped, never guessed.
 pub(crate) fn git_targets(command: &str, cwd: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut dir = cwd.to_owned();
-    for segment in command.split(['\n', ';', '&', '|']) {
-        let words = words(segment);
+    for words in commands(command) {
+        // `VAR=value git …`, `env … git …`, `command git …`: the command is the first plain word.
+        let start = words
+            .iter()
+            .position(|w| (w.starts_with('-') || !w.contains('=')) && w != "command" && w != "env")
+            .unwrap_or(words.len());
+        let words = &words[start..];
         let Some(first) = words.first() else {
             continue;
         };
         if first == "cd" {
             match words.get(1).and_then(|w| resolve(w, &dir)) {
                 Some(next) => dir = next,
-                // `cd -`, `cd $X`: where the rest of the command runs is unknown.
+                // `cd`, `cd -`, `cd $X`: where the rest of the command runs is unknown.
                 None => return found,
             }
             continue;
         }
-        let Some(at) = words.iter().position(|w| w == "git" || w.ends_with("/git")) else {
+        if first != "git" && !first.ends_with("/git") {
             continue;
-        };
+        }
         let mut here = dir.clone();
-        let mut i = at + 1;
+        let mut i = 1;
         while let Some(w) = words.get(i) {
             match w.as_str() {
                 "-C" => {
@@ -262,35 +269,166 @@ pub(crate) fn git_targets(command: &str, cwd: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// A shell segment split into words, with quotes removed and a leading `(` dropped. Good enough
-/// for `cd "/a b" && git -C x commit`; not a shell.
-fn words(segment: &str) -> Vec<String> {
-    let mut out = Vec::new();
+/// What the next finished word is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Next {
+    Word,
+    /// The end word of a heredoc (`<<EOF`): its body is skipped.
+    HeredocEnd,
+    /// The target of a redirection (`> file`, `2>&1`): not a word of the command.
+    Redirect,
+}
+
+/// A shell command line split into simple commands, each as its words: quotes removed and
+/// respected (a `;` or `&&` inside quotes is text), grouping and redirections dropped, and the
+/// body of every heredoc (`<<WORD`, `<<'WORD'`, `<<-WORD`) skipped to its end line. Good enough for
+/// `cd "/a b" && git -C x commit -F - <<'EOF' … EOF`; not a shell.
+fn commands(command: &str) -> Vec<Vec<String>> {
+    let chars: Vec<char> = command.chars().collect();
+    let mut out: Vec<Vec<String>> = Vec::new();
+    let mut words: Vec<String> = Vec::new();
     let mut word = String::new();
-    let mut quote: Option<char> = None;
     let mut started = false;
-    for c in segment.trim().trim_start_matches(['(', '{', ' ']).chars() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), c) => word.push(c),
-            (None, '"' | '\'') => {
+    let mut quote: Option<char> = None;
+    let mut next = Next::Word;
+    let mut heredocs: Vec<String> = Vec::new();
+    let finish = |word: &mut String,
+                  started: &mut bool,
+                  next: &mut Next,
+                  words: &mut Vec<String>,
+                  heredocs: &mut Vec<String>| {
+        if !*started {
+            return;
+        }
+        let w = std::mem::take(word);
+        *started = false;
+        match std::mem::replace(next, Next::Word) {
+            Next::Word => words.push(w),
+            Next::HeredocEnd => heredocs.push(w),
+            Next::Redirect => {}
+        }
+    };
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            } else if q == '"' && c == '\\' && i + 1 < chars.len() {
+                i += 1;
+                word.push(chars[i]);
+            } else {
+                word.push(c);
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '\'' | '"' => {
                 quote = Some(c);
                 started = true;
             }
-            (None, c) if c.is_whitespace() => {
-                if started {
-                    out.push(std::mem::take(&mut word));
-                    started = false;
+            '\\' => {
+                i += 1;
+                if let Some(&n) = chars.get(i) {
+                    if n != '\n' {
+                        word.push(n);
+                        started = true;
+                    }
                 }
             }
-            (None, c) => {
+            '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
+                finish(
+                    &mut word,
+                    &mut started,
+                    &mut next,
+                    &mut words,
+                    &mut heredocs,
+                );
+                i += 1;
+                if chars.get(i + 1) == Some(&'-') {
+                    i += 1;
+                }
+                next = Next::HeredocEnd;
+            }
+            '<' | '>' => {
+                // `2>&1`: the descriptor before the arrow is not a word either.
+                if started && word.chars().all(|d| d.is_ascii_digit()) {
+                    word.clear();
+                    started = false;
+                }
+                finish(
+                    &mut word,
+                    &mut started,
+                    &mut next,
+                    &mut words,
+                    &mut heredocs,
+                );
+                while chars
+                    .get(i + 1)
+                    .is_some_and(|n| matches!(n, '>' | '&' | '|'))
+                {
+                    i += 1;
+                }
+                next = Next::Redirect;
+            }
+            '\n' | ';' | '&' | '|' | '(' | ')' | '{' | '}' => {
+                finish(
+                    &mut word,
+                    &mut started,
+                    &mut next,
+                    &mut words,
+                    &mut heredocs,
+                );
+                next = Next::Word;
+                if !words.is_empty() {
+                    out.push(std::mem::take(&mut words));
+                }
+                if c == '\n' {
+                    // Each heredoc started on this line: skip its body to its end line.
+                    for end in std::mem::take(&mut heredocs) {
+                        loop {
+                            let from = i + 1;
+                            if from >= chars.len() {
+                                i = chars.len();
+                                break;
+                            }
+                            let to = chars[from..]
+                                .iter()
+                                .position(|n| *n == '\n')
+                                .map_or(chars.len(), |p| from + p);
+                            let line: String = chars[from..to].iter().collect();
+                            i = to;
+                            if line.trim() == end {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            c if c.is_whitespace() => finish(
+                &mut word,
+                &mut started,
+                &mut next,
+                &mut words,
+                &mut heredocs,
+            ),
+            c => {
                 word.push(c);
                 started = true;
             }
         }
+        i += 1;
     }
-    if started {
-        out.push(word);
+    finish(
+        &mut word,
+        &mut started,
+        &mut next,
+        &mut words,
+        &mut heredocs,
+    );
+    if !words.is_empty() {
+        out.push(words);
     }
     out
 }
@@ -337,11 +475,11 @@ pub(crate) fn resolve(raw: &str, dir: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
-#[cfg(test)]
+// The tests use Unix paths; the parser itself is the same everywhere.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     fn line(cwd: &str, calls: serde_json::Value) -> Vec<u8> {
         let mut text = serde_json::to_vec(&serde_json::json!({
             "type": "assistant", "cwd": cwd,
@@ -351,11 +489,9 @@ mod tests {
         text.push(b'\n');
         text
     }
-    #[cfg(unix)]
     fn tool(name: &str, input: serde_json::Value) -> serde_json::Value {
         serde_json::json!({"type": "tool_use", "name": name, "input": input})
     }
-    #[cfg(unix)]
     fn targets(command: &str) -> Vec<String> {
         git_targets(command, Path::new("/w/app"))
             .into_iter()
@@ -364,7 +500,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn a_shell_command_names_the_folders_it_commits_in_and_nothing_it_only_reads() {
         assert_eq!(targets("git commit -m x"), ["/w/app"]);
         assert_eq!(
@@ -387,6 +522,23 @@ mod tests {
         assert!(targets("cd $DIR && git commit -m x").is_empty());
         assert!(targets("cd /w/a && cd - && git push").is_empty());
         assert!(targets("grep -r 'git commit' docs").is_empty());
+        // Text is not a command: a commit message, a heredoc body, an echo.
+        assert_eq!(
+            targets("git add -A && git commit -q -F - <<'EOF'\nfix: x\n\ncd ../org && git add a && git commit -m row\nEOF\ngit push"),
+            ["/w/app", "/w/app", "/w/app"]
+        );
+        assert_eq!(
+            targets("git commit -m \"wip; cd /etc\" && git push"),
+            ["/w/app", "/w/app"]
+        );
+        assert!(targets("echo run git add later").is_empty());
+        assert_eq!(
+            targets("git -C sub/lib push 2>&1 | tail -3"),
+            ["/w/app/sub/lib"]
+        );
+        assert_eq!(targets("cd /w/x >/dev/null && git push"), ["/w/x"]);
+        assert_eq!(targets("env GIT_X=1 git commit -m y"), ["/w/app"]);
+        assert!(targets("cd && git commit -m x").is_empty());
         assert_eq!(
             resolve("../b/./c", Path::new("/w/a")),
             Some(PathBuf::from("/w/b/c"))
@@ -395,7 +547,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn edits_and_commits_count_with_the_sessions_folder_and_reads_do_not() {
         let edit = line(
             "/w/app",
@@ -453,7 +604,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn a_transcript_is_read_only_where_it_grew_and_a_line_being_written_waits() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("s.jsonl");

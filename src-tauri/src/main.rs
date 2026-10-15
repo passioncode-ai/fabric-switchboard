@@ -407,7 +407,7 @@ async fn save_project(
         })
         .await
 }
-/// SB-117: folders found for a project, waiting for Add or Not this one.
+/// SB-117/SB-131: folders added to projects or taken out as deleted, and those still being added.
 #[tauri::command]
 async fn project_suggestions(state: State<'_, Slot>) -> Result<Value, String> {
     state

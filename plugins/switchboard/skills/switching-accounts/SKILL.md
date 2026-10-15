@@ -173,20 +173,28 @@ between. A spend, credit or billing limit is the operator's to pay; report it on
 not retry it. `switchboard recovery` lists registered stops with `mode` `capacity` or
 `probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
 
-## 7. New worktrees and clones belong to their project
+## 7. A project's folders follow its work by themselves
 
-A Switchboard project reserves its accounts to its folders. When you create a git worktree, a
-second clone of a project repository, or a clone of a new repository of the same product, offer
-it to its project:
+A Switchboard project reserves its accounts to its folders, and Switchboard keeps the folder
+list for it, with nothing asked. These join the project by themselves within half a minute:
+
+- a git worktree you create;
+- a second clone of a project repository;
+- a clone of a new repository of the same product;
+- **any repository you edit, write or commit in while working in the project**.
+
+A project folder deleted from disk leaves the project by itself. To add a folder at once, for
+example one you create and do not start a session in:
 
 ```sh
 switchboard project suggest --folder <the new folder>
 ```
 
-The operator approves it in Switchboard; nothing joins without a click. Claude Code sessions do
-this by themselves at start through the plugin's hook; do it explicitly for a folder you create
-and do not start a session in, and in agents without the hook (Codex, others). Never add folders
-to a project with `project save` yourself to skip the approval.
+Before you change files or commit in another repository, know that it becomes part of your
+project. Its sessions then use your project's accounts and refuse others there. Work only in
+the repositories the task needs. A repository two projects' agents work in is taken out again
+and left to the operator. Never add or remove folders with `project save` yourself; the
+operator edits projects in the app.
 
 ## 8. A project folder routes Claude Code to its own accounts
 
