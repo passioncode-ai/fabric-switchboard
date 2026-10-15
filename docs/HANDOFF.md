@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-15 (morning) — 0.6.33 published: SB-129; SB-127, SB-49 closed
+
+- **SB-129** released in [v0.6.33](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.33)
+  (03:21:51Z, run 38672112470, every job green). A workflow whose executor names no account is
+  handed over only while it is worked (`silentSeconds` ≤ 3600).
+- **SB-127** merged (`13e0ca4`, ships with the next release): every early quota-check refusal has a
+  log code. The person still sees the store's own message.
+- **SB-49** closed. The installed app took 0.66 % CPU over an hour while relaying 24 session and
+  17 provider connections; that is load, not idle.
+- The installed app updated itself to 0.6.32 at 00:38Z; 0.6.33 follows at its next check.
+- **Models** per the operator's list (`synthesis/llm-models.md`): agents' OpenRouter default and
+  Hermes on mimo. Switchboard itself calls no model.
+
+**Exact next task** (unchanged): the operator decides SB-130 (trust the continuation's checkout, or
+keep the dialog). Then SB-122: confirm the pool move on 0.6.32+, then the *Move to…* action. Then
+SB-82 (runner kinds: `cursor-cli` → `cursor-agent` with an alias for saved chains).
+
+---
+
 ## 2026-10-15 — 0.6.32 published; iteration closed
 
 **Released** [v0.6.32](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.32)
