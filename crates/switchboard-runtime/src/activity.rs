@@ -483,6 +483,9 @@ pub(crate) fn resolve(raw: &str, dir: &Path) -> Option<PathBuf> {
             .map(PathBuf::from)
     };
     let raw = raw.trim_end_matches(')');
+    // A Windows verbatim path (`\\?\C:\…`, what `canonicalize` gives there) is a plain path:
+    // its `?` is no glob.
+    let raw = raw.strip_prefix(r"\\?\").unwrap_or(raw);
     let path = if raw == "~" || raw == "$HOME" || raw == "${HOME}" {
         home()?
     } else if let Some(rest) = raw
@@ -514,6 +517,20 @@ pub(crate) fn resolve(raw: &str, dir: &Path) -> Option<PathBuf> {
         }
     }
     Some(out)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn a_verbatim_windows_path_is_a_path() {
+        // SB-131: canonical paths on Windows start with `\\?\`; the nightly Windows run found it.
+        assert_eq!(
+            resolve(r"\\?\C:\work\lib\src\a.rs", Path::new(r"C:\work")),
+            Some(PathBuf::from(r"C:\work\lib\src\a.rs"))
+        );
+        assert_eq!(resolve(r"C:\work\*.rs", Path::new(r"C:\work")), None);
+    }
 }
 
 // The tests use Unix paths; the parser itself is the same everywhere.
