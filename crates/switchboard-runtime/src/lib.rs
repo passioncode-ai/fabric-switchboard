@@ -4025,6 +4025,18 @@ mod owner_tests {
             "Choose an existing project folder."
         );
     }
+    /// A path as a shell command on this system names it: Claude Code's shell on Windows is Git
+    /// Bash, where `\` escapes and paths are written with `/`.
+    fn shell_path(path: &Path) -> String {
+        let text = path.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text.to_owned()
+        }
+    }
+
     #[tokio::test]
     async fn a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither() {
         // SB-131: «автодобавление всех репозиториев … когда там агент работает».
@@ -4081,7 +4093,7 @@ mod owner_tests {
             entry(
                 &app,
                 "Bash",
-                json!({"command": format!("cd {} && git commit -m x", shared.display())}),
+                json!({"command": format!("cd {} && git commit -m x", shell_path(&shared))}),
             ),
             entry(
                 &other,

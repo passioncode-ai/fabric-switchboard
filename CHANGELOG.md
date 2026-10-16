@@ -12,6 +12,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - **A deleted folder leaves its project (SB-131).** A project folder deleted from disk — also while Switchboard was not running — and still missing five minutes later is taken out of its project, with one notification. Folders on an unmounted drive or share stay, a project keeps its last folder, a renamed or moved folder counts as deleted, and a deleted folder that comes back is found again.
 - **Edit a project's folders with the picker (SB-131).** Each folder in the project dialog has *Change…*, which opens the system folder picker. A project card with many folders shows the first six and *Show all*.
 - **An update no longer waits behind a window left open (SB-131).** A window open but out of focus for 30 minutes counts as nobody looking, so an update restarts into place; the window closes and Switchboard comes back in the menu bar. *Restart to update* keeps the window as you left it. A copy already waiting behind an open window needs one manual restart to get this release. Before, an app left open ran an old version for a day.
+- **Windows paths in agents' work (SB-131).** A path Windows writes in its long form (`\\?\C:\…`) counts as a path, not a pattern, when Switchboard reads which repository an agent changed.
 
 The operations log names every way a quota check can fail before it asks the provider (an account
 removed meanwhile, a non-OAuth account, a disabled one, an unreadable sign-in or store) instead of
