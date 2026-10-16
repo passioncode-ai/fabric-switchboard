@@ -106,7 +106,29 @@ pub fn apply_at_start(app: &AppHandle, root: &Path) {
         Ok(code) => switchboard_runtime::oplog::Field::Code(code),
         Err(_) => switchboard_runtime::oplog::Field::Code("failed"),
     };
+    // Checked at every start: a login item the system refused is said, not left silent
+    // (lifecycle rule, operator 2026-10-16).
+    if outcome.is_err() {
+        use tauri_plugin_notification::NotificationExt;
+        let (title, body) = login_item_failed_text(in_russian());
+        let _ = app.notification().builder().title(title).body(body).show();
+    }
     switchboard_runtime::oplog::event("login_item", &[("outcome", field)]);
+}
+
+/// What the notification says when the login item could not be set at start.
+pub fn login_item_failed_text(ru: bool) -> (String, String) {
+    if ru {
+        (
+            "Switchboard не запускается при входе".into(),
+            "Система не дала добавить Switchboard в объекты входа. Разрешите его в Системных настройках → Основные → Объекты входа.".into(),
+        )
+    } else {
+        (
+            "Switchboard does not open at login".into(),
+            "The system refused to add Switchboard to the login items. Allow it in System Settings → General → Login Items.".into(),
+        )
+    }
 }
 
 /// `{available, enabled}` for the About panel. Not available in a development build.
@@ -213,10 +235,41 @@ fn restart_label_in(version: &str, ru: bool) -> String {
     }
 }
 
-/// Adds "Restart to update" to the tray menu once an update is ready.
+/// The version a "Restart to finish updating" notification was shown for (one per version).
+static ANNOUNCED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// What the notification for a ready update says (lifecycle rule, operator 2026-10-16).
+pub fn update_ready_text(version: &str, ru: bool) -> (String, String) {
+    if ru {
+        (
+            "Перезапустите, чтобы завершить обновление".into(),
+            format!("Fabric Switchboard {version} готов. Перезапустите из значка в строке меню, или он запустится сам в свободную минуту."),
+        )
+    } else {
+        (
+            "Restart to finish updating".into(),
+            format!("Fabric Switchboard {version} is ready. Restart from the menu-bar icon, or it starts by itself at a quiet moment."),
+        )
+    }
+}
+
+/// Adds "Restart to update" to the tray menu once an update is ready, and says so once per
+/// version in a system notification.
 pub fn show_update(app: &AppHandle, version: &str) {
     if let Ok(mut ready) = READY.lock() {
         *ready = Some(version.to_owned());
+    }
+    let first = ANNOUNCED.lock().is_ok_and(|mut shown| {
+        let new = shown.as_deref() != Some(version);
+        if new {
+            *shown = Some(version.to_owned());
+        }
+        new
+    });
+    if first {
+        use tauri_plugin_notification::NotificationExt;
+        let (title, body) = update_ready_text(version, in_russian());
+        let _ = app.notification().builder().title(title).body(body).show();
     }
     if let (Some(tray), Ok(menu)) = (app.tray_by_id("switchboard"), menu(app, Some(version))) {
         let _ = tray.set_menu(Some(menu));
@@ -312,6 +365,15 @@ mod tests {
         assert!(!packaged(Path::new(
             "/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard"
         )));
+    }
+
+    #[test]
+    fn a_ready_update_and_a_refused_login_item_are_said() {
+        let (title, body) = update_ready_text("0.6.34", false);
+        assert_eq!(title, "Restart to finish updating");
+        assert!(body.contains("0.6.34"));
+        assert!(update_ready_text("0.6.34", true).1.contains("0.6.34"));
+        assert!(login_item_failed_text(false).1.contains("Login Items"));
     }
 
     #[test]
