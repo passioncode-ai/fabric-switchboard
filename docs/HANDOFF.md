@@ -2,6 +2,36 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-18 — REQ-002: an agent's unassigned Git repository becomes a project
+
+- **Behavior.** `ProjectSuggest`, the plugin's `SessionStart` hook and the existing background
+  activity pass now create an account-less project when no existing project claims the agent's
+  Git root. Creation reuses `projects::project_dir` and `Store::save_project` with an empty
+  account set. Existing worktree/clone/source attachment still goes through
+  `add_suggested_folder`; there is no second scanner and no broad parent scan.
+- **Preserved.** Existing matches and `in_project` win; equal matches create nothing; non-Git,
+  home/root and transient/tool folders are refused; `added`, `dismissed` and `shared` memory is
+  not undone; `gone` may be found again. `reason: unassigned` rows give the new project the same
+  one-notification and removal memory as an accepted suggestion. No account IDs move.
+- **Fallback.** A provider with no enabled account in the new project keeps its existing launch
+  fallback (`launch::project_allows`). Automatic `--provider` selection is a separate path and
+  still returns `NO_PROJECT_SELECTION` without a selected project account.
+- **Lifecycle.** The monitor stop receiver flows through `Pass::run` → `suggest_pass` →
+  `Activity::collect_while`: collection stops between transcripts, returns no partial evidence
+  and skips the rest of the pass. Automatic registration and the LC-01 drain deadline coexist.
+- **Docs.** CONTRACTS, SPEC, AGENT-ONBOARDING, CLI, MCP instructions/tool descriptions, SCN-055,
+  AGENTS lifecycle, OPERATIONS, the plugin guide and the changelog describe that behavior;
+  AGENT-ONBOARDING no longer says an account-less project cannot start a provider's sessions.
+
+**Checks.** The new tests first failed before implementation. On the final rebased commits,
+`./scripts/check.sh` exited 0, including frontend build, Rust tests/clippy, Node checks,
+documentation, plugin validation, packaging and third-party notices. The focused SessionStart
+creation test, background creation test, stop-aware collection test and SIGTERM/SIGINT shutdown
+deadline test all pass. `git diff --check` also passes.
+
+**Exact next task:** land the branch and run the isolated two-round cross-product scenario.
+No live-provider or Windows acceptance is claimed here.
+
 ## 2026-10-17 (evening) — 0.6.35–0.6.37: lifecycle prompts, 5-minute updates, project delta, no stalls
 
 Releases:

@@ -221,6 +221,83 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
     assert_eq!(hooked(&hook.to_string()), "", "already in the project");
 }
 #[test]
+fn an_unassigned_repository_becomes_a_project_through_the_session_hook() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let work = work.path().canonicalize().unwrap();
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+        (
+            output.status.success(),
+            json,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let hooked = |input: &str| {
+        let mut child = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(["project", "suggest", "--from-hook"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let repo = work.join("solo");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::write(repo.join(".git/config"), "").unwrap();
+    let hook =
+        serde_json::json!({"session_id": "s", "cwd": repo, "hook_event_name": "SessionStart"});
+
+    let said = hooked(&hook.to_string());
+    assert!(said.contains("project \"solo\""), "{said}");
+    assert!(said.contains("no accounts were moved"), "{said}");
+    assert_eq!(said.lines().count(), 1);
+    let (ok, listed, err) = run(&["project", "list"]);
+    assert!(ok, "{err}");
+    let projects = listed["data"]["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 1, "{listed}");
+    assert_eq!(projects[0]["accounts"], serde_json::json!([]));
+    assert_eq!(projects[0]["folders"].as_array().unwrap().len(), 1);
+    assert_eq!(hooked(&hook.to_string()), "", "idempotent re-entry");
+
+    let (ok, _, err) = run(&["project", "delete", "--pool", "solo"]);
+    assert!(ok, "{err}");
+    assert_eq!(
+        hooked(&hook.to_string()),
+        "",
+        "a project the person removed is not created again"
+    );
+    let (_, listed, _) = run(&["project", "list"]);
+    assert_eq!(listed["data"]["projects"].as_array().unwrap().len(), 0);
+
+    let plain_hook =
+        serde_json::json!({"session_id": "s", "cwd": "/", "hook_event_name": "SessionStart"});
+    assert_eq!(hooked(&plain_hook.to_string()), "");
+    let (_, listed, _) = run(&["project", "list"]);
+    assert_eq!(listed["data"]["projects"].as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn recovery_hook_never_fails_the_session() {
     // SB-115: Claude Code's StopFailure hook runs `switchboard recovery hook`; whatever the
     // input or the owner's state, it exits 0 and says why nothing was registered.

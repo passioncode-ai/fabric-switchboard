@@ -1522,14 +1522,20 @@ pub(crate) async fn onboard_status(
     probe.folder = Some(folder);
     Ok(onboarding::steps(&probe))
 }
-/// `switchboard project suggest --from-hook` (SB-117): Claude Code's `SessionStart` hook names
-/// the session's folder as `cwd`. A `SessionStart` hook's output joins the session's context,
-/// so it prints one line only when the folder was added to a project (SB-121) or waits for the
-/// operator, and nothing otherwise; it always exits 0.
+/// `switchboard project suggest --from-hook` (SB-117/REQ-002): Claude Code's `SessionStart` hook
+/// names the session's folder as `cwd`. Its output joins the session's context, so it prints one
+/// line only when a folder was added or its project was created, or when an add waits; it exits 0.
 async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
     let value = project_suggest_hook(root).await;
-    let project = value["suggestion"]["project"].as_str().unwrap_or("?");
-    if value["added"] == true {
+    let project = value["suggestion"]["project"]
+        .as_str()
+        .or_else(|| value["project"]["name"].as_str())
+        .unwrap_or("?");
+    if value["created"] == true {
+        println!(
+            "Switchboard: this Git folder is now the project \"{project}\"; no accounts were moved, and provider fallback is unchanged."
+        );
+    } else if value["added"] == true {
         println!(
             "Switchboard: this folder was added to the project \"{project}\"; its sessions use the project's accounts from their next start."
         );

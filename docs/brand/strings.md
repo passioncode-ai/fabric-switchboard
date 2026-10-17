@@ -88,3 +88,12 @@ errors; `handovers.rs` owns invalid id, unavailable offer and failed queue write
 The CLI uses "register", "claim" and "finish" for distinct host actions; it never
 calls a claim "resumed". No new renderer strings or locale keys.
 Humanization: on, own operational-language pass; no decorative or promotional wording.
+
+## Automatic project registration, 2026-10-17
+
+Surface: product-ui (CLI SessionStart). Status: proposed. SCN-055.
+`project.registration.created` = “Switchboard: this Git folder is now the project “{project}”; no accounts were moved, and provider fallback is unchanged.” —
+[SessionStart output](../../crates/switchboard-cli/src/main.rs), `main.rs:1536`.
+The line names the effect and account preservation only; the separate `--provider`
+selection contract stays in CONTRACTS and AGENT-ONBOARDING.
+Humanization: on, own operational-language pass; no decorative or promotional wording.

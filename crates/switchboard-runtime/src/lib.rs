@@ -863,9 +863,9 @@ impl Runtime {
             .map(|mut told| told.len() < 4096 && told.insert(key.to_owned()))
             .unwrap_or(false)
     }
-    /// The background half of SB-117/SB-121/SB-131, under the owner transaction like any other
-    /// write: folders found next to a project's, repositories its agents changed, folders that
-    /// could not be added yet, and project folders deleted from disk.
+    /// The background half of SB-117/SB-121/SB-131 and REQ-002, under the owner transaction like
+    /// any other write: folders found next to a project's, repositories its agents changed, an
+    /// agent's unassigned Git root, folders that could not be added yet, and deleted folders.
     /// The owner transaction for a background step, logged when held long.
     pub(crate) async fn hold(&self, step: &'static str) -> Held<'_> {
         Held {
@@ -878,9 +878,6 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
-        if snapshot.projects.is_empty() {
-            return;
-        }
         // Folders that could not be added (and those an older version left as questions) are
         // tried again every RETRY_PENDING, never asked about.
         let retry_at = self
@@ -981,6 +978,7 @@ impl Runtime {
         let mut claims: HashMap<PathBuf, HashSet<String>> = HashMap::new();
         // Folders of one project another project's agent works in: (folder, its project).
         let mut contested: HashMap<String, String> = HashMap::new();
+        let mut unassigned = Vec::new();
         {
             let Ok(mut worked) = self.worked.lock() else {
                 return;
@@ -995,6 +993,9 @@ impl Runtime {
                     target: canonical_near(&w.target),
                 };
                 let Some(project) = snapshot.project_for(&w.cwd) else {
+                    if let Some(root) = suggest::repo_root(&w.cwd) {
+                        unassigned.push(root);
+                    }
                     continue;
                 };
                 // Work inside a project folder is that project's already — unless another
@@ -1021,7 +1022,9 @@ impl Runtime {
                 claims.entry(root).or_default().insert(project.pool.clone());
             }
         }
-        if claims.is_empty() && contested.is_empty() {
+        unassigned.sort();
+        unassigned.dedup();
+        if claims.is_empty() && contested.is_empty() && unassigned.is_empty() {
             return;
         }
         let _transaction = self.hold("worked").await;
@@ -1070,6 +1073,51 @@ impl Runtime {
             self.suggestions_changed();
         }
         self.add_found(found, time);
+
+        let mut created = 0;
+        for folder in unassigned {
+            let Ok(current) = self.store.snapshot() else {
+                return;
+            };
+            let repos = suggest::project_repos(&current);
+            match suggest::unassigned(&self.root, &current, &repos, &folder) {
+                Ok(suggest::Outcome::Unassigned { folder, repository }) => {
+                    match create_unassigned_project(
+                        &self.store,
+                        &self.root,
+                        folder,
+                        repository,
+                        time,
+                    ) {
+                        Ok(_) => created += 1,
+                        Err(_) => {
+                            if self.first_time("create:refused") {
+                                oplog::event(
+                                    "project_suggestion",
+                                    &[("create", oplog::Field::Code("refused"))],
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    if self.first_time("create:unrecorded") {
+                        oplog::event(
+                            "project_suggestion",
+                            &[("create", oplog::Field::Code("unrecorded"))],
+                        );
+                    }
+                }
+            }
+        }
+        if created > 0 {
+            oplog::event(
+                "project_suggestion",
+                &[("created", oplog::Field::Number(created))],
+            );
+            self.suggestions_changed();
+        }
     }
     /// SB-131: a folder that joined its project because that project's agents worked in it, and
     /// that another project's agents now work in too, is a shared repository (an organisation
@@ -1970,6 +2018,43 @@ fn add_suggested_folder(
     }
     Ok(projects::project_view(&store.snapshot()?, &saved))
 }
+
+/// Creates the project for an agent's unassigned Git root. Creation never moves accounts: the
+/// empty account list is deliberate, and `save_project` supplies the usual name, bounds and event.
+fn create_unassigned_project(
+    store: &Store,
+    root: &Path,
+    folder: PathBuf,
+    repository: String,
+    now: i64,
+) -> Result<(Value, Value), String> {
+    let admitted = projects::project_dir(root, &folder)?;
+    let name = admitted
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project".into());
+    let saved = store.save_project(None, &name, std::slice::from_ref(&admitted), &[])?;
+    let suggestion = suggest::Suggestion {
+        folder: admitted.to_string_lossy().into_owned(),
+        pool: saved.pool.clone(),
+        reason: suggest::Reason::Unassigned,
+        repository: repository.clone(),
+        first_seen: now,
+        state: suggest::State::Added,
+    };
+    if suggest::remember_created(root, &suggestion.folder, &saved.pool, repository, now).is_err() {
+        oplog::event(
+            "project_suggestion",
+            &[("remember", oplog::Field::Code("failed"))],
+        );
+    }
+    let snapshot = store.snapshot()?;
+    Ok((
+        projects::project_view(&snapshot, &saved),
+        suggestion_view(&snapshot, &suggestion),
+    ))
+}
+
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
@@ -3135,10 +3220,17 @@ async fn execute(
         Operation::ProjectSuggest { folder } => {
             let snapshot = store.snapshot()?;
             let repos = suggest::project_repos(&snapshot);
-            match suggest::record(root, &snapshot, &repos, &folder, monitor::now())? {
+            let now = monitor::now();
+            let outcome = match suggest::record(root, &snapshot, &repos, &folder, now)? {
+                suggest::Outcome::NotOurs { .. } => {
+                    suggest::unassigned(root, &snapshot, &repos, &folder)?
+                }
+                other => other,
+            };
+            match outcome {
                 suggest::Outcome::New(s) => {
                     // SB-121: a project's folder joins it at once; only a refused add waits.
-                    let added = add_suggested_folder(&store, root, &s, monitor::now());
+                    let added = add_suggested_folder(&store, root, &s, now);
                     if let Some(rt) = runtime {
                         oplog::event(
                             "project_suggestion",
@@ -3158,6 +3250,19 @@ async fn execute(
                             json!({"suggested": true, "added": false, "suggestion": view, "message": e})
                         }
                     })
+                }
+                suggest::Outcome::Unassigned { folder, repository } => {
+                    let (project, suggestion) =
+                        create_unassigned_project(&store, root, folder, repository, now)?;
+                    if let Some(rt) = runtime {
+                        oplog::event(
+                            "project_suggestion",
+                            &[("created", oplog::Field::Number(1))],
+                        );
+                        rt.suggestions_changed();
+                    }
+                    Ok(json!({"suggested": false, "added": true, "created": true,
+                        "suggestion": suggestion, "project": project}))
                 }
                 other => Ok(
                     json!({"suggested": false, "reason": other.code(), "message": other.message()}),
@@ -4206,6 +4311,102 @@ mod owner_tests {
         } else {
             text.to_owned()
         }
+    }
+
+    #[tokio::test]
+    async fn an_unassigned_git_repository_becomes_a_project_without_changing_provider_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let repo = work.join("solo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(
+            repo.join(".git/config"),
+            "[remote \"origin\"]\n\turl = git@github.com:org/solo.git\n",
+        )
+        .unwrap();
+        let default = save(&runtime.store, "synthetic-default", "default");
+        runtime
+            .store
+            .select(Provider::Claude, "default", &default.id)
+            .unwrap();
+
+        let answer = runtime
+            .execute(Operation::ProjectSuggest {
+                folder: repo.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["added"], true, "{answer}");
+        assert_eq!(answer["created"], true, "{answer}");
+        assert_eq!(answer["project"]["accounts"], json!([]));
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.projects.len(), 1);
+        let project = &snapshot.projects[0];
+        assert_eq!(project.name, "solo");
+        assert_eq!(project.folders, [repo.to_string_lossy().into_owned()]);
+        assert!(!snapshot.accounts.iter().any(|a| a.pool == project.pool));
+        assert_eq!(snapshot.routes["claude:default"], default.id);
+        assert!(
+            launch::project_allows(&snapshot, &default, &repo).is_ok(),
+            "a provider with no account in the new project keeps its default fallback"
+        );
+
+        let again = runtime
+            .execute(Operation::ProjectSuggest {
+                folder: repo.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(again["reason"], "in_project", "{again}");
+        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
+        let plain = work.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let refused = runtime
+            .execute(Operation::ProjectSuggest { folder: plain })
+            .await
+            .unwrap();
+        assert_eq!(refused["reason"], "not_ours", "{refused}");
+        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_background_pass_creates_an_unassigned_agents_project_once() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let repo = work.join("background");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join(".git/config"), "").unwrap();
+        let transcript = work.join("session.jsonl");
+        std::fs::write(
+            &transcript,
+            json!({"type": "assistant", "cwd": repo, "message": {"content": [
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": repo.join("src/a.rs")}}]}})
+                .to_string()
+                + "\n",
+        )
+        .unwrap();
+        let now = monitor::now();
+        *runtime.transcript_list.lock().unwrap() = Some((now, vec![transcript]));
+
+        runtime.suggest_pass(now).await;
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.projects.len(), 1);
+        assert_eq!(snapshot.projects[0].name, "background");
+        assert_eq!(
+            snapshot.projects[0].folders,
+            [repo.to_string_lossy().into_owned()]
+        );
+        assert!(!snapshot
+            .accounts
+            .iter()
+            .any(|a| a.pool == snapshot.projects[0].pool));
+        runtime.suggest_pass(now + 1).await;
+        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
     }
 
     #[tokio::test]

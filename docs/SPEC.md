@@ -12,7 +12,7 @@ Core outcomes: canonical account secrets stay in the OS vault (isolated CLI mode
 | Provider | Claude Code, Codex CLI | provider adapters; Claude Desktop excluded |
 | Credential | API key, Claude setup token, imported OAuth JSON | inactive Claude OAuth accounts renewed by Switchboard since 0.5 (PLAN-0.5 D-2); the account Claude Code uses is renewed by Claude Code; no fabricated OAuth app registration |
 | Surface | Tauri desktop window, native `switchboard` CLI, managed child launch | menu-bar / notification-area icon and residency with the window closed since 0.5.5 (SB-28); MCP server for agents since 0.4 |
-| Scope | account + provider + pool | project rules since 0.4, projects with reserved accounts since 0.6.0 (SB-53); no cross-pool auto fallback |
+| Scope | account + provider + pool | project rules since 0.4, projects with optional reserved accounts since 0.6.0 (SB-53); an eligible unassigned Git repository registers as an account-less project when a coding agent opens it (REQ-002); no cross-pool auto fallback |
 | Isolation | managed home per account | no automatic MCP/settings/history sharing |
 | Switch | next launch (isolated); next request (proxy) | current stream retains captured identity |
 | Existing external CLI | current authorization capture; explicit native Claude activation | client cache reload timing requires live acceptance |

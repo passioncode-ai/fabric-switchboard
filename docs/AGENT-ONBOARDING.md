@@ -17,7 +17,8 @@ between them when one runs out, and gives coding agents its tools over MCP.
    - `needs_person` — tell the person `next.person` in your own words. When `next.command` is
      present, you may run it to start the step for them (for example, it opens the sign-in in a
      Terminal window), then wait for them.
-   - `optional` — offer it once; do it only if the person wants it.
+   - `optional` — not required to finish; follow its `next` only when you have not already
+     completed it.
 3. Run `switchboard onboard --status --json` again after every step. It reads the computer each
    time and writes nothing, so it is always safe to repeat.
 
@@ -27,7 +28,7 @@ between them when one runs out, and gives coding agents its tools over MCP.
 |---|---|---|
 | `owner` | The desktop app or `switchboard serve` is running | the person opens the app |
 | `accounts` | At least one account is saved | the person signs in; you may start `switchboard login begin` |
-| `project` | The folder belongs to a project (accounts reserved for its folders) | optional; ask first |
+| `project` | The folder belongs to a project; an eligible Git folder registers on agent open | optional; automatic, or run `next.command` |
 | `mcp` | The `switchboard` MCP server is registered with you | you |
 | `proving_call` | A Switchboard tool answered a coding agent | you |
 
@@ -37,9 +38,10 @@ between them when one runs out, and gives coding agents its tools over MCP.
   one in a command line. Sign-ins happen in the provider's own sign-in, in a Terminal window.
 - `switchboard accounts capture` saves the account the ordinary `claude` or `codex` is signed in
   to. Run it only when the person says to.
-- A project's accounts serve only sessions started in its folders, and a folder in a project
-  with no account of a provider cannot start that provider's sessions. Create one only when the
-  person wants accounts kept for it, and name the accounts (`switchboard accounts list`).
+- An eligible unassigned Git repository becomes a project when a coding agent opens it; no account
+  IDs move. For a provider with no enabled account in that project, ordinary account launches keep
+  their existing fallback; automatic `--provider` selection still requires the project's selected
+  account. Never move accounts during setup.
 - Changing the ordinary Claude Code login affects every `claude` session on the computer. Never
   do it during setup.
 - A server you register during a session is loaded by the next session. If `switchboard_accounts`

@@ -130,28 +130,20 @@ pub fn steps(probe: &Probe) -> Value {
             ),
             Value::Null,
         ),
-        (Some(folder), None) => {
-            let name = folder
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "project".into());
-            step(
-                "project",
-                "optional",
-                format!(
-                    "{} belongs to no project: its sessions use the default pool. A project reserves accounts for its folders.",
-                    folder.display()
+        (Some(folder), None) => step(
+            "project",
+            "optional",
+            format!(
+                "{} belongs to no project yet: its sessions use the default pool. An eligible Git repository becomes a project when a coding agent opens it, without moving accounts.",
+                folder.display()
+            ),
+            json!({
+                "command": format!(
+                    "{cli} project suggest --folder {}",
+                    shell_word(&folder.to_string_lossy())
                 ),
-                json!({
-                    "command": format!(
-                        "{cli} project save --name {} --folder {} --account <id>",
-                        shell_word(&name),
-                        shell_word(&folder.to_string_lossy())
-                    ),
-                    "person": "Only if the person wants accounts kept for this project: ask which ones (`switchboard accounts list`). A project with no account of a provider cannot start that provider's sessions in its folders.",
-                }),
-            )
-        }
+            }),
+        ),
         (None, _) => step(
             "project",
             "optional",
@@ -380,8 +372,12 @@ mod tests {
         assert_eq!(project["state"], "optional");
         assert_eq!(
             project["next"]["command"],
-            "/Users/x/.local/bin/switchboard project save --name 'my app' --folder '/work/my app' --account <id>"
+            "/Users/x/.local/bin/switchboard project suggest --folder '/work/my app'"
         );
+        assert!(project["summary"]
+            .as_str()
+            .unwrap()
+            .contains("without moving accounts"));
         let mcp = by_id(&answer, "mcp");
         assert_eq!(mcp["state"], "todo");
         assert_eq!(

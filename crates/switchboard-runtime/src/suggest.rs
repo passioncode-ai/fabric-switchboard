@@ -56,6 +56,8 @@ pub enum Reason {
     Ecosystem,
     /// SB-131: an agent working in the project changed files or committed in it.
     Worked,
+    /// An agent opened a Git repository that belonged to no project (REQ-002).
+    Unassigned,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -204,16 +206,18 @@ pub(crate) fn project_repos(snapshot: &Snapshot) -> Vec<(String, Repo)> {
 }
 
 /// Which project a folder belongs to, and why: the strongest match wins (worktree, then clone,
-/// then source); two projects matching equally strongly is no answer (D-7).
-pub(crate) fn classify(
+/// then source); two projects matching equally strongly is a conflict, never a guess (D-7).
+fn classify_inner(
     snapshot: &Snapshot,
     repos: &[(String, Repo)],
     folder: &Path,
-) -> Option<(String, Reason, String)> {
+) -> Result<Option<(String, Reason, String)>, ()> {
     if snapshot.project_for(folder).is_some() || contains_project(snapshot, folder) {
-        return None;
+        return Ok(None);
     }
-    let candidate = repo(folder)?;
+    let Some(candidate) = repo(folder) else {
+        return Ok(None);
+    };
     let mut best: Option<(u8, String, Reason, String)> = None;
     let mut tie = false;
     for project in &snapshot.projects {
@@ -258,9 +262,17 @@ pub(crate) fn classify(
         }
     }
     if tie {
-        return None;
+        return Err(());
     }
-    best.map(|(_, pool, reason, label)| (pool, reason, label))
+    Ok(best.map(|(_, pool, reason, label)| (pool, reason, label)))
+}
+
+pub(crate) fn classify(
+    snapshot: &Snapshot,
+    repos: &[(String, Repo)],
+    folder: &Path,
+) -> Option<(String, Reason, String)> {
+    classify_inner(snapshot, repos, folder).ok().flatten()
 }
 
 /// A folder around another project's folder could never join (projects never nest).
@@ -318,6 +330,11 @@ pub(crate) enum Outcome {
     Waiting,
     Declined,
     InProject,
+    /// A Git repository an agent opened that no existing project claims (REQ-002).
+    Unassigned {
+        folder: PathBuf,
+        repository: String,
+    },
     /// No project claims it. `settled: false`: a repository without an `origin` yet.
     NotOurs {
         settled: bool,
@@ -331,13 +348,14 @@ impl Outcome {
             Outcome::Waiting => "waiting",
             Outcome::Declined => "declined",
             Outcome::InProject => "in_project",
+            Outcome::Unassigned { .. } => "unassigned",
             Outcome::NotOurs { .. } => "not_ours",
             Outcome::Full => "full",
         }
     }
     pub(crate) fn message(&self) -> &'static str {
         match self {
-            Outcome::New(_) => "",
+            Outcome::New(_) | Outcome::Unassigned { .. } => "",
             Outcome::Waiting => WAITING,
             Outcome::Declined => DECLINED,
             Outcome::InProject => IN_PROJECT,
@@ -431,6 +449,57 @@ pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
         at = dir.parent();
     }
     None
+}
+
+/// The Git root an agent opened when no existing project claims it. Existing matches and ties are
+/// resolved first; remembered additions, dismissals and shared folders are never recreated.
+pub(crate) fn unassigned(
+    root: &Path,
+    snapshot: &Snapshot,
+    repos: &[(String, Repo)],
+    folder: &Path,
+) -> Result<Outcome, String> {
+    let Ok(folder) = folder.canonicalize() else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    if snapshot.project_for(&folder).is_some() {
+        return Ok(Outcome::InProject);
+    }
+    if transient(&folder) || tool_folder(&folder) {
+        return Ok(Outcome::NotOurs { settled: true });
+    }
+    let Some(folder) = repo_root(&folder).and_then(|p| p.canonicalize().ok()) else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    let Some(text) = folder
+        .to_str()
+        .filter(|t| t.len() <= MAX_FOLDER)
+        .map(str::to_owned)
+    else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    if contains_project(snapshot, &folder) {
+        return Ok(Outcome::NotOurs { settled: true });
+    }
+    let Some(candidate) = repo(&folder) else {
+        return Ok(Outcome::NotOurs { settled: true });
+    };
+    match classify_inner(snapshot, repos, &folder) {
+        Ok(Some(_)) | Err(()) => return Ok(Outcome::NotOurs { settled: true }),
+        Ok(None) => {}
+    }
+    let mut rows = read(root)?;
+    if let Some(i) = rows.iter().position(|r| r.folder == text) {
+        match rows[i].state {
+            State::Pending => return Ok(Outcome::Waiting),
+            State::Dismissed | State::Added | State::Shared => return Ok(Outcome::Declined),
+            State::Gone => {
+                rows.remove(i);
+            }
+        }
+    }
+    let repository = candidate.remote.unwrap_or(text);
+    Ok(Outcome::Unassigned { folder, repository })
 }
 
 /// Records a folder if it is a project's and not already suggested, added or declined.
@@ -548,6 +617,28 @@ fn record_row(
     rows.push(suggestion.clone());
     write(root, &rows)?;
     Ok(Outcome::New(suggestion))
+}
+
+/// Remembers a project created for an agent's unassigned Git root, using the same bounded storage
+/// and added/removed memory as an existing project's accepted suggestion.
+pub(crate) fn remember_created(
+    root: &Path,
+    folder: &str,
+    pool: &str,
+    repository: String,
+    now: i64,
+) -> Result<(), String> {
+    match record_row(
+        root,
+        folder.to_owned(),
+        pool.to_owned(),
+        Reason::Unassigned,
+        repository,
+        now,
+    )? {
+        Outcome::New(_) => mark_added(root, folder, now),
+        other => Err(other.message().into()),
+    }
 }
 
 /// The open suggestions: still pending, the folder still there and still in no project.
@@ -1207,6 +1298,57 @@ mod tests {
             read(root.path()).is_err(),
             "corrupt storage is not an empty list"
         );
+    }
+
+    #[test]
+    fn unassigned_repositories_are_not_guessed_from_conflicts_or_remembered_removals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let a = data.join("a");
+        let b = data.join("b");
+        git(&a, Some("git@github.com:org/shared.git"));
+        git(&b, Some("git@github.com:org/shared.git"));
+        let s = snapshot(&[("one", &[&a], &[]), ("two", &[&b], &[])]);
+        let repos = project_repos(&s);
+        let conflict = data.join("conflict");
+        git(&conflict, Some("git@github.com:org/shared.git"));
+        assert_eq!(
+            unassigned(root.path(), &s, &repos, &conflict).unwrap(),
+            Outcome::NotOurs { settled: true }
+        );
+
+        let fresh = data.join("fresh");
+        git(&fresh, None);
+        let first = unassigned(root.path(), &s, &repos, &fresh).unwrap();
+        let Outcome::Unassigned { folder, .. } = &first else {
+            panic!("expected an unassigned repository, got {first:?}");
+        };
+        assert_eq!(folder, &fresh);
+        remember_created(
+            root.path(),
+            &fresh.to_string_lossy(),
+            "fresh",
+            String::new(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            unassigned(root.path(), &s, &repos, &fresh).unwrap(),
+            Outcome::Declined,
+            "a project folder removed later is not created again"
+        );
+        mark_gone(
+            root.path(),
+            "fresh",
+            &[fresh.to_string_lossy().into_owned()],
+            2,
+        )
+        .unwrap();
+        assert!(matches!(
+            unassigned(root.path(), &s, &repos, &fresh).unwrap(),
+            Outcome::Unassigned { .. }
+        ));
     }
 
     #[test]

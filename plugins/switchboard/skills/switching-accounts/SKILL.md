@@ -175,17 +175,21 @@ between. A spend, credit or billing limit is the operator's to pay; report it on
 not retry it. `switchboard recovery` lists registered stops with `mode` `capacity` or
 `probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
 
-## 7. A project's folders follow its work by themselves
+## 7. Git folders and projects register by themselves
 
-A Switchboard project reserves its accounts to its folders, and Switchboard keeps the folder
-list for it, with nothing asked. These join the project by themselves within half a minute:
+An eligible unassigned Git repository you open becomes a Switchboard project through the same
+suggestion path used for existing projects. Creation uses an empty account set and never moves
+account IDs. Re-entry is idempotent; a project or folder the person removed is not recreated.
+
+A Switchboard project may reserve accounts to its folders, and Switchboard keeps the folder list
+for it, with nothing asked. These join an existing project by themselves within half a minute:
 
 - a git worktree you create;
 - a second clone of a project repository;
 - a clone of a new repository of the same product;
 - **any repository you edit, write or commit in while working in the project**.
 
-A project folder deleted from disk leaves the project by itself. To add a folder at once, for
+A project folder deleted from disk leaves the project by itself. To attach or create at once, for
 example one you create and do not start a session in:
 
 ```sh
@@ -193,19 +197,21 @@ switchboard project suggest --folder <the new folder>
 ```
 
 Before you change files or commit in another repository, know that it becomes part of your
-project. Its sessions then use your project's accounts and refuse others there. Work only in
-the repositories the task needs. A repository two projects' agents work in is taken out again
-and left to the operator. Change a project only when the operator asks, and then by delta with
-`switchboard_project_edit` (or `switchboard project edit`), never by restating its whole set
-with `project save`: a whole-set save drops whatever the list leaves out.
+project. For a provider with an enabled account in the project, other pools are refused there;
+a provider with no enabled project account keeps its existing launch fallback. Work only in the
+repositories the task needs. A repository two projects' agents work in is taken out again and left
+to the operator. Change an existing project only when the operator asks, and then by delta with
+`switchboard_project_edit` (or `switchboard project edit`), never by restating its whole set with
+`project save`: a whole-set save drops whatever the list leaves out.
 
 ## 8. A project folder routes Claude Code to its own accounts
 
-In a project folder, `.claude/settings.local.json` carries `ANTHROPIC_BASE_URL` and
-`ANTHROPIC_AUTH_TOKEN` written by Switchboard (SB-118). Claude Code sessions started there use
-the project's accounts. Never print, copy or commit that file, and never edit those two keys:
-the token opens the project's pool on this computer. `switchboard project bindings` lists the
-folders. A session that started before the folder joined keeps its old account until restarted.
+In a project folder with Claude accounts, `.claude/settings.local.json` carries
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` written by Switchboard (SB-118). Claude Code
+sessions started there use the project's accounts. Never print, copy or commit that file, and never
+edit those two keys: the token opens the project's pool on this computer. `switchboard project
+bindings` lists the folders. A session that started before the folder joined keeps its old account
+until restarted.
 
 ## 9. Never
 
