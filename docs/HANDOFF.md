@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-17 (evening) — 0.6.35–0.6.37: lifecycle prompts, 5-minute updates, project delta, no stalls
+
+Releases:
+- **0.6.35** (SB-136): a «Restart to finish updating» notification and a refused-login-item notification.
+- **0.6.36**:
+  - update checks every 5 minutes (operator 2026-10-17, for every PassionCode product; asked of the others on the Fabric board, thread 92c37fc0);
+  - SB-134 part 1: `project edit`, MCP `switchboard_projects` and `switchboard_project_edit`.
+- **0.6.37** (SB-138, release run 39073078291):
+  - **Stalls removed.** The owner had stalled control requests for up to 12 s, and `handovers` for up to 366 s (Fabric Dashboards FD-71). The background file work now runs in blocking sections, and subagent directories are listed every 120 s. `Handovers`/`HandoverTake` skip the owner transaction, and a transaction held ≥5 s logs `transaction_held` with the step that held it.
+
+Live, operator's machine:
+- **Folders:** 31 deleted folders left their projects and 15 found folders joined, with nothing asked.
+- **Duplicate MCP registration removed:** there had been a user-scope `switchboard` beside the plugin, giving 72 processes. The plugin was updated to 0.6.36.
+
+Accounts moved on the operator's word (2026-10-16/17):
+- **Agents:** claude8 and claude6.
+- **Apps & Soft:** claude5 and sergeysheleg4 (Claude).
+- **PassionCode:** vibecoder3.
+- **Back to default:** twingpt.
+- **Stays in default:** the Codex account of sergeysheleg4. It is the ordinary Codex CLI login, which no project may hold; switching that login was left alone, since it would affect every Codex session.
+
+**Exact next task:**
+1. After 0.6.37 is installed, re-measure `agents status` and `handovers` through the owner, the same way: one probe every 5 s for 10 minutes. Read any `transaction_held` lines and fix the step they name.
+2. Then SB-134 part 2: the rest of the CLI over MCP, and the CI parity check.
+
+---
+
 ## 2026-10-17 — 0.6.34 published (SB-131); lifecycle prompts (SB-136); accounts moved
 
 - **0.6.34**:
