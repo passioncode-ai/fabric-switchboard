@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.36 — 2026-10-17
 
 - **Updates are found within five minutes (operator, 2026-10-17).** Switchboard checks for a new version every five minutes instead of every six hours, also after a failed check. It logs a check that finds nothing new only once.
 - **Change a project by delta, also over MCP (SB-134).** `switchboard project edit --pool <pool> --add-account <id> --remove-folder <folder>` and the MCP tool `switchboard_project_edit` add or take out accounts and folders, or rename a project, and leave everything else as it is. Before, moving one account into a pool meant restating every folder and account of the project. `switchboard_projects` lists the projects over MCP.
