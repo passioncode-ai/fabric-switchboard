@@ -195,6 +195,21 @@ pub enum Operation {
     RemoveProject {
         pool: String,
     },
+    /// SB-134: change a project by delta — add or take out accounts and folders, rename it —
+    /// without restating its whole set. Everything not named stays as it is.
+    ProjectEdit {
+        pool: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        add_accounts: Vec<String>,
+        #[serde(default)]
+        remove_accounts: Vec<String>,
+        #[serde(default)]
+        add_folders: Vec<PathBuf>,
+        #[serde(default)]
+        remove_folders: Vec<PathBuf>,
+    },
     /// The third-party agent catalog (`agent_catalog`).
     AgentCatalog,
     /// How to connect one agent to `switchboard mcp` and, when it can, the proxy's `pool`.
@@ -1944,6 +1959,74 @@ fn with_subagents(files: &[PathBuf], time: i64) -> Vec<PathBuf> {
     }
     all
 }
+/// SB-134: the whole save a project delta amounts to. A folder or account named to be taken out
+/// that the project does not hold is refused (a typo never passes as done); one named to be added
+/// that it already holds is no change. The current folders are the save's base, so only the
+/// folders named here count as taken out by the person.
+fn project_edit(
+    snapshot: &switchboard_core::Snapshot,
+    pool: &str,
+    name: Option<String>,
+    add_accounts: &[String],
+    remove_accounts: &[String],
+    add_folders: &[PathBuf],
+    remove_folders: &[PathBuf],
+) -> Result<Operation, String> {
+    let project = snapshot
+        .projects
+        .iter()
+        .find(|p| p.pool == pool)
+        .ok_or("Project not found.")?;
+    let held: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
+    let same = |a: &Path, b: &Path| a == b || canonical_near(a) == canonical_near(b);
+    for f in remove_folders {
+        if !held.iter().any(|h| same(h, f)) {
+            return Err(PROJECT_EDIT_NO_FOLDER.into());
+        }
+    }
+    let mut folders: Vec<PathBuf> = held
+        .iter()
+        .filter(|h| !remove_folders.iter().any(|f| same(h, f)))
+        .cloned()
+        .collect();
+    for f in add_folders {
+        if !folders.iter().any(|h| same(h, f)) {
+            folders.push(f.clone());
+        }
+    }
+    let mut accounts: Vec<String> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.pool == project.pool)
+        .map(|a| a.id.clone())
+        .collect();
+    for id in remove_accounts {
+        if !accounts.contains(id) {
+            return Err(PROJECT_EDIT_NO_ACCOUNT.into());
+        }
+    }
+    accounts.retain(|id| !remove_accounts.contains(id));
+    for id in add_accounts {
+        if !snapshot.accounts.iter().any(|a| &a.id == id) {
+            return Err("Account not found.".into());
+        }
+        if !accounts.contains(id) {
+            accounts.push(id.clone());
+        }
+    }
+    Ok(Operation::SaveProject {
+        pool: Some(project.pool.clone()),
+        name: name.unwrap_or_else(|| project.name.clone()),
+        folders,
+        account_ids: accounts,
+        base_folders: Some(held),
+    })
+}
+/// Refusals of a project delta (SB-134).
+pub const PROJECT_EDIT_NO_FOLDER: &str =
+    "This project does not hold that folder. List the project's folders and name one of them.";
+pub const PROJECT_EDIT_NO_ACCOUNT: &str =
+    "This account is not in the project. List the project's accounts and name one of them.";
 /// A path with its nearest existing ancestor resolved (symlinks, `/tmp` → `/private/tmp`) and the
 /// missing rest joined back (SB-131).
 fn canonical_near(path: &Path) -> PathBuf {
@@ -2000,6 +2083,7 @@ impl Reported {
                 Self::Project(if pool.is_some() { "updated" } else { "created" })
             }
             Operation::RemoveProject { .. } => Self::Project("removed"),
+            Operation::ProjectEdit { .. } => Self::Project("updated"),
             Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
             Operation::Select { provider, .. } => Self::Switch {
                 provider: *provider,
@@ -3035,6 +3119,27 @@ async fn execute(
                 rt.suggestions_changed();
             }
             Ok(projects::project_view(&store.snapshot()?, &project))
+        }
+        Operation::ProjectEdit {
+            pool,
+            name,
+            add_accounts,
+            remove_accounts,
+            add_folders,
+            remove_folders,
+        } => {
+            let snapshot = store.snapshot()?;
+            let save = project_edit(
+                &snapshot,
+                &pool,
+                name,
+                &add_accounts,
+                &remove_accounts,
+                &add_folders,
+                &remove_folders,
+            )?;
+            // The same admission, refusals and memory of removals as a whole save (SaveProject).
+            Box::pin(execute(store, root, runtime, save)).await
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
@@ -4230,6 +4335,103 @@ mod owner_tests {
         assert_eq!(
             with_subagents(std::slice::from_ref(&session), later),
             [session]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_project_changes_by_delta_and_keeps_what_is_not_named() {
+        // SB-134: «перенеси claude8 в пул агентов» took a whole-set rewrite of 66 folders and
+        // 6 accounts; a delta names only what changes.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (a, b, c) = (work.join("a"), work.join("b"), work.join("c"));
+        for d in [&a, &b, &c] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        let two = fixtures::save(&runtime.store, "synthetic-two", "default").id;
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![a.clone(), b.clone()],
+                account_ids: vec![one.clone()],
+                base_folders: None,
+            })
+            .await
+            .unwrap();
+        let edit = |add_accounts: Vec<String>,
+                    remove_accounts: Vec<String>,
+                    add_folders: Vec<PathBuf>,
+                    remove_folders: Vec<PathBuf>| Operation::ProjectEdit {
+            pool: "app".into(),
+            name: None,
+            add_accounts,
+            remove_accounts,
+            add_folders,
+            remove_folders,
+        };
+        let view = runtime
+            .execute(edit(
+                vec![two.clone()],
+                vec![],
+                vec![c.clone()],
+                vec![b.clone()],
+            ))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let project = &snapshot.projects[0];
+        let text = |p: &PathBuf| p.to_string_lossy().into_owned();
+        assert_eq!(project.folders, [text(&a), text(&c)], "{view}");
+        let pool_of = |id: &str| {
+            snapshot
+                .accounts
+                .iter()
+                .find(|x| x.id == id)
+                .unwrap()
+                .pool
+                .clone()
+        };
+        assert_eq!((pool_of(&one), pool_of(&two)), ("app".into(), "app".into()));
+        // A folder the person takes out by delta stays out of the automatic adding.
+        let rows = suggest::read(root.path()).unwrap();
+        assert!(rows
+            .iter()
+            .any(|r| r.folder == text(&b) && r.state == suggest::State::Dismissed));
+        // Taking out what the project does not hold is refused; adding what it holds is no change.
+        let refused = runtime
+            .execute(edit(
+                vec![],
+                vec!["synthetic-nobody".into()],
+                vec![],
+                vec![],
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, PROJECT_EDIT_NO_ACCOUNT);
+        let refused = runtime
+            .execute(edit(vec![], vec![], vec![], vec![work.join("zzz")]))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, PROJECT_EDIT_NO_FOLDER);
+        runtime
+            .execute(edit(
+                vec![one.clone()],
+                vec![two.clone()],
+                vec![a.clone()],
+                vec![],
+            ))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.projects[0].folders.len(), 2);
+        assert_eq!(
+            snapshot.accounts.iter().find(|x| x.id == two).unwrap().pool,
+            "default",
+            "an account taken out goes back to the default pool"
         );
     }
 
