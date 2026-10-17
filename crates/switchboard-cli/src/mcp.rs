@@ -54,6 +54,8 @@ fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched (Claude Code, Codex): account_id, label, provider, pool, mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state — starting, running, ended or unknown. Without all, only starting and running ones. Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (optional), mcp (this server is registered with the agent) and proving_call. Each step is done, todo (run next.command), needs_person (tell the person next.person) or optional. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_projects","title":"Projects","description":"Every project: its pool, name, folders (repositories), sources and the accounts reserved for it, then every optional project rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_edit","title":"Change a project","description":"Change a project by delta: reserve accounts for it (add_accounts), give accounts back to the default pool (remove_accounts), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it. Everything not named stays as it is; naming an account or folder the project does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a project.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The project's pool, from switchboard_projects."},"name":{"type":"string"},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the project, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove project rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply project rule","description":"Apply the folder's rule to this session when you start work in a project. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
@@ -334,6 +336,48 @@ impl Server {
             _ => Err("target must be session, route or claude_cli.".into()),
         }
     }
+    async fn project_edit(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let strings = |key: &str| -> Result<Vec<String>, String> {
+            match args.get(key) {
+                None => Ok(vec![]),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .ok_or(format!("{key} must list strings."))
+                    })
+                    .collect(),
+                Some(_) => Err(format!("{key} must be a list.")),
+            }
+        };
+        let absolute = |key: &str| -> Result<Vec<PathBuf>, String> {
+            strings(key)?
+                .into_iter()
+                .map(|f| {
+                    let p = PathBuf::from(&f);
+                    if p.is_absolute() {
+                        Ok(p)
+                    } else {
+                        Err(format!("{key} takes absolute folders."))
+                    }
+                })
+                .collect()
+        };
+        let project = self
+            .call(Operation::ProjectEdit {
+                pool: required(args, "pool")?.into(),
+                name: args.get("name").and_then(Value::as_str).map(str::to_owned),
+                add_accounts: strings("add_accounts")?,
+                remove_accounts: strings("remove_accounts")?,
+                add_folders: absolute("add_folders")?,
+                remove_folders: absolute("remove_folders")?,
+            })
+            .await?;
+        Ok(
+            json!({"project": project, "message": "Project saved. It is visible in the Switchboard app under Projects."}),
+        )
+    }
     async fn project_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let hours = match args.get("expires_in_hours") {
             None => None,
@@ -419,6 +463,11 @@ impl Server {
                 Ok(path) => self.call(Operation::ResolveProject { path }).await,
                 Err(error) => Err(error),
             },
+            "switchboard_projects" => self
+                .call(Operation::Snapshot)
+                .await
+                .map(|v| json!({"projects": project_views(&v), "rules": rule_views(&v, now())})),
+            "switchboard_project_edit" => self.project_edit(args).await,
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,
             "switchboard_project_apply" => self.project_apply(args).await,

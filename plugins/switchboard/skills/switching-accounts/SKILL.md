@@ -46,6 +46,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_sessions` | no | the sessions Switchboard launched, and whether each is starting, running or ended |
 | `switchboard_onboarding` | no | setup steps: what is done, what to run, what is the person's (`switchboard onboard` is the guide) |
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
+| `switchboard_projects` | no | every project: pool, folders, sources, reserved accounts, and the rules |
+| `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename), only when the operator asks |
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |
 | `switchboard_project_remove` | yes | remove the rule for exactly one folder and provider |
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |
@@ -193,8 +195,9 @@ switchboard project suggest --folder <the new folder>
 Before you change files or commit in another repository, know that it becomes part of your
 project. Its sessions then use your project's accounts and refuse others there. Work only in
 the repositories the task needs. A repository two projects' agents work in is taken out again
-and left to the operator. Never add or remove folders with `project save` yourself; the
-operator edits projects in the app.
+and left to the operator. Change a project only when the operator asks, and then by delta with
+`switchboard_project_edit` (or `switchboard project edit`), never by restating its whole set
+with `project save`: a whole-set save drops whatever the list leaves out.
 
 ## 8. A project folder routes Claude Code to its own accounts
 

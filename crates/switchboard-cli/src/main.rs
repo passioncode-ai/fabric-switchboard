@@ -257,9 +257,32 @@ enum Project {
         #[arg(long, value_enum)]
         provider: ProviderArg,
     },
+    /// Change a project by delta (SB-134): add or take out accounts and folders, or rename it.
+    /// Everything not named stays as it is; naming something the project does not hold is
+    /// refused.
+    Edit {
+        /// The project's pool (`switchboard project list`).
+        #[arg(long)]
+        pool: String,
+        /// A new name for the project.
+        #[arg(long)]
+        name: Option<String>,
+        /// An account to reserve for the project; repeat for each.
+        #[arg(long = "add-account")]
+        add_accounts: Vec<String>,
+        /// An account to give back to the `default` pool; repeat for each.
+        #[arg(long = "remove-account")]
+        remove_accounts: Vec<String>,
+        /// An absolute folder to add; repeat for each.
+        #[arg(long = "add-folder")]
+        add_folders: Vec<PathBuf>,
+        /// A folder of the project to take out; repeat for each. It is not added back by itself.
+        #[arg(long = "remove-folder")]
+        remove_folders: Vec<PathBuf>,
+    },
     /// Create or update a project: its folders (repositories) and the accounts reserved for
     /// them. The listed accounts are the project's whole set; one left out goes back to the
-    /// `default` pool.
+    /// `default` pool. To change a few, use `project edit`.
     Save {
         /// Update the project with this pool; without it, a new project is created.
         #[arg(long)]
@@ -1224,6 +1247,25 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 account_ids: accounts.clone(),
                 base_folders: None,
+            },
+            Project::Edit {
+                pool,
+                name,
+                add_accounts,
+                remove_accounts,
+                add_folders,
+                remove_folders,
+            } => Operation::ProjectEdit {
+                pool: pool.clone(),
+                name: name.clone(),
+                add_accounts: add_accounts.clone(),
+                remove_accounts: remove_accounts.clone(),
+                add_folders: add_folders
+                    .iter()
+                    .map(|f| folder(&Some(f.clone())))
+                    .collect::<Result<Vec<_>, _>>()?,
+                // A folder to take out may be gone from disk: taken as given.
+                remove_folders: remove_folders.clone(),
             },
             Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
             Project::Suggest {

@@ -173,6 +173,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_sessions",
             "switchboard_onboarding",
             "switchboard_project_context",
+            "switchboard_projects",
+            "switchboard_project_edit",
             "switchboard_project_set",
             "switchboard_project_remove",
             "switchboard_project_apply",
@@ -540,6 +542,47 @@ fn project_commands_work_offline_from_the_cli() {
             .len(),
         2
     );
+    // SB-134: one folder taken out by delta; the other stays.
+    let edited = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args([
+            "--json",
+            "project",
+            "edit",
+            "--pool",
+            "alpha-web",
+            "--remove-folder",
+        ])
+        .arg(&api)
+        .output()
+        .unwrap();
+    assert!(
+        edited.status.success(),
+        "{}",
+        String::from_utf8_lossy(&edited.stderr)
+    );
+    let value: Value = serde_json::from_slice(&edited.stdout).unwrap();
+    assert_eq!(
+        value["data"]["folders"].as_array().unwrap().len(),
+        1,
+        "{value}"
+    );
+    let refused = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args([
+            "project",
+            "edit",
+            "--pool",
+            "alpha-web",
+            "--remove-account",
+            "nobody",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("not in the project"));
     let deleted = Command::new(env!("CARGO_BIN_EXE_switchboard"))
         .arg("--data-dir")
         .arg(data.path())
@@ -690,4 +733,57 @@ fn an_in_place_launch_is_refused_where_it_cannot_run() {
     );
     let (ok, _) = run(&["launch", "some-id", "--provider", "claude"]);
     assert!(!ok, "an id and --provider together are refused");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
+    // SB-134: moving one account into a project's pool takes one call naming it.
+    let (data, projects, owner, ids) = fixture().await;
+    let (a, b) = (projects.path().join("a"), projects.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    owner
+        .runtime
+        .execute(Operation::SaveProject {
+            pool: None,
+            name: "Agents".into(),
+            folders: vec![a.clone()],
+            account_ids: vec![],
+            base_folders: None,
+        })
+        .await
+        .unwrap();
+    let mut agent = Agent::start(data.path(), projects.path(), &[], false);
+    let (error, listed) = agent.tool("switchboard_projects", json!({}));
+    assert!(!error, "{listed}");
+    assert_eq!(listed["projects"][0]["name"], "Agents");
+    let pool = listed["projects"][0]["pool"].as_str().unwrap().to_owned();
+    let (error, changed) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "add_accounts": [ids[2]], "add_folders": [b.to_string_lossy()]}),
+    );
+    assert!(!error, "{changed}");
+    let (_, listed) = agent.tool("switchboard_projects", json!({}));
+    let project = &listed["projects"][0];
+    assert_eq!(project["folders"].as_array().unwrap().len(), 2);
+    assert_eq!(project["accounts"][0]["id"], ids[2]);
+    let (error, refused) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "remove_accounts": ["not-an-account"]}),
+    );
+    assert!(error, "{refused}");
+    let (error, refused) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "add_folders": ["relative/x"]}),
+    );
+    assert!(error, "{refused}");
+    let mut reader = Agent::start(data.path(), projects.path(), &[], true);
+    let names: Vec<String> = reader.request("tools/list", json!({}))["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.contains(&"switchboard_projects".to_owned()));
+    assert!(!names.contains(&"switchboard_project_edit".to_owned()));
 }

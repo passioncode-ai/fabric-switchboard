@@ -190,6 +190,7 @@ Project rules are optional: a folder and its subfolders start on a chosen accoun
 switchboard project list                      # {projects, rules}: projects with folders and accounts, then rules
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
+switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8

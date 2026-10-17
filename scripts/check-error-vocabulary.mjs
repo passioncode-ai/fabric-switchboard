@@ -55,6 +55,8 @@ const ALLOWLIST = {
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
+  "This project does not hold that folder. List the project's folders and name one of them.": 'ProjectEdit (SB-134): CLI `project edit` and MCP `switchboard_project_edit` only; the window saves whole projects',
+  "This account is not in the project. List the project's accounts and name one of them.": 'ProjectEdit (SB-134): CLI `project edit` and MCP `switchboard_project_edit` only; the window saves whole projects',
   'store': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the store\'s own message',
   'vault': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the vault\'s own message',
   // runtime bindings.rs (SB-118): read by the background pass, uninstall and `project bindings` (CLI) only.
