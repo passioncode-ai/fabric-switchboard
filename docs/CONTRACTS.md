@@ -707,7 +707,7 @@ Code: `src-tauri/src/updates.rs` (`replaces`, `idle_blocker`, `IdleReport`, `rec
 `Updates::swap`), `Runtime::busy_reason`. Behaviour and events: [DISTRIBUTION → Automatic
 updates](DISTRIBUTION.md#automatic-updates-sb-55).
 
-- The check loop runs every 6 h while an update waits. Offered: newer than the running version and
+- The check loop runs every 5 min (`CHECK_EVERY`, operator 2026-10-17), also while an update waits; a check that finds nothing new is logged once, not each time. Offered: newer than the running version and
   than the waiting one. A newer verified release replaces the waiting one; nothing newer, a failed
   check, download or signature, or a held release keeps it; a failed or stalled swap drops it.
 - `Updates::swap` (an async mutex) is held across each bundle swap and across *Restart to update*

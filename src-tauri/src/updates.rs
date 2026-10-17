@@ -1,5 +1,5 @@
 //! Automatic updates (SB-55): an installed Switchboard checks the latest GitHub release at start
-//! and every six hours, downloads a newer version in the background, verifies it against the
+//! and every five minutes, downloads a newer version in the background, verifies it against the
 //! minisign public key in `tauri.conf.json` (`plugins.updater`) and against the version that
 //! signature names, and installs it without the person doing anything. On by default; one switch
 //! in About → "Running in the background" turns it off (`<data>/auto-update`, absent = on).
@@ -32,8 +32,11 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub const AUTO_UPDATE_FILE: &str = "auto-update";
 /// The first check waits for the start-up work (owner, monitor, renewals) to settle.
 pub const FIRST_CHECK_AFTER: Duration = Duration::from_secs(90);
-pub const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
-pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(60 * 60);
+/// Every PassionCode product checks for a new version every five minutes (operator 2026-10-17,
+/// «проверка обновления раз в 5 минут во всех продуктах passioncode»). One small request to the
+/// release's `latest.json` asset, which is not the rate-limited GitHub API.
+pub const CHECK_EVERY: Duration = Duration::from_secs(5 * 60);
+pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(5 * 60);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 /// While an update waits to start (and only then), how often the app looks for an idle moment to
 /// start it (LC-16 activation). No other timer runs while nothing is ready.
@@ -528,8 +531,22 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
     };
     let phase = inner.phase;
     drop(inner);
-    event("update_check", &[("outcome", Field::Code(code))]);
+    if logs_check(code) {
+        event("update_check", &[("outcome", Field::Code(code))]);
+    }
     phase
+}
+
+/// The outcome of the last logged check. A check every five minutes that finds nothing new is
+/// logged once, not 288 times a day; every other outcome is logged each time.
+static LAST_LOGGED: Mutex<Option<&'static str>> = Mutex::new(None);
+fn logs_check(code: &'static str) -> bool {
+    let Ok(mut last) = LAST_LOGGED.lock() else {
+        return true;
+    };
+    let repeat = code == "current" && *last == Some("current");
+    *last = Some(code);
+    !repeat
 }
 
 /// The end of a check that ran while an update waited (SB-105). Nothing newer, or a check or
@@ -1098,6 +1115,18 @@ mod tests {
             t
         ));
         assert!(nobody_looking(Some(true), false, t - UNATTENDED_SECONDS, t));
+    }
+
+    #[test]
+    fn checks_run_every_five_minutes_and_a_quiet_check_is_logged_once() {
+        // Operator 2026-10-17: every PassionCode product checks every five minutes.
+        assert_eq!(CHECK_EVERY, Duration::from_secs(300));
+        assert_eq!(RETRY_AFTER_FAILURE, Duration::from_secs(300));
+        assert!(logs_check("current"));
+        assert!(!logs_check("current"));
+        assert!(logs_check("failed"));
+        assert!(logs_check("current"));
+        assert!(logs_check("ready"));
     }
 
     #[test]

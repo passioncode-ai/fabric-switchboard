@@ -355,7 +355,7 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
   if (status.state === 'checking') return { text: t('Checking for updates…'), restart: false };
   if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };
   if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
-  return { text: t('Version {version} is the latest. Switchboard checks again every six hours.', { version: status.current }), restart: false };
+  return { text: t('Version {version} is the latest. Switchboard checks again every five minutes.', { version: status.current }), restart: false };
 }
 
 /**
