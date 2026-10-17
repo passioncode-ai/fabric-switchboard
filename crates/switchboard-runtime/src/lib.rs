@@ -5457,8 +5457,17 @@ mod lifecycle_tests {
         assert!(stopped.drained);
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(!descriptor.exists());
-        // The store is free for the next owner.
-        Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        // The store is free for the next owner. The lock goes with the last handle on the store,
+        // which a background task of the drained owner may drop a moment later (release run
+        // 38967680225, Linux): free within a second.
+        let free = (0..50).any(|_| {
+            let open = Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default()));
+            if open.is_err() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            open.is_ok()
+        });
+        assert!(free, "the store is free within a second of the stop");
     }
 
     #[tokio::test]
