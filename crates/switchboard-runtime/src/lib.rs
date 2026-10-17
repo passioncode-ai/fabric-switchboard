@@ -874,7 +874,19 @@ impl Runtime {
             since: std::time::Instant::now(),
         }
     }
+    #[cfg(test)]
     pub(crate) async fn suggest_pass(&self, time: i64) {
+        self.suggest_pass_with_stop(time, None).await;
+    }
+    async fn suggest_pass_with_stop(
+        &self,
+        time: i64,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) {
+        let stopped = || stop.as_ref().is_some_and(|s| *s.borrow());
+        if stopped() {
+            return;
+        }
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
@@ -894,15 +906,21 @@ impl Runtime {
                 }
             }
         }
-        self.worked_pass(&snapshot, time).await;
+        self.worked_pass_with_stop(&snapshot, time, stop).await;
+        if stopped() {
+            return;
+        }
         self.vanish_pass(&snapshot, time).await;
+        if stopped() {
+            return;
+        }
         // Listing folders writes nothing: it runs outside the owner transaction, which only
         // the recording below takes, and only when something changed.
         let candidates = match self.suggest.lock() {
             Ok(mut scanner) => blocking::run(|| scanner.collect(&snapshot, time)),
             Err(_) => return,
         };
-        if candidates.is_empty() {
+        if candidates.is_empty() || stopped() {
             return;
         }
         let _transaction = self.hold("suggest_found").await;
@@ -918,13 +936,22 @@ impl Runtime {
     /// SB-131: the repositories agents of a project changed since the last pass join it. The
     /// project is the one the session works in (its `cwd`); a repository changed by agents of two
     /// projects in one pass joins neither.
-    async fn worked_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
+    async fn worked_pass_with_stop(
+        &self,
+        snapshot: &switchboard_core::Snapshot,
+        time: i64,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) {
+        if stop.as_ref().is_some_and(|s| *s.borrow()) {
+            return;
+        }
         // A synthetic owner reads no transcript of the machine it runs on. Listing and reading
         // transcripts is file work: it runs as a blocking section, so the control listener and the
         // proxy never wait behind it (a pass that read ~6,700 subagent entries on a worker held a
         // control request for 12 s, 2026-10-17).
         let files = blocking::run(|| self.work_files(time));
-        self.worked_from(snapshot, &files, time).await;
+        self.worked_from_with_stop(snapshot, &files, time, stop)
+            .await;
     }
     /// The transcripts the work scan reads: the sessions' and their subagents', the subagent
     /// directories listed again at most every SUBAGENTS_EVERY.
@@ -961,15 +988,31 @@ impl Runtime {
         }
         files
     }
+    #[cfg(test)]
     pub(crate) async fn worked_from(
         &self,
         snapshot: &switchboard_core::Snapshot,
         files: &[PathBuf],
         time: i64,
     ) {
+        self.worked_from_with_stop(snapshot, files, time, None)
+            .await;
+    }
+    async fn worked_from_with_stop(
+        &self,
+        snapshot: &switchboard_core::Snapshot,
+        files: &[PathBuf],
+        time: i64,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) {
         let evidence = match self.activity.lock() {
-            Ok(mut activity) => blocking::run(|| activity.collect(files)),
+            Ok(mut activity) => blocking::run(|| {
+                activity.collect_while(files, || stop.as_ref().is_some_and(|s| *s.borrow()))
+            }),
             Err(_) => return,
+        };
+        let Some(evidence) = evidence else {
+            return;
         };
         if evidence.is_empty() {
             return;

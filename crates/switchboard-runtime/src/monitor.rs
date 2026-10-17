@@ -57,7 +57,8 @@ impl MonitorHandle {
                 let Some(runtime) = weak.upgrade() else {
                     break;
                 };
-                pass.run(&runtime, native_sources, now()).await;
+                pass.run_with_stop(&runtime, native_sources, now(), Some(&stopped))
+                    .await;
             }
         });
         Self {
@@ -110,10 +111,20 @@ struct RenewSchedule {
     retry_at: std::collections::HashMap<String, i64>,
 }
 impl Pass {
+    #[cfg(test)]
     pub(crate) async fn run(&mut self, runtime: &Runtime, native_sources: bool, time: i64) {
-        // With no saved Claude OAuth account there is nothing of Claude Code's to keep
-        // current: no Keychain read, no Claude Swap read, no limit scan of transcripts (the
-        // work scan of SB-131 reads them only while a project exists).
+        self.run_with_stop(runtime, native_sources, time, None)
+            .await;
+    }
+    async fn run_with_stop(
+        &mut self,
+        runtime: &Runtime,
+        native_sources: bool,
+        time: i64,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) {
+        // With no saved Claude OAuth account there is nothing of Claude Code's to keep current:
+        // no Keychain read and no Claude Swap read. Unassigned work discovery is stop-aware.
         let claude = native_sources && claude_oauth_saved(&runtime.store);
         if native_sources
             && (time - self.last_source_sync >= INTERVAL_SECONDS || time < self.last_source_sync)
@@ -125,11 +136,20 @@ impl Pass {
         }
         // Reads recent transcripts: file work, in a blocking section (2026-10-17 stalls).
         crate::blocking::run(|| scan_limits(runtime, claude, time));
+        if stop.as_ref().is_some_and(|s| *s.borrow()) {
+            return;
+        }
         // SB-117: a project's new folders, found by stamps only (LC-04); a real owner only.
         if native_sources {
-            runtime.suggest_pass(time).await;
+            runtime.suggest_pass_with_stop(time, stop).await;
+            if stop.as_ref().is_some_and(|s| *s.borrow()) {
+                return;
+            }
             // SB-118: ordinary Claude Code in a project's folders uses the project's accounts.
             runtime.bindings_pass().await;
+        }
+        if stop.as_ref().is_some_and(|s| *s.borrow()) {
+            return;
         }
         // SB-106: near its limit the account a session works on is checked sooner, and the
         // pool's next account every minute — never one whose checks the provider refused lately.

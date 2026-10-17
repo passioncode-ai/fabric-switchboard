@@ -65,12 +65,26 @@ pub(crate) struct Activity {
 impl Activity {
     /// The evidence appended to `files` since the last call. A transcript seen for the first
     /// time is read from its last TAIL_BYTES, so a session already running counts too.
+    #[cfg(test)]
     pub(crate) fn collect(&mut self, files: &[PathBuf]) -> Vec<Worked> {
+        self.collect_while(files, || false).unwrap_or_default()
+    }
+
+    /// As `collect`, but stops between transcripts when `stop` answers true. A stopped collection
+    /// returns no partial evidence, so a shutdown cannot register only part of a pass.
+    pub(crate) fn collect_while(
+        &mut self,
+        files: &[PathBuf],
+        mut stop: impl FnMut() -> bool,
+    ) -> Option<Vec<Worked>> {
         let wanted: HashSet<&PathBuf> = files.iter().collect();
         self.files.retain(|path, _| wanted.contains(path));
         let mut found: Vec<Worked> = Vec::new();
         let mut unique: HashSet<Worked> = HashSet::new();
         for path in files {
+            if stop() {
+                return None;
+            }
             if found.len() >= MAX_EVIDENCE {
                 break;
             }
@@ -80,7 +94,7 @@ impl Activity {
                 }
             }
         }
-        found
+        Some(found)
     }
 
     fn scan(&mut self, path: &PathBuf) -> Vec<Worked> {
@@ -720,5 +734,29 @@ mod tests {
         // A transcript no longer recent is forgotten.
         activity.collect(&[]);
         assert!(activity.files.is_empty());
+    }
+
+    #[test]
+    fn collection_stops_between_transcripts_without_returning_partial_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.jsonl");
+        let second = dir.path().join("second.jsonl");
+        let call = |target: &str| {
+            line(
+                "/w/app",
+                serde_json::json!([tool("Edit", serde_json::json!({"file_path": target}))]),
+            )
+        };
+        fs::write(&first, call("/w/one/a.rs")).unwrap();
+        fs::write(&second, call("/w/two/b.rs")).unwrap();
+        let mut activity = Activity::default();
+        let mut checks = 0;
+        let found = activity.collect_while(&[first, second], || {
+            checks += 1;
+            checks > 1
+        });
+        assert!(found.is_none(), "a stop returns no partial evidence");
+        assert_eq!(checks, 2, "the next transcript is not read after the stop");
+        assert_eq!(activity.files.len(), 1);
     }
 }

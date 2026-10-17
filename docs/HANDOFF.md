@@ -29,6 +29,15 @@ documentation, plugin validation, packaging and third-party notices. The focused
 creation test, background creation test, stop-aware collection test and SIGTERM/SIGINT shutdown
 deadline test all pass. `git diff --check` also passes.
 
+**Lifecycle follow-up.** `serve_stops_on_sigterm_and_sigint_within_the_deadline` initially failed
+at `commands.rs:927`: removing the empty-project guard also made the first background pass read
+recent Claude transcripts (22 session files, about 767 MB on this machine, plus 13 subagent
+files), and synchronous activity collection delayed the drain. `Pass::run` now passes its stop
+receiver through `suggest_pass` into `Activity::collect_while`; a stop between transcripts returns
+no partial evidence and skips the rest of the pass, preserving automatic project creation and the
+LC-01 drain. `collection_stops_between_transcripts_without_returning_partial_evidence`, the
+original SIGTERM/SIGINT lifecycle test, and the background project-creation test pass.
+
 **Exact next task:** land the branch and run the isolated two-round cross-product scenario.
 No live-provider or Windows acceptance is claimed here.
 

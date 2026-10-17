@@ -6,11 +6,14 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- **An agent's unassigned Git repository becomes a project (REQ-002).** The existing `ProjectSuggest`/`SessionStart` and background activity path now creates an account-less project when no existing project matches, while worktrees, clones and source repositories still attach to their existing project. Creation moves no account IDs and leaves provider fallback rules unchanged. Re-entry is idempotent; conflicts, non-Git and broad folders, transient/tool folders, and remembered removals do not create projects. A `project-suggestions.json` row with `reason: unassigned` is unreadable to 0.6.36 and older; delete that operational file before downgrading.
+
 ## 0.6.37 — 2026-10-17
 
 - **No more stalls behind the background scan.** Switchboard read many agent transcripts on every pass in a way that held up its own answers, sometimes for 12 seconds. A tool call could time out. That work now runs aside, and subagent folders are listed every two minutes instead of every 30 seconds.
 - **Hand-overs answer at once.** Reading the queue of hand-overs (`switchboard handovers`) and taking one no longer wait behind background work, which could hold them for minutes. Fabric's console takes a hand-over before it falls back to Terminal.
-- **An agent's unassigned Git repository becomes a project (REQ-002).** The existing `ProjectSuggest`/`SessionStart` and background activity path now creates an account-less project when no existing project matches, while worktrees, clones and source repositories still attach to their existing project. Creation moves no account IDs and leaves provider fallback rules unchanged. Re-entry is idempotent; conflicts, non-Git and broad folders, transient/tool folders, and remembered removals do not create projects. A `project-suggestions.json` row with `reason: unassigned` is unreadable to 0.6.36 and older; delete that operational file before downgrading.
 
 ## 0.6.36 — 2026-10-17
 
