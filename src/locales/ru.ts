@@ -719,7 +719,7 @@ export const RU: Record<string, string> = {
   "Version {version}. Automatic updates are off.": "Версия {version}. Автоматические обновления выключены.",
   "Downloading version {version}…": "Загрузка версии {version}…",
   "Checking for updates…": "Проверка обновлений…",
-  "Version {version} is the latest. Switchboard checks again every six hours.": "Версия {version} — последняя. Switchboard проверяет обновления каждые шесть часов.",
+  "Version {version} is the latest. Switchboard checks again every five minutes.": "Версия {version} — последняя. Switchboard проверяет обновления каждые пять минут.",
   "{label} is signed in again in {provider} · {pool}.": "Вход в аккаунт {label} выполнен снова ({provider} · {pool}).",
   "{label} added to {provider} · {pool}.": "Аккаунт {label} добавлен в {provider} · {pool}.",
   "Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.": "Switchboard пока не смог удалить временную папку входа и попробует снова перед следующим входом.",
