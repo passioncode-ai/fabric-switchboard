@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.35 — 2026-10-17
 
 - **A ready update says so (lifecycle rule, 2026-10-16).** When a new version is downloaded and ready, one notification per version reads “Restart to finish updating”. The menu-bar item still offers the restart, and an idle moment still starts it by itself.
 - **A refused login item says so.** Switchboard checks its login item at every start. If the system refuses it, a notification names where to allow it (System Settings → General → Login Items) instead of failing silently.
