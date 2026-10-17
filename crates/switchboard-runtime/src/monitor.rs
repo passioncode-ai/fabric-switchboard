@@ -123,7 +123,8 @@ impl Pass {
         if native_sources {
             let _ = runtime.maybe_backup(time, false);
         }
-        scan_limits(runtime, claude, time);
+        // Reads recent transcripts: file work, in a blocking section (2026-10-17 stalls).
+        crate::blocking::run(|| scan_limits(runtime, claude, time));
         // SB-117: a project's new folders, found by stamps only (LC-04); a real owner only.
         if native_sources {
             runtime.suggest_pass(time).await;
@@ -185,7 +186,7 @@ impl Pass {
                 .await;
         }
         {
-            let _mutation = runtime.mutations.lock().await;
+            let _mutation = runtime.hold("rotate").await;
             let _ = rotate(runtime, native_sources);
         }
         // A workflow whose executor hit its limit goes to the next agent of its chain (SB-73);
@@ -263,7 +264,7 @@ impl Pass {
             self.swap_last_signature = signature;
             self.swap_was_running = Some(running);
         }
-        let _mutation = runtime.mutations.lock().await;
+        let _mutation = runtime.hold("source_sync").await;
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
         // sessions and quota checks on that account keep working.
         if claude {
@@ -510,7 +511,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
         if due_at > time || schedule.retry_at.get(&id).is_some_and(|at| *at > time) {
             continue;
         }
-        let _mutation = runtime.mutations.lock().await;
+        let _mutation = runtime.hold("renewal").await;
         let outcome = crate::refresh::ensure_fresh(
             &runtime.store,
             runtime.native,
