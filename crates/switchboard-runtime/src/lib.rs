@@ -540,6 +540,8 @@ pub struct Runtime {
     /// The recent transcript list, walked once per pass and shared by the limit scan and the
     /// work scan (SB-131): `(when, files)`.
     transcript_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
+    /// The recent subagent transcripts, listed at most every SUBAGENTS_EVERY (SB-131).
+    subagent_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
     vanish_at: std::sync::atomic::AtomicI64,
     /// OpenRouter's model list, kept six hours (SB-119).
     openrouter_models: Mutex<agent_settings::ModelCache>,
@@ -639,6 +641,7 @@ impl Runtime {
             vanished: Mutex::new(Vanish::default()),
             told: Mutex::new(HashSet::new()),
             transcript_list: Mutex::new(None),
+            subagent_list: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
@@ -691,6 +694,11 @@ impl Runtime {
                 | Operation::ProjectBindings
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
+                // Hand-overs are files: listing reads them, and taking one is claimed by an
+                // exclusive create (`handovers::take`). Behind the owner transaction a console's
+                // read waited out renewals and syncs for up to 366 s (Fabric Dashboards FD-71).
+                | Operation::Handovers
+                | Operation::HandoverTake { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -747,7 +755,7 @@ impl Runtime {
         if self.bindings_key.lock().ok().and_then(|k| *k) == Some(key) {
             return;
         }
-        let _transaction = self.mutations.lock().await;
+        let _transaction = self.hold("bindings").await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
@@ -858,6 +866,14 @@ impl Runtime {
     /// The background half of SB-117/SB-121/SB-131, under the owner transaction like any other
     /// write: folders found next to a project's, repositories its agents changed, folders that
     /// could not be added yet, and project folders deleted from disk.
+    /// The owner transaction for a background step, logged when held long.
+    pub(crate) async fn hold(&self, step: &'static str) -> Held<'_> {
+        Held {
+            _guard: self.mutations.lock().await,
+            step,
+            since: std::time::Instant::now(),
+        }
+    }
     pub(crate) async fn suggest_pass(&self, time: i64) {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
@@ -876,7 +892,7 @@ impl Runtime {
                 .store(time + RETRY_PENDING, std::sync::atomic::Ordering::Relaxed);
             if let Ok(waiting) = suggest::pending(&self.root, &snapshot) {
                 if !waiting.is_empty() {
-                    let _transaction = self.mutations.lock().await;
+                    let _transaction = self.hold("suggest_retry").await;
                     self.add_found(waiting, time);
                 }
             }
@@ -886,13 +902,13 @@ impl Runtime {
         // Listing folders writes nothing: it runs outside the owner transaction, which only
         // the recording below takes, and only when something changed.
         let candidates = match self.suggest.lock() {
-            Ok(mut scanner) => scanner.collect(&snapshot, time),
+            Ok(mut scanner) => blocking::run(|| scanner.collect(&snapshot, time)),
             Err(_) => return,
         };
         if candidates.is_empty() {
             return;
         }
-        let _transaction = self.mutations.lock().await;
+        let _transaction = self.hold("suggest_found").await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
@@ -906,9 +922,32 @@ impl Runtime {
     /// project is the one the session works in (its `cwd`); a repository changed by agents of two
     /// projects in one pass joins neither.
     async fn worked_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
-        // A synthetic owner reads no transcript of the machine it runs on.
-        let files = with_subagents(&self.transcripts(time), time);
+        // A synthetic owner reads no transcript of the machine it runs on. Listing and reading
+        // transcripts is file work: it runs as a blocking section, so the control listener and the
+        // proxy never wait behind it (a pass that read ~6,700 subagent entries on a worker held a
+        // control request for 12 s, 2026-10-17).
+        let files = blocking::run(|| self.work_files(time));
         self.worked_from(snapshot, &files, time).await;
+    }
+    /// The transcripts the work scan reads: the sessions' and their subagents', the subagent
+    /// directories listed again at most every SUBAGENTS_EVERY.
+    fn work_files(&self, time: i64) -> Vec<PathBuf> {
+        let sessions = self.transcripts(time);
+        let Ok(mut cached) = self.subagent_list.lock() else {
+            return sessions;
+        };
+        let fresh = cached
+            .as_ref()
+            .is_some_and(|(at, _)| time >= *at && time - at < SUBAGENTS_EVERY);
+        if !fresh {
+            let all = with_subagents(&sessions, time);
+            *cached = Some((time, all[sessions.len()..].to_vec()));
+        }
+        let mut files = sessions;
+        if let Some((_, subagents)) = cached.as_ref() {
+            files.extend(subagents.iter().cloned());
+        }
+        files
     }
     /// The recent Claude Code transcripts, walked at most once per background pass (SB-131).
     pub(crate) fn transcripts(&self, time: i64) -> Vec<PathBuf> {
@@ -932,7 +971,7 @@ impl Runtime {
         time: i64,
     ) {
         let evidence = match self.activity.lock() {
-            Ok(mut activity) => activity.collect(files),
+            Ok(mut activity) => blocking::run(|| activity.collect(files)),
             Err(_) => return,
         };
         if evidence.is_empty() {
@@ -985,7 +1024,7 @@ impl Runtime {
         if claims.is_empty() && contested.is_empty() {
             return;
         }
-        let _transaction = self.mutations.lock().await;
+        let _transaction = self.hold("worked").await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
@@ -1105,7 +1144,8 @@ impl Runtime {
         self.vanish_at
             .store(time + VANISH_LOOK, std::sync::atomic::Ordering::Relaxed);
         let mut confirmed: Vec<(String, String)> = Vec::new();
-        {
+        // A stat of every project folder (~200 here): file work, in a blocking section.
+        blocking::run(|| {
             let Ok(mut vanish) = self.vanished.lock() else {
                 return;
             };
@@ -1140,11 +1180,11 @@ impl Runtime {
             }
             vanish.missing = still;
             vanish.devices = devices;
-        }
+        });
         if confirmed.is_empty() {
             return;
         }
-        let _transaction = self.mutations.lock().await;
+        let _transaction = self.hold("vanish").await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
@@ -1933,6 +1973,9 @@ fn add_suggested_folder(
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
+/// How often the subagent transcript directories are listed again: a long session keeps
+/// hundreds of finished subagents there, and each listing stats every one.
+const SUBAGENTS_EVERY: i64 = 120;
 /// SB-131: the recent sessions' transcripts and their subagents' (`<session>/subagents/*.jsonl`,
 /// where implementer subagents record their edits), each written within the limit scan's window.
 fn with_subagents(files: &[PathBuf], time: i64) -> Vec<PathBuf> {
@@ -2044,6 +2087,29 @@ fn canonical_near(path: &Path) -> PathBuf {
     }
     path.to_owned()
 }
+/// The owner transaction, held by a background step, logged when held long (2026-10-17: reads
+/// waited minutes behind it). `step` is a fixed code naming the holder.
+pub(crate) struct Held<'a> {
+    _guard: tokio::sync::MutexGuard<'a, ()>,
+    step: &'static str,
+    since: std::time::Instant,
+}
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        let held = self.since.elapsed();
+        if held >= HELD_LONG {
+            oplog::event(
+                "transaction_held",
+                &[
+                    ("step", oplog::Field::Code(self.step)),
+                    ("millis", oplog::Field::Number(held.as_millis() as i64)),
+                ],
+            );
+        }
+    }
+}
+/// A background step holding the owner transaction this long is logged.
+const HELD_LONG: std::time::Duration = std::time::Duration::from_secs(5);
 /// SB-131: what the deletion check remembers between looks: since when each folder is missing,
 /// and the device each folder was on when last seen.
 #[derive(Default)]
@@ -4316,6 +4382,76 @@ mod owner_tests {
             .await
             .unwrap();
         assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn hand_overs_answer_while_a_background_step_holds_the_transaction() {
+        // Fabric Dashboards FD-71: `switchboard handovers` waited up to 366 s behind renewals and
+        // syncs holding the owner transaction. It reads files and claims by exclusive create.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let held = runtime.hold("test").await;
+        let listed = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.execute(Operation::Handovers),
+        )
+        .await
+        .expect("answered while the transaction is held")
+        .unwrap();
+        assert_eq!(listed["handovers"], json!([]));
+        let taken = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.execute(Operation::HandoverTake {
+                id: "h-nothing".into(),
+            }),
+        )
+        .await
+        .expect("a take is answered too");
+        assert!(taken.is_err(), "no such hand-over");
+        drop(held);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn subagent_directories_are_listed_again_only_every_two_minutes() {
+        // 2026-10-17: listing ~6,700 subagent transcripts on every 30 s pass held the owner's
+        // workers for seconds; the list is kept for SUBAGENTS_EVERY.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let now = monitor::now();
+        let first = runtime.work_files(now);
+        assert!(first.is_empty(), "a synthetic owner lists no transcript");
+        let listed_at = runtime
+            .subagent_list
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(at, _)| *at);
+        assert_eq!(listed_at, Some(now));
+        runtime.work_files(now + SUBAGENTS_EVERY - 1);
+        let kept = runtime
+            .subagent_list
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(at, _)| *at);
+        assert_eq!(kept, Some(now), "not listed again within the interval");
+        runtime.work_files(now + SUBAGENTS_EVERY);
+        let again = runtime
+            .subagent_list
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(at, _)| *at);
+        assert_eq!(again, Some(now + SUBAGENTS_EVERY));
+        // A clock set back lists again rather than keeping a list from the future.
+        runtime.work_files(now - 10);
+        let back = runtime
+            .subagent_list
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(at, _)| *at);
+        assert_eq!(back, Some(now - 10));
     }
 
     #[test]
