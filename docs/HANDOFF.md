@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-17 — 0.6.34 published (SB-131); lifecycle prompts (SB-136); accounts moved
+
+- **0.6.34**:
+  - **Published:** [v0.6.34](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.34) on 2026-10-17 00:42 UTC, run 38967680225 on `8bc1964`, 25 assets.
+  - **First tag refused:** the release guard refused the first tag on `c87cca6` because the Windows nightly failed. A Windows verbatim `\\?\` path was being read as a glob pattern in the SB-131 work scan; fixed in `8bc1964`, together with the move of the nightly macOS job to `macos-15`.
+  - **Second run, two failures:**
+    - The Linux idle-owner test failed once; it now waits up to a bounded second for the lock (`#221`).
+    - Sigstore's tlog fetch failed once during publish, and re-running publish passed.
+- **SB-136** (`85794df`, not released yet):
+  - a «Restart to finish updating» notification, once per version;
+  - a notification when the login item is refused at start.
+
+  These answer the Fabric board's lifecycle rule (thread cb31a510; reply 089f3ac0). The row was renumbered from a duplicate SB-134.
+- **Accounts (operator, 2026-10-16):**
+  - claude8@sshlg.me moved into the Agents pool;
+  - claude6@sshlg.me and twingpt@appvillis.com moved back to `default`.
+
+  Saving the Agents project also dropped four worktrees that had been deleted from disk.
+- **New row:** SB-137, from the hosts-contracts finding (isolated Pi and Claude homes lose the operator's setup).
+
+**Exact next task:**
+1. Watch the operator's app take 0.6.34. It may need one restart, because 0.6.31 was waiting behind an open window.
+2. Release SB-136 as 0.6.35.
+3. Then SB-134/SB-135 (MCP parity, root folders; [packet](packets/sb-134-135-mcp-parity-and-project-roots.md)), unless another session holds them.
+
+---
+
 ## 2026-10-15 (day) — SB-131: projects keep their repositories by themselves, nothing is asked
 
 Operator request 2026-10-15: «автодобавление всех репозиториев нужных в проект, когда там агент
