@@ -81,7 +81,13 @@ struct Gateway {
     openai: String,
     chatgpt: String,
     salts: PoolSalts,
+    folders: FolderTokens,
+    legacy_until: Arc<std::sync::atomic::AtomicI64>,
 }
+/// SB-133: each pool's folder capabilities (`folder_token`), one per folder that is part of the
+/// pool's project now. `None` until the owner sets them at start.
+pub type FolderTokens =
+    Arc<std::sync::RwLock<Option<std::collections::HashMap<String, Vec<String>>>>>;
 /// Per-pool salts of the folders' capabilities (`pool_token_salted`): a pool whose capability was
 /// rotated has one; the rest keep the unsalted capability.
 pub type PoolSalts = Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>;
@@ -90,6 +96,8 @@ pub struct ProxyHandle {
     token: String,
     agent_token: String,
     salts: PoolSalts,
+    folders: FolderTokens,
+    legacy_until: Arc<std::sync::atomic::AtomicI64>,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
@@ -124,6 +132,17 @@ pub fn pool_token_salted(token: &str, pool: &str, salt: Option<&str>) -> String 
     let digest = Sha256::digest(input.as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// SB-133: one folder's capability: the pool's (`pool_token_salted`) bound to the folder's path.
+/// A folder that leaves its project, or is moved or renamed away from it, keeps a value the proxy
+/// no longer accepts, so it cannot go on spending the project's accounts.
+pub fn folder_token(pool_capability: &str, folder: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest =
+        Sha256::digest(format!("switchboard-folder:{folder}:{pool_capability}").as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+/// SB-133: refused to a folder capability the proxy does not know (any longer).
+pub const FOLDER_NOT_IN_PROJECT: &str = "This folder is not part of a Switchboard project now. Remove Switchboard's lines from .claude/settings.local.json, or add the folder to a project in Switchboard.";
 /// Third-party agents may use only accounts the provider sells for any client: API keys.
 /// Subscription sign-ins (Claude.ai OAuth, a Claude setup token, ChatGPT) belong to the
 /// provider's own client (docs/AGENTS.md → Terms).
@@ -197,6 +216,8 @@ impl ProxyHandle {
             .map_err(|_| "HTTP client unavailable.")?;
         let agent = agent_token(&token);
         let salts: PoolSalts = Arc::default();
+        let folders: FolderTokens = Arc::default();
+        let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
         let state = Gateway {
             store,
             token: token.clone(),
@@ -208,6 +229,8 @@ impl ProxyHandle {
             openai,
             chatgpt,
             salts: salts.clone(),
+            folders: folders.clone(),
+            legacy_until: legacy_until.clone(),
         };
         let slots = state.slots.clone();
         let router = Router::new()
@@ -227,6 +250,8 @@ impl ProxyHandle {
             token,
             agent_token: agent,
             salts,
+            folders,
+            legacy_until,
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
             slots,
@@ -253,6 +278,20 @@ impl ProxyHandle {
     pub fn pool_capability(&self, pool: &str) -> String {
         let salt = self.salts.read().ok().and_then(|s| s.get(pool).cloned());
         pool_token_salted(&self.token, pool, salt.as_deref())
+    }
+    /// SB-133: the folder capabilities of every pool, set at start and whenever the project
+    /// folders change.
+    pub fn set_folder_tokens(&self, tokens: std::collections::HashMap<String, Vec<String>>) {
+        if let Ok(mut current) = self.folders.write() {
+            *current = Some(tokens);
+        }
+    }
+    /// SB-133: until this Unix time a pool's own capability, which 0.6.39 and earlier wrote into
+    /// every folder of the pool, is still accepted, so sessions started before the folders got
+    /// their own keep working. `i64::MAX` (the start value) accepts it always; 0 never.
+    pub fn set_legacy_until(&self, until: i64) {
+        self.legacy_until
+            .store(until, std::sync::atomic::Ordering::Relaxed);
     }
     /// The capability third-party agents present (as `x-api-key` or a bearer token).
     pub fn agent_token(&self) -> &str {
@@ -400,12 +439,32 @@ async fn relay(
     // SB-118: a project folder's capability counts as the session token, for its pool only.
     let salt = g.salts.read().ok().and_then(|s| s.get(&pool).cloned());
     let capability = pool_token_salted(&g.token, &pool, salt.as_deref());
-    let scoped = bearer.ct_eq(capability.as_bytes()) | header.ct_eq(capability.as_bytes());
+    // SB-133: a folder's own capability, while the folder is part of the pool's project; the
+    // pool's capability itself only inside the migration window.
+    let legacy = subtle::Choice::from(u8::from(
+        now() < g.legacy_until.load(std::sync::atomic::Ordering::Relaxed),
+    ));
+    let mut scoped =
+        (bearer.ct_eq(capability.as_bytes()) | header.ct_eq(capability.as_bytes())) & legacy;
+    if let Some(tokens) = g
+        .folders
+        .read()
+        .ok()
+        .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
+    {
+        for token in &tokens {
+            scoped |= bearer.ct_eq(token.as_bytes()) | header.ct_eq(token.as_bytes());
+        }
+    }
     let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
     let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
     let agent = bool::from(!official & as_agent);
     let official = bool::from(official);
     if !official && !agent {
+        // A folder that left its project still sends its old header: say what to do there.
+        if !header.is_empty() {
+            return error(StatusCode::UNAUTHORIZED, FOLDER_NOT_IN_PROJECT);
+        }
         return error(StatusCode::UNAUTHORIZED, "Local capability required.");
     }
     let query = request.uri().query().map(str::to_owned);

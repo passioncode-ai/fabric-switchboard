@@ -786,6 +786,7 @@ impl Runtime {
         let salts = read_pool_salts(&self.root);
         match bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts) {
             Ok(report) => {
+                self.proxy.set_folder_tokens(report.tokens.clone());
                 oplog::event(
                     "claude_binding",
                     &[
@@ -802,10 +803,18 @@ impl Runtime {
                     *k = Some(key);
                 }
             }
-            Err(_) => oplog::event(
-                "claude_binding",
-                &[("result", oplog::Field::Code("unreadable"))],
-            ),
+            Err(_) => {
+                // The record is unreadable, but the proxy still follows the project folders.
+                self.proxy.set_folder_tokens(bindings::folder_tokens(
+                    &bindings::desired(&snapshot),
+                    self.proxy.token(),
+                    &salts,
+                ));
+                oplog::event(
+                    "claude_binding",
+                    &[("result", oplog::Field::Code("unreadable"))],
+                )
+            }
         }
     }
     /// `Operation::ContinueToConsole`: the hand-over the automatic fallback makes with "Open
@@ -1773,6 +1782,31 @@ fn write_pool_salts(root: &Path, salts: &HashMap<String, String>) -> Result<(), 
     let bytes = serde_json::to_vec(salts).map_err(|_| "Could not save the new capability.")?;
     switchboard_core::private_fs::private_write(&root.join(POOL_SALTS_FILE), &bytes)
 }
+/// SB-133: when the folders' own capabilities became the only ones accepted. Recorded at the first
+/// start of a version that writes them, so a later restart does not move it.
+const CAPABILITY_MIGRATION_FILE: &str = "capability-migration.json";
+/// SB-133: how long a pool's capability still stands for its folders after the folders got their
+/// own: sessions started before keep the old value until they restart.
+const LEGACY_CAPABILITY_SECONDS: i64 = 7 * 86_400;
+fn legacy_until(root: &Path, now: i64) -> i64 {
+    let path = root.join(CAPABILITY_MIGRATION_FILE);
+    let saved = switchboard_core::private_fs::read_private(&path, 4096)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|v| v["legacy_until"].as_i64());
+    if let Some(until) = saved {
+        return until;
+    }
+    let until = now + LEGACY_CAPABILITY_SECONDS;
+    let bytes = serde_json::to_vec(&json!({"legacy_until": until})).unwrap_or_default();
+    if switchboard_core::private_fs::private_write(&path, &bytes).is_err() {
+        oplog::event(
+            "capability_migration",
+            &[("result", oplog::Field::Code("unsaved"))],
+        );
+    }
+    until
+}
 /// A fresh salt: two random UUIDs, hashed.
 fn new_salt() -> String {
     use sha2::{Digest, Sha256};
@@ -1801,6 +1835,7 @@ fn load_proxy_record(root: &Path) -> Option<ProxyRecord> {
 /// starts on a fresh one, keeps the token, and points the managed homes' generated files at
 /// the new port, so a session launched from them again reaches the proxy.
 async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, String> {
+    let proxy_store = store.clone();
     let record = load_proxy_record(root);
     let proxy = ProxyHandle::start_on(
         store,
@@ -1808,7 +1843,18 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
         record.as_ref().map(|r| r.token.clone()),
     )
     .await?;
-    proxy.set_pool_salts(read_pool_salts(root));
+    let salts = read_pool_salts(root);
+    proxy.set_pool_salts(salts.clone());
+    // SB-133: the folders' own capabilities from the first request on, and the window in which a
+    // pool's capability (what 0.6.39 and earlier wrote) still stands for its folders.
+    proxy.set_legacy_until(legacy_until(root, monitor::now()));
+    if let Ok(snapshot) = proxy_store.snapshot() {
+        proxy.set_folder_tokens(bindings::folder_tokens(
+            &bindings::desired(&snapshot),
+            proxy.token(),
+            &salts,
+        ));
+    }
     let port = proxy.address().port();
     let unchanged = record
         .as_ref()
@@ -3398,6 +3444,7 @@ async fn execute(
             let address = rt.proxy.address().to_string();
             let report =
                 bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
+            rt.proxy.set_folder_tokens(report.tokens.clone());
             if let Ok(mut key) = rt.bindings_key.lock() {
                 *key = None;
             }
@@ -4838,6 +4885,72 @@ mod owner_tests {
             with_subagents(std::slice::from_ref(&session), later),
             [session]
         );
+    }
+
+    #[tokio::test]
+    async fn a_folder_moved_out_of_its_project_cannot_spend_the_projects_accounts() {
+        // SB-133: a renamed project folder kept the project's route and capability in its
+        // settings and went on using the project's accounts.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let app = work.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![app.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        let settings = |folder: &Path| -> Value {
+            serde_json::from_slice(
+                &std::fs::read(folder.join(".claude/settings.local.json")).unwrap(),
+            )
+            .unwrap()
+        };
+        let header = settings(&app)["env"]["ANTHROPIC_CUSTOM_HEADERS"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("X-Switchboard-Capability: ")
+            .unwrap()
+            .to_owned();
+        // An authorised request with a query the proxy refuses never reaches a provider: 400
+        // after the capability check, 401 before it.
+        let ask = |value: String| {
+            let address = runtime.proxy.address();
+            async move {
+                reqwest::Client::new()
+                    .post(format!("http://{address}/claude/app/v1/messages?probe=1"))
+                    .header(switchboard_proxy::CAPABILITY_HEADER, value)
+                    .body("{}")
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            }
+        };
+        assert_eq!(
+            ask(header.clone()).await,
+            400,
+            "the folder is the project's"
+        );
+        let moved = work.join("app-renamed");
+        std::fs::rename(&app, &moved).unwrap();
+        assert_eq!(
+            settings(&moved)["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+            format!("X-Switchboard-Capability: {header}"),
+            "the moved folder still carries the old value"
+        );
+        runtime.bindings_pass().await;
+        assert_eq!(ask(header).await, 401, "and the proxy no longer takes it");
     }
 
     #[tokio::test]

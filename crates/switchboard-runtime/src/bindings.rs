@@ -66,6 +66,8 @@ pub(crate) struct Report {
     pub skipped: Vec<String>,
     /// Folders whose `ANTHROPIC_*` values are the person's, not Switchboard's: left untouched.
     pub user_values_present: Vec<String>,
+    /// SB-133: each pool's folder capabilities, for the proxy (`folder_tokens`).
+    pub tokens: std::collections::HashMap<String, Vec<String>>,
 }
 
 fn sha256(text: &str) -> String {
@@ -391,6 +393,41 @@ pub(crate) fn sync(
         &std::collections::HashMap::new(),
     )
 }
+/// SB-133: the capability written into one folder: its pool's, bound to the folder's path, so a
+/// folder that leaves the project (or is moved or renamed away) holds a value the proxy refuses.
+pub(crate) fn folder_capability(
+    session_token: &str,
+    pool: &str,
+    salts: &std::collections::HashMap<String, String>,
+    folder: &str,
+) -> String {
+    let pool_capability = switchboard_proxy::pool_token_salted(
+        session_token,
+        pool,
+        salts.get(pool).map(String::as_str),
+    );
+    switchboard_proxy::folder_token(&pool_capability, folder)
+}
+/// SB-133: every folder capability the proxy accepts now, by pool: one per folder that is part of
+/// its project and exists (`desired`).
+pub(crate) fn folder_tokens(
+    want: &[(PathBuf, String)],
+    session_token: &str,
+    salts: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for (folder, pool) in want {
+        if let Some(text) = folder.to_str() {
+            out.entry(pool.clone()).or_default().push(folder_capability(
+                session_token,
+                pool,
+                salts,
+                text,
+            ));
+        }
+    }
+    out
+}
 /// `sync`, with the pools' capability salts (`pool_salts`): a pool whose capability was rotated
 /// gets its new capability written in every one of its folders.
 pub(crate) fn sync_salted(
@@ -400,20 +437,19 @@ pub(crate) fn sync_salted(
     session_token: &str,
     salts: &std::collections::HashMap<String, String>,
 ) -> Result<Report, String> {
-    let rows = read(root)?;
     let want = desired(snapshot);
-    let mut report = Report::default();
+    let mut report = Report {
+        tokens: folder_tokens(&want, session_token, salts),
+        ..Report::default()
+    };
+    let rows = read(root)?;
     let mut kept: Vec<Binding> = Vec::new();
     for (folder, pool) in &want {
         let Some(text) = folder.to_str() else {
             continue;
         };
         let base_url = format!("http://{address}/claude/{pool}");
-        let token = switchboard_proxy::pool_token_salted(
-            session_token,
-            pool,
-            salts.get(pool.as_str()).map(String::as_str),
-        );
+        let token = folder_capability(session_token, pool, salts, text);
         let previous = rows.iter().find(|r| r.folder == text);
         // A folder moved to another pool, or a new address: the old values go first.
         if let Some(old) = previous {
@@ -621,10 +657,14 @@ mod tests {
         assert_eq!((report.bound, report.skipped.len()), (2, 0));
         let e = env(&app).unwrap();
         assert_eq!(e[BASE_URL], "http://127.0.0.1:4000/claude/pc");
-        assert_eq!(
-            e[CUSTOM_HEADERS],
-            header_value(&switchboard_proxy::pool_token("session", "pc")).as_str()
-        );
+        let none = std::collections::HashMap::new();
+        let mine = folder_capability("session", "pc", &none, app.to_str().unwrap());
+        assert_eq!(e[CUSTOM_HEADERS], header_value(&mine).as_str());
+        // SB-133: each folder its own value, all of them known to the proxy for the pool.
+        let theirs = folder_capability("session", "pc", &none, fresh.to_str().unwrap());
+        assert_ne!(mine, theirs);
+        assert_eq!(report.tokens["pc"], [mine.clone(), theirs]);
+        assert_ne!(mine, switchboard_proxy::pool_token("session", "pc"));
         // SB-140: never an auth source, so the session keeps its claude.ai login and connectors.
         assert_eq!(e.get(AUTH_TOKEN), None);
         assert_eq!(e["FOO"], "bar", "the person's own env stays");
@@ -928,9 +968,10 @@ mod tests {
         assert_eq!(report.bound, 1, "{report:?}");
         let new = read();
         assert_ne!(new, old);
+        let canonical = app.canonicalize().unwrap();
         assert_eq!(
             new,
-            switchboard_proxy::pool_token_salted("session", "pc", Some("synthetic-salt"))
+            folder_capability("session", "pc", &salts, canonical.to_str().unwrap())
         );
     }
 
@@ -971,7 +1012,9 @@ mod tests {
         assert_eq!(report.bound, 1, "{report:?}");
         let e = env(&app).unwrap();
         assert_eq!(e.get(AUTH_TOKEN), None);
-        assert_eq!(e[CUSTOM_HEADERS], header_value(&cap).as_str());
+        let none = std::collections::HashMap::new();
+        let mine = folder_capability("session", "pc", &none, app.to_str().unwrap());
+        assert_eq!(e[CUSTOM_HEADERS], header_value(&mine).as_str());
         // Leaving the project removes the header as well.
         let gone = sync(&root, &Snapshot::default(), "127.0.0.1:4000", "session").unwrap();
         assert_eq!(gone.removed, 1);

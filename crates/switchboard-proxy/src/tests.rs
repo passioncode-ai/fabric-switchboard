@@ -1551,6 +1551,87 @@ async fn a_pool_capability_reaches_its_pool_only() {
     );
 }
 
+// SB-133: a folder's own capability works while the folder is part of the project; a folder
+// moved or renamed away keeps a value that is refused, with words that say what to do.
+#[tokio::test]
+async fn a_folder_capability_works_only_while_its_folder_is_in_the_project() {
+    let (_root, s) = store();
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let router = Router::new().route("/v1/messages", post(|| async { "{}" }));
+    let (url, _up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let pool = p.pool_capability("default");
+    let (here, moved) = (
+        crate::folder_token(&pool, "/work/app"),
+        crate::folder_token(&pool, "/work/app-old"),
+    );
+    assert_ne!(here, moved);
+    assert_ne!(here, pool);
+    let client = reqwest::Client::new();
+    let to = format!("http://{}/claude/default/v1/messages", p.address());
+    let send = |value: String| {
+        let (client, to) = (client.clone(), to.clone());
+        async move {
+            client
+                .post(to)
+                .header(crate::CAPABILITY_HEADER, value)
+                .body("{}")
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    // Before the owner sets the folders, inside the migration window: the pool's own value.
+    assert_eq!(send(pool.clone()).await.status(), 200);
+    assert_eq!(
+        send(here.clone()).await.status(),
+        401,
+        "no folder known yet"
+    );
+    p.set_folder_tokens([("default".to_owned(), vec![here.clone()])].into());
+    assert_eq!(
+        send(here.clone()).await.status(),
+        200,
+        "a folder of the project"
+    );
+    let refused = send(moved).await;
+    assert_eq!(refused.status(), 401, "a folder no longer in the project");
+    assert!(refused
+        .text()
+        .await
+        .unwrap()
+        .contains("not part of a Switchboard project"));
+    // The window closes: the pool's own value no longer stands for every folder.
+    assert_eq!(send(pool.clone()).await.status(), 200);
+    p.set_legacy_until(1);
+    assert_eq!(send(pool).await.status(), 401);
+    assert_eq!(send(here.clone()).await.status(), 200);
+    // A folder token is for its own pool only, and managed sessions are untouched.
+    let other = client
+        .post(format!("http://{}/claude/other/v1/messages", p.address()))
+        .header(crate::CAPABILITY_HEADER, &here)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.status(), 401);
+    let session = client
+        .post(&to)
+        .bearer_auth(p.token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(session.status(), 200);
+}
+
 // Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.
 #[tokio::test]
 async fn agents_reach_api_key_accounts_and_never_a_subscription_sign_in() {
