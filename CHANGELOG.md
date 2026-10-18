@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- **A project folder that is moved or renamed no longer spends the project's accounts (SB-133).** Every project folder now gets a capability of its own, and the local proxy accepts only those of folders that are part of the project right now. A folder moved, renamed or taken out of its project keeps an old value that is refused, with a message that says how to clean it up. The shared value older versions wrote into every folder still works for 7 days after the update, so sessions already running keep working until they restart.
+
 ## 0.6.39 — 2026-10-18
 
 - **Move an account to another pool from its card (SB-122).** The ⋯ menu on an account card has *Move to another pool…*: choose the default pool or a project, and the account moves there; the old project gives it up by itself. The account Claude Code or Codex is signed in to stays in the default pool, and the dialog says why. The same move for agents: `switchboard accounts move <id> --pool <pool>` and the MCP tool `switchboard_account_move`.
