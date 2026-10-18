@@ -70,6 +70,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-060 | A workflow continues in OpenCode on the OpenRouter key | draft |
 | SCN-061 | A deleted folder leaves its project by itself | draft |
 | SCN-062 | Move an account to another pool from its card | draft |
+| SCN-063 | See a project's repositories with their worktrees under them | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1297,3 +1298,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `an_account_left_in_a_deleted_projects_pool_returns_to_default`; owner `an_account_moves_between_projects_and_back_to_default`; MCP `accounts_rotation_activity_and_queues_are_reachable_over_mcp`; `scripts/test-ui-logic.mjs` (`moveTargets`).
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-122
+
+## SCN-063 — See a project's repositories with their worktrees under them
+**Persona:** P-01
+**Goal:** A project reads as its repositories: the main checkout once, its worktrees and clones under it, not as peers (operator 2026-10-16 and 2026-10-18: «вместо того чтобы делать так все репы, ты мог сделать главную, а остальные со звёздочкой, все ворктри»).
+**Preconditions:** a project whose folders include a repository's main checkout and one or more of its worktrees (often added by themselves, SCN-055).
+**Entry point:** Projects page.
+**Steps:**
+1. Open Projects → each repository shows once, at its main folder, followed by “+2 worktrees and clones”.
+2. *Show all folders* → the worktrees and clones appear under their root by name, with their kind and branch (“alpha-web-wt-login · worktree · login”).
+3. *Edit* → the dialog lists them under their root; × on the root removes it together with them (its label says so), × on one of them removes only that one.
+**Alt paths:** a folder that is no Git checkout is a root of its own; a repository whose main checkout is not in the project keeps its first listed folder as root; a clone (same `origin`, its own `.git`) goes under the main checkout as *clone*; the tree cannot be read (Git files unreadable) → the flat list as before. Agents read the same tree in `project list` and MCP `switchboard_projects` (`roots`).
+**Expected result:** a project with a dozen worktrees reads as its few repositories; removing a repository leaves none of its worktrees behind.
+**UI elements:** project card rows, `+n` note, *Show all folders*, dialog folder rows (indented), × with its label.
+**States covered:** root with worktrees, root with a clone, no main checkout, non-Git folder, tree unreadable.
+**Errors & recovery:** none of its own; a save refused for another reason keeps the dialog open with the error (SCN-034).
+**Status:** draft
+**Meaning:** operator request 2026-10-18 (SB-135, first part).
+**Coverage:** `roots::tests::*` (a real repository and worktree included), owner `taking_a_root_out_of_a_project_takes_its_worktrees_too`, `scripts/test-ui-logic.mjs` (`folderRows`, `withoutFolder`, `folderName`); checked in WebKit on the demo in English and Russian.
+**Product:** unobserved
+**Traces:** CONTRACTS → Projects (0.6), SB-135

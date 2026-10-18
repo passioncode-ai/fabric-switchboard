@@ -44,6 +44,7 @@ export const nativeAdapter: Adapter = {
   linkCli: () => invoke('link_cli'),
   saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null }),
   removeProject: (pool) => invoke('remove_project', { pool }),
+  projectRoots: () => invoke('project_roots'),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),
   projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
   acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),

@@ -190,7 +190,7 @@ switchboard project source --pool app --add github.com/example   # also adopt ne
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
 ```sh
-switchboard project list                      # {projects, rules}: projects with folders and accounts, then rules
+switchboard project list                      # {projects, rules}: projects with folders, roots (each with its worktrees and clones) and accounts, then rules
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays

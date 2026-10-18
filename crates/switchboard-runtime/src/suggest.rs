@@ -100,6 +100,10 @@ fn read_small(path: &Path, limit: u64) -> Option<String> {
 pub(crate) struct Repo {
     pub common: PathBuf,
     pub remote: Option<String>,
+    /// This checkout's own git folder (a worktree's lives under `common/worktrees`).
+    pub gitdir: PathBuf,
+    /// The repository's main checkout (`.git` is a folder), not a linked worktree.
+    pub main: bool,
 }
 
 pub(crate) fn repo(dir: &Path) -> Option<Repo> {
@@ -128,13 +132,18 @@ pub(crate) fn repo(dir: &Path) -> Option<Repo> {
                 gitdir.join(path)
             }
         }
-        None => gitdir,
+        None => gitdir.clone(),
     };
     let common = common.canonicalize().ok()?;
     let remote = read_small(&common.join("config"), CONFIG_LIMIT)
         .and_then(|c| origin_url(&c))
         .and_then(|u| normalize(&u));
-    Some(Repo { common, remote })
+    Some(Repo {
+        common,
+        remote,
+        gitdir,
+        main: meta.is_dir(),
+    })
 }
 
 fn origin_url(config: &str) -> Option<String> {

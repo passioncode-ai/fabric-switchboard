@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, moveTargets, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -321,14 +321,31 @@ function projectsSection() {
 /** Folders shown on a project's card before *Show all*: a project an agent works in gathers dozens (SB-131). */
 const FOLDERS_SHOWN = 6;
 const expandedProjects = new Set<string>();
+/** SB-135: each project's folders as Git sees them (roots, and the worktrees and clones under each), read again when the folders change. */
+let projectRoots: Record<string, ProjectRoot[]> | null = null; let rootsKey = ''; let rootsLoading = false;
+function wantRoots() {
+  const key = JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, p.folders]));
+  if (key === rootsKey || rootsLoading) return;
+  rootsLoading = true;
+  void adapter.projectRoots().then((roots) => { projectRoots = roots; rootsKey = key; }, () => { rootsKey = key; }).finally(() => { rootsLoading = false; render(); });
+}
+const derivedText = (kind: 'worktree' | 'clone' | null, branch: string | null) => [kind === 'clone' ? t('clone') : kind === 'worktree' ? t('worktree') : '', branch ?? ''].filter(Boolean).join(' · ');
 function projectFolderList(project: Project) {
+  wantRoots();
   const wrap = el('div', 'project-folder-block');
   const folders = el('ul', 'project-folders');
   const open = expandedProjects.has(project.pool);
-  const shown = open ? project.folders : project.folders.slice(0, FOLDERS_SHOWN);
-  for (const folder of shown) { const item = el('li', 'account-meta', folder); item.title = folder; folders.append(item); }
+  const rows = folderRows(project.folders, projectRoots?.[project.pool] ?? null, open);
+  const shown = open ? rows : rows.slice(0, FOLDERS_SHOWN);
+  for (const row of shown) {
+    const item = el('li', row.depth ? 'account-meta derived-folder' : 'account-meta', row.depth ? folderName(row.folder) : row.folder); item.title = row.folder;
+    const note = row.depth ? derivedText(row.kind, row.branch) : row.derived ? plural(row.derived, { one: '+{n} worktree or clone', other: '+{n} worktrees and clones' }) : '';
+    if (note) item.append(el('span', 'folder-note', ` · ${note}`));
+    folders.append(item);
+  }
   wrap.append(folders);
-  if (project.folders.length > FOLDERS_SHOWN) {
+  const hidden = project.folders.length - shown.length;
+  if (hidden > 0 || open) {
     const label = open ? t('Show fewer folders') : t('Show all folders ({n})', { n: project.folders.length });
     const toggle = button(label, () => { if (open) expandedProjects.delete(project.pool); else expandedProjects.add(project.pool); render(); restoreFocus(`folders-${project.pool}`); }, 'text-button', `folders-${project.pool}`);
     toggle.setAttribute('aria-expanded', String(open));
@@ -339,7 +356,7 @@ function projectFolderList(project: Project) {
 function projectDialog(existing?: Project) {
   const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New project'), t('Add the project\'s folders and choose the accounts that belong to it. An account belongs to one project at a time.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
-  const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders');
+  const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the project now and add them later.')));
@@ -1481,19 +1498,22 @@ function folderPicker(context: DialogContext, initial: string, key: string, lock
   };
 }
 /** Several folders, each added or changed with the system picker and removable; never typed. */
-function foldersPicker(context: DialogContext, initial: string[], key: string) {
+function foldersPicker(context: DialogContext, initial: string[], key: string, roots: ProjectRoot[] | null = null) {
   let folders = [...initial];
   const node = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
   const add = button(t('Add folder…'), () => void chooseFolder(folders.at(-1) ?? '', (text) => { context.error.textContent = text; }).then((folder) => { if (folder) { folders = withFolder(folders, folder); context.error.textContent = ''; paint(); } }), 'button row-button', `${key}-add`);
   const paint = () => {
     list.replaceChildren();
     if (!folders.length) list.append(el('li', 'folder-path is-empty', t('No folder chosen')));
-    folders.forEach((folder) => {
-      const item = el('li', 'folder-item'); const path = el('span', 'folder-path', folder); path.title = folder;
+    folderRows(folders, roots).forEach((row) => {
+      const folder = row.folder;
+      const item = el('li', row.depth ? 'folder-item derived-folder' : 'folder-item'); const path = el('span', 'folder-path', folderName(folder)); path.title = folder;
+      // SB-135: a worktree or clone sits under its root, and goes when the root is removed.
+      if (row.depth) path.append(el('span', 'folder-note', ` · ${derivedText(row.kind, row.branch)}`));
       const change = button(t('Change…'), () => void chooseFolder(folder, (text) => { context.error.textContent = text; }).then((chosen) => { if (chosen && chosen !== folder) { folders = replaceFolder(folders, folder, chosen); context.error.textContent = ''; paint(); } }), 'text-button', '');
       change.setAttribute('aria-label', t('Change {folder}', { folder }));
-      const remove = button('×', () => { folders = folders.filter((entry) => entry !== folder); paint(); add.focus(); }, 'icon-button', '');
-      remove.setAttribute('aria-label', t('Remove {folder}', { folder })); item.append(path, change, remove); list.append(item);
+      const remove = button('×', () => { folders = withoutFolder(folders, roots, folder); paint(); add.focus(); }, 'icon-button', '');
+      remove.setAttribute('aria-label', row.derived ? t('Remove {folder} with its {n} worktrees and clones', { folder, n: row.derived }) : t('Remove {folder}', { folder })); item.append(path, change, remove); list.append(item);
     });
   };
   node.append(list, add); paint();

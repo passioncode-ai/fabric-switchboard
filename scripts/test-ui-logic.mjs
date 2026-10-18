@@ -39,6 +39,21 @@ check(() => {
   assert.deepEqual(inCli.map((t) => t.blocked), [false, true, true]);
   assert.deepEqual(logic.moveTargets('gone', projects, false).filter((t) => t.current), [], 'a deleted project leaves no current option');
 });
+// SB-135: worktrees and clones are listed under their root; taking the root out takes them too.
+check(() => {
+  const roots = [{ folder: '/bot', branch: 'main', derived: [{ folder: '/wt/bot-card', kind: 'worktree', branch: 'card' }, { folder: '/bot-copy', kind: 'clone', branch: null }] }, { folder: '/web', branch: 'main', derived: [] }];
+  const folders = ['/wt/bot-card', '/web', '/bot', '/bot-copy', '/new'];
+  assert.deepEqual(logic.folderRows(folders, roots).map((r) => [r.folder, r.depth, r.derived]), [['/web', 0, 0], ['/bot', 0, 2], ['/wt/bot-card', 1, 0], ['/bot-copy', 1, 0], ['/new', 0, 0]]);
+  assert.deepEqual(logic.folderRows(folders, roots, false).map((r) => r.folder), ['/web', '/bot', '/new'], 'closed: roots only');
+  assert.deepEqual(logic.folderRows(folders, null).map((r) => r.depth), [0, 0, 0, 0, 0], 'no tree yet: the flat list');
+  // A worktree whose root is not in the project stays a root of its own.
+  assert.deepEqual(logic.folderRows(['/wt/bot-card'], roots).map((r) => r.depth), [0]);
+  assert.deepEqual(logic.withoutFolder(folders, roots, '/bot'), ['/web', '/new']);
+  assert.equal(logic.folderName('/srv/projects/.worktrees/alpha-web-wt-login'), 'alpha-web-wt-login');
+  assert.equal(logic.folderName('C:\\Users\\me\\app\\'), 'app');
+  assert.equal(logic.folderName('/'), '/');
+  assert.deepEqual(logic.withoutFolder(folders, roots, '/bot-copy'), ['/wt/bot-card', '/web', '/bot', '/new']);
+});
 // SB-99/100: a Kimi window at 100 % stops the account until its reset; a passed reset no longer shows the old percent.
 check(() => {
   const now = 1_000_000;

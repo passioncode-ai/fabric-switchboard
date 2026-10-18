@@ -74,6 +74,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  /** SB-135: each project's folders as roots with their worktrees and clones, by pool. */
+  projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
   moveAccount(id: string, pool: string): Promise<unknown>;
   /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */

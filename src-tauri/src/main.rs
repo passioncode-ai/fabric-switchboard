@@ -447,6 +447,38 @@ async fn move_account(id: String, pool: String, state: State<'_, Slot>) -> Resul
         .execute(Operation::MoveAccount { id, pool })
         .await
 }
+/// SB-135: every project's folders as roots with their worktrees and clones, read from Git.
+#[tauri::command]
+async fn project_roots(state: State<'_, Slot>) -> Result<Value, String> {
+    let snapshot = state.runtime().await?.execute(Operation::Snapshot).await?;
+    let projects: Vec<(String, Vec<String>)> = snapshot["projects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|p| {
+            let folders = p["folders"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|f| f.as_str().map(str::to_owned))
+                .collect();
+            (p["pool"].as_str().unwrap_or_default().to_owned(), folders)
+        })
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut out = serde_json::Map::new();
+        for (pool, folders) in projects {
+            out.insert(
+                pool,
+                serde_json::to_value(switchboard_runtime::roots::tree(&folders))
+                    .unwrap_or_default(),
+            );
+        }
+        Value::Object(out)
+    })
+    .await
+    .map_err(|_| "Project folders could not be read.".to_owned())
+}
 #[tauri::command]
 async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -960,6 +992,7 @@ fn main() {
             kimi_launch,
             kimi_remove,
             remove_project,
+            project_roots,
             move_account,
             agents_overview,
             agent_enable,

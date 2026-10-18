@@ -6,8 +6,9 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.40 — 2026-10-18
 
+- **A project shows its main folders, with worktrees and clones under them (SB-135, first part).** A project that gathered a repository's worktrees listed each of them beside the main checkout. Now the Projects page shows each repository once, at its main folder, with "+2 worktrees and clones" that opens the list; the project dialog puts them under their root, and removing the root removes them too. `switchboard project list` and the MCP tool `switchboard_projects` return the same tree as `roots`.
 - **A project folder that is moved or renamed no longer spends the project's accounts (SB-133).** Every project folder now gets a capability of its own, and the local proxy accepts only those of folders that are part of the project right now. A folder moved, renamed or taken out of its project keeps an old value that is refused, with a message that says how to clean it up. The shared value older versions wrote into every folder still works for 7 days after the update, so sessions already running keep working until they restart.
 
 ## 0.6.39 — 2026-10-18
