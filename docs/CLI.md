@@ -21,6 +21,7 @@ switchboard accounts list
 switchboard accounts add --provider claude --kind api-key --label Work --pool work --secret-stdin < /private/path/to/credential
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
+switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
 switchboard accounts remove ACCOUNT_UUID
 switchboard --json events
 ```

@@ -2,6 +2,28 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-18 — 0.6.39: move an account to another pool from its card (SB-122)
+
+- **Behavior.** The account card's ⋯ menu has *Move to another pool…* (SCN-062): the default pool
+  first, then every project by name, the current pool marked “(now)”. `Operation::MoveAccount
+  { id, pool }` joins a project through `ProjectEdit` (so the old project lets the account go and
+  every refusal of a project save applies), leaves one the same way, and takes an account left in
+  a deleted project's pool back to `default` with `Store::return_to_default`. Any other pool is
+  refused (`MOVE_ACCOUNT_NO_PROJECT`). The account the ordinary CLI is signed in to cannot join a
+  project: the dialog greys projects out and says why. Agents: `accounts move <id> --pool`, MCP
+  `switchboard_account_move` (parity table updated).
+- **Live, 0.6.38.** `project rotate-capability --pool agents` rewrote 85 folders; all 196 bound
+  folders carry the `X-Switchboard-Capability` header and none keeps `ANTHROPIC_AUTH_TOKEN`
+  (SB-139/SB-140 rows updated). The dataroom session that asked had ended; nothing was sent.
+
+**Checks.** `./scripts/check.sh` exit 0 on the branch; the move dialog checked in WebKit
+(Playwright, demo `?demo=1`) in English and Russian: a loose-pool account moved to the default
+pool and the notice named it. Release preflight for v0.6.39: ok.
+
+**Exact next task.** After 0.6.39 is installed, move one account into a project and back from its
+card, then close SB-122 on the board with that evidence. Then the open board rows by priority:
+SB-132, SB-133, SB-135, SB-137, SB-134 part 3.
+
 ## 2026-10-18 — REQ-002: an agent's unassigned Git repository becomes a project
 
 - **Behavior.** `ProjectSuggest`, the plugin's `SessionStart` hook and the existing background

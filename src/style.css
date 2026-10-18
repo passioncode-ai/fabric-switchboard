@@ -85,6 +85,8 @@ h1:focus { outline: none; }
 .appearance-options { display: flex; flex-wrap: wrap; gap: var(--space-2); border: 0; margin: 0; padding: 0; }
 .appearance-option { display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); cursor: pointer; }
 .appearance-option:has(input:checked) { background: var(--accent-weak); border-color: var(--accent-text); font-weight: 600; }
+.move-options { flex-direction: column; flex-wrap: nowrap; max-height: 320px; overflow-y: auto; }
+.appearance-option:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
 .block { display: block; }
 .address { display: inline-block; margin-top: var(--space-1); font-family: var(--font-data); font-size: var(--t-chip); color: var(--link); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
 a.address { text-decoration: underline; text-underline-offset: 3px; user-select: auto; -webkit-user-select: auto; }

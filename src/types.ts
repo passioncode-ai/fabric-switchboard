@@ -74,6 +74,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  /** SB-122: an account into a project's pool, or back to `default`. */
+  moveAccount(id: string, pool: string): Promise<unknown>;
   /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */
   projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[]; added?: ProjectSuggestion[]; removed?: ProjectSuggestion[] }>;
   acceptProjectSuggestion(folder: string): Promise<unknown>;

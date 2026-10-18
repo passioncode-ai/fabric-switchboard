@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.39 — 2026-10-18
+
+- **Move an account to another pool from its card (SB-122).** The ⋯ menu on an account card has *Move to another pool…*: choose the default pool or a project, and the account moves there; the old project gives it up by itself. The account Claude Code or Codex is signed in to stays in the default pool, and the dialog says why. The same move for agents: `switchboard accounts move <id> --pool <pool>` and the MCP tool `switchboard_account_move`.
+
 ## 0.6.38 — 2026-10-18
 
 - **claude.ai connectors work again in project folders.** Switchboard put the project's capability into `ANTHROPIC_AUTH_TOKEN`, which Claude Code counts as a login of its own, so it showed "claude.ai connectors are disabled" and turned them off in every project folder. The capability now goes as a separate header (`ANTHROPIC_CUSTOM_HEADERS`), the session keeps its claude.ai login and connectors, and the older value is replaced in every folder by itself. Restart a session to pick it up.

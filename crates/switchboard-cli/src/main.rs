@@ -428,6 +428,16 @@ enum Accounts {
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: Option<bool>,
     },
+    /// Move an account into a project's pool, or back to `default`. Joining or leaving a project
+    /// is that project's change (`project edit`); the account the ordinary Claude Code or Codex is
+    /// signed in to stays in `default`.
+    Move {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// A project's pool (`switchboard project list`), or `default`.
+        #[arg(long)]
+        pool: String,
+    },
     /// Remove an account and its stored credential. Select another one first if it is selected.
     Remove {
         /// The account id (`switchboard accounts list`).
@@ -947,6 +957,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 id: id.clone(),
                 label: label.clone(),
                 enabled: *enabled,
+            },
+            Accounts::Move { id, pool } => Operation::MoveAccount {
+                id: id.clone(),
+                pool: pool.clone(),
             },
             Accounts::Remove { id } => Operation::Remove { id: id.clone() },
             Accounts::Select { id, provider, pool } => Operation::Select {
@@ -2262,6 +2276,7 @@ mod mcp_parity {
         ("accounts activate", Tool("switchboard_switch")),
         ("accounts add", Not(PERSON)),
         ("accounts update", Tool("switchboard_account_update")),
+        ("accounts move", Tool("switchboard_account_move")),
         ("accounts remove", Not(PERSON)),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),

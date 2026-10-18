@@ -438,6 +438,15 @@ async fn dismiss_project_suggestion(
         .execute(Operation::ProjectSuggestionDismiss { folder })
         .await
 }
+/// SB-122: an account into a project's pool, or back to `default`.
+#[tauri::command]
+async fn move_account(id: String, pool: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::MoveAccount { id, pool })
+        .await
+}
 #[tauri::command]
 async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -951,6 +960,7 @@ fn main() {
             kimi_launch,
             kimi_remove,
             remove_project,
+            move_account,
             agents_overview,
             agent_enable,
             agent_default,

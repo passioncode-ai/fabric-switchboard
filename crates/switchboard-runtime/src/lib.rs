@@ -215,6 +215,13 @@ pub enum Operation {
         #[serde(default)]
         remove_folders: Vec<PathBuf>,
     },
+    /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
+    /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
+    /// deleted project's pool goes back to `default` by itself.
+    MoveAccount {
+        id: String,
+        pool: String,
+    },
     /// The third-party agent catalog (`agent_catalog`).
     AgentCatalog,
     /// How to connect one agent to `switchboard mcp` and, when it can, the proxy's `pool`.
@@ -2232,6 +2239,9 @@ fn project_edit(
         base_folders: Some(held),
     })
 }
+/// SB-122: an account moves only into a project's pool or back to `default`.
+pub const MOVE_ACCOUNT_NO_PROJECT: &str =
+    "No project uses that pool. Choose a project, or Default.";
 /// Refusals of a project delta (SB-134).
 pub const PROJECT_EDIT_NO_FOLDER: &str =
     "This project does not hold that folder. List the project's folders and name one of them.";
@@ -2317,6 +2327,7 @@ impl Reported {
             }
             Operation::RemoveProject { .. } => Self::Project("removed"),
             Operation::ProjectEdit { .. } => Self::Project("updated"),
+            Operation::MoveAccount { .. } => Self::Project("updated"),
             Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
             Operation::Select { provider, .. } => Self::Switch {
                 provider: *provider,
@@ -3420,6 +3431,51 @@ async fn execute(
             )?;
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
+        }
+        Operation::MoveAccount { id, pool } => {
+            let snapshot = store.snapshot()?;
+            let from = snapshot
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .ok_or("Account not found.")?
+                .pool
+                .clone();
+            if from == pool {
+                return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
+            }
+            let edit =
+                |pool: String, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
+                    pool,
+                    name: None,
+                    add_accounts: add,
+                    remove_accounts: remove,
+                    add_folders: Vec::new(),
+                    remove_folders: Vec::new(),
+                };
+            if pool != "default" {
+                if snapshot.project_of_pool(&pool).is_none() {
+                    return Err(MOVE_ACCOUNT_NO_PROJECT.into());
+                }
+                Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(pool.clone(), vec![id.clone()], Vec::new()),
+                ))
+                .await?;
+            } else if snapshot.project_of_pool(&from).is_some() {
+                Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(from.clone(), Vec::new(), vec![id.clone()]),
+                ))
+                .await?;
+            } else {
+                store.return_to_default(&id)?;
+            }
+            Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
@@ -4878,6 +4934,87 @@ mod owner_tests {
             snapshot.accounts.iter().find(|x| x.id == two).unwrap().pool,
             "default",
             "an account taken out goes back to the default pool"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_account_moves_between_projects_and_back_to_default() {
+        // SB-122: «аккаунты между пулами перемещать через UI, три точки, добавить в пул, выбор».
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (a, b) = (work.join("a"), work.join("b"));
+        for d in [&a, &b] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        for (name, folder) in [("App", &a), ("Web", &b)] {
+            runtime
+                .execute(Operation::SaveProject {
+                    pool: None,
+                    name: name.into(),
+                    folders: vec![folder.clone()],
+                    account_ids: vec![],
+                    base_folders: None,
+                })
+                .await
+                .unwrap();
+        }
+        let move_to = |pool: &str| Operation::MoveAccount {
+            id: one.clone(),
+            pool: pool.into(),
+        };
+        let pool_of = |runtime: &Runtime| {
+            runtime
+                .store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .iter()
+                .find(|x| x.id == one)
+                .unwrap()
+                .pool
+                .clone()
+        };
+        let view = runtime.execute(move_to("app")).await.unwrap();
+        assert_eq!(
+            (view["from"].as_str(), view["moved"].as_bool()),
+            (Some("default"), Some(true))
+        );
+        assert_eq!(pool_of(&runtime), "app");
+        // From one project straight into another: the first lets it go.
+        runtime.execute(move_to("web")).await.unwrap();
+        assert_eq!(pool_of(&runtime), "web");
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.accounts.iter().all(|x| x.pool != "app"));
+        // The same pool is no change; a pool no project uses is refused.
+        let same = runtime.execute(move_to("web")).await.unwrap();
+        assert_eq!(same["moved"], false);
+        assert_eq!(
+            runtime.execute(move_to("nowhere")).await.unwrap_err(),
+            MOVE_ACCOUNT_NO_PROJECT
+        );
+        runtime.execute(move_to("default")).await.unwrap();
+        assert_eq!(pool_of(&runtime), "default");
+        // An account left in a deleted project's pool goes back to default by itself.
+        runtime.execute(move_to("app")).await.unwrap();
+        runtime
+            .execute(Operation::RemoveProject { pool: "app".into() })
+            .await
+            .unwrap();
+        assert_eq!(pool_of(&runtime), "app");
+        runtime.execute(move_to("default")).await.unwrap();
+        assert_eq!(pool_of(&runtime), "default");
+        assert_eq!(
+            runtime
+                .execute(Operation::MoveAccount {
+                    id: "synthetic-nobody".into(),
+                    pool: "web".into()
+                })
+                .await
+                .unwrap_err(),
+            "Account not found."
         );
     }
 
