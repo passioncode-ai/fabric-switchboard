@@ -1497,6 +1497,58 @@ async fn a_pool_capability_reaches_its_pool_only() {
         "only as a bearer, like the session token"
     );
     assert_eq!(hits.load(Ordering::SeqCst), 1);
+    // A rotation (2026-10-18, an exposed folder capability): the old capability is refused at
+    // once, the new one works, and the session token is untouched.
+    p.set_pool_salts([("default".to_owned(), "synthetic-salt".to_owned())].into());
+    let rotated = p.pool_capability("default");
+    assert_ne!(rotated, scoped);
+    let old = client
+        .post(to("default"))
+        .bearer_auth(&scoped)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(old.status(), 401, "the exposed capability is dead");
+    let new = client
+        .post(to("default"))
+        .bearer_auth(&rotated)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(new.status(), 200);
+    let session = client
+        .post(to("default"))
+        .bearer_auth(p.token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(session.status(), 200, "managed sessions keep working");
+    // SB-140: the capability as its own header, beside the session's own claude.ai bearer,
+    // which is ignored and never forwarded.
+    let header = client
+        .post(to("default"))
+        .bearer_auth("synthetic-person-oauth-token")
+        .header(crate::CAPABILITY_HEADER, &rotated)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(header.status(), 200);
+    let wrong = client
+        .post(to("other"))
+        .header(crate::CAPABILITY_HEADER, &rotated)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong.status(),
+        401,
+        "the header counts for its own pool only"
+    );
 }
 
 // Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.

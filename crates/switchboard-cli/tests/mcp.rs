@@ -175,6 +175,16 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_context",
             "switchboard_projects",
             "switchboard_project_edit",
+            "switchboard_events",
+            "switchboard_account_update",
+            "switchboard_rotation",
+            "switchboard_rotation_set",
+            "switchboard_backups",
+            "switchboard_backup_now",
+            "switchboard_recovery",
+            "switchboard_handovers",
+            "switchboard_agent_set",
+            "switchboard_login",
             "switchboard_project_set",
             "switchboard_project_remove",
             "switchboard_project_apply",
@@ -786,4 +796,55 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         .collect();
     assert!(names.contains(&"switchboard_projects".to_owned()));
     assert!(!names.contains(&"switchboard_project_edit".to_owned()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
+    // SB-134 part 2: the CLI's account, rotation, activity, backup and hand-over commands have
+    // MCP tools; a rotation change keeps every field it does not name.
+    let (data, projects, _owner, ids) = fixture().await;
+    let mut agent = Agent::start(data.path(), projects.path(), &[], false);
+    let (error, renamed) = agent.tool(
+        "switchboard_account_update",
+        json!({"account_id": ids[2], "label": "Personal 2", "enabled": false}),
+    );
+    assert!(!error, "{renamed}");
+    let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
+    let personal = accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == ids[2])
+        .unwrap()
+        .clone();
+    assert_eq!(personal["label"], "Personal 2", "{accounts}");
+    let (error, refused) = agent.tool("switchboard_account_update", json!({"account_id": ids[2]}));
+    assert!(error, "nothing to change is refused: {refused}");
+    let (error, set) = agent.tool(
+        "switchboard_rotation_set",
+        json!({"provider": "claude", "pool": "work", "threshold_percent": 80}),
+    );
+    assert!(!error, "{set}");
+    let (_, again) = agent.tool(
+        "switchboard_rotation_set",
+        json!({"provider": "claude", "pool": "work", "enabled": true}),
+    );
+    let (_, rotation) = agent.tool("switchboard_rotation", json!({}));
+    let policy = rotation["policies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["pool"] == "work")
+        .unwrap()
+        .clone();
+    assert_eq!(policy["threshold_percent"], 80.0, "{again}");
+    assert_eq!(policy["enabled"], true);
+    let (error, events) = agent.tool("switchboard_events", json!({"limit": 5}));
+    assert!(!error && events["events"].as_array().is_some(), "{events}");
+    let (error, handovers) = agent.tool("switchboard_handovers", json!({}));
+    assert!(!error && handovers["handovers"] == json!([]), "{handovers}");
+    let (error, backups) = agent.tool("switchboard_backups", json!({}));
+    assert!(!error, "{backups}");
+    let (error, login) = agent.tool("switchboard_login", json!({"action": "nope"}));
+    assert!(error, "{login}");
 }

@@ -126,7 +126,7 @@ A project reserves its accounts to its folders and their subfolders. A project h
 The ordinary `claude` is signed in once for every folder. So that sessions in a project's folders spend the project's accounts, Switchboard writes two keys into each folder's `.claude/settings.local.json`:
 
 - `env.ANTHROPIC_BASE_URL`: the proxy route of the project's pool;
-- `env.ANTHROPIC_AUTH_TOKEN`: a capability for that pool only.
+- `env.ANTHROPIC_CUSTOM_HEADERS`: `X-Switchboard-Capability: <capability>`, a capability for that pool only, sent as a header of its own (SB-140). It is not an auth source, so the session keeps its claude.ai login and the claude.ai connectors. Versions up to 0.6.37 wrote `ANTHROPIC_AUTH_TOKEN`, which turned the connectors off; the next sync replaces it.
 
 This covers worktrees inside a project folder too. Everything else in the file stays as it was, and the file is kept out of Git through the repository's `info/exclude`. Your skills, plugins, MCP servers and `CLAUDE.md` stay in force. A session already running keeps its account until it restarts.
 
@@ -193,6 +193,7 @@ switchboard project list                      # {projects, rules}: projects with
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
+switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8
