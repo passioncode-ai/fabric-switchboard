@@ -257,6 +257,14 @@ enum Project {
         #[arg(long, value_enum)]
         provider: ProviderArg,
     },
+    /// Rotate the capability a project's folders carry (their `.claude/settings.local.json`):
+    /// the old one is refused at once and the new one is written into every folder of the pool.
+    /// For an exposure. Other pools and managed sessions keep theirs.
+    RotateCapability {
+        /// The project's pool (`switchboard project list`).
+        #[arg(long)]
+        pool: String,
+    },
     /// Change a project by delta (SB-134): add or take out accounts and folders, or rename it.
     /// Everything not named stays as it is; naming something the project does not hold is
     /// refused.
@@ -1248,6 +1256,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 account_ids: accounts.clone(),
                 base_folders: None,
             },
+            Project::RotateCapability { pool } => {
+                Operation::RotatePoolCapability { pool: pool.clone() }
+            }
             Project::Edit {
                 pool,
                 name,
@@ -2219,5 +2230,153 @@ mod help_tests {
         let mut missing = Vec::new();
         walk(&super::Cli::command(), "switchboard", &mut missing);
         assert!(missing.is_empty(), "no help text: {missing:#?}");
+    }
+}
+
+/// SB-134: every CLI command either has an MCP tool or a written reason it has none, so the gap
+/// between the CLI and the MCP server cannot reopen without someone deciding it.
+#[cfg(test)]
+mod mcp_parity {
+    use clap::CommandFactory;
+    enum Over {
+        Tool(&'static str),
+        Not(&'static str),
+    }
+    use Over::{Not, Tool};
+    const PERSON: &str = "the person's own act: it takes a secret, deletes what cannot be restored, or changes this machine";
+    const PROCESS: &str = "a process mode, not an operation";
+    const HOST: &str =
+        "plumbing that hooks, consoles or hosts call; the state is readable over MCP";
+    const LATER: &str = "not over MCP yet: SB-134 part 3 (board)";
+    const LAUNCH: &str = "launching an agent from an agent is SB-64/SB-74";
+    const PARITY: &[(&str, Over)] = &[
+        ("accounts list", Tool("switchboard_accounts")),
+        ("accounts capture", Not(PERSON)),
+        ("accounts import-claude-swap", Not(PERSON)),
+        ("accounts activate", Tool("switchboard_switch")),
+        ("accounts add", Not(PERSON)),
+        ("accounts update", Tool("switchboard_account_update")),
+        ("accounts remove", Not(PERSON)),
+        ("accounts select", Tool("switchboard_switch")),
+        ("usage", Tool("switchboard_usage")),
+        ("events", Tool("switchboard_events")),
+        ("status", Tool("switchboard_status")),
+        ("sessions", Tool("switchboard_sessions")),
+        ("current", Tool("switchboard_status")),
+        ("rotation status", Tool("switchboard_rotation")),
+        ("rotation set", Tool("switchboard_rotation_set")),
+        ("login begin", Tool("switchboard_login")),
+        ("login status", Tool("switchboard_login")),
+        ("login finish", Tool("switchboard_login")),
+        ("login cancel", Tool("switchboard_login")),
+        ("launch", Not(LAUNCH)),
+        ("continue", Not(LAUNCH)),
+        ("serve", Not(PROCESS)),
+        ("mcp", Not(PROCESS)),
+        ("agents list", Tool("switchboard_agents")),
+        ("agents status", Tool("switchboard_agents")),
+        ("agents enable", Tool("switchboard_agent_set")),
+        ("agents disable", Tool("switchboard_agent_set")),
+        ("agents default", Tool("switchboard_agent_set")),
+        ("agents models", Not(LATER)),
+        ("agents connect", Tool("switchboard_onboarding")),
+        ("agents key", Not(PERSON)),
+        ("agents openrouter set", Not(PERSON)),
+        (
+            "agents openrouter status",
+            Tool("switchboard_openrouter_status"),
+        ),
+        (
+            "agents openrouter model",
+            Tool("switchboard_openrouter_model"),
+        ),
+        ("agents openrouter remove", Not(PERSON)),
+        ("agents hermes status", Tool("switchboard_hermes_status")),
+        ("agents hermes set", Tool("switchboard_hermes_set")),
+        ("agents launch", Not(LAUNCH)),
+        ("kimi list", Tool("switchboard_kimi_accounts")),
+        ("kimi login", Not(LATER)),
+        ("kimi finish", Not(LATER)),
+        ("kimi cancel", Not(LATER)),
+        ("kimi relogin", Not(LATER)),
+        ("kimi launch", Not(LAUNCH)),
+        ("kimi rename", Not(LATER)),
+        ("kimi remove", Not(PERSON)),
+        ("recovery register", Not(HOST)),
+        ("recovery claim", Not(HOST)),
+        ("recovery hook", Not(HOST)),
+        ("recovery finish", Not(HOST)),
+        ("handovers list", Tool("switchboard_handovers")),
+        ("handovers run", Not(HOST)),
+        ("handovers set", Not(LATER)),
+        ("chain list", Tool("switchboard_chain_get")),
+        ("chain set", Tool("switchboard_chain_set")),
+        ("chain clear", Tool("switchboard_chain_set")),
+        ("project list", Tool("switchboard_projects")),
+        ("project show", Tool("switchboard_project_context")),
+        ("project set", Tool("switchboard_project_set")),
+        ("project remove", Tool("switchboard_project_remove")),
+        ("project edit", Tool("switchboard_project_edit")),
+        ("project rotate-capability", Not(PERSON)),
+        ("project save", Tool("switchboard_project_edit")),
+        ("project delete", Not(PERSON)),
+        ("project suggest", Not(HOST)),
+        ("project suggestions", Not(LATER)),
+        ("project bindings", Not(LATER)),
+        ("project accept", Not(LATER)),
+        ("project dismiss", Not(LATER)),
+        ("project source", Not(LATER)),
+        ("project apply", Tool("switchboard_project_apply")),
+        ("backup list", Tool("switchboard_backups")),
+        ("backup now", Tool("switchboard_backup_now")),
+        ("backup restore", Not(PERSON)),
+        ("onboard", Tool("switchboard_onboarding")),
+        ("uninstall", Not(PERSON)),
+    ];
+
+    fn leaves(command: &clap::Command, path: &str, out: &mut Vec<String>) {
+        let subs: Vec<&clap::Command> = command
+            .get_subcommands()
+            .filter(|c| c.get_name() != "help")
+            .collect();
+        if subs.is_empty() {
+            out.push(path.trim().to_owned());
+        }
+        for sub in subs {
+            leaves(sub, &format!("{path} {}", sub.get_name()), out);
+        }
+    }
+
+    #[test]
+    fn every_cli_command_has_an_mcp_tool_or_a_reason() {
+        let mut commands = Vec::new();
+        leaves(&super::Cli::command(), "", &mut commands);
+        let tools: Vec<String> = crate::mcp::tools()
+            .into_iter()
+            .map(|(_, t)| t["name"].as_str().unwrap().to_owned())
+            .collect();
+        let missing: Vec<&String> = commands
+            .iter()
+            .filter(|c| !PARITY.iter().any(|(p, _)| p == c))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "CLI commands with no MCP decision: {missing:?}"
+        );
+        for (command, over) in PARITY {
+            assert!(
+                commands.iter().any(|c| c == command),
+                "no such CLI command: {command}"
+            );
+            match over {
+                Tool(name) => assert!(
+                    tools.iter().any(|t| t == name),
+                    "{command}: no MCP tool {name}"
+                ),
+                Not(reason) => assert!(reason.len() > 20, "{command}: the reason says why"),
+            }
+        }
+        let covered = PARITY.iter().filter(|(_, o)| matches!(o, Tool(_))).count();
+        assert!(covered * 2 > PARITY.len(), "most commands have a tool");
     }
 }

@@ -127,8 +127,8 @@ class PlantedDefects(Fixture):
         self.assertFlags("'switchboard_statsu'")
 
     def test_unknown_prefixed_tool_named_in_skill(self):
-        self.edit(SKILL, "mcp__switchboard__switchboard_status", "mcp__switchboard__switchboard_login")
-        self.assertFlags("'switchboard_login'")
+        self.edit(SKILL, "mcp__switchboard__switchboard_status", "mcp__switchboard__switchboard_teleport")
+        self.assertFlags("'switchboard_teleport'")
 
     def test_undocumented_server_tool(self):
         self.edit(check_plugin.MCP_SOURCE, '"name":"switchboard_status"',

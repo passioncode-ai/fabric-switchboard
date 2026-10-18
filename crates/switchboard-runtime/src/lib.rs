@@ -195,6 +195,11 @@ pub enum Operation {
     RemoveProject {
         pool: String,
     },
+    /// Makes a pool's folder capability worthless and writes a new one into its folders (an
+    /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
+    RotatePoolCapability {
+        pool: String,
+    },
     /// SB-134: change a project by delta — add or take out accounts and folders, rename it —
     /// without restating its whole set. Everything not named stays as it is.
     ProjectEdit {
@@ -750,7 +755,19 @@ impl Runtime {
             let Ok(mut repos) = self.bindings_repos.lock() else {
                 return;
             };
-            bindings::key(&snapshot, &address, &mut repos)
+            let mut key = bindings::key(&snapshot, &address, &mut repos);
+            // A rotated capability is a change the folders must get.
+            {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                key.hash(&mut h);
+                let mut salts: Vec<(String, String)> =
+                    read_pool_salts(&self.root).into_iter().collect();
+                salts.sort();
+                salts.hash(&mut h);
+                key = h.finish();
+            }
+            key
         };
         if self.bindings_key.lock().ok().and_then(|k| *k) == Some(key) {
             return;
@@ -759,7 +776,8 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
-        match bindings::sync(&self.root, &snapshot, &address, self.proxy.token()) {
+        let salts = read_pool_salts(&self.root);
+        match bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts) {
             Ok(report) => {
                 oplog::event(
                     "claude_binding",
@@ -1644,6 +1662,26 @@ impl Runtime {
 /// Where the proxy's port and token are recorded, so a managed session started before a
 /// restart or an update still reaches the proxy (lifecycle LC-11).
 const PROXY_FILE: &str = "proxy.json";
+/// The pools whose folder capability was rotated, and their salts (0600). Losing it reverts those
+/// pools to the unsalted capability, as a new session token would replace every capability.
+const POOL_SALTS_FILE: &str = "pool-salts.json";
+fn read_pool_salts(root: &Path) -> HashMap<String, String> {
+    switchboard_core::private_fs::read_private(&root.join(POOL_SALTS_FILE), 64 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+fn write_pool_salts(root: &Path, salts: &HashMap<String, String>) -> Result<(), String> {
+    let bytes = serde_json::to_vec(salts).map_err(|_| "Could not save the new capability.")?;
+    switchboard_core::private_fs::private_write(&root.join(POOL_SALTS_FILE), &bytes)
+}
+/// A fresh salt: two random UUIDs, hashed.
+fn new_salt() -> String {
+    use sha2::{Digest, Sha256};
+    let digest =
+        Sha256::digest(format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()).as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProxyRecord {
@@ -1672,6 +1710,7 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
         record.as_ref().map(|r| r.token.clone()),
     )
     .await?;
+    proxy.set_pool_salts(read_pool_salts(root));
     let port = proxy.address().port();
     let unchanged = record
         .as_ref()
@@ -3185,6 +3224,33 @@ async fn execute(
                 rt.suggestions_changed();
             }
             Ok(projects::project_view(&store.snapshot()?, &project))
+        }
+        Operation::RotatePoolCapability { pool } => {
+            let rt = needs_owner()?;
+            if !store.snapshot()?.projects.iter().any(|p| p.pool == pool) {
+                return Err("Project not found.".into());
+            }
+            let mut salts = read_pool_salts(root);
+            salts.insert(pool.clone(), new_salt());
+            write_pool_salts(root, &salts)?;
+            rt.proxy.set_pool_salts(salts.clone());
+            // Written at once, not at the next pass: the old capability is already refused.
+            let snapshot = store.snapshot()?;
+            let address = rt.proxy.address().to_string();
+            let report =
+                bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
+            if let Ok(mut key) = rt.bindings_key.lock() {
+                *key = None;
+            }
+            oplog::event(
+                "capability_rotated",
+                &[("folders", oplog::Field::Number(report.bound as i64))],
+            );
+            Ok(
+                json!({"pool": pool, "rotated": true, "folders_rewritten": report.bound,
+                "skipped": report.skipped.len(),
+                "note": "The old capability is refused now. A Claude Code session already running in one of these folders keeps the old one until it restarts."}),
+            )
         }
         Operation::ProjectEdit {
             pool,

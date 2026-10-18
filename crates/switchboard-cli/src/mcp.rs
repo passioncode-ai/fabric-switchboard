@@ -43,7 +43,7 @@ pub(crate) fn rfc3339(seconds: i64) -> Value {
 }
 
 /// One tool: its name, whether it writes, and its schema.
-fn tools() -> Vec<(bool, Value)> {
+pub(crate) fn tools() -> Vec<(bool, Value)> {
     let path = json!({"type":"string","description":"Absolute project folder. Defaults to the folder the agent runs in."});
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
@@ -56,6 +56,16 @@ fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_projects","title":"Projects","description":"Every project: its pool, name, folders (repositories), sources and the accounts reserved for it, then every optional project rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_edit","title":"Change a project","description":"Change a project by delta: reserve accounts for it (add_accounts), give accounts back to the default pool (remove_accounts), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it. Everything not named stays as it is; naming an account or folder the project does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a project.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The project's pool, from switchboard_projects."},"name":{"type":"string"},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the project, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, projects, rotation, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, or enable or disable it (a disabled account is never selected or switched to). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"}},"required":["account_id"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_rotation","title":"Automatic rotation","description":"The automatic rotation policy per provider, pool and target (enabled, threshold, hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_rotation_set","title":"Set automatic rotation","description":"Change one rotation policy (provider, pool, target): switch it on or off, or change its threshold, hysteresis, cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, projects, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restoring stays the person's, in the app or with switchboard backup restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue (SB-115): each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them (SB-108).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), or set the machine's default agent (default: an agent id, or null for none). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_login","title":"Sign in a new account","description":"Start the official sign-in for a new Claude or Codex account (action begin: provider, label, pool; it opens Terminal where the person signs in) and follow it (status, finish once the person signed in, cancel). The person signs in; this never takes a password or a key.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel"]},"login_id":{"type":"string"},"provider":{"type":"string","enum":["claude","codex"]},"label":{"type":"string","minLength":1,"maxLength":80},"pool":{"type":"string","default":"default"}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save project rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop rotation. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove project rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply project rule","description":"Apply the folder's rule to this session when you start work in a project. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
@@ -378,6 +388,133 @@ impl Server {
             json!({"project": project, "message": "Project saved. It is visible in the Switchboard app under Projects."}),
         )
     }
+    async fn account_update(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let label = args.get("label").and_then(Value::as_str).map(str::to_owned);
+        let enabled = args.get("enabled").and_then(Value::as_bool);
+        if label.is_none() && enabled.is_none() {
+            return Err("Name a label or enabled to change.".into());
+        }
+        self.call(Operation::Update {
+            id: required(args, "account_id")?.into(),
+            label,
+            enabled,
+        })
+        .await
+    }
+    async fn rotation_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let provider: Provider =
+            serde_json::from_value(args.get("provider").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "provider must be claude or codex.")?;
+        let pool = args
+            .get("pool")
+            .and_then(Value::as_str)
+            .unwrap_or("default")
+            .to_owned();
+        let target = args
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or("managed")
+            .to_owned();
+        if target != "managed" && target != "claude_cli" {
+            return Err("target is managed or claude_cli.".into());
+        }
+        // Merge with the saved policy so one field never resets the others (as the CLI does).
+        let saved = self.call(Operation::Snapshot).await?["policies"]
+            .as_array()
+            .and_then(|ps| {
+                ps.iter().find(|p| {
+                    p["provider"] == provider.as_str()
+                        && p["pool"] == pool.as_str()
+                        && p["target"] == target.as_str()
+                })
+            })
+            .map(|p| serde_json::from_value::<switchboard_core::RotationPolicy>(p.clone()))
+            .transpose()
+            .map_err(|_| "Saved rotation policy is unreadable.")?;
+        let mut policy = saved.unwrap_or(switchboard_core::RotationPolicy {
+            provider,
+            pool,
+            target,
+            enabled: false,
+            threshold_percent: 90.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 1800,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        });
+        if let Some(v) = args.get("enabled").and_then(Value::as_bool) {
+            policy.enabled = v;
+        }
+        if let Some(v) = args.get("threshold_percent").and_then(Value::as_f64) {
+            policy.threshold_percent = v;
+        }
+        if let Some(v) = args.get("hysteresis_percent").and_then(Value::as_f64) {
+            policy.hysteresis_percent = v;
+        }
+        if let Some(v) = args
+            .get("cooldown_seconds")
+            .and_then(Value::as_i64)
+            .filter(|v| *v >= 0)
+        {
+            policy.cooldown_seconds = v;
+        }
+        if let Some(v) = args
+            .get("max_age_seconds")
+            .and_then(Value::as_i64)
+            .filter(|v| *v >= 30)
+        {
+            policy.max_age_seconds = v;
+        }
+        self.call(Operation::SetPolicy { policy }).await
+    }
+    async fn agent_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let mut answer = json!({});
+        if let Some(enabled) = args.get("enabled").and_then(Value::as_bool) {
+            answer = self
+                .call(Operation::AgentEnable {
+                    agent: required(args, "agent")?.into(),
+                    enabled,
+                })
+                .await?;
+        }
+        if let Some(default) = args.get("default") {
+            let agent = match default {
+                Value::Null => None,
+                Value::String(a) if a == "auto" => None,
+                Value::String(a) => Some(a.clone()),
+                _ => return Err("default is an agent id or null.".into()),
+            };
+            answer = self.call(Operation::AgentDefault { agent }).await?;
+        }
+        if answer == json!({}) {
+            return Err("Name enabled (with agent) or default to change.".into());
+        }
+        Ok(answer)
+    }
+    async fn login(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let id = || required(args, "login_id").map(str::to_owned);
+        match required(args, "action")? {
+            "begin" => {
+                let provider: Provider =
+                    serde_json::from_value(args.get("provider").cloned().unwrap_or(Value::Null))
+                        .map_err(|_| "provider must be claude or codex.")?;
+                self.call(Operation::BeginLogin {
+                    provider,
+                    label: required(args, "label")?.into(),
+                    pool: args
+                        .get("pool")
+                        .and_then(Value::as_str)
+                        .unwrap_or("default")
+                        .into(),
+                })
+                .await
+            }
+            "status" => self.call(Operation::LoginStatus { login_id: id()? }).await,
+            "finish" => self.call(Operation::FinishLogin { login_id: id()? }).await,
+            "cancel" => self.call(Operation::CancelLogin { login_id: id()? }).await,
+            _ => Err("action is begin, status, finish or cancel.".into()),
+        }
+    }
     async fn project_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let hours = match args.get("expires_in_hours") {
             None => None,
@@ -468,6 +605,37 @@ impl Server {
                 .await
                 .map(|v| json!({"projects": project_views(&v), "rules": rule_views(&v, now())})),
             "switchboard_project_edit" => self.project_edit(args).await,
+            "switchboard_events" => {
+                let limit = args
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(50)
+                    .clamp(1, 500) as usize;
+                self.call(Operation::Snapshot).await.map(|v| {
+                    let events: Vec<Value> = v["events"]
+                        .as_array()
+                        .map(|e| e.iter().rev().take(limit).cloned().collect())
+                        .unwrap_or_default();
+                    json!({"events": events})
+                })
+            }
+            "switchboard_account_update" => self.account_update(args).await,
+            "switchboard_rotation" => match self.call(Operation::Snapshot).await {
+                Ok(v) => {
+                    let monitor = self.call(Operation::MonitorStatus).await.unwrap_or(
+                        json!({"running": false, "note": "The app is not running: nothing rotates now."}),
+                    );
+                    Ok(json!({"policies": v["policies"], "monitor": monitor}))
+                }
+                Err(e) => Err(e),
+            },
+            "switchboard_rotation_set" => self.rotation_set(args).await,
+            "switchboard_backups" => self.call(Operation::Backups).await,
+            "switchboard_backup_now" => self.call(Operation::BackupNow).await,
+            "switchboard_recovery" => self.call(Operation::Recovery).await,
+            "switchboard_handovers" => self.call(Operation::Handovers).await,
+            "switchboard_agent_set" => self.agent_set(args).await,
+            "switchboard_login" => self.login(args).await,
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,
             "switchboard_project_apply" => self.project_apply(args).await,
