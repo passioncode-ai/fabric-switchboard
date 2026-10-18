@@ -1632,6 +1632,62 @@ async fn a_folder_capability_works_only_while_its_folder_is_in_the_project() {
     assert_eq!(session.status(), 200);
 }
 
+// 2026-10-18: an update waited three hours for a moment with no request in flight. Draining
+// answers new requests 503 with Retry-After (clients retry) and lets the ones in flight finish.
+#[tokio::test]
+async fn a_draining_proxy_asks_new_requests_to_retry_and_reaches_the_provider_again_after() {
+    let (_root, s) = store();
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let router = Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                "{}"
+            }
+        }),
+    );
+    let (url, _up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let to = format!("http://{}/claude/default/v1/messages", p.address());
+    let send = || {
+        let to = to.clone();
+        let token = p.token().to_owned();
+        async move {
+            reqwest::Client::new()
+                .post(to)
+                .bearer_auth(token)
+                .body("{}")
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    p.set_draining(true);
+    let refused = send().await;
+    assert_eq!(refused.status(), 503);
+    assert_eq!(refused.headers()["retry-after"], "5");
+    assert!(refused.text().await.unwrap().contains("restarting"));
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "nothing reached the provider"
+    );
+    p.set_draining(false);
+    assert_eq!(send().await.status(), 200);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
 // Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.
 #[tokio::test]
 async fn agents_reach_api_key_accounts_and_never_a_subscription_sign_in() {

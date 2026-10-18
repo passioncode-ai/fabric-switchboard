@@ -1096,4 +1096,49 @@ mod tests {
         let row = &read(root.path()).unwrap()[0];
         assert_eq!((row.attempt, row.kind), (1, StopKind::Billing));
     }
+
+    #[tokio::test]
+    async fn a_stop_in_a_project_folder_is_the_projects_account() {
+        // 2026-10-18: 1,202 stops in project folders were refused in one day: the hook named the
+        // ordinary CLI's account, which a project's folder never uses.
+        use crate::{fixtures, Operation};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), fixtures::signed_in, fixtures::fails).await;
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        let mine = fixtures::save(&runtime.store, "synthetic-project", "default");
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![folder.clone()],
+                account_ids: vec![mine.id.clone()],
+                base_folders: None,
+            })
+            .await
+            .unwrap();
+        let done = runtime
+            .execute(Operation::RecoveryHook {
+                session: "s-2".into(),
+                directory: folder.join("src"),
+                billing: false,
+            })
+            .await;
+        // A subfolder that does not exist is not this case; the project folder itself is.
+        assert!(done.is_err());
+        let done = runtime
+            .execute(Operation::RecoveryHook {
+                session: "s-2".into(),
+                directory: folder,
+                billing: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(done["result"], "registered", "{done}");
+        let row = &read(root.path()).unwrap()[0];
+        assert_eq!(
+            (row.account.as_str(), row.pool.as_str()),
+            (mine.id.as_str(), "app")
+        );
+    }
 }

@@ -83,6 +83,7 @@ struct Gateway {
     salts: PoolSalts,
     folders: FolderTokens,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
+    draining: Arc<std::sync::atomic::AtomicBool>,
 }
 /// SB-133: each pool's folder capabilities (`folder_token`), one per folder that is part of the
 /// pool's project now. `None` until the owner sets them at start.
@@ -98,12 +99,14 @@ pub struct ProxyHandle {
     salts: PoolSalts,
     folders: FolderTokens,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
+    draining: Arc<std::sync::atomic::AtomicBool>,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
 }
-/// Requests relayed at once; each holds a slot until its response stream ends.
-const SLOTS: usize = 16;
+/// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
+/// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
+const SLOTS: usize = 64;
 /// How long a start waits for its recorded port to be released by a previous owner.
 const REBIND_ATTEMPTS: u32 = 5;
 const REBIND_WAIT: Duration = Duration::from_millis(100);
@@ -141,6 +144,9 @@ pub fn folder_token(pool_capability: &str, folder: &str) -> String {
         Sha256::digest(format!("switchboard-folder:{folder}:{pool_capability}").as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// Answered while the app drains for an update restart; Claude Code and the SDKs retry a 503.
+pub const RESTARTING: &str =
+    "Switchboard is restarting to finish an update. Retry in a few seconds.";
 /// SB-133: refused to a folder capability the proxy does not know (any longer).
 pub const FOLDER_NOT_IN_PROJECT: &str = "This folder is not part of a Switchboard project now. Remove Switchboard's lines from .claude/settings.local.json, or add the folder to a project in Switchboard.";
 /// Third-party agents may use only accounts the provider sells for any client: API keys.
@@ -218,6 +224,7 @@ impl ProxyHandle {
         let salts: PoolSalts = Arc::default();
         let folders: FolderTokens = Arc::default();
         let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
+        let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let state = Gateway {
             store,
             token: token.clone(),
@@ -231,6 +238,7 @@ impl ProxyHandle {
             salts: salts.clone(),
             folders: folders.clone(),
             legacy_until: legacy_until.clone(),
+            draining: draining.clone(),
         };
         let slots = state.slots.clone();
         let router = Router::new()
@@ -252,6 +260,7 @@ impl ProxyHandle {
             salts,
             folders,
             legacy_until,
+            draining,
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
             slots,
@@ -292,6 +301,12 @@ impl ProxyHandle {
     pub fn set_legacy_until(&self, until: i64) {
         self.legacy_until
             .store(until, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// While set, new requests are answered 503 with `Retry-After` and requests already relayed
+    /// finish: the app is about to restart into an update that waited too long for a quiet moment.
+    pub fn set_draining(&self, on: bool) {
+        self.draining
+            .store(on, std::sync::atomic::Ordering::Relaxed);
     }
     /// The capability third-party agents present (as `x-api-key` or a bearer token).
     pub fn agent_token(&self) -> &str {
@@ -483,6 +498,13 @@ async fn relay(
         ("codex", "responses" | "chat/completions") => Provider::Codex,
         _ => return error(StatusCode::NOT_FOUND, "Unsupported provider operation."),
     };
+    if g.draining.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut response = error(StatusCode::SERVICE_UNAVAILABLE, RESTARTING);
+        response
+            .headers_mut()
+            .insert("retry-after", axum::http::HeaderValue::from_static("5"));
+        return response;
+    }
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => p,
         Err(_) => {
