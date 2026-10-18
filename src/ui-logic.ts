@@ -447,6 +447,34 @@ export function moveTargets(currentPool: string, projects: { pool: string; name:
     return { ...target, current, blocked: inCli && target.pool !== 'default' && !current };
   });
 }
+/** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
+export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone'; branch: string | null }
+export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[] }
+export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | null; branch: string | null; derived: number }
+/** The rows of a folder list: each root, then (when `open`) its derived folders under it; a folder the tree does not know (just added, or the tree not read yet) is a root of its own, in its place. */
+export function folderRows(folders: string[], roots: ProjectRoot[] | null, open = true): FolderRow[] {
+  const listed = new Set(folders); const placed = new Set<string>(); const rows: FolderRow[] = [];
+  const byRoot = new Map((roots ?? []).map((r) => [r.folder, r]));
+  const under = new Map<string, string>(); for (const r of roots ?? []) for (const d of r.derived) under.set(d.folder, r.folder);
+  for (const folder of folders) {
+    if (placed.has(folder)) continue;
+    const parent = under.get(folder);
+    if (parent && listed.has(parent)) continue; // listed under its root
+    const root = byRoot.get(folder); const derived = (root?.derived ?? []).filter((d) => listed.has(d.folder));
+    rows.push({ folder, depth: 0, kind: null, branch: root?.branch ?? null, derived: derived.length }); placed.add(folder);
+    for (const d of derived) { placed.add(d.folder); if (open) rows.push({ folder: d.folder, depth: 1, kind: d.kind, branch: d.branch, derived: 0 }); }
+  }
+  return rows;
+}
+/** A folder's own name (its last path segment), for a narrow list; the full path goes in the title. */
+export function folderName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+/** SB-135: taking a root out of the list takes its worktrees and clones with it. */
+export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, folder: string): string[] {
+  const gone = new Set([folder, ...((roots ?? []).find((r) => r.folder === folder)?.derived.map((d) => d.folder) ?? [])]);
+  return folders.filter((f) => !gone.has(f));
+}
 /** The last launch folder, remembered across restarts as a per-window convenience; anything but a non-empty string reads as none. */
 export const LAST_FOLDER_KEY = 'switchboard.last-folder';
 export function storedFolder(store: Pick<Storage, 'getItem'> | null): string {

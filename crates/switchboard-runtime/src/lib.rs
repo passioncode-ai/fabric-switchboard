@@ -24,6 +24,7 @@ pub mod oplog;
 pub mod projects;
 pub mod recovery;
 mod refresh;
+pub mod roots;
 pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
@@ -3467,6 +3468,25 @@ async fn execute(
             remove_folders,
         } => {
             let snapshot = store.snapshot()?;
+            // SB-135: a root taken out takes its worktrees and clones with it.
+            let mut remove_folders = remove_folders;
+            if let Some(project) = snapshot.projects.iter().find(|p| p.pool == pool) {
+                let roots = blocking::run(|| roots::tree(&project.folders));
+                let mut extra: Vec<PathBuf> = Vec::new();
+                for f in &remove_folders {
+                    let named = canonical_near(f);
+                    for root in &roots {
+                        if canonical_near(Path::new(&root.folder)) == named {
+                            extra.extend(root.derived.iter().map(|d| PathBuf::from(&d.folder)));
+                        }
+                    }
+                }
+                for f in extra {
+                    if !remove_folders.contains(&f) {
+                        remove_folders.push(f);
+                    }
+                }
+            }
             let save = project_edit(
                 &snapshot,
                 &pool,
@@ -4951,6 +4971,84 @@ mod owner_tests {
         );
         runtime.bindings_pass().await;
         assert_eq!(ask(header).await, 401, "and the proxy no longer takes it");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn taking_a_root_out_of_a_project_takes_its_worktrees_too() {
+        // SB-135 (operator 2026-10-18): the main checkout is the project's folder; its worktrees
+        // are listed under it and go with it.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (main, wt, other) = (work.join("bot"), work.join("bot-card"), work.join("web"));
+        let git = |args: &[&str], dir: &Path| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        for d in [&main, &other] {
+            std::fs::create_dir_all(d).unwrap();
+            git(&["init", "-q", "-b", "main"], d);
+        }
+        git(
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@e.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            &main,
+        );
+        git(
+            &["worktree", "add", "-q", "-b", "card", wt.to_str().unwrap()],
+            &main,
+        );
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Apps".into(),
+                folders: vec![wt.clone(), main.clone(), other.clone()],
+                account_ids: vec![],
+                base_folders: None,
+            })
+            .await
+            .unwrap();
+        let folders = runtime.store.snapshot().unwrap().projects[0]
+            .folders
+            .clone();
+        let tree = roots::tree(&folders);
+        assert_eq!(tree.len(), 2, "{tree:?}");
+        assert_eq!(tree[0].folder, main.to_string_lossy());
+        assert_eq!(tree[0].derived[0].folder, wt.to_string_lossy());
+        runtime
+            .execute(Operation::ProjectEdit {
+                pool: "apps".into(),
+                name: None,
+                add_accounts: vec![],
+                remove_accounts: vec![],
+                add_folders: vec![],
+                remove_folders: vec![main.clone()],
+            })
+            .await
+            .unwrap();
+        let left = runtime.store.snapshot().unwrap().projects[0]
+            .folders
+            .clone();
+        assert_eq!(left, [other.to_string_lossy().into_owned()]);
     }
 
     #[tokio::test]

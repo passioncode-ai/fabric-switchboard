@@ -45,6 +45,7 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
   "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',
