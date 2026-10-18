@@ -1526,6 +1526,29 @@ async fn a_pool_capability_reaches_its_pool_only() {
         .await
         .unwrap();
     assert_eq!(session.status(), 200, "managed sessions keep working");
+    // SB-140: the capability as its own header, beside the session's own claude.ai bearer,
+    // which is ignored and never forwarded.
+    let header = client
+        .post(to("default"))
+        .bearer_auth("synthetic-person-oauth-token")
+        .header(crate::CAPABILITY_HEADER, &rotated)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(header.status(), 200);
+    let wrong = client
+        .post(to("other"))
+        .header(crate::CAPABILITY_HEADER, &rotated)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        wrong.status(),
+        401,
+        "the header counts for its own pool only"
+    );
 }
 
 // Third-party agents (operator request 2026-10-05): their own capability, API-key accounts only.

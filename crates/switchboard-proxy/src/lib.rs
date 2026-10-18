@@ -19,6 +19,8 @@ use uuid::Uuid;
 
 /// The provider's own request ceiling (Anthropic: 32 MB); the proxy must not be the smaller one.
 const BODY_LIMIT: usize = 32 * 1024 * 1024;
+/// The header a project folder's Claude Code sends its pool capability in (SB-140).
+pub const CAPABILITY_HEADER: &str = "x-switchboard-capability";
 /// Client headers relayed upstream. Authentication (`authorization`, `x-api-key`), cookies,
 /// proxy and account-identity headers are never on this list: the proxy injects its own.
 const REQUEST_HEADERS: &[&str] = &[
@@ -386,10 +388,19 @@ async fn relay(
         .get("x-api-key")
         .map(|x| x.as_bytes().to_vec())
         .unwrap_or_default();
+    // SB-140: a project folder's capability as a header of its own. Claude Code sends it with
+    // `ANTHROPIC_CUSTOM_HEADERS`, which is not an auth source, so a session there keeps its
+    // claude.ai login and connectors; its own bearer is then ignored and never forwarded.
+    let header = request
+        .headers()
+        .get(CAPABILITY_HEADER)
+        .map(|x| x.as_bytes().to_vec())
+        .unwrap_or_default();
     // Every comparison runs, whatever matched: no timing tells which header or token was right.
     // SB-118: a project folder's capability counts as the session token, for its pool only.
     let salt = g.salts.read().ok().and_then(|s| s.get(&pool).cloned());
-    let scoped = bearer.ct_eq(pool_token_salted(&g.token, &pool, salt.as_deref()).as_bytes());
+    let capability = pool_token_salted(&g.token, &pool, salt.as_deref());
+    let scoped = bearer.ct_eq(capability.as_bytes()) | header.ct_eq(capability.as_bytes());
     let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
     let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
     let agent = bool::from(!official & as_agent);
@@ -515,6 +526,22 @@ async fn relay(
             let beta = axum::http::HeaderValue::from_str(&beta)
                 .unwrap_or_else(|_| axum::http::HeaderValue::from_static("oauth-2025-04-20"));
             headers.insert("anthropic-beta", beta);
+        }
+        // A Claude Code session signed in with claude.ai sends the OAuth beta; an API-key account
+        // upstream must not get it.
+        if provider == Provider::Claude && account.kind == AuthKind::ApiKey {
+            if let Some(existing) = headers.get("anthropic-beta").and_then(|h| h.to_str().ok()) {
+                let kept: Vec<&str> = existing
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty() && *v != "oauth-2025-04-20")
+                    .collect();
+                if kept.is_empty() {
+                    headers.remove("anthropic-beta");
+                } else if let Ok(value) = axum::http::HeaderValue::from_str(&kept.join(",")) {
+                    headers.insert("anthropic-beta", value);
+                }
+            }
         }
         if provider == Provider::Claude && !headers.contains_key("anthropic-version") {
             headers.insert(

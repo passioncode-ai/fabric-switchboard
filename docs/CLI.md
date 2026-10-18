@@ -126,7 +126,7 @@ A project reserves its accounts to its folders and their subfolders. A project h
 The ordinary `claude` is signed in once for every folder. So that sessions in a project's folders spend the project's accounts, Switchboard writes two keys into each folder's `.claude/settings.local.json`:
 
 - `env.ANTHROPIC_BASE_URL`: the proxy route of the project's pool;
-- `env.ANTHROPIC_AUTH_TOKEN`: a capability for that pool only.
+- `env.ANTHROPIC_CUSTOM_HEADERS`: `X-Switchboard-Capability: <capability>`, a capability for that pool only, sent as a header of its own (SB-140). It is not an auth source, so the session keeps its claude.ai login and the claude.ai connectors. Versions up to 0.6.37 wrote `ANTHROPIC_AUTH_TOKEN`, which turned the connectors off; the next sync replaces it.
 
 This covers worktrees inside a project folder too. Everything else in the file stays as it was, and the file is kept out of Git through the repository's `info/exclude`. Your skills, plugins, MCP servers and `CLAUDE.md` stay in force. A session already running keeps its account until it restarts.
 

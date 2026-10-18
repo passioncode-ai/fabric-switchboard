@@ -214,7 +214,7 @@ to the operator. Change an existing project only when the operator asks, and the
 ## 8. A project folder routes Claude Code to its own accounts
 
 In a project folder with Claude accounts, `.claude/settings.local.json` carries
-`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` written by Switchboard (SB-118). Claude Code
+`ANTHROPIC_BASE_URL` and `ANTHROPIC_CUSTOM_HEADERS` written by Switchboard (SB-118, SB-140). Claude Code
 sessions started there use the project's accounts. Never print, copy or commit that file, and never
 edit those two keys: the token opens the project's pool on this computer. `switchboard project
 bindings` lists the folders. A session that started before the folder joined keeps its old account

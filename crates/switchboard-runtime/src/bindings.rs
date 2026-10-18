@@ -18,7 +18,26 @@ const SETTINGS_DIR: &str = ".claude";
 const SETTINGS_FILE: &str = "settings.local.json";
 const EXCLUDE_LINE: &str = ".claude/settings.local.json";
 pub(crate) const BASE_URL: &str = "ANTHROPIC_BASE_URL";
+/// Written by 0.6.37 and earlier; removed where it is still ours (SB-140): Claude Code counts it
+/// as an auth source and turns off the session's claude.ai connectors.
 pub(crate) const AUTH_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
+/// Where the capability goes now: a header, not an auth source (SB-140).
+pub(crate) const CUSTOM_HEADERS: &str = "ANTHROPIC_CUSTOM_HEADERS";
+fn header_value(token: &str) -> String {
+    format!("X-Switchboard-Capability: {token}")
+}
+/// Whether a `ANTHROPIC_CUSTOM_HEADERS` value is the one Switchboard wrote: the current one, or
+/// the one the record's digest names.
+fn header_ours(value: &Value, token: &str, previous: Option<&Binding>) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    text == header_value(token)
+        || previous.is_some_and(|old| {
+            text.strip_prefix("X-Switchboard-Capability: ")
+                .is_some_and(|t| sha256(t) == old.token_sha256)
+        })
+}
 const MAX_ROWS: usize = 2048;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_SETTINGS: u64 = 1024 * 1024;
@@ -279,7 +298,10 @@ fn apply(
         let token_ok = env
             .get(AUTH_TOKEN)
             .is_none_or(|v| is_ours(v, token, previous, false));
-        if !base_ok || !token_ok {
+        let header_ok = env
+            .get(CUSTOM_HEADERS)
+            .is_none_or(|v| header_ours(v, token, previous));
+        if !base_ok || !token_ok || !header_ok {
             return Ok(Applied::UserValues);
         }
     }
@@ -289,14 +311,18 @@ fn apply(
     let Value::Object(env) = env else {
         return Err(());
     };
+    let header = header_value(token);
     let same = env.get(BASE_URL).and_then(Value::as_str) == Some(base_url)
-        && env.get(AUTH_TOKEN).and_then(Value::as_str) == Some(token);
+        && env.get(CUSTOM_HEADERS).and_then(Value::as_str) == Some(header.as_str())
+        && !env.contains_key(AUTH_TOKEN);
     exclude(folder);
     if same {
         return Ok(Applied::Unchanged);
     }
+    // Checked above to be ours: the old auth-token form goes.
+    env.remove(AUTH_TOKEN);
     env.insert(BASE_URL.into(), Value::String(base_url.into()));
-    env.insert(AUTH_TOKEN.into(), Value::String(token.into()));
+    env.insert(CUSTOM_HEADERS.into(), Value::String(header));
     write_settings(&path, &map)?;
     Ok(Applied::Written(created))
 }
@@ -322,6 +348,15 @@ fn unapply(row: &Binding) -> Result<bool, ()> {
         .is_some_and(|t| sha256(t) == row.token_sha256)
     {
         env.remove(AUTH_TOKEN);
+        removed = true;
+    }
+    if env
+        .get(CUSTOM_HEADERS)
+        .and_then(Value::as_str)
+        .and_then(|v| v.strip_prefix("X-Switchboard-Capability: "))
+        .is_some_and(|t| sha256(t) == row.token_sha256)
+    {
+        env.remove(CUSTOM_HEADERS);
         removed = true;
     }
     if !removed {
@@ -587,9 +622,11 @@ mod tests {
         let e = env(&app).unwrap();
         assert_eq!(e[BASE_URL], "http://127.0.0.1:4000/claude/pc");
         assert_eq!(
-            e[AUTH_TOKEN],
-            switchboard_proxy::pool_token("session", "pc").as_str()
+            e[CUSTOM_HEADERS],
+            header_value(&switchboard_proxy::pool_token("session", "pc")).as_str()
         );
+        // SB-140: never an auth source, so the session keeps its claude.ai login and connectors.
+        assert_eq!(e.get(AUTH_TOKEN), None);
         assert_eq!(e["FOO"], "bar", "the person's own env stays");
         let whole = read_settings(&settings_path(&app)).unwrap().unwrap();
         assert!(whole.contains_key("permissions"));
@@ -754,7 +791,7 @@ mod tests {
         std::fs::remove_file(settings_path(&app)).unwrap();
         let again = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
         assert_eq!((again.bound, again.skipped.len()), (1, 0));
-        assert!(env(&app).unwrap().contains_key(AUTH_TOKEN));
+        assert!(env(&app).unwrap().contains_key(CUSTOM_HEADERS));
         s.projects.clear();
         let gone = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
         assert_eq!(gone.removed, 1);
@@ -876,7 +913,14 @@ mod tests {
             ..Default::default()
         };
         sync(&root, &snapshot, "127.0.0.1:4000", "session").unwrap();
-        let read = || env(&app).unwrap()[AUTH_TOKEN].as_str().unwrap().to_owned();
+        let read = || {
+            env(&app).unwrap()[CUSTOM_HEADERS]
+                .as_str()
+                .unwrap()
+                .strip_prefix("X-Switchboard-Capability: ")
+                .unwrap()
+                .to_owned()
+        };
         let old = read();
         let salts: std::collections::HashMap<String, String> =
             [("pc".to_owned(), "synthetic-salt".to_owned())].into();
@@ -888,5 +932,49 @@ mod tests {
             new,
             switchboard_proxy::pool_token_salted("session", "pc", Some("synthetic-salt"))
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_folder_bound_by_an_older_version_loses_its_auth_token_for_the_header() {
+        // SB-140 (2026-10-18): `ANTHROPIC_AUTH_TOKEN` made Claude Code turn off claude.ai
+        // connectors in every project folder. An older binding's token goes; the person's own
+        // auth token is never touched.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        let app = temp.path().join("app");
+        git(&app);
+        let app = app.canonicalize().unwrap();
+        let cap = switchboard_proxy::pool_token("session", "pc");
+        let old = Binding {
+            folder: app.to_string_lossy().into_owned(),
+            pool: "pc".into(),
+            base_url: "http://127.0.0.1:4000/claude/pc".into(),
+            token_sha256: sha256(&cap),
+            created: true,
+        };
+        write(&root, std::slice::from_ref(&old)).unwrap();
+        std::fs::create_dir_all(app.join(".claude")).unwrap();
+        let mut env_map = Map::new();
+        env_map.insert(BASE_URL.into(), Value::String(old.base_url.clone()));
+        env_map.insert(AUTH_TOKEN.into(), Value::String(cap.clone()));
+        let mut settings = Map::new();
+        settings.insert("env".into(), Value::Object(env_map));
+        write_settings(&settings_path(&app), &settings).unwrap();
+        let snapshot = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let report = sync(&root, &snapshot, "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(report.bound, 1, "{report:?}");
+        let e = env(&app).unwrap();
+        assert_eq!(e.get(AUTH_TOKEN), None);
+        assert_eq!(e[CUSTOM_HEADERS], header_value(&cap).as_str());
+        // Leaving the project removes the header as well.
+        let gone = sync(&root, &Snapshot::default(), "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(gone.removed, 1);
+        assert!(!settings_path(&app).exists());
     }
 }

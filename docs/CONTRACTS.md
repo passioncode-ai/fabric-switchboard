@@ -126,7 +126,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 
 - **SB-118 (operator 2026-10-14; [packet](packets/sb-118-claude-bindings.md)).**
   - `switchboard_proxy::pool_token(session, pool)` = SHA-256 of `switchboard-pool:<pool>:<session>`, in hex. It is accepted as the session token for `/claude|codex/<pool>/…`, and only as a bearer.
-  - `bindings::sync` writes `env.ANTHROPIC_BASE_URL` and `env.ANTHROPIC_AUTH_TOKEN` into `<folder>/.claude/settings.local.json` (0600, atomic) for every folder of a project with an enabled Claude account, and for worktrees of its repositories inside a project folder.
+  - `bindings::sync` writes `env.ANTHROPIC_BASE_URL` and `env.ANTHROPIC_CUSTOM_HEADERS` (`X-Switchboard-Capability: <pool capability>`, SB-140; up to 0.6.37 `env.ANTHROPIC_AUTH_TOKEN`, which Claude Code counts as an auth source and which turned off claude.ai connectors; a sync removes that older value wherever it is still Switchboard's) into `<folder>/.claude/settings.local.json` (0600, atomic) for every folder of a project with an enabled Claude account, and for worktrees of its repositories inside a project folder.
   - It appends `.claude/settings.local.json` to the repository's `info/exclude`.
   - It records `{folder, pool, base_url, token_sha256, created}` in `<data>/claude-bindings.json` (0600; operational, not backed up, removed by uninstall after `unbind_all`).
   - It removes only values equal to what it wrote and never touches a file that is not a JSON object.
