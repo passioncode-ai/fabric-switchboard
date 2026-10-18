@@ -48,6 +48,13 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
 | `switchboard_projects` | no | every project: pool, folders, sources, reserved accounts, and the rules |
 | `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename), only when the operator asks |
+| `switchboard_events` | no | recent activity as fixed codes |
+| `switchboard_account_update` | yes | rename, enable or disable an account, only when the operator asks |
+| `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic rotation, the change only when the operator asks |
+| `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |
+| `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |
+| `switchboard_agent_set` | yes | enable or disable an agent for taking over work, or set the default |
+| `switchboard_login` | yes | start and follow an official sign-in; the person signs in |
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |
 | `switchboard_project_remove` | yes | remove the rule for exactly one folder and provider |
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |

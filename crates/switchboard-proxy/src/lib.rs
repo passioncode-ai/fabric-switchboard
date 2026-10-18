@@ -78,11 +78,16 @@ struct Gateway {
     claude: String,
     openai: String,
     chatgpt: String,
+    salts: PoolSalts,
 }
+/// Per-pool salts of the folders' capabilities (`pool_token_salted`): a pool whose capability was
+/// rotated has one; the rest keep the unsalted capability.
+pub type PoolSalts = Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>;
 pub struct ProxyHandle {
     address: SocketAddr,
     token: String,
     agent_token: String,
+    salts: PoolSalts,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
@@ -104,8 +109,17 @@ pub fn agent_token(token: &str) -> String {
 /// derived from the session token, so it survives a restart with it; knowing it reveals neither
 /// the session token nor any other pool's capability.
 pub fn pool_token(token: &str, pool: &str) -> String {
+    pool_token_salted(token, pool, None)
+}
+/// A pool's capability after a rotation: the pool's salt is part of it, so a new salt makes the
+/// old capability worthless without touching the session token or any other pool.
+pub fn pool_token_salted(token: &str, pool: &str, salt: Option<&str>) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(format!("switchboard-pool:{pool}:{token}").as_bytes());
+    let input = match salt {
+        Some(salt) => format!("switchboard-pool:{pool}:{salt}:{token}"),
+        None => format!("switchboard-pool:{pool}:{token}"),
+    };
+    let digest = Sha256::digest(input.as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 /// Third-party agents may use only accounts the provider sells for any client: API keys.
@@ -180,6 +194,7 @@ impl ProxyHandle {
             .build()
             .map_err(|_| "HTTP client unavailable.")?;
         let agent = agent_token(&token);
+        let salts: PoolSalts = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -190,6 +205,7 @@ impl ProxyHandle {
             claude,
             openai,
             chatgpt,
+            salts: salts.clone(),
         };
         let slots = state.slots.clone();
         let router = Router::new()
@@ -208,6 +224,7 @@ impl ProxyHandle {
             address,
             token,
             agent_token: agent,
+            salts,
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
             slots,
@@ -223,6 +240,17 @@ impl ProxyHandle {
     }
     pub fn token(&self) -> &str {
         &self.token
+    }
+    /// The pools' capability salts, set at start and after a rotation.
+    pub fn set_pool_salts(&self, salts: std::collections::HashMap<String, String>) {
+        if let Ok(mut current) = self.salts.write() {
+            *current = salts;
+        }
+    }
+    /// The capability a pool's folders present now.
+    pub fn pool_capability(&self, pool: &str) -> String {
+        let salt = self.salts.read().ok().and_then(|s| s.get(pool).cloned());
+        pool_token_salted(&self.token, pool, salt.as_deref())
     }
     /// The capability third-party agents present (as `x-api-key` or a bearer token).
     pub fn agent_token(&self) -> &str {
@@ -360,7 +388,8 @@ async fn relay(
         .unwrap_or_default();
     // Every comparison runs, whatever matched: no timing tells which header or token was right.
     // SB-118: a project folder's capability counts as the session token, for its pool only.
-    let scoped = bearer.ct_eq(pool_token(&g.token, &pool).as_bytes());
+    let salt = g.salts.read().ok().and_then(|s| s.get(&pool).cloned());
+    let scoped = bearer.ct_eq(pool_token_salted(&g.token, &pool, salt.as_deref()).as_bytes());
     let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
     let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
     let agent = bool::from(!official & as_agent);

@@ -340,11 +340,30 @@ fn unapply(row: &Binding) -> Result<bool, ()> {
 
 /// Brings every project folder's settings in line with the projects, the pools' accounts and
 /// the proxy's address. Must run under the owner transaction.
+/// The unsalted sync: tests and the uninstall test's fixture.
+#[cfg(test)]
 pub(crate) fn sync(
     root: &Path,
     snapshot: &Snapshot,
     address: &str,
     session_token: &str,
+) -> Result<Report, String> {
+    sync_salted(
+        root,
+        snapshot,
+        address,
+        session_token,
+        &std::collections::HashMap::new(),
+    )
+}
+/// `sync`, with the pools' capability salts (`pool_salts`): a pool whose capability was rotated
+/// gets its new capability written in every one of its folders.
+pub(crate) fn sync_salted(
+    root: &Path,
+    snapshot: &Snapshot,
+    address: &str,
+    session_token: &str,
+    salts: &std::collections::HashMap<String, String>,
 ) -> Result<Report, String> {
     let rows = read(root)?;
     let want = desired(snapshot);
@@ -355,7 +374,11 @@ pub(crate) fn sync(
             continue;
         };
         let base_url = format!("http://{address}/claude/{pool}");
-        let token = switchboard_proxy::pool_token(session_token, pool);
+        let token = switchboard_proxy::pool_token_salted(
+            session_token,
+            pool,
+            salts.get(pool.as_str()).map(String::as_str),
+        );
         let previous = rows.iter().find(|r| r.folder == text);
         // A folder moved to another pool, or a new address: the old values go first.
         if let Some(old) = previous {
@@ -835,5 +858,35 @@ mod tests {
         std::fs::write(app.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
         assert_eq!(key(&s, "127.0.0.1:4000", &mut repos), first);
         assert_eq!(repos.reads, 2);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_rotated_pool_gets_its_new_capability_written_over_the_old_one() {
+        // 2026-10-18: a folder's capability was printed into a transcript; the rotation rewrites
+        // it in every folder of the pool (the old value is still ours, never the person's).
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        let app = temp.path().join("app");
+        git(&app);
+        let snapshot = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        sync(&root, &snapshot, "127.0.0.1:4000", "session").unwrap();
+        let read = || env(&app).unwrap()[AUTH_TOKEN].as_str().unwrap().to_owned();
+        let old = read();
+        let salts: std::collections::HashMap<String, String> =
+            [("pc".to_owned(), "synthetic-salt".to_owned())].into();
+        let report = sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts).unwrap();
+        assert_eq!(report.bound, 1, "{report:?}");
+        let new = read();
+        assert_ne!(new, old);
+        assert_eq!(
+            new,
+            switchboard_proxy::pool_token_salted("session", "pc", Some("synthetic-salt"))
+        );
     }
 }

@@ -9,6 +9,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - **An agent's unassigned Git repository becomes a project (REQ-002).** The existing `ProjectSuggest`/`SessionStart` and background activity path now creates an account-less project when no existing project matches, while worktrees, clones and source repositories still attach to their existing project. Creation moves no account IDs and leaves provider fallback rules unchanged. Re-entry is idempotent; conflicts, non-Git and broad folders, transient/tool folders, and remembered removals do not create projects. A `project-suggestions.json` row with `reason: unassigned` is unreadable to 0.6.36 and older; delete that operational file before downgrading.
+- **Rotate a project's folder capability.** `switchboard project rotate-capability --pool <pool>` makes the capability in that pool's folders worthless at once and writes a new one into every folder. Use it when the value leaked, for example into an agent's transcript. Other pools and managed sessions are not touched.
+- **Almost everything over MCP (SB-134).** New tools: activity, account rename and enable, rotation, backups, stopped sessions, hand-overs, agent settings and starting a sign-in. A check now fails when a CLI command has neither an MCP tool nor a written reason.
 
 ## 0.6.37 — 2026-10-17
 
