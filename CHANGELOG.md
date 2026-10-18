@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.38 — 2026-10-18
 
 - **claude.ai connectors work again in project folders.** Switchboard put the project's capability into `ANTHROPIC_AUTH_TOKEN`, which Claude Code counts as a login of its own, so it showed "claude.ai connectors are disabled" and turned them off in every project folder. The capability now goes as a separate header (`ANTHROPIC_CUSTOM_HEADERS`), the session keeps its claude.ai login and connectors, and the older value is replaced in every folder by itself. Restart a session to pick it up.
 - **An agent's unassigned Git repository becomes a project (REQ-002).** The existing `ProjectSuggest`/`SessionStart` and background activity path now creates an account-less project when no existing project matches, while worktrees, clones and source repositories still attach to their existing project. Creation moves no account IDs and leaves provider fallback rules unchanged. Re-entry is idempotent; conflicts, non-Git and broad folders, transient/tool folders, and remembered removals do not create projects. A `project-suggestions.json` row with `reason: unassigned` is unreadable to 0.6.36 and older; delete that operational file before downgrading.
