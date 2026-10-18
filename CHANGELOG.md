@@ -6,6 +6,13 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.41 — 2026-10-18
+
+- **Sessions no longer get "Proxy is busy".** The local proxy relayed at most 16 requests at once; with two dozen agent sessions streaming, the rest got a 503 (154 times in a day). It now relays 64.
+- **Updates start even when sessions never pause.** An update waited for a moment with no request in flight, which never came with many agents working: 0.6.40 waited for hours. After 30 minutes of waiting only for requests, Switchboard asks new requests to retry in a few seconds, lets the running ones finish (up to 90 s) and restarts into the update. Claude Code retries those requests by itself.
+- **A session stopped by a limit in a project folder is recorded for recovery.** The stop hook named the account of the ordinary Claude Code, which a project's folder never uses, so every such stop was refused (1,202 in a day). It now names the project's account.
+- **Folder settings no longer hold up everything else.** Writing the project folders' settings ran inside the transaction every other change waits on, for up to 13 seconds with 200 folders. It now runs on its own lock.
+
 ## 0.6.40 — 2026-10-18
 
 - **A project shows its main folders, with worktrees and clones under them (SB-135, first part).** A project that gathered a repository's worktrees listed each of them beside the main checkout. Now the Projects page shows each repository once, at its main folder, with "+2 worktrees and clones" that opens the list; the project dialog puts them under their root, and removing the root removes them too. `switchboard project list` and the MCP tool `switchboard_projects` return the same tree as `roots`.

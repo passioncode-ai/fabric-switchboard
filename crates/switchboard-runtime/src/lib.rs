@@ -560,6 +560,9 @@ pub struct Runtime {
     openrouter_models: Mutex<agent_settings::ModelCache>,
     /// What the project folders' Claude Code route was last synced for (SB-118).
     bindings_key: Mutex<Option<u64>>,
+    /// The bindings pass and a capability rotation write the same files: one at a time, without
+    /// the owner transaction (a pass over 200 folders held it up to 13 s, 2026-10-18).
+    bindings_lock: tokio::sync::Mutex<()>,
     /// The project folders' resolved repositories, re-read only when a `.git` stamp moves.
     bindings_repos: Mutex<bindings::RepoCache>,
 }
@@ -657,6 +660,7 @@ impl Runtime {
             subagent_list: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
+            bindings_lock: tokio::sync::Mutex::new(()),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
             usage_gate,
@@ -780,12 +784,15 @@ impl Runtime {
         if self.bindings_key.lock().ok().and_then(|k| *k) == Some(key) {
             return;
         }
-        let _transaction = self.hold("bindings").await;
+        let _bindings = self.bindings_lock.lock().await;
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
         let salts = read_pool_salts(&self.root);
-        match bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts) {
+        let synced = blocking::run(|| {
+            bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts)
+        });
+        match synced {
             Ok(report) => {
                 self.proxy.set_folder_tokens(report.tokens.clone());
                 oplog::event(
@@ -2286,6 +2293,26 @@ fn project_edit(
         base_folders: Some(held),
     })
 }
+/// The account a stopped session in a project's folder was using: the pool's selected Claude
+/// account, else its first enabled Claude OAuth account.
+fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Option<String> {
+    let routed = snapshot
+        .routes
+        .get(&format!("claude:{pool}"))
+        .filter(|id| snapshot.accounts.iter().any(|a| &a.id == *id));
+    routed.cloned().or_else(|| {
+        snapshot
+            .accounts
+            .iter()
+            .find(|a| {
+                a.pool == pool
+                    && a.provider == Provider::Claude
+                    && a.enabled
+                    && a.kind == AuthKind::OAuth
+            })
+            .map(|a| a.id.clone())
+    })
+}
 /// SB-122: an account moves only into a project's pool or back to `default`.
 pub const MOVE_ACCOUNT_NO_PROJECT: &str =
     "No project uses that pool. Choose a project, or Default.";
@@ -2640,16 +2667,25 @@ async fn execute(
             let rt = needs_owner()?;
             let snapshot = store.snapshot()?;
             let saved = |id: &String| snapshot.accounts.iter().any(|a| &a.id == id);
+            // A session in a project's folder ran on the project's pool (SB-118), never on the
+            // ordinary CLI's account: before 0.6.41 every such stop was refused (1,202 in a day).
+            let in_project = directory
+                .canonicalize()
+                .ok()
+                .and_then(|d| snapshot.project_for(&d).map(|p| p.pool.clone()));
             let account = match rt
                 .limits
                 .bound(&session)
                 .and_then(|ids| ids.into_iter().find(saved))
             {
                 Some(id) => Some(id),
-                None => rt.current_accounts()?["claude"]["account_id"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .filter(saved),
+                None => match &in_project {
+                    Some(pool) => project_stop_account(&snapshot, pool),
+                    None => rt.current_accounts()?["claude"]["account_id"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .filter(saved),
+                },
             };
             let Some(account) = account else {
                 oplog::event(
@@ -3436,6 +3472,7 @@ async fn execute(
             if !store.snapshot()?.projects.iter().any(|p| p.pool == pool) {
                 return Err("Project not found.".into());
             }
+            let _bindings = rt.bindings_lock.lock().await;
             let mut salts = read_pool_salts(root);
             salts.insert(pool.clone(), new_salt());
             write_pool_salts(root, &salts)?;

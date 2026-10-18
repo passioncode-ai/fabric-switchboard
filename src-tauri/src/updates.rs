@@ -45,6 +45,11 @@ pub const IDLE_LOOK_EVERY: Duration = Duration::from_secs(5 * 60);
 /// update waited behind a window the person had simply left open: 0.6.31 ran for a day with
 /// 0.6.32 and 0.6.33 installed (`update_waiting window_visible` every hour, 2026-10-15).
 pub const UNATTENDED_SECONDS: i64 = 30 * 60;
+/// An update that waited this long only for requests in flight drains instead (2026-10-18: with
+/// two dozen agent sessions there was never a moment with none, and 0.6.40 waited three hours).
+pub const DRAIN_AFTER_SECONDS: i64 = 30 * 60;
+/// How long a drain lets the requests in flight finish before the restart.
+pub const DRAIN_WAIT: Duration = Duration::from_secs(90);
 /// How often the idle watch says, at most, what keeps a ready update from starting (SB-105): the
 /// first look that finds a reason logs it, later ones only once this much time has passed.
 pub const IDLE_REPORT_EVERY: i64 = 60 * 60;
@@ -161,6 +166,13 @@ pub fn idle_blocker(
     } else {
         busy
     }
+}
+
+/// Whether a ready update stops waiting for a quiet moment and drains: it has waited
+/// DRAIN_AFTER_SECONDS and nothing else keeps it (the window, a sign-in, the switch) but requests
+/// in flight.
+pub fn drain_due(waited: i64, blocker: Option<&str>) -> bool {
+    waited >= DRAIN_AFTER_SECONDS && blocker == Some("request_in_flight")
 }
 
 /// When the idle watch logs its reason (SB-105): the first time it has one, then at most once per
@@ -631,6 +643,7 @@ fn watch_for_idle(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut idle_before = false;
         let mut report = IdleReport::default();
+        let waiting_since = now();
         loop {
             tokio::time::sleep(IDLE_LOOK_EVERY).await;
             let state = app.state::<Updates>();
@@ -654,10 +667,15 @@ fn watch_for_idle(app: &AppHandle) {
             let enabled = state.is_enabled();
             let hidden = window_hidden(&app);
             // SB-105: a watch that never starts the update says why, at most hourly.
-            if let Some(reason) = idle_blocker(enabled, starts_alone, hidden, checking, busy) {
+            let blocker = idle_blocker(enabled, starts_alone, hidden, checking, busy);
+            if let Some(reason) = blocker {
                 if report.due(now()) {
                     event("update_waiting", &[("reason", Field::Code(reason))]);
                 }
+            }
+            if drain_due(now() - waiting_since, blocker) {
+                drain_and_restart(&app).await;
+                break;
             }
             let (idle, start) = idle_moment(
                 enabled,
@@ -678,6 +696,38 @@ fn watch_for_idle(app: &AppHandle) {
         }
         app.state::<Updates>().lock().watching = false;
     });
+}
+
+/// New requests are asked to retry (503, `Retry-After`), the ones in flight get DRAIN_WAIT to
+/// finish, then the app restarts into the update in the background. A refused restart ends the
+/// drain, so sessions are never left refused.
+async fn drain_and_restart(app: &AppHandle) {
+    let Some(slot) = app.try_state::<crate::Slot>() else {
+        return;
+    };
+    let Ok(runtime) = slot.runtime().await else {
+        return;
+    };
+    runtime.proxy.set_draining(true);
+    let started = std::time::Instant::now();
+    while runtime.proxy.in_flight() > 0 && started.elapsed() < DRAIN_WAIT {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    event(
+        "update_restart",
+        &[
+            ("outcome", Field::Code("drained")),
+            ("in_flight", Field::Number(runtime.proxy.in_flight() as i64)),
+            (
+                "millis",
+                Field::Number(started.elapsed().as_millis() as i64),
+            ),
+        ],
+    );
+    if restart_as(app.clone(), true).await.is_err() {
+        runtime.proxy.set_draining(false);
+        event("update_restart", &[("outcome", Field::Code("refused"))]);
+    }
 }
 
 /// Whether a ready update can start without the person: macOS when it is already in the bundle
@@ -1047,6 +1097,31 @@ pub fn finish(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_update_waiting_only_for_requests_drains_after_half_an_hour() {
+        // 2026-10-18: 0.6.40 waited three hours behind two dozen agent sessions.
+        assert!(!drain_due(
+            DRAIN_AFTER_SECONDS - 1,
+            Some("request_in_flight")
+        ));
+        assert!(drain_due(DRAIN_AFTER_SECONDS, Some("request_in_flight")));
+        // Anything else that keeps it waits on: the person, a sign-in, the switch, a check.
+        for other in [
+            "window_visible",
+            "sign_in_waiting",
+            "updates_off",
+            "needs_person",
+            "checking",
+            "owner_unavailable",
+        ] {
+            assert!(!drain_due(10 * DRAIN_AFTER_SECONDS, Some(other)), "{other}");
+        }
+        assert!(
+            !drain_due(10 * DRAIN_AFTER_SECONDS, None),
+            "idle starts the usual way"
+        );
+    }
 
     #[test]
     fn a_ready_update_starts_alone_only_on_two_idle_looks_in_a_row() {

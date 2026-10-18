@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-18 — 0.6.41: hot fixes from the live check (proxy slots, update drain, recovery hook)
+
+- **Measured live on 0.6.39/0.6.40.** Proxy port had 15 to 25 connections in every one of 90
+  one-second samples, never 0; recent transcripts held 154 `503 Proxy is busy` answers (16
+  slots). The owner ran 0.6.39 since 15:50 although 0.6.40 was in the bundle since 18:03: the
+  idle watch waited for a moment with no request in flight (`update_waiting request_in_flight`).
+  `recovery_hook refused` 1,202 times: a project folder's stop named the ordinary CLI's account.
+  `transaction_held step bindings` up to 12.9 s.
+- **Fixed.** 64 proxy slots; after 30 min of waiting only for requests the update drains (503
+  with `Retry-After: 5`, 90 s for running requests, background restart); the hook names the
+  project's routed account; the bindings pass and capability rotation run under their own lock,
+  off the owner transaction, on a blocking thread.
+- **Not done.** The lifecycle broker's `restart` of `switchboard.desktop` timed out
+  (`verification_timeout`) and its status calls time out, so the running owner could not be moved
+  to 0.6.40 by an agent. 0.6.41's own drain moves it once 0.6.41 runs, but the running 0.6.39 code
+  installs 0.6.41 and still waits under the old rule; the operator's tray *Restart to update* does
+  it at once.
+
+**Checks.** `./scripts/check.sh` exit 0; new tests
+`a_draining_proxy_asks_new_requests_to_retry_and_reaches_the_provider_again_after`,
+`an_update_waiting_only_for_requests_drains_after_half_an_hour`,
+`a_stop_in_a_project_folder_is_the_projects_account`.
+
+**Exact next task.** After the owner runs 0.6.41: check the log for no `Proxy is busy`, `recovery_hook
+registered` in project folders, `capability-migration.json` present; then SB-122 live move, SB-135
+part 2 (disk map), SB-132.
+
 ## 2026-10-18 — 0.6.39: move an account to another pool from its card (SB-122)
 
 - **Behavior.** The account card's ⋯ menu has *Move to another pool…* (SCN-062): the default pool
