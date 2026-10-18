@@ -69,6 +69,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-059 | Pick an OpenRouter model, starting from the recommended ones | draft |
 | SCN-060 | A workflow continues in OpenCode on the OpenRouter key | draft |
 | SCN-061 | A deleted folder leaves its project by itself | draft |
+| SCN-062 | Move an account to another pool from its card | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1276,3 +1277,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`, `an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first`. A live run with OpenCode 1.19 and a real key is the operator's.
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-5
+
+## SCN-062 — Move an account to another pool from its card
+**Persona:** P-01
+**Goal:** Put an account into a project's pool, or back into the default pool, without opening the project and restating its whole account set (operator 2026-10-18: «аккаунты между пулами перемещать через UI, три точки, контекстное меню, добавить в пул, выбор»; CALL-07).
+**Preconditions:** at least one saved account; projects are optional.
+**Entry point:** an account card's ⋯ menu → *Move to another pool…*.
+**Steps:**
+1. Open ⋯ on the card → *Move to another pool…* → a dialog lists *Default pool* first, then each project by name; the pool the account is in now is marked “(now)” and chosen.
+2. Choose another one → *Move* becomes available.
+3. *Move* → the account leaves its old pool (a project gives it up) and joins the chosen one; the notice says where: “{label} moved to project “{name}”.” or “{label} moved to the default pool.”
+**Alt paths:** the account is the one the ordinary Claude Code or Codex is signed in to → projects are shown but cannot be chosen, and the note says to switch the CLI to another account first; the default pool stays available. No projects yet → only the default pool, and a note says to create a project under Projects. An account left in a deleted project's pool has no “(now)” option; *Default pool* takes it back. The same move from an agent: `switchboard accounts move <id> --pool <pool>` or MCP `switchboard_account_move`.
+**Expected result:** the card shows the new pool at once; a managed route the account held in its old pool no longer applies there.
+**UI elements:** ⋯ menu item, radio list, *Move* button, notice, dialog error.
+**States covered:** into a project, project to project, back to default, from a deleted project's pool, CLI account, no projects, refused.
+**Errors & recovery:** a second copy of the same login already in the chosen pool → “This account is already saved in that pool. Remove the other copy first.”; a project deleted while the dialog was open → “No project uses that pool. Choose a project, or Default.”; the dialog stays open with the error and nothing moves.
+**Status:** draft
+**Meaning:** operator request 2026-10-18 (SB-122).
+**Coverage:** core `an_account_left_in_a_deleted_projects_pool_returns_to_default`; owner `an_account_moves_between_projects_and_back_to_default`; MCP `accounts_rotation_activity_and_queues_are_reachable_over_mcp`; `scripts/test-ui-logic.mjs` (`moveTargets`).
+**Product:** unobserved
+**Traces:** CONTRACTS → Projects (0.6), SB-122

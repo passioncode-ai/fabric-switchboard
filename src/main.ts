@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, moveTargets, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -1062,6 +1062,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
+  items.push([t('Move to another pool…'), () => moveDialog(account, state.current)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }
@@ -1540,12 +1541,38 @@ function launchDialog(account: Account) {
   folder.focus();
 }
 function editDialog(account: Account) {
-  const context = openDialog(t('Edit account'), t('{provider} · {pool} pool. To change credentials or pool, add a new account.', { provider: providerName(account.provider), pool: account.pool }));
+  const context = openDialog(t('Edit account'), t('{provider} · {pool} pool. To change credentials, add the account again; to change the pool, use Move to another pool.', { provider: providerName(account.provider), pool: account.pool }));
   const label = input(account.label); label.maxLength = 80; const enabled = input('', 'checkbox'); enabled.required = false; enabled.checked = account.enabled;
   const enabledLabel = el('label', 'checkbox-field'); enabledLabel.append(enabled, el('span', '', t('Enabled for selection and launch')));
   context.body.append(field(t('Account label'), label), enabledLabel, el('p', 'form-note', t('Disabling a selected account clears its route. Managed requests in that pool will fail until you select another account.')));
   context.actions.append(submit(t('Save changes')));
   context.form.addEventListener('submit', (event) => { event.preventDefault(); if (!label.value.trim()) { label.setCustomValidity(t('Enter an account label.')); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; } void dialogSave(context, () => adapter.update(account.id, label.value.trim(), enabled.checked), enabled.checked ? t('Account updated.') : t('Account disabled. Any selection for this account has been cleared.')); }); label.focus();
+}
+/** SB-122: the account card's ⋯ → *Move to another pool…*: the default pool or a project, the current one marked (SCN-062). */
+function moveDialog(account: Account, inCli: boolean) {
+  const context = openDialog(t('Move to another pool'), t('Choose where “{label}” is used. A project’s accounts work only in its folders; the default pool works in every other folder.', { label: account.label }));
+  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Pool')));
+  const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
+  const radios: HTMLInputElement[] = [];
+  for (const target of targets) {
+    const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
+    const text = target.name === null ? t('Default pool') : t('Project “{name}”', { name: target.name });
+    option.append(radio, el('span', '', target.current ? t('{target} (now)', { target: text }) : text)); group.append(option); radios.push(radio);
+  }
+  context.body.append(group);
+  if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a project. Switch the CLI to another account first.')));
+  if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects, then move accounts into it.')));
+  const confirm = submit(t('Move')); context.actions.append(confirm);
+  const sync = () => { const chosen = radios.find((r) => r.checked); confirm.disabled = !chosen || chosen.value === account.pool; };
+  radios.forEach((radio) => radio.addEventListener('change', sync)); sync();
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === account.pool) return;
+    const target = targets.find((x) => x.pool === chosen.value)!;
+    const success = target.name === null ? t('{label} moved to the default pool.', { label: account.label }) : t('{label} moved to project “{name}”.', { label: account.label, name: target.name });
+    void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
+  });
+  (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();
 }
 function removeDialog(account: Account) {
   const active = selected(account);

@@ -223,6 +223,17 @@ export function createDemoAdapter(): Adapter {
       log('project', '', existing ? 'updated' : 'created');
       return structuredClone(project);
     },
+    async moveAccount(id, pool) {
+      await pause();
+      const account = state.accounts.find((a) => a.id === id); if (!account) throw new Error('Account not found.');
+      if (account.pool === pool) return;
+      if (pool !== 'default' && !state.projects?.some((p) => p.pool === pool)) throw new Error('No project uses that pool. Choose a project, or Default.');
+      if (pool !== 'default' && (current.claude.account_id === id || current.codex.account_id === id)) throw new Error('This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.');
+      const email = account.external_identity?.email;
+      if (email && state.accounts.some((b) => b.id !== id && b.provider === account.provider && b.pool === pool && b.external_identity?.email === email)) throw new Error('This account is already saved in that pool. Remove the other copy first.');
+      const old = `${account.provider}:${account.pool}`; if (state.routes[old] === id) delete state.routes[old];
+      account.pool = pool; log('project', '', 'updated');
+    },
     async removeProject(pool) { await pause(); const before = state.projects?.length ?? 0; state.projects = (state.projects ?? []).filter((p) => p.pool !== pool); if (state.projects.length === before) throw new Error('Project not found.'); log('project', '', 'removed'); },
     async projectSuggestions() { return { suggestions: structuredClone(suggestions.filter((s) => (state.projects ?? []).some((p) => p.pool === s.pool))) }; },
     async acceptProjectSuggestion(folder) { await pause(); const s = suggestions.find((x) => x.folder === folder); if (!s) throw new Error('No such suggestion. Read the suggestions again.'); const project = (state.projects ?? []).find((p) => p.pool === s.pool); if (!project) throw new Error('Project not found.'); project.folders.push(folder); suggestions = suggestions.filter((x) => x.folder !== folder); log('project', '', 'updated'); },

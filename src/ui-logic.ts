@@ -438,6 +438,15 @@ export function replaceFolder(folders: string[], old: string, folder: string): s
   if (folders.includes(folder)) return folders.filter((entry) => entry !== old);
   return folders.map((entry) => (entry === old ? folder : entry));
 }
+/** SB-122: where an account can move. The default pool first, then each project by name; `current` marks where it is, `blocked` a project the CLI's own account cannot join. An account left in a deleted project's pool has no current option. */
+export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean }
+export function moveTargets(currentPool: string, projects: { pool: string; name: string }[], inCli: boolean): MoveTarget[] {
+  const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
+  return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: p.name }))].map((target) => {
+    const current = target.pool === currentPool;
+    return { ...target, current, blocked: inCli && target.pool !== 'default' && !current };
+  });
+}
 /** The last launch folder, remembered across restarts as a per-window convenience; anything but a non-empty string reads as none. */
 export const LAST_FOLDER_KEY = 'switchboard.last-folder';
 export function storedFolder(store: Pick<Storage, 'getItem'> | null): string {

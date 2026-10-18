@@ -457,6 +457,49 @@ impl Store {
         self.changed();
         Ok(project)
     }
+    /// SB-122: moves an account whose pool no project reserves (a deleted project leaves its
+    /// accounts there) back to `default`. A project's account leaves through `save_project`.
+    pub fn return_to_default(&self, id: &str) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let account = candidate
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or("Account not found")?
+            .clone();
+        if account.pool == "default" {
+            return Ok(());
+        }
+        if candidate.project_of_pool(&account.pool).is_some() {
+            return Err("This account is in a project. Take it out of the project instead.".into());
+        }
+        let clash = candidate.accounts.iter().any(|b| {
+            b.id != account.id
+                && b.provider == account.provider
+                && b.pool == "default"
+                && b.external_identity
+                    .as_ref()
+                    .zip(account.external_identity.as_ref())
+                    .is_some_and(|(x, y)| x.matches(y))
+        });
+        if clash {
+            return Err(
+                "This account is already saved in that pool. Remove the other copy first.".into(),
+            );
+        }
+        let old = format!("{}:{}", account.provider.as_str(), account.pool);
+        if candidate.routes.get(&old).map(String::as_str) == Some(id) {
+            candidate.routes.remove(&old);
+        }
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            a.pool = "default".into();
+        }
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
     /// Puts a project back from a backup as it was: its accounts are already in its pool. A
     /// project whose pool or folders this install already uses is left out.
     pub fn restore_project(&self, project: Project) -> Result<(), String> {

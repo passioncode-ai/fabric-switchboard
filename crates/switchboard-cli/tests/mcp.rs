@@ -177,6 +177,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_edit",
             "switchboard_events",
             "switchboard_account_update",
+            "switchboard_account_move",
             "switchboard_rotation",
             "switchboard_rotation_set",
             "switchboard_backups",
@@ -820,6 +821,22 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert_eq!(personal["label"], "Personal 2", "{accounts}");
     let (error, refused) = agent.tool("switchboard_account_update", json!({"account_id": ids[2]}));
     assert!(error, "nothing to change is refused: {refused}");
+    // SB-122: an account in a pool no project uses goes back to default; elsewhere only a
+    // project's pool is accepted.
+    let (error, moved) = agent.tool(
+        "switchboard_account_move",
+        json!({"account_id": ids[2], "pool": "default"}),
+    );
+    assert!(!error, "{moved}");
+    assert_eq!(
+        (moved["from"].as_str(), moved["pool"].as_str()),
+        (Some("personal"), Some("default"))
+    );
+    let (error, refused) = agent.tool(
+        "switchboard_account_move",
+        json!({"account_id": ids[2], "pool": "nowhere"}),
+    );
+    assert!(error, "a pool no project uses is refused: {refused}");
     let (error, set) = agent.tool(
         "switchboard_rotation_set",
         json!({"provider": "claude", "pool": "work", "threshold_percent": 80}),

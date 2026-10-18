@@ -58,6 +58,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_edit","title":"Change a project","description":"Change a project by delta: reserve accounts for it (add_accounts), give accounts back to the default pool (remove_accounts), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it. Everything not named stays as it is; naming an account or folder the project does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a project.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The project's pool, from switchboard_projects."},"name":{"type":"string"},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the project, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, projects, rotation, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, or enable or disable it (a disabled account is never selected or switched to). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_move","title":"Move an account to another pool","description":"Move an account into a project's pool, or back to the default pool (pool: default). Only when the operator asks. Joining or leaving a project is that project's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a project, and a second copy of a login already in that pool is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A project's pool from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_rotation","title":"Automatic rotation","description":"The automatic rotation policy per provider, pool and target (enabled, threshold, hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic rotation","description":"Change one rotation policy (provider, pool, target): switch it on or off, or change its threshold, hysteresis, cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, projects, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -401,6 +402,13 @@ impl Server {
         })
         .await
     }
+    async fn account_move(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::MoveAccount {
+            id: required(args, "account_id")?.into(),
+            pool: required(args, "pool")?.into(),
+        })
+        .await
+    }
     async fn rotation_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let provider: Provider =
             serde_json::from_value(args.get("provider").cloned().unwrap_or(Value::Null))
@@ -620,6 +628,7 @@ impl Server {
                 })
             }
             "switchboard_account_update" => self.account_update(args).await,
+            "switchboard_account_move" => self.account_move(args).await,
             "switchboard_rotation" => match self.call(Operation::Snapshot).await {
                 Ok(v) => {
                     let monitor = self.call(Operation::MonitorStatus).await.unwrap_or(

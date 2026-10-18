@@ -28,6 +28,17 @@ check(() => {
   assert.deepEqual(logic.replaceFolder(['/a'], '/a', ''), ['/a']);
   assert.deepEqual(logic.replaceFolder(['/a'], '/gone', '/x'), ['/a']);
 });
+// SB-122: the default pool first, projects by name; the CLI's own account cannot join a project.
+check(() => {
+  const projects = [{ pool: 'web', name: 'Web' }, { pool: 'agents', name: 'Agents' }];
+  const targets = logic.moveTargets('web', projects, false);
+  assert.deepEqual(targets.map((t) => t.pool), ['default', 'agents', 'web']);
+  assert.deepEqual(targets.map((t) => t.current), [false, false, true]);
+  assert.ok(targets.every((t) => !t.blocked));
+  const inCli = logic.moveTargets('default', projects, true);
+  assert.deepEqual(inCli.map((t) => t.blocked), [false, true, true]);
+  assert.deepEqual(logic.moveTargets('gone', projects, false).filter((t) => t.current), [], 'a deleted project leaves no current option');
+});
 // SB-99/100: a Kimi window at 100 % stops the account until its reset; a passed reset no longer shows the old percent.
 check(() => {
   const now = 1_000_000;

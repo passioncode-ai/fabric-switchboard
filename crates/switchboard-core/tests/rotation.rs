@@ -1328,6 +1328,61 @@ fn a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out()
     );
 }
 
+// SB-122: a deleted project's accounts stay in its pool; one can go back to default by itself.
+#[test]
+fn an_account_left_in_a_deleted_projects_pool_returns_to_default() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account_in(&store, "org-a", "default", now);
+    let dir = tempfile::tempdir().unwrap();
+    store
+        .save_project(
+            None,
+            "Gone",
+            &[dir.path().join("x")],
+            std::slice::from_ref(&a),
+        )
+        .unwrap();
+    // While the project exists, leaving goes through the project.
+    assert!(store
+        .return_to_default(&a)
+        .unwrap_err()
+        .contains("in a project"));
+    store.select(Provider::Claude, "gone", &a).unwrap();
+    store.remove_project("gone").unwrap();
+    // A copy of the same login already in default is refused, and nothing moves.
+    let copy = account_in(&store, "org-a", "default", now);
+    assert_ne!(copy, a);
+    assert!(store
+        .return_to_default(&a)
+        .unwrap_err()
+        .contains("already saved"));
+    assert_eq!(pool_of(&store, &a), "gone");
+    store.remove(&copy).unwrap();
+    store.return_to_default(&a).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert_eq!(pool_of(&store, &a), "default");
+    assert!(
+        !snap.routes.contains_key("claude:gone"),
+        "its old route no longer applies"
+    );
+    // Already in default: no change, no error.
+    store.return_to_default(&a).unwrap();
+    assert!(store.return_to_default("missing").is_err());
+}
+
+fn pool_of(store: &Store, id: &str) -> String {
+    store
+        .snapshot()
+        .unwrap()
+        .accounts
+        .iter()
+        .find(|x| x.id == id)
+        .unwrap()
+        .pool
+        .clone()
+}
+
 #[test]
 fn projects_never_share_a_folder_or_an_account_identity() {
     let (_root, _vault, store) = setup();
