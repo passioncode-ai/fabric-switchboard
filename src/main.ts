@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -999,10 +999,22 @@ function renderAccounts(main: HTMLElement) {
     const section = el('section', 'account-group'); section.setAttribute('aria-label', t('{provider} accounts', { provider: providerName(group.provider) }));
     const heading = el('div', 'group-heading');
     heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${plural(group.count, { one: '{n} account', other: '{n} accounts' })}`));
+    // SB-142: the ordinary CLI's login is one per machine; it is named here, not as a pool's mark.
+    const inCli = accounts.find((a) => a.provider === group.provider && currentMatch(a));
+    if (inCli) heading.append(el('span', 'group-note', group.provider === 'claude' ? t('Ordinary Claude Code: {label}', { label: inCli.label }) : t('Ordinary Codex CLI: {label}', { label: inCli.label })));
     section.append(heading);
+    const anyProject = (snapshot!.projects ?? []).length > 0;
     for (const pool of group.pools) {
       const owner = projectOf(pool.pool);
-      if (group.pools.length > 1 || owner) section.append(el('h3', 'pool-heading', owner ? t('Project · {name}', { name: owner.name }) : t('Pool · {pool}', { pool: pool.pool })));
+      if (group.pools.length > 1 || owner || anyProject) {
+        const poolHead = el('div', 'pool-heading');
+        poolHead.append(el('h3', '', owner ? t('Project · {name}', { name: owner.name }) : pool.pool === 'default' ? t('Default pool') : t('Pool · {pool}', { pool: pool.pool })));
+        // SB-142: which account this pool's sessions use, so every pool reads the same way.
+        const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
+        const chosen = pool.accounts.find((a) => a.id === routed);
+        poolHead.append(el('span', 'group-note', chosen ? (owner ? t('Sessions in its folders use {label}', { label: chosen.label }) : t('Managed sessions use {label}', { label: chosen.label })) : t('Nothing selected here yet')));
+        section.append(poolHead);
+      }
       const list = el('div', 'account-list'); list.setAttribute('role', 'list');
       pool.accounts.forEach((account) => list.append(accountRow(account)));
       section.append(list);
@@ -1064,7 +1076,14 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   else if (limitedUntil !== null) title.append(el('span', 'badge danger-badge', limitedUntil > 0 ? t('Limit reached · resets in {time}', { time: compactCountdown(limitedUntil, Math.floor(Date.now() / 1000)) }) : t('Limit reached')));
   name.append(title, el('span', 'row-sub', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
-  const usage = el('div', 'usage-cell kimi-usage'); usage.append(kimiStatusLine(status));
+  const usage = el('div', 'usage-cell kimi-usage');
+  // SB-142: one plan window per line, so a narrow column never wraps them into a block.
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const lines = status.error ? [] : kimiWindowsLines(status.windows ?? [], nowSeconds);
+  if (lines.length) {
+    for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
+    if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
+  } else usage.append(kimiStatusLine(status));
   const relogin = () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`);
   const primary = el('div', 'row-primary');
   primary.append(signedOut ? button(t('Sign in'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
@@ -1130,13 +1149,12 @@ function kimiRemoveDialog(id: string, accountLabel: string) {
 function accountRow(account: Account) {
   const current = currentMatch(account); const active = selected(account); const signIn = signInRequired(account);
   const row = el('article', `account-row ${current ? 'is-current' : ''} ${active ? 'is-selected' : ''} ${!account.enabled ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
-  row.setAttribute('aria-label', t('{label}, {provider}, {pool} pool', { label: account.label, provider: providerName(account.provider), pool: account.pool }) + (current ? t(', in use by the CLI') : ''));
+  row.setAttribute('aria-label', t('{label}, {provider}, {pool} pool', { label: account.label, provider: providerName(account.provider), pool: account.pool }) + (current ? t(', in use by the CLI') : '') + (active ? t(', selected in this pool') : ''));
   const state = cardState(account, quotaContext()); row.dataset.state = state;
   const icon = el('span', `provider-icon ${account.provider}`, account.provider === 'claude' ? '✳' : '◎'); icon.setAttribute('aria-hidden', 'true'); icon.title = CARD_STATE[state];
   const name = el('div', 'row-name');
   const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
-  if (active) title.append(el('span', 'badge selected-badge', t('Next managed request')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const email = account.external_identity?.email;

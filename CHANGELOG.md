@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.47 — 2026-10-19
+
+- **Which account each pool uses is shown the same way everywhere (SB-142).** The blue bar on an account meant "the ordinary Claude Code or Codex is signed in to it", which happens in one pool only, so it looked selected in one project and not in another. Now the gold bar marks the account each pool or project uses, in every pool alike, and each pool's heading says it ("Managed sessions use Studio", or "Nothing selected here yet"). The ordinary CLI's login is named on the provider heading and keeps its blue badge.
+- **Buttons no longer drift.** The page header's buttons stay in one row, a project's and a rule's actions sit together at the top right of their card, and a Kimi Code account lists its plan windows one per line instead of wrapping under its button.
+
 ## 0.6.46 — 2026-10-19
 
 - **Sessions Switchboard launches keep your setup (SB-137).** A Claude Code session started from Switchboard ran in a fresh settings folder: without your `CLAUDE.md`, skills, commands, plugins, hooks and permissions. They now come along as links, so changes to your own files reach these sessions too, and your settings are carried without anything that signs in. Pi started by Switchboard gets your `AGENTS.md`, skills and extensions the same way, and Codex your `AGENTS.md`.

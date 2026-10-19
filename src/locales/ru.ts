@@ -1058,4 +1058,10 @@ export const RU: Record<string, string> = {
   "No project uses that pool. Choose a project.": "Этот пул не принадлежит ни одному проекту. Выберите проект.",
   "This repository is inside a folder of a project. Move that folder instead.": "Этот репозиторий лежит внутри папки проекта. Перенесите эту папку.",
   "This is the project's only repository. Add another folder to the project first, or delete the project.": "Это единственный репозиторий проекта. Сначала добавьте в проект другую папку или удалите проект.",
+  "Ordinary Claude Code: {label}": "Обычный Claude Code: {label}",
+  "Ordinary Codex CLI: {label}": "Обычный Codex CLI: {label}",
+  "Sessions in its folders use {label}": "Сессии в папках проекта используют {label}",
+  "Managed sessions use {label}": "Управляемые сессии используют {label}",
+  "Nothing selected here yet": "Здесь пока ничего не выбрано",
+  ", selected in this pool": ", выбран в этом пуле",
 };
