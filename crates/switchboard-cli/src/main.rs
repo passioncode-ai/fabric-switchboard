@@ -257,6 +257,14 @@ enum Project {
         #[arg(long, value_enum)]
         provider: ProviderArg,
     },
+    /// Codex sessions in a project's folders use the project's Codex accounts (SB-143): `on`
+    /// writes one provider into Codex's own config.toml that points at the local proxy, `off`
+    /// takes it out, nothing shows the state. Another model_provider of yours is never replaced.
+    Codex {
+        /// `on` or `off`; without it, the state only.
+        #[arg(value_enum)]
+        state: Option<OnOff>,
+    },
     /// Rotate the capability a project's folders carry (their `.claude/settings.local.json`):
     /// the old one is refused at once and the new one is written into every folder of the pool.
     /// For an exposure. Other pools and managed sessions keep theirs.
@@ -1322,6 +1330,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 account_ids: accounts.clone(),
                 base_folders: None,
+            },
+            Project::Codex { state } => Operation::CodexRoute {
+                enabled: state.map(|s| matches!(s, OnOff::On)),
             },
             Project::RotateCapability { pool } => {
                 Operation::RotatePoolCapability { pool: pool.clone() }
@@ -2408,6 +2419,7 @@ mod mcp_parity {
         ("project move-root", Tool("switchboard_project_move_root")),
         ("project map", Tool("switchboard_repository_map")),
         ("project rotate-capability", Not(PERSON)),
+        ("project codex", Tool("switchboard_codex_route")),
         ("project save", Tool("switchboard_project_edit")),
         ("project delete", Not(PERSON)),
         ("project suggest", Not(HOST)),

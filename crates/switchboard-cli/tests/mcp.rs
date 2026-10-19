@@ -175,6 +175,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_context",
             "switchboard_projects",
             "switchboard_project_edit",
+            "switchboard_codex_route",
             "switchboard_project_move_root",
             "switchboard_repository_map",
             "switchboard_events",

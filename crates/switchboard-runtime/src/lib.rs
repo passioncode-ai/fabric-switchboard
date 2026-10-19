@@ -8,6 +8,7 @@ pub mod analytics;
 mod bindings;
 mod blocking;
 mod carry;
+mod codex_route;
 pub mod continuation;
 pub mod control;
 pub mod external;
@@ -216,6 +217,12 @@ pub enum Operation {
         add_folders: Vec<PathBuf>,
         #[serde(default)]
         remove_folders: Vec<PathBuf>,
+    },
+    /// SB-143: whether Codex sessions in a project's folders use its Codex accounts (one
+    /// user-level provider at the proxy). `enabled` none: the state only.
+    CodexRoute {
+        #[serde(default)]
+        enabled: Option<bool>,
     },
     /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
     /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
@@ -487,6 +494,8 @@ pub(crate) struct NativeSources {
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
     /// Codex's recent rollouts, for the repositories its sessions change (SB-132).
     pub(crate) rollouts: fn(i64) -> Vec<PathBuf>,
+    /// SB-143: Codex's own `config.toml`; None for a synthetic owner, which never writes it.
+    pub(crate) codex_config: fn() -> Option<PathBuf>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -507,6 +516,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_signature: || None,
     transcripts: |_| Vec::new(),
     rollouts: |_| Vec::new(),
+    codex_config: || None,
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -526,6 +536,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
     rollouts: limits::codex_rollout_files,
+    codex_config: codex_route::config_path,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
@@ -705,6 +716,35 @@ impl Runtime {
             analytics: Mutex::new(None),
             restored_at_start: Mutex::new(None),
         }))
+        .inspect(|rt| rt.codex_route_sync(true))
+    }
+    /// SB-143: with the switch on, Codex's config carries the provider while this owner runs
+    /// (`up`) and loses it when it stops, so a Codex started meanwhile reaches OpenAI directly.
+    pub(crate) fn codex_route_sync(&self, up: bool) {
+        let Some(path) = (self.native.codex_config)() else {
+            return;
+        };
+        if !codex_route::wanted(&self.root) {
+            return;
+        }
+        let address = self.proxy.address().to_string();
+        let outcome = if up {
+            codex_route::apply(&path, &address, &self.proxy.auto_capability())
+        } else {
+            codex_route::remove(&path)
+        };
+        oplog::event(
+            "codex_route",
+            &[(
+                "outcome",
+                oplog::Field::Code(match (&outcome, up) {
+                    (Ok(true), true) => "applied",
+                    (Ok(true), false) => "removed",
+                    (Ok(false), _) => "unchanged",
+                    (Err(_), _) => "refused",
+                }),
+            )],
+        );
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
         if let Operation::ContinueToConsole {
@@ -799,6 +839,9 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
+        // SB-143: the proxy's Codex folder map follows the projects and their Codex accounts.
+        self.proxy
+            .set_codex_folders(codex_route::folders(&snapshot));
         let address = self.proxy.address().to_string();
         let key = {
             let Ok(mut repos) = self.bindings_repos.lock() else {
@@ -1923,6 +1966,7 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
             proxy.token(),
             &salts,
         ));
+        proxy.set_codex_folders(codex_route::folders(&snapshot));
     }
     let port = proxy.address().port();
     let unchanged = record
@@ -2144,6 +2188,8 @@ impl Owner {
             .proxy
             .stop(left(std::time::Duration::from_secs(2)))
             .await;
+        // SB-143: no Codex should be pointed at a proxy that is gone.
+        runtime.codex_route_sync(false);
         let _ = runtime.store.flush();
         drop(transaction);
         let millis = started.elapsed().as_millis() as u64;
@@ -3659,6 +3705,39 @@ async fn execute(
                 store.return_to_default(&id)?;
             }
             Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
+        }
+        Operation::CodexRoute { enabled } => {
+            let path = runtime.and_then(|r| (r.native.codex_config)());
+            if let Some(on) = enabled {
+                let rt = needs_owner()?;
+                let path = path.clone().ok_or(codex_route::CODEX_ROUTE_UNREADABLE)?;
+                if on {
+                    codex_route::apply(
+                        &path,
+                        &rt.proxy.address().to_string(),
+                        &rt.proxy.auto_capability(),
+                    )?;
+                    codex_route::set_wanted(root, true)?;
+                } else {
+                    codex_route::set_wanted(root, false)?;
+                    codex_route::remove(&path)?;
+                }
+                oplog::event(
+                    "codex_route",
+                    &[("switch", oplog::Field::Code(if on { "on" } else { "off" }))],
+                );
+            }
+            let snapshot = store.snapshot()?;
+            let mut status = codex_route::status(root, path.as_deref());
+            status["projects"] = json!(snapshot
+                .projects
+                .iter()
+                .filter(|p| codex_route::folders(&snapshot)
+                    .iter()
+                    .any(|(_, pool)| pool == &p.pool))
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>());
+            Ok(status)
         }
         Operation::MoveRoot { folder, pool } => {
             let snapshot = store.snapshot()?;
