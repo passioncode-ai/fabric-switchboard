@@ -8,7 +8,7 @@ import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFro
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -34,7 +34,7 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-type Page = 'accounts' | 'projects' | 'agents' | 'activity' | 'about';
+type Page = 'accounts' | 'tokens' | 'projects' | 'agents' | 'activity' | 'about';
 let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
@@ -89,6 +89,8 @@ let agentSetupError = false;
 /** The OpenRouter key for agents (SB-79); null while it is read. */
 let openrouter: OpenrouterStatus | null = null;
 let openrouterError = '';
+/** SB-144: the machine's key and each project's own key (metadata only). */
+let openrouterKeys: OpenrouterKeys | null = null;
 /** The ordinary Hermes's model and provider (SB-80); null while it is read. */
 let hermes: HermesModel | null = null;
 let hermesError = '';
@@ -233,8 +235,8 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['about', t('About'), '○']] as const) {
+    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
@@ -247,8 +249,8 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per project.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -267,6 +269,7 @@ function render(options: { background?: boolean } = {}): boolean {
   loginBanner(main);
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
+  else if (page === 'tokens') renderTokens(main);
   else if (loadError) {
     const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load projects') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
@@ -531,7 +534,7 @@ function renderAgents(main: HTMLElement) {
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
   else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
   else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), availableAgentsPanel(agentsView));
-  main.append(openrouterPanel(), connectPanel());
+  main.append(tokensPointer(), connectPanel());
 }
 function defaultAgentPanel(view: AgentsOverview) {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'default-agent-heading');
@@ -652,14 +655,49 @@ function hermesDialog() {
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
 async function loadOpenrouter() {
-  try { openrouter = await adapter.openrouterStatus(); openrouterError = ''; } catch (error) { openrouterError = safeError(error); }
+  try { [openrouter, openrouterKeys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); openrouterError = ''; } catch (error) { openrouterError = safeError(error); }
   backgroundRender();
+}
+/** SB-144: the Tokens page: the key every folder uses, and each project's own. */
+function renderTokens(main: HTMLElement) {
+  if (!openrouter && !openrouterError) void loadOpenrouter();
+  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the project whose folder they start in. A folder outside every project, or a project without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
+}
+/** On Agents, where the key used to be: one line to the Tokens page. */
+function tokensPointer() {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'tokens-pointer');
+  const heading = el('h2', '', t('OpenRouter keys')); heading.id = 'tokens-pointer';
+  section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each project\'s own key are under Tokens.')), button(t('Open Tokens'), () => { page = 'tokens'; void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'button', 'open-tokens'));
+  return section;
+}
+/** SB-144: each project, with its own key or the machine's. */
+function projectKeysPanel() {
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'project-keys-heading');
+  const heading = el('h2', '', t('Project keys')); heading.id = 'project-keys-heading';
+  section.append(heading, el('p', '', t('Give a project its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
+  const projects = openrouterKeys?.projects ?? [];
+  if (!openrouterKeys) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
+  if (!projects.length) { section.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects, then give it a key here.'))); return section; }
+  const list = el('ul', 'project-folders repository-map'); list.setAttribute('aria-label', t('Project keys'));
+  for (const project of projects) {
+    const own = openrouterKeys.keys.find((k) => k.pool === project.pool);
+    const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
+    text.append(el('span', 'repository-name', project.name), el('span', 'folder-note', ` · ${own ? (own.model ? t('Own key · {model}', { model: own.model }) : t('Own key')) : openrouter?.saved ? t('Uses the machine\'s key') : t('No key: agents here cannot start on OpenRouter')}`));
+    item.append(text);
+    const target = { pool: project.pool, name: project.name };
+    const actions = el('div', 'management-actions');
+    if (own) actions.append(button(t('Change model'), () => openrouterModelDialog(target), 'text-button', `key-model-${project.pool}`), button(t('Replace key'), () => openrouterKeyDialog(target), 'text-button', `key-replace-${project.pool}`), button(t('Remove key'), () => openrouterRemoveDialog(target), 'text-button danger-text', `key-remove-${project.pool}`));
+    else actions.append(button(t('Add key…'), () => openrouterKeyDialog(target), 'text-button', `key-add-${project.pool}`));
+    item.append(actions); list.append(item);
+  }
+  section.append(list);
+  return section;
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
 /** SB-79: one OpenRouter key that agents launched from Switchboard run on (SCN-045). */
 function openrouterPanel() {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'openrouter-heading');
-  const heading = el('h2', '', t('OpenRouter key for agents')); heading.id = 'openrouter-heading';
+  const heading = el('h2', '', t('Machine key · OpenRouter')); heading.id = 'openrouter-heading';
   const names = openrouterAgents().map((agent) => agent.name).join(', ');
   section.append(heading, el('p', '', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : onLinux() ? t('The key stays in the Secret Service keyring; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
   if (openrouterError && !openrouter) { section.append(el('p', 'usage-error', t(openrouterError)), button(t('Retry'), () => void loadOpenrouter(), 'text-button', 'openrouter-retry')); return section; }
@@ -679,11 +717,12 @@ function openrouterPanel() {
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
-function openrouterKeyDialog() {
-  const replacing = !!openrouter?.saved;
-  const context = openDialog(replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.'));
+function openrouterKeyDialog(target?: { pool: string; name: string }) {
+  const own = target ? openrouterKeys?.keys.find((k) => k.pool === target.pool) : null;
+  const replacing = target ? !!own : !!openrouter?.saved;
+  const context = openDialog(target ? (replacing ? t('Replace the key of “{name}”', { name: target.name }) : t('A key for “{name}”', { name: target.name })) : replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.') + (target ? ' ' + t('Agents started in this project\'s folders run on it.') : ''));
   const key = input('', 'password'); key.placeholder = 'sk-or-…';
-  const picker = modelPicker(openrouter?.model ?? '', 'key-model'); const model = picker.value;
+  const picker = modelPicker((target ? own?.model : openrouter?.model) ?? '', 'key-model'); const model = picker.value;
   const grid = el('div', 'form-grid');
   grid.append(field(t('Key'), key, t('Starts with sk-or-. Switchboard never shows it again.')));
   context.body.append(grid, el('h3', 'pool-heading', t('Default model')), picker.node);
@@ -691,7 +730,7 @@ function openrouterKeyDialog() {
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = key.value.trim(); key.value = '';
-    void dialogSave(context, async () => { await adapter.openrouterSave(value, model.value.trim() || null); await loadOpenrouter(); }, t('OpenRouter key saved. Agents launched on it receive it when they start.'));
+    void dialogSave(context, async () => { await adapter.openrouterSave(value, model.value.trim() || null, target?.pool ?? null); await loadOpenrouter(); }, target ? t('Key saved for “{name}”. Agents started in its folders run on it.', { name: target.name }) : t('OpenRouter key saved. Agents launched on it receive it when they start.'));
   });
   key.focus();
 }
@@ -724,18 +763,18 @@ function modelPicker(initial: string, key: string) {
   node.append(el('strong', 'block', t('Recommended models')), cards, field(t('Model'), value, ''), list, note);
   return { node, value };
 }
-function openrouterModelDialog() {
-  const context = openDialog(t('Default model'), t('The OpenRouter model agents start on unless a launch names another.'));
-  const picker = modelPicker(openrouter?.model ?? '', 'default-model');
+function openrouterModelDialog(target?: { pool: string; name: string }) {
+  const context = openDialog(target ? t('Default model of “{name}”', { name: target.name }) : t('Default model'), t('The OpenRouter model agents start on unless a launch names another.'));
+  const picker = modelPicker((target ? openrouterKeys?.keys.find((k) => k.pool === target.pool)?.model : openrouter?.model) ?? '', 'default-model');
   context.body.append(picker.node);
   context.actions.append(submit(t('Save model')));
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); const model = picker.value.value.trim(); void dialogSave(context, async () => { await adapter.openrouterModel(model); await loadOpenrouter(); agentsView = await adapter.agentsOverview().catch(() => agentsView); }, t('Agents launch on {model}.', { model })); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); const model = picker.value.value.trim(); void dialogSave(context, async () => { await adapter.openrouterModel(model, target?.pool ?? null); await loadOpenrouter(); agentsView = await adapter.agentsOverview().catch(() => agentsView); }, t('Agents launch on {model}.', { model })); });
   picker.value.focus();
 }
-function openrouterRemoveDialog() {
-  const context = openDialog(t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+function openrouterRemoveDialog(target?: { pool: string; name: string }) {
+  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(); await loadOpenrouter(); }, t('OpenRouter key removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')); });
   context.actions.querySelector('button')?.focus();
 }
 async function agentDialog(agent: AgentInfo) {

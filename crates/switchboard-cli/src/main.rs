@@ -674,6 +674,10 @@ enum AgentsCommand {
         /// `openrouter`: the key agents run on (`switchboard agents openrouter set`).
         #[arg(long, value_enum)]
         service: Option<KeyService>,
+        /// With --service: the folder the agent starts in (default: the current folder); the
+        /// key of its project wins over the machine's (SB-144).
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
     /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
     /// change the default model, or remove it.
@@ -783,16 +787,33 @@ enum OpenrouterCommand {
         /// Read the key from piped stdin. Interactive input is refused (no echo).
         #[arg(long, required = true)]
         key_stdin: bool,
+        /// A project's pool: the key agents in its folders run on (SB-144). Without it, the key
+        /// every other folder uses.
+        #[arg(long)]
+        pool: Option<String>,
     },
     /// Whether a key is saved, its default model and what it may still spend (asks OpenRouter).
-    Status,
+    Status {
+        /// A project's pool; without it, the machine's key.
+        #[arg(long)]
+        pool: Option<String>,
+    },
     /// Change the default model.
     Model {
         /// An OpenRouter model id, for example `anthropic/claude-sonnet-4.5`.
         model: String,
+        /// A project's pool; without it, the machine's key.
+        #[arg(long)]
+        pool: Option<String>,
     },
     /// Remove the key from Switchboard and the OS vault.
-    Remove,
+    Remove {
+        /// A project's pool; without it, the machine's key.
+        #[arg(long)]
+        pool: Option<String>,
+    },
+    /// Every saved key with the project it is for, and the projects without one (SB-144).
+    List,
 }
 #[derive(Subcommand)]
 enum Backup {
@@ -1182,27 +1203,40 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 agent: agent.clone(),
                 pool: pool.clone(),
             },
-            AgentsCommand::Key { service: None } => Operation::AgentKey,
+            AgentsCommand::Key { service: None, .. } => Operation::AgentKey,
             AgentsCommand::Key {
                 service: Some(KeyService::Openrouter),
+                dir,
             } => Operation::AgentKeyValue {
                 service: "openrouter".into(),
+                folder: match dir {
+                    Some(d) if d.is_absolute() => Some(d.clone()),
+                    Some(_) => return Err("--dir must be an absolute folder.".into()),
+                    None => std::env::current_dir().ok(),
+                },
             },
             AgentsCommand::Openrouter { command } => match command {
-                OpenrouterCommand::Set { model, .. } => Operation::AgentKeySet {
+                OpenrouterCommand::Set { model, pool, .. } => Operation::AgentKeySet {
                     service: "openrouter".into(),
                     key: read_secret()?,
                     model: model.clone(),
+                    pool: pool.clone(),
                 },
-                OpenrouterCommand::Status => Operation::AgentKeyStatus {
+                OpenrouterCommand::Status { pool } => Operation::AgentKeyStatus {
                     service: "openrouter".into(),
                     credit: true,
+                    pool: pool.clone(),
                 },
-                OpenrouterCommand::Model { model } => Operation::AgentKeyModel {
+                OpenrouterCommand::Model { model, pool } => Operation::AgentKeyModel {
                     service: "openrouter".into(),
                     model: model.clone(),
+                    pool: pool.clone(),
                 },
-                OpenrouterCommand::Remove => Operation::AgentKeyRemove {
+                OpenrouterCommand::Remove { pool } => Operation::AgentKeyRemove {
+                    service: "openrouter".into(),
+                    pool: pool.clone(),
+                },
+                OpenrouterCommand::List => Operation::AgentKeys {
                     service: "openrouter".into(),
                 },
             },
@@ -2024,7 +2058,7 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Agents {
             command:
                 AgentsCommand::Openrouter {
-                    command: OpenrouterCommand::Status,
+                    command: OpenrouterCommand::Status { .. },
                 },
         } => {
             if value["saved"] != true {
@@ -2341,6 +2375,10 @@ mod mcp_parity {
             Tool("switchboard_openrouter_model"),
         ),
         ("agents openrouter remove", Not(PERSON)),
+        (
+            "agents openrouter list",
+            Tool("switchboard_openrouter_status"),
+        ),
         ("agents hermes status", Tool("switchboard_hermes_status")),
         ("agents hermes set", Tool("switchboard_hermes_set")),
         ("agents launch", Not(LAUNCH)),

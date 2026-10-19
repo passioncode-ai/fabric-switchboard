@@ -89,9 +89,11 @@ export interface Adapter {
   /** The OpenRouter key agents run on (SB-79): metadata and what it may still spend, never the key. */
   openrouterStatus(): Promise<OpenrouterStatus>;
   /** Saves the key; the answer is metadata only. */
-  openrouterSave(key: string, model: string | null): Promise<unknown>;
-  openrouterModel(model: string): Promise<unknown>;
-  openrouterRemove(): Promise<unknown>;
+  openrouterSave(key: string, model: string | null, pool?: string | null): Promise<unknown>;
+  openrouterModel(model: string, pool?: string | null): Promise<unknown>;
+  openrouterRemove(pool?: string | null): Promise<unknown>;
+  /** SB-144: the machine's key and each project's own; never a key. */
+  openrouterKeys(): Promise<OpenrouterKeys>;
   /** The ordinary Hermes's model and provider (SB-80). */
   hermesModel(): Promise<HermesModel>;
   agentsOverview(): Promise<AgentsOverview>;
@@ -141,6 +143,8 @@ export interface AgentsOverview { schema?: number; revision?: string; updated_at
 /** SB-119: OpenRouter's tool-capable models; `available: false` when its list could not be read. */
 export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
+/** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
+export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }

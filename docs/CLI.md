@@ -349,6 +349,9 @@ switchboard agents openrouter set --key-stdin [--model moonshotai/kimi-k2]   # k
 switchboard agents openrouter status       # saved? default model, what the key may still spend
 switchboard agents openrouter model anthropic/claude-sonnet-4.5
 switchboard agents openrouter remove
+switchboard agents openrouter set --key-stdin --pool client-alpha   # SB-144: the key agents in that project's folders run on
+switchboard agents openrouter list         # every saved key with its project, and the projects without one
+switchboard agents key --service openrouter --dir /work/app   # the key of that folder's project, else the machine's (launch scripts call this)
 switchboard agents key --service openrouter   # the value, for a session script's export only
 ```
 

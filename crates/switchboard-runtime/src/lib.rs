@@ -252,6 +252,9 @@ pub enum Operation {
         key: String,
         #[serde(default)]
         model: Option<String>,
+        /// SB-144: a project's pool for its own key; none: the machine's key.
+        #[serde(default)]
+        pool: Option<String>,
     },
     /// The saved key's metadata and, with `credit`, what it may still spend (asked of the
     /// service). Never the key.
@@ -259,20 +262,34 @@ pub enum Operation {
         service: String,
         #[serde(default)]
         credit: bool,
+        #[serde(default)]
+        pool: Option<String>,
     },
     /// Changes the default model of the saved key.
     AgentKeyModel {
         service: String,
         model: String,
+        #[serde(default)]
+        pool: Option<String>,
     },
     /// Removes the saved key and its vault item.
     AgentKeyRemove {
+        service: String,
+        #[serde(default)]
+        pool: Option<String>,
+    },
+    /// SB-144: every saved key of a service with the project it is for (none: the machine's),
+    /// and every project with or without one. Never a key.
+    AgentKeys {
         service: String,
     },
     /// The key's value, for a launched agent's environment. Only the CLI asks for it (a session
     /// script's `export`); the desktop window and `switchboard mcp` never send it.
     AgentKeyValue {
         service: String,
+        /// SB-144: the folder the agent starts in; its project's key wins over the machine's.
+        #[serde(default)]
+        folder: Option<PathBuf>,
     },
     /// Durable stopped-session registrations and capacity notices (SB-114), CLI/host only.
     Recovery,
@@ -712,6 +729,7 @@ impl Runtime {
                 | Operation::AgentKey
                 | Operation::AgentKeyStatus { .. }
                 | Operation::AgentKeyValue { .. }
+                | Operation::AgentKeys { .. }
                 | Operation::KimiAccounts
                 | Operation::HermesModel
                 | Operation::KimiLoginStatus { .. }
@@ -2841,22 +2859,32 @@ async fn execute(
             service,
             key,
             model,
+            pool,
         } => {
-            let saved = store.set_agent_key(&service, &key, model)?;
-            Ok(json!({"service": saved.service, "saved_at": saved.saved_at, "model": saved.model}))
+            let saved = store.set_agent_key_for(&service, pool.as_deref(), &key, model)?;
+            Ok(
+                json!({"service": saved.service, "pool": saved.pool, "saved_at": saved.saved_at, "model": saved.model}),
+            )
         }
-        Operation::AgentKeyStatus { service, credit } => {
-            agent_keys::status(&store, &service, credit).await
+        Operation::AgentKeyStatus {
+            service,
+            credit,
+            pool,
+        } => agent_keys::status_for(&store, &service, pool.as_deref(), credit).await,
+        Operation::AgentKeyModel {
+            service,
+            model,
+            pool,
+        } => {
+            let saved = store.set_agent_key_model_for(&service, pool.as_deref(), &model)?;
+            Ok(json!({"service": saved.service, "pool": saved.pool, "model": saved.model}))
         }
-        Operation::AgentKeyModel { service, model } => {
-            let saved = store.set_agent_key_model(&service, &model)?;
-            Ok(json!({"service": saved.service, "model": saved.model}))
+        Operation::AgentKeyRemove { service, pool } => {
+            Ok(json!({"removed": store.remove_agent_key_for(&service, pool.as_deref())?}))
         }
-        Operation::AgentKeyRemove { service } => {
-            Ok(json!({"removed": store.remove_agent_key(&service)?}))
-        }
-        Operation::AgentKeyValue { service } => {
-            Ok(json!({"key": store.agent_key_value(&service)?}))
+        Operation::AgentKeys { service } => agent_keys::list(&store, &service),
+        Operation::AgentKeyValue { service, folder } => {
+            Ok(json!({"key": store.agent_key_value_in(&service, folder.as_deref())?}))
         }
         Operation::HermesModel => tokio::task::spawn_blocking(hermes::status)
             .await

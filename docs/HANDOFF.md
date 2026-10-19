@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.48, Tokens tab and a key per project (SB-144)
+
+- An agent on OpenRouter now runs on the key of the project its launch folder belongs to, else on
+  the machine's key: `AgentKey.pool`, `Store::agent_key_in`, every launch script's key command
+  carries `--dir <launch folder>` (it runs before the script's `cd`). Hermes, OpenCode and
+  OpenRouter launches take the default model from the same key.
+- Window: a Tokens page (machine key + Project keys with Add / Change model / Replace / Remove);
+  Agents keeps a pointer. CLI `agents openrouter set|status|model|remove --pool`, `list`;
+  `agents key --service openrouter --dir`. MCP status lists `keys` and `projects`.
+- Deleting a project deletes its keys; backups carry the pool and restore a project key only with
+  its project. Old versions (0.6.47 and before) cannot read a store holding a project key.
+
+**Checks.** `./scripts/check.sh` exit 0; WebKit demo, English and Russian: a project key added
+from Tokens, no page errors.
+
+**Exact next task.** SB-143 (Codex per project): measure codex 0.163 against the proxy (request
+body carries the folder? ChatGPT backend path? behaviour with Switchboard stopped), then build the
+opt-in switch. Then the `/openrouter/<pool>` proxy route (SB-97/SB-72).
+
 ## 2026-10-19: 0.6.47, one mark per meaning in the account list (SB-142); SB-143, SB-144 designed
 
 Operator 2026-10-19 (dictated): Codex not attributed to projects; buttons drifted; the blue bar

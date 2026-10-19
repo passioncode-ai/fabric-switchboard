@@ -71,22 +71,65 @@ async fn credit_at(base: &str, key: &str) -> Result<Value, &'static str> {
 /// `{service, saved, saved_at, model, credit, credit_error}` — `credit` asked of OpenRouter when
 /// `with_credit` and a key is saved.
 pub async fn status(store: &Store, service: &str, with_credit: bool) -> Result<Value, String> {
-    status_at(store, service, with_credit, &base()).await
+    status_at(store, service, None, with_credit, &base()).await
+}
+/// As `status`, for one project pool's key (SB-144); none: the machine's key.
+pub async fn status_for(
+    store: &Store,
+    service: &str,
+    pool: Option<&str>,
+    with_credit: bool,
+) -> Result<Value, String> {
+    status_at(store, service, pool, with_credit, &base()).await
+}
+/// SB-144: `{service, keys: [{pool, project, saved_at, model}], projects: [{pool, name, own}]}`:
+/// the machine's key (`pool: null`) and each project's own, and every project with whether it has
+/// one. Never a key.
+pub fn list(store: &Store, service: &str) -> Result<Value, String> {
+    let snapshot = store.snapshot()?;
+    let name = |pool: &Option<String>| {
+        pool.as_ref().and_then(|p| {
+            snapshot
+                .projects
+                .iter()
+                .find(|x| &x.pool == p)
+                .map(|x| x.name.clone())
+        })
+    };
+    let keys: Vec<Value> = snapshot
+        .agent_keys
+        .iter()
+        .filter(|k| k.service == service)
+        .map(|k| json!({"pool": k.pool, "project": name(&k.pool), "saved_at": k.saved_at, "model": k.model}))
+        .collect();
+    let projects: Vec<Value> = snapshot
+        .projects
+        .iter()
+        .map(|p| {
+            let own = snapshot
+                .agent_keys
+                .iter()
+                .any(|k| k.service == service && k.pool.as_ref() == Some(&p.pool));
+            json!({"pool": p.pool, "name": p.name, "own": own})
+        })
+        .collect();
+    Ok(json!({"service": service, "keys": keys, "projects": projects}))
 }
 async fn status_at(
     store: &Store,
     service: &str,
+    pool: Option<&str>,
     with_credit: bool,
     base: &str,
 ) -> Result<Value, String> {
-    let entry = store.agent_key(service)?;
+    let entry = store.agent_key_for(service, pool)?;
     let Some(entry) = entry else {
         return Ok(
-            json!({"service": service, "saved": false, "saved_at": null, "model": null, "credit": null, "credit_error": null}),
+            json!({"service": service, "pool": pool, "saved": false, "saved_at": null, "model": null, "credit": null, "credit_error": null}),
         );
     };
     let (credit, credit_error) = if with_credit {
-        match credit_at(base, &store.agent_key_value(service)?).await {
+        match credit_at(base, &store.agent_key_secret(&entry)?).await {
             Ok(credit) => (credit, Value::Null),
             Err(error) => (Value::Null, json!(error)),
         }
@@ -95,6 +138,7 @@ async fn status_at(
     };
     Ok(json!({
         "service": service,
+        "pool": pool,
         "saved": true,
         "saved_at": entry.saved_at,
         "model": entry.model,
@@ -141,7 +185,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let store = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
         let base = stand_in(200).await;
-        let empty = status_at(&store, "openrouter", true, &base).await.unwrap();
+        let empty = status_at(&store, "openrouter", None, true, &base)
+            .await
+            .unwrap();
         assert_eq!(empty["saved"], false);
         store
             .set_agent_key(
@@ -150,7 +196,9 @@ mod tests {
                 Some("moonshotai/kimi-k2".into()),
             )
             .unwrap();
-        let answer = status_at(&store, "openrouter", true, &base).await.unwrap();
+        let answer = status_at(&store, "openrouter", None, true, &base)
+            .await
+            .unwrap();
         assert_eq!(answer["saved"], true);
         assert_eq!(answer["model"], "moonshotai/kimi-k2");
         assert_eq!(answer["credit"]["limit_remaining"], 3.25);
@@ -167,7 +215,9 @@ mod tests {
         store
             .set_agent_key("openrouter", "sk-or-v1-revoked", None)
             .unwrap();
-        let refused = status_at(&store, "openrouter", true, &base).await.unwrap();
+        let refused = status_at(&store, "openrouter", None, true, &base)
+            .await
+            .unwrap();
         assert_eq!(refused["credit_error"], KEY_REFUSED);
         assert!(refused["credit"].is_null());
         // A host other than loopback is never taken from the environment.

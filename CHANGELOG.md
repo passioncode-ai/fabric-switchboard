@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.48 — 2026-10-19
+
+- **A Tokens tab, and a key per project for agents (SB-144).** Agents that run on an API key, such as Hermes, OpenCode or Pi on OpenRouter, now take the key of the project whose folder they start in: give a client's project its own key under Tokens → Project keys, and agents started there spend it, while every other folder keeps the machine's key. Each launch reads its key when it starts, so agents in different projects run at the same time on different keys. The machine's key moved from Agents to Tokens. Agents: `switchboard agents openrouter set --pool`, `switchboard agents openrouter list`, and `switchboard_openrouter_status` lists every project's key. A store with a project key cannot be read by 0.6.47 or older.
+
 ## 0.6.47 — 2026-10-19
 
 - **Which account each pool uses is shown the same way everywhere (SB-142).** The blue bar on an account meant "the ordinary Claude Code or Codex is signed in to it", which happens in one pool only, so it looked selected in one project and not in another. Now the gold bar marks the account each pool or project uses, in every pool alike, and each pool's heading says it ("Managed sessions use Studio", or "Nothing selected here yet"). The ordinary CLI's login is named on the provider heading and keeps its blue badge.

@@ -116,6 +116,9 @@ struct AgentKeyCopy {
     value: String,
     #[serde(default)]
     model: Option<String>,
+    /// SB-144: the project pool the key was for; none: the machine's key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pool: Option<String>,
 }
 
 fn key(keys: &dyn BackupKey, create: bool) -> Result<(LessSafeKey, String), String> {
@@ -217,11 +220,12 @@ pub fn write(
         .agent_keys
         .iter()
         .filter_map(|k| {
-            let value = store.agent_key_value(&k.service).ok()?;
+            let value = store.agent_key_secret(k).ok()?;
             Some(AgentKeyCopy {
                 service: k.service.clone(),
                 value,
                 model: k.model.clone(),
+                pool: k.pool.clone(),
             })
         })
         .collect();
@@ -572,9 +576,13 @@ pub fn restore(
     }
     for copy in payload.agent_keys {
         // Never over a key saved on this install.
-        if store.agent_key(&copy.service)?.is_none()
+        // A project key returns only when its project is back too (`set_agent_key_for` refuses one
+        // whose project is gone).
+        if store
+            .agent_key_for(&copy.service, copy.pool.as_deref())?
+            .is_none()
             && store
-                .set_agent_key(&copy.service, &copy.value, copy.model)
+                .set_agent_key_for(&copy.service, copy.pool.as_deref(), &copy.value, copy.model)
                 .is_ok()
         {
             result.agent_keys += 1;

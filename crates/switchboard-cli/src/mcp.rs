@@ -74,12 +74,12 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_apply","title":"Apply project rule","description":"Apply the folder's rule to this session when you start work in a project. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, project pool or workflow), the presets, and the chain that applies — the workflow's own, else its project's, else the machine's. None applies until the operator sets one.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A project's pool."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<pool> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter). Never the key itself.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter); with pool, that project's own key. Also lists every saved key with the project it is for (keys) and the projects with or without one (projects): an agent starting in a project's folder runs on that project's key, else on the machine's. Never a key itself.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"A project's pool from switchboard_projects; omit for the machine's key."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_hermes_status","title":"Hermes model and provider","description":"The model and provider the operator's ordinary Hermes Agent runs on (hermes config get model): model, provider, endpoint, API mode. Never a key.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in, launching and removing are the operator's (the app or switchboard kimi).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."}},"required":["model"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."},"pool":{"type":"string","description":"A project's pool for its own key; omit for the machine's key."}},"required":["model"],"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -691,11 +691,29 @@ impl Server {
             }
             "switchboard_chain_set" => self.chain_set(args).await,
             "switchboard_openrouter_status" => {
-                self.call(Operation::AgentKeyStatus {
-                    service: "openrouter".into(),
-                    credit: true,
-                })
-                .await
+                let pool = args.get("pool").and_then(Value::as_str).map(str::to_owned);
+                let mut status = match self
+                    .call(Operation::AgentKeyStatus {
+                        service: "openrouter".into(),
+                        credit: true,
+                        pool,
+                    })
+                    .await
+                {
+                    Ok(status) => status,
+                    Err(e) => return Some(Err(e)),
+                };
+                // SB-144: every project's key beside the one asked about.
+                if let Ok(keys) = self
+                    .call(Operation::AgentKeys {
+                        service: "openrouter".into(),
+                    })
+                    .await
+                {
+                    status["keys"] = keys["keys"].clone();
+                    status["projects"] = keys["projects"].clone();
+                }
+                Ok(status)
             }
             "switchboard_agents" => self.call(Operation::AgentsOverview).await,
             "switchboard_kimi_accounts" => self.call(Operation::KimiAccounts).await,
@@ -715,6 +733,7 @@ impl Server {
                     self.call(Operation::AgentKeyModel {
                         service: "openrouter".into(),
                         model: model.to_owned(),
+                        pool: args.get("pool").and_then(Value::as_str).map(str::to_owned),
                     })
                     .await
                 }
