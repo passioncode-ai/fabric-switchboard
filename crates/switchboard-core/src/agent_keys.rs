@@ -1,6 +1,8 @@
-//! Keys for agents (SB-79, packet XA-02): one key per service — today OpenRouter — that agents
-//! launched by Switchboard run on. The value lives only in the vault, under the UUID recorded
-//! here with the service, when it was saved and the default model; the metadata never holds it.
+//! Keys for agents (SB-79, packet XA-02): keys agents launched by Switchboard run on, per service
+//! (today OpenRouter). SB-144 (operator 2026-10-19): one key for the machine and, optionally, one
+//! per project pool; an agent gets the key of the project whose folder it starts in, else the
+//! machine's. The value lives only in the vault, under the UUID recorded here with the service,
+//! the pool, when it was saved and the default model; the metadata never holds it.
 use crate::{append_event, now, uuid_valid, vault, Credential, Snapshot, Store};
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +12,8 @@ pub const KEY_INVALID: &str = "That is not an OpenRouter key: it starts with sk-
 pub const MODEL_INVALID: &str =
     "A model is an OpenRouter id such as moonshotai/kimi-k2 (letters, digits and / . _ : -).";
 pub const NO_AGENT_KEY: &str = "No OpenRouter key is saved. Add one under Agents.";
+pub const KEY_POOL_INVALID: &str =
+    "That pool is not a project. Choose a project, or none for the key every folder uses.";
 const MAX_KEY: usize = 512;
 const MAX_MODEL: usize = 120;
 
@@ -21,6 +25,9 @@ pub struct AgentKey {
     /// The vault item holding the value.
     pub id: String,
     pub saved_at: i64,
+    /// SB-144: the project pool this key is for; none: the key every other folder uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
     /// The model agents start on unless a launch names another (an OpenRouter id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -51,7 +58,10 @@ pub(crate) fn validate_agent_keys(s: &Snapshot) -> Result<(), String> {
     let mut ids = std::collections::HashSet::new();
     for k in &s.agent_keys {
         if !service_valid(&k.service)
-            || !services.insert(&k.service)
+            || !services.insert((&k.service, &k.pool))
+            || k.pool
+                .as_deref()
+                .is_some_and(|p| !crate::pool_valid(p) || p == "default")
             || !uuid_valid(&k.id)
             || !ids.insert(&k.id)
             || s.accounts.iter().any(|a| a.id == k.id)
@@ -70,6 +80,16 @@ impl Store {
     pub fn set_agent_key(
         &self,
         service: &str,
+        key: &str,
+        model: Option<String>,
+    ) -> Result<AgentKey, String> {
+        self.set_agent_key_for(service, None, key, model)
+    }
+    /// As `set_agent_key`, for a project pool (SB-144); the project must exist.
+    pub fn set_agent_key_for(
+        &self,
+        service: &str,
+        pool: Option<&str>,
         key: &str,
         model: Option<String>,
     ) -> Result<AgentKey, String> {
@@ -93,10 +113,16 @@ impl Store {
         };
         let mut state = self.lock()?;
         let mut candidate = state.clone();
+        if let Some(p) = pool {
+            if !candidate.projects.iter().any(|x| x.pool == p) {
+                return Err(KEY_POOL_INVALID.into());
+            }
+        }
+        let pool = pool.map(str::to_owned);
         let existing = candidate
             .agent_keys
             .iter()
-            .position(|k| k.service == service);
+            .position(|k| k.service == service && k.pool == pool);
         let (entry, old) = match existing {
             Some(i) => {
                 let entry = &mut candidate.agent_keys[i];
@@ -115,6 +141,7 @@ impl Store {
                     service: service.to_owned(),
                     id: uuid::Uuid::new_v4().to_string(),
                     saved_at: now(),
+                    pool,
                     model,
                 };
                 candidate.agent_keys.push(entry.clone());
@@ -140,6 +167,15 @@ impl Store {
 
     /// Changes only the default model of a saved key.
     pub fn set_agent_key_model(&self, service: &str, model: &str) -> Result<AgentKey, String> {
+        self.set_agent_key_model_for(service, None, model)
+    }
+    /// As `set_agent_key_model`, for a project pool's key (SB-144).
+    pub fn set_agent_key_model_for(
+        &self,
+        service: &str,
+        pool: Option<&str>,
+        model: &str,
+    ) -> Result<AgentKey, String> {
         if !model_valid(model) {
             return Err(MODEL_INVALID.into());
         }
@@ -148,7 +184,7 @@ impl Store {
         let entry = candidate
             .agent_keys
             .iter_mut()
-            .find(|k| k.service == service)
+            .find(|k| k.service == service && k.pool.as_deref() == pool)
             .ok_or(NO_AGENT_KEY)?;
         entry.model = Some(model.to_owned());
         let entry = entry.clone();
@@ -159,16 +195,63 @@ impl Store {
 
     /// The saved key's metadata, never its value.
     pub fn agent_key(&self, service: &str) -> Result<Option<AgentKey>, String> {
+        self.agent_key_for(service, None)
+    }
+    /// The key saved for exactly this pool (none: the machine's key).
+    pub fn agent_key_for(
+        &self,
+        service: &str,
+        pool: Option<&str>,
+    ) -> Result<Option<AgentKey>, String> {
         Ok(self
             .snapshot()?
             .agent_keys
             .into_iter()
-            .find(|k| k.service == service))
+            .find(|k| k.service == service && k.pool.as_deref() == pool))
+    }
+    /// SB-144: the key an agent starting in `folder` runs on: its project's own key, else the
+    /// machine's. A project that was deleted leaves its key unused, never in the way.
+    pub fn agent_key_in(
+        &self,
+        service: &str,
+        folder: Option<&std::path::Path>,
+    ) -> Result<Option<AgentKey>, String> {
+        let snapshot = self.snapshot()?;
+        let pool = folder
+            .and_then(|f| snapshot.project_for(f))
+            .map(|p| p.pool.clone());
+        let own = pool.as_ref().and_then(|p| {
+            snapshot
+                .agent_keys
+                .iter()
+                .find(|k| k.service == service && k.pool.as_ref() == Some(p))
+        });
+        Ok(own
+            .or_else(|| {
+                snapshot
+                    .agent_keys
+                    .iter()
+                    .find(|k| k.service == service && k.pool.is_none())
+            })
+            .cloned())
     }
 
     /// The key's value, for a launched agent's environment only. Never returned to the window.
     pub fn agent_key_value(&self, service: &str) -> Result<String, String> {
         let entry = self.agent_key(service)?.ok_or(NO_AGENT_KEY)?;
+        self.agent_key_secret(&entry)
+    }
+    /// The value of the key `agent_key_in` picks for `folder`.
+    pub fn agent_key_value_in(
+        &self,
+        service: &str,
+        folder: Option<&std::path::Path>,
+    ) -> Result<String, String> {
+        let entry = self.agent_key_in(service, folder)?.ok_or(NO_AGENT_KEY)?;
+        self.agent_key_secret(&entry)
+    }
+    /// One saved key's value.
+    pub fn agent_key_secret(&self, entry: &AgentKey) -> Result<String, String> {
         Ok(self
             .vault
             .get(&entry.id)
@@ -179,12 +262,16 @@ impl Store {
     /// Removes the key: the metadata first, then the vault item (a leftover item is harmless and
     /// unreachable; a leftover entry without its item would not be).
     pub fn remove_agent_key(&self, service: &str) -> Result<bool, String> {
+        self.remove_agent_key_for(service, None)
+    }
+    /// As `remove_agent_key`, for a project pool's key (SB-144).
+    pub fn remove_agent_key_for(&self, service: &str, pool: Option<&str>) -> Result<bool, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let Some(i) = candidate
             .agent_keys
             .iter()
-            .position(|k| k.service == service)
+            .position(|k| k.service == service && k.pool.as_deref() == pool)
         else {
             return Ok(false);
         };

@@ -558,9 +558,24 @@ impl Store {
             .ok_or("Project not found.")?;
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
+        // SB-144: the project's own agent keys go with it, so a later project of the same pool
+        // never inherits them; the vault items are deleted after the metadata (a leftover item is
+        // unreachable).
+        let keys: Vec<String> = candidate
+            .agent_keys
+            .iter()
+            .filter(|k| k.pool.as_deref() == Some(pool))
+            .map(|k| k.id.clone())
+            .collect();
+        candidate
+            .agent_keys
+            .retain(|k| k.pool.as_deref() != Some(pool));
         append_event(&mut candidate, "project", None, "removed");
         self.publish(&mut state, candidate)?;
         self.changed();
+        for id in keys {
+            let _ = self.vault.delete(&id);
+        }
         Ok(project)
     }
 }

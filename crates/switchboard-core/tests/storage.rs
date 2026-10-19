@@ -1203,3 +1203,66 @@ fn a_failed_agent_key_save_leaves_nothing_behind() {
         .is_err());
     assert!(store.agent_key("openrouter").unwrap().is_none());
 }
+
+#[test]
+fn an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines() {
+    // SB-144 (operator 2026-10-19): Hermes in project A runs on A's key, in project B on B's,
+    // anywhere else on the machine's key; a deleted project takes its key with it.
+    let (root, _vault, store) = setup();
+    let work = tempfile::tempdir().unwrap();
+    let (a, b, plain) = (
+        work.path().join("a"),
+        work.path().join("b"),
+        work.path().join("plain"),
+    );
+    for d in [&a, &b, &plain] {
+        fs::create_dir_all(d).unwrap();
+    }
+    let alpha = store
+        .save_project(None, "Alpha", std::slice::from_ref(&a), &[])
+        .unwrap();
+    store
+        .save_project(None, "Beta", std::slice::from_ref(&b), &[])
+        .unwrap();
+    assert_eq!(
+        store
+            .set_agent_key_for("openrouter", Some("nowhere"), "sk-or-v1-x", None)
+            .unwrap_err(),
+        switchboard_core::agent_keys::KEY_POOL_INVALID
+    );
+    store
+        .set_agent_key("openrouter", "sk-or-v1-machine", None)
+        .unwrap();
+    store
+        .set_agent_key_for(
+            "openrouter",
+            Some(&alpha.pool),
+            "sk-or-v1-alpha",
+            Some("moonshotai/kimi-k2".into()),
+        )
+        .unwrap();
+    let value = |dir: &std::path::Path| store.agent_key_value_in("openrouter", Some(dir)).unwrap();
+    assert_eq!(value(&a.join("src")), "sk-or-v1-alpha");
+    assert_eq!(
+        value(&b),
+        "sk-or-v1-machine",
+        "a project without its own key"
+    );
+    assert_eq!(value(&plain), "sk-or-v1-machine");
+    assert_eq!(
+        store.agent_key_value("openrouter").unwrap(),
+        "sk-or-v1-machine",
+        "the machine's key is unchanged"
+    );
+    let metadata = fs::read_to_string(root.path().join("accounts.json")).unwrap();
+    assert!(
+        !metadata.contains("sk-or-v1"),
+        "no value in the metadata file"
+    );
+    store.remove_project(&alpha.pool).unwrap();
+    assert!(store
+        .agent_key_for("openrouter", Some(&alpha.pool))
+        .unwrap()
+        .is_none());
+    assert_eq!(value(&a), "sk-or-v1-machine");
+}

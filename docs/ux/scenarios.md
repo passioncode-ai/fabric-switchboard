@@ -72,6 +72,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-062 | Move an account to another pool from its card | draft |
 | SCN-063 | See a project's repositories with their worktrees under them | draft |
 | SCN-064 | Find repositories on disk and put each in its project | draft |
+| SCN-065 | Give a project its own API key for agents | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -931,7 +932,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** Keep one OpenRouter key that agents launched by Switchboard run on, and see what it may still spend — without the key ever appearing in a file, a command line or a log.
 **Preconditions:** an OpenRouter key (starts `sk-or-`); the app, the CLI or an MCP client.
-**Entry point:** Agents → *OpenRouter key for agents* · `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
+**Entry point:** Tokens → *Machine key · OpenRouter* (moved from Agents in 0.6.48; Agents links to it) · `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
 **Steps:**
 1. Save the key with a default model: `switchboard agents openrouter set --key-stdin --model moonshotai/kimi-k2 < key.txt` (the key is piped on stdin, never an argument; interactive input is refused) → “OpenRouter key saved · model moonshotai/kimi-k2”, and the remaining credit OpenRouter reports.
 2. Ask the status later: `switchboard agents openrouter status` (or the MCP tool) → saved date, default model, `limit_remaining` and `usage_daily` from OpenRouter itself; never the key.
@@ -939,7 +940,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 4. Remove the key: `switchboard agents openrouter remove` → the metadata goes first, then the vault item.
 **Alt paths:** a malformed key (“That is not an OpenRouter key: it starts with sk-or-.”) or model id is refused before anything is written; a key OpenRouter refuses is named as such and stays saved, its balance marked with the refusal; an unreachable OpenRouter leaves the key saved with “its balance shows when OpenRouter answers”; a failed save leaves nothing behind — no metadata row, no vault item; after reinstalling Switchboard an encrypted backup puts the key back with its model (SCN-030).
 **Expected result:** the key's value exists only in the OS vault; metadata names the service, the saved time and the model; the journal records `agent_key saved|removed`; the value leaves the vault only into a launched agent's environment (`switchboard agents key --service openrouter`, CLI only).
-**UI elements:** the *OpenRouter key for agents* panel on Agents — before a key: *No key is saved.* and *Add OpenRouter key*; after: the default model, the balance line (“$3.25 of $5.00 left, resets daily · spent today $1.75”, or the refusal), *Change model*, *Replace key*, *Remove key* (asks first); the key field is a password field cleared on submit and never filled again. The journal names the action “Agent key”.
+**UI elements:** the *Machine key · OpenRouter* panel on Tokens — before a key: *No key is saved.* and *Add OpenRouter key*; after: the default model, the balance line (“$3.25 of $5.00 left, resets daily · spent today $1.75”, or the refusal), *Change model*, *Replace key*, *Remove key* (asks first); the key field is a password field cleared on submit and never filled again. The journal names the action “Agent key”.
 **States covered:** reading, read failed (with *Retry*), no key saved, saved with credit, saved with no spending limit, saved with the credit refused or unreachable, invalid key, invalid model, failed save, removed.
 **Errors & recovery:** every refusal names the fix (the key shape, the model id shape, openrouter.ai/settings/keys); a refused or unreachable balance does not delete the key.
 **Status:** draft
@@ -1340,3 +1341,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `roots::tests::the_disk_map_lists_repositories_with_their_projects_and_skips_dependencies`, owner `a_root_moves_to_another_project_with_its_worktrees_in_one_step`, MCP `project_edit` test (map and move tools, read-only server), `scripts/test-ui-logic.mjs` (`mapRows`, `rootTargets`, `storedMapFolders`); checked in WebKit on the demo in English and Russian.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
+
+## SCN-065 — Give a project its own API key for agents
+**Persona:** P-01
+**Goal:** An agent on an API key spends the key of the project it works for, picked by the folder it starts in, while every other folder keeps the machine's key, and nothing waits on a choice (operator 2026-10-19: «гермес в одном проекте подключался к open-router одного токена, в другом проекте … к другому»; «мы делаем по тому, откуда запустился агент»).
+**Preconditions:** a project; an OpenRouter key for it (`sk-or-`).
+**Entry point:** Tokens → *Project keys* · `switchboard agents openrouter set --key-stdin --pool <pool>` · MCP `switchboard_openrouter_status` (lists `keys` and `projects`).
+**Steps:**
+1. Open Tokens → *Machine key · OpenRouter* and *Project keys*: each project reads “Own key · model”, “Uses the machine's key”, or “No key: agents here cannot start on OpenRouter”.
+2. *Add key…* on a project → the key (a password field) and a default model → “Key saved for “Alpha Web”. Agents started in its folders run on it.”
+3. Launch Hermes, OpenCode or any agent on OpenRouter from a folder of that project → it runs on the project's key and model; from a folder of another project, or of none, on the machine's key. Two agents in two projects run at the same time, each on its own key.
+4. *Change model*, *Replace key* or *Remove key* on the project → after removal its agents use the machine's key again.
+**Alt paths:** a pool that is no project is refused (“That pool is not a project…”); deleting a project deletes its key, so a later project of the same pool never inherits it; a backup brings a project's key back only together with its project; an agent's key command names its folder (`switchboard agents key --service openrouter --dir <folder>`; without `--dir`, the current folder).
+**Expected result:** the key used is decided at each launch from the launch folder; the key's value never appears in the window, a file, an argument or a log.
+**UI elements:** Tokens page in the navigation, *Machine key · OpenRouter* panel, *Project keys* list (project, state, *Add key…* / *Change model* / *Replace key* / *Remove key*), key dialog titled with the project's name, notices naming the project; on Agents an *OpenRouter keys* panel with *Open Tokens*.
+**States covered:** reading, no projects, project with its own key, project on the machine's key, no key at all, saved, replaced, removed, refused pool.
+**Errors & recovery:** every refusal names the fix; a failed save leaves no metadata row and no vault item.
+**Status:** draft
+**Meaning:** operator request 2026-10-19 (SB-144).
+**Coverage:** `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines` (core storage), launch tests asserting `--dir` in every key command, MCP handshake; checked in WebKit on the demo in English and Russian (a project key added from Tokens, notice, no page errors).
+**Product:** unobserved
+**Traces:** SB-144

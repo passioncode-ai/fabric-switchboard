@@ -606,13 +606,26 @@ async fn kimi_remove(id: String, state: State<'_, Slot>) -> Result<Value, String
 /// The OpenRouter key agents run on (SB-79): metadata and what it may still spend, asked of
 /// OpenRouter. Never the key — `AgentKeyValue` is the CLI's alone.
 #[tauri::command]
-async fn openrouter_status(state: State<'_, Slot>) -> Result<Value, String> {
+async fn openrouter_status(pool: Option<String>, state: State<'_, Slot>) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::AgentKeyStatus {
             service: "openrouter".into(),
             credit: true,
+            pool,
+        })
+        .await
+}
+/// SB-144: the machine's OpenRouter key and each project's own, with the projects that have none.
+/// Never a key.
+#[tauri::command]
+async fn openrouter_keys(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentKeys {
+            service: "openrouter".into(),
         })
         .await
 }
@@ -621,6 +634,7 @@ async fn openrouter_status(state: State<'_, Slot>) -> Result<Value, String> {
 async fn openrouter_save(
     key: String,
     model: Option<String>,
+    pool: Option<String>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -630,6 +644,7 @@ async fn openrouter_save(
             service: "openrouter".into(),
             key,
             model,
+            pool,
         })
         .await
 }
@@ -672,23 +687,29 @@ async fn openrouter_models(state: State<'_, Slot>) -> Result<Value, String> {
         .await
 }
 #[tauri::command]
-async fn openrouter_model(model: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn openrouter_model(
+    model: String,
+    pool: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::AgentKeyModel {
             service: "openrouter".into(),
             model,
+            pool,
         })
         .await
 }
 #[tauri::command]
-async fn openrouter_remove(state: State<'_, Slot>) -> Result<Value, String> {
+async fn openrouter_remove(pool: Option<String>, state: State<'_, Slot>) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::AgentKeyRemove {
             service: "openrouter".into(),
+            pool,
         })
         .await
 }
@@ -1001,6 +1022,7 @@ fn main() {
             agent_connect,
             launch_agent,
             openrouter_status,
+            openrouter_keys,
             openrouter_save,
             openrouter_model,
             openrouter_remove,

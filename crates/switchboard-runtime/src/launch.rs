@@ -1733,7 +1733,7 @@ fn hermes_continuation_session(
             return Err(crate::continuation::BAD_WORKFLOW_ID.into());
         }
         let saved = store
-            .agent_key("openrouter")?
+            .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
         let (model, model_from) = match own_model {
             Some(m) if switchboard_core::agent_keys::model_valid(m) => (m.to_owned(), "hermes"),
@@ -1782,6 +1782,9 @@ fn hermes_continuation_session(
             "key".into(),
             "--service".into(),
             "openrouter".into(),
+            // SB-144: the key of the project the agent starts in (the command runs before `cd`).
+            "--dir".into(),
+            working_directory.to_string_lossy().into_owned(),
         ];
         let content = script_with(
             &session,
@@ -1898,7 +1901,7 @@ pub(crate) fn opencode_continuation_session(
             return Err(crate::continuation::BAD_WORKFLOW_ID.into());
         }
         let saved = store
-            .agent_key("openrouter")?
+            .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
         let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
         if !switchboard_core::agent_keys::model_valid(&model) {
@@ -1930,6 +1933,9 @@ pub(crate) fn opencode_continuation_session(
             "key".into(),
             "--service".into(),
             "openrouter".into(),
+            // SB-144: the key of the project the agent starts in (the command runs before `cd`).
+            "--dir".into(),
+            working_directory.to_string_lossy().into_owned(),
         ];
         let content = script_with(
             &session,
@@ -2050,7 +2056,7 @@ fn openrouter_session(
 ) -> Result<(PathBuf, Value), String> {
     let working_directory = agent_folder(root, working_directory)?;
     let saved = store
-        .agent_key("openrouter")?
+        .agent_key_in("openrouter", Some(&working_directory))?
         .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
     let model = match model {
         Some(m) if !switchboard_core::agent_keys::model_valid(m) => {
@@ -2108,6 +2114,9 @@ fn openrouter_session(
         "key".into(),
         "--service".into(),
         "openrouter".into(),
+        // SB-144: the key of the project the agent starts in (the command runs before `cd`).
+        "--dir".into(),
+        working_directory.to_string_lossy().into_owned(),
     ];
     let content = script_with(
         &home,
@@ -3868,7 +3877,10 @@ mod tests {
         assert!(text.contains("exec '/opt/Agent Tools/opencode' '--prompt' "));
         assert!(text.contains("'-m' 'openrouter/xiaomi/mimo-v2.6-pro'"));
         assert!(text.contains("export OPENCODE_CONFIG_CONTENT="));
-        assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+        assert!(
+            text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
+            "the key of the folder's project (SB-144)"
+        );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
             .arg("-n")
@@ -3972,7 +3984,10 @@ mod tests {
             "export HERMES_HOME={}",
             quote(base.join("agent-home").to_string_lossy().as_ref())
         )));
-        assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+        assert!(
+            text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
+            "the key of the folder's project (SB-144)"
+        );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
             .arg("-n")
@@ -4121,7 +4136,10 @@ mod tests {
             assert!(text.contains(
                 "OPENROUTER_API_KEY=\"$('/opt/Switchboard Tools/switch'\\''board' '--data-dir' "
             ));
-            assert!(text.contains("'agents' 'key' '--service' 'openrouter')\""));
+            assert!(
+                text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
+                "the key of the folder's project (SB-144)"
+            );
             assert!(text.contains("export OPENROUTER_API_KEY\n"));
             assert!(text.contains(
                 "exec '/opt/Agent Tools/agent' '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'"
