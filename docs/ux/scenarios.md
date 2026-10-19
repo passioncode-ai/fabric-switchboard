@@ -71,6 +71,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-061 | A deleted folder leaves its project by itself | draft |
 | SCN-062 | Move an account to another pool from its card | draft |
 | SCN-063 | See a project's repositories with their worktrees under them | draft |
+| SCN-064 | Find repositories on disk and put each in its project | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1318,3 +1319,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `roots::tests::*` (a real repository and worktree included), owner `taking_a_root_out_of_a_project_takes_its_worktrees_too`, `scripts/test-ui-logic.mjs` (`folderRows`, `withoutFolder`, `folderName`); checked in WebKit on the demo in English and Russian.
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-135
+
+## SCN-064 — Find repositories on disk and put each in its project
+**Persona:** P-01
+**Goal:** See every repository on disk with its project, and put a loose one in a project or move one with its worktrees to another, without editing folder lists by hand (operator 2026-10-16: «папки на диске должны быть указаны в Switchboard — какая к какому проекту относится, менять это в интерфейсе»).
+**Preconditions:** at least one project exists; repositories sit under a folder such as `~/DATA`.
+**Entry point:** Projects page → *Repositories on disk*.
+**Steps:**
+1. *Show repositories* → the repositories under `~/DATA` (else the home folder) are listed; *Not in a project (n)* is chosen, so only loose ones show, each with its name, branch and full path.
+2. *Add folder…* (system picker, starts at the last folder chosen) → the list is read again under the chosen folders; × next to one stops looking there; the choice is remembered across restarts.
+3. *Add to project…* on a loose repository → a dialog lists the projects; choose one, *Add* → “beta-cli added to project “Alpha Web”.”, the row leaves the loose list; its worktrees join by themselves (SCN-055).
+4. *All (n)* → every repository with its project; *Move…* on one of a project's folders → choose another project, *Move* → it and its worktrees and clones are now that project's.
+**Alt paths:** a repository inside a project folder reads “Inside a folder of “P”” and has no action (it moves with that folder); the project's only repository cannot move (“This is the project's only repository…”), the project keeps it; no projects yet → the dialog says to create one first; more than 2,000 repositories or 20,000 folders → the first ones and a note to choose a narrower folder. Agents: `switchboard project map`, `switchboard project move-root`, MCP `switchboard_repository_map` and `switchboard_project_move_root`.
+**Expected result:** every repository on disk is either in a project or visibly loose, and one action puts it where it belongs with its whole tree.
+**UI elements:** section heading, *Show repositories* toggle, folder list with × and *Add folder…*, *Look again*, filter (*Not in a project*, *All*), repository rows (name, place, branch, path, one action), move dialog (radio list, current marked “(now)”).
+**States covered:** closed, loading, empty (nothing loose / no repositories), list, truncated, error (a folder cannot be read), dialog success and refusal.
+**Errors & recovery:** a refused move keeps the dialog open with the reason; when the second save of a move is refused, the first is undone, so nothing is half moved.
+**Status:** draft
+**Meaning:** operator request 2026-10-16 (SB-135, second part).
+**Coverage:** `roots::tests::the_disk_map_lists_repositories_with_their_projects_and_skips_dependencies`, owner `a_root_moves_to_another_project_with_its_worktrees_in_one_step`, MCP `project_edit` test (map and move tools, read-only server), `scripts/test-ui-logic.mjs` (`mapRows`, `rootTargets`, `storedMapFolders`); checked in WebKit on the demo in English and Russian.
+**Product:** unobserved
+**Traces:** ST-001, FLW-01

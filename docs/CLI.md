@@ -195,6 +195,8 @@ switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written
+switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none (default ~/DATA, else home)
+switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another project, in one step
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8

@@ -155,6 +155,136 @@ pub fn derived_of<'a>(roots: &'a [Root], root: &str) -> Vec<&'a str> {
         .unwrap_or_default()
 }
 
+/// SB-135 (part 2): one repository on disk and where it belongs.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    pub folder: String,
+    /// The `origin` as `host/owner/repo`, when there is one.
+    pub remote: Option<String>,
+    pub branch: Option<String>,
+    /// The project's pool and name; none: no project holds it.
+    pub pool: Option<String>,
+    pub project: Option<String>,
+    /// `folder`: it is one of the project's folders; `inside`: it sits inside one, so it moves
+    /// with that folder and not on its own.
+    pub place: Option<&'static str>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct DiskMap {
+    pub under: Vec<String>,
+    pub repositories: Vec<Found>,
+    /// More was there than the walk looks at (`MAP_REPOSITORIES`, `MAP_FOLDERS`).
+    pub truncated: bool,
+}
+
+/// How deep below each chosen folder the walk looks for repositories (`~/DATA/<org>/<repo>`).
+const MAP_DEPTH: usize = 3;
+/// At most this many repositories are listed, and this many folders looked at.
+const MAP_REPOSITORIES: usize = 2000;
+const MAP_FOLDERS: usize = 20_000;
+/// Folders that hold dependencies, build output or app data, never a person's repositories.
+const MAP_SKIP: &[&str] = &[
+    "node_modules",
+    "target",
+    "vendor",
+    "build",
+    "dist",
+    "Library",
+    "Pods",
+    "DerivedData",
+];
+
+/// Where the map looks when no folder is chosen: `~/DATA` when it exists, else the home folder.
+pub fn default_under() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)?;
+    let data = home.join("DATA");
+    Some(if data.is_dir() { data } else { home })
+}
+
+/// The main checkouts under `under` (a linked worktree is listed under its root on the project
+/// page, not here). The walk does not go into a repository, a hidden folder or `MAP_SKIP`.
+pub fn disk_map(under: &[PathBuf], snapshot: &switchboard_core::Snapshot) -> DiskMap {
+    let mut starts: Vec<PathBuf> = under.iter().filter_map(|u| u.canonicalize().ok()).collect();
+    starts.sort();
+    starts.dedup();
+    // A chosen folder inside another chosen one is walked once.
+    let starts: Vec<PathBuf> = starts
+        .iter()
+        .filter(|s| !starts.iter().any(|o| o != *s && s.starts_with(o)))
+        .cloned()
+        .collect();
+    let mut repositories = Vec::new();
+    let mut truncated = false;
+    let mut visited = 0usize;
+    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
+        starts.iter().map(|s| (s.clone(), 0)).collect();
+    while let Some((dir, depth)) = queue.pop_front() {
+        visited += 1;
+        if visited > MAP_FOLDERS || repositories.len() >= MAP_REPOSITORIES {
+            truncated = true;
+            break;
+        }
+        let dotgit = dir.join(".git");
+        if let Ok(meta) = std::fs::symlink_metadata(&dotgit) {
+            if meta.is_dir() {
+                repositories.push(found(&dir, snapshot));
+            }
+            continue;
+        }
+        if depth >= MAP_DEPTH {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children: Vec<PathBuf> = entries
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter(|e| {
+                let name = e.file_name();
+                let name = name.to_string_lossy();
+                !name.starts_with('.') && !MAP_SKIP.contains(&name.as_ref())
+            })
+            .map(|e| e.path())
+            .collect();
+        children.sort();
+        queue.extend(children.into_iter().map(|c| (c, depth + 1)));
+    }
+    repositories.sort_by(|a, b| a.folder.cmp(&b.folder));
+    DiskMap {
+        under: starts
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect(),
+        repositories,
+        truncated,
+    }
+}
+
+fn found(dir: &Path, snapshot: &switchboard_core::Snapshot) -> Found {
+    let c = checkout(dir);
+    let text = dir.to_string_lossy().into_owned();
+    let project = snapshot.project_for(dir);
+    let place = project.map(|p| {
+        if p.folders.iter().any(|f| f == &text) {
+            "folder"
+        } else {
+            "inside"
+        }
+    });
+    Found {
+        folder: text,
+        remote: c.as_ref().and_then(|c| c.remote.clone()),
+        branch: c.and_then(|c| c.branch),
+        pool: project.map(|p| p.pool.clone()),
+        project: project.map(|p| p.name.clone()),
+        place,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +413,60 @@ mod tests {
         assert_eq!(roots[0].folder, text(&main));
         assert_eq!(roots[0].branch.as_deref(), Some("main"));
         assert_eq!(roots[0].derived[0].branch.as_deref(), Some("feature"));
+    }
+
+    #[test]
+    fn the_disk_map_lists_repositories_with_their_projects_and_skips_dependencies() {
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let repo = |d: &Path| std::fs::create_dir_all(d.join(".git")).unwrap();
+        let (app, shared, inner, loose, deep) = (
+            work.join("org/app"),
+            work.join("shared"),
+            work.join("shared/tool"),
+            work.join("loose"),
+            work.join("a/b/c/d"),
+        );
+        for d in [&app, &inner, &loose, &deep] {
+            repo(d);
+        }
+        repo(&work.join("node_modules/pkg"));
+        repo(&work.join(".hidden/x"));
+        repo(&app.join("module"));
+        let snapshot = switchboard_core::Snapshot {
+            projects: vec![switchboard_core::Project {
+                pool: "p".into(),
+                name: "P".into(),
+                folders: vec![
+                    app.to_string_lossy().into_owned(),
+                    shared.to_string_lossy().into_owned(),
+                ],
+                created_at: 1,
+                sources: vec![],
+            }],
+            ..Default::default()
+        };
+        let map = disk_map(&[work.clone(), work.join("org")], &snapshot);
+        let listed: Vec<(&str, Option<&str>)> = map
+            .repositories
+            .iter()
+            .map(|r| (r.folder.as_str(), r.place))
+            .collect();
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        assert_eq!(
+            map.under,
+            [text(&work)],
+            "a chosen folder inside another is walked once"
+        );
+        assert_eq!(
+            listed,
+            [
+                (text(&loose).as_str(), None),
+                (text(&app).as_str(), Some("folder")),
+                (text(&inner).as_str(), Some("inside")),
+            ]
+        );
+        assert_eq!(map.repositories[1].pool.as_deref(), Some("p"));
+        assert!(!map.truncated);
     }
 }

@@ -288,6 +288,25 @@ enum Project {
         #[arg(long = "remove-folder")]
         remove_folders: Vec<PathBuf>,
     },
+    /// Move a project's repository (its root folder), with the worktrees and clones under it,
+    /// into another project in one step (SB-135); a repository in no project joins the named one.
+    /// A project keeps at least one folder.
+    MoveRoot {
+        /// The repository's folder; default: the current folder.
+        #[arg(long)]
+        folder: Option<PathBuf>,
+        /// The project to move it to (`switchboard project list`).
+        #[arg(long)]
+        pool: String,
+    },
+    /// The Git repositories on disk, each with the project it belongs to or none (SB-135). Looks
+    /// up to three folders deep and not into a repository, a hidden folder or dependencies.
+    Map {
+        /// A folder to look under; repeat for each. Default: `~/DATA` when it exists, else the
+        /// home folder.
+        #[arg(long)]
+        under: Vec<PathBuf>,
+    },
     /// Create or update a project: its folders (repositories) and the accounts reserved for
     /// them. The listed accounts are the project's whole set; one left out goes back to the
     /// `default` pool. To change a few, use `project edit`.
@@ -1291,6 +1310,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 // A folder to take out may be gone from disk: taken as given.
                 remove_folders: remove_folders.clone(),
+            },
+            Project::MoveRoot { folder: path, pool } => Operation::MoveRoot {
+                folder: folder(path)?,
+                pool: pool.clone(),
+            },
+            Project::Map { under } => Operation::RepositoryMap {
+                under: under
+                    .iter()
+                    .map(|u| folder(&Some(u.clone())))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
             Project::Suggest {
@@ -2338,6 +2367,8 @@ mod mcp_parity {
         ("project set", Tool("switchboard_project_set")),
         ("project remove", Tool("switchboard_project_remove")),
         ("project edit", Tool("switchboard_project_edit")),
+        ("project move-root", Tool("switchboard_project_move_root")),
+        ("project map", Tool("switchboard_repository_map")),
         ("project rotate-capability", Not(PERSON)),
         ("project save", Tool("switchboard_project_edit")),
         ("project delete", Not(PERSON)),

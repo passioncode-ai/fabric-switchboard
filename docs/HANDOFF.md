@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.43, repositories on disk and moving a repository between projects (SB-135 part 2)
+
+- **0.6.42 published** 2026-10-19 04:39:27 UTC (run 39197312600, 25 assets; nightly on the tag
+  green, run 39197489647).
+- **Disk map.** `RepositoryMap { under }` lists the main checkouts under the chosen folders (three
+  levels, not into a repository, hidden folders or dependency folders; `~/DATA` else home when none
+  is chosen), each with its project and place (`folder` or `inside`). Read-only, outside the owner
+  transaction.
+- **Root move.** `MoveRoot { folder, pool }`: the folder and its derived folders out of their
+  project and into `pool`'s, as two `ProjectEdit` saves; a refused second save restores the first.
+  A loose repository joins; a project's last folder and a repository inside a project folder are
+  refused with their own messages.
+- **Window.** Projects → *Repositories on disk*: closed by default (the walk runs only when
+  opened), chosen folders remembered (`switchboard.map-folders`), filter *Not in a project* / *All*,
+  one action per row and a project dialog. SCN-064.
+- **Agents.** CLI `project map`, `project move-root`; MCP `switchboard_repository_map` (also on a
+  read-only server) and `switchboard_project_move_root` (write); parity table updated.
+
+**Checks.** `./scripts/check.sh` exit 0; WebKit (Playwright 2359 build, demo `?demo=1`) in English
+and Russian: the section opens, 2 loose and 4 in all, *Add to project…* added `beta-cli` to
+“Alpha Web” with the notice, no page errors.
+
+**Exact next task.** After 0.6.43 runs on the operator's machine: open *Repositories on disk*,
+measure how long the `~/DATA` walk takes, add one loose repository to a project and move one
+repository there and back; then SB-138 re-measure (no long `suggest_found` holds), SB-132 (Codex
+rollouts), SB-137.
+
 ## 2026-10-19: 0.6.42, analytics on PassionCode's host (SB-H01) and the next owner stall
 
 - **0.6.41 checked live.** The owner restarted into it by itself at 2026-10-18 23:44 UTC

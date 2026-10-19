@@ -360,3 +360,11 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
   .agent-row { flex-direction: column; align-items: stretch; }
   .agent-controls { flex-wrap: wrap; }
 }
+/* SB-135 part 2: the disk map's rows: a name, where it belongs, one action at the end. */
+.disk-map .segmented { margin: var(--space-2) 0; }
+.repository-map { list-style: none; padding: 0; margin: 0; }
+.repository-map .repository-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.repository-text { min-width: 0; flex: 1; }
+.repository-name { color: var(--ink); font-weight: 600; }
+.repository-path { display: block; color: var(--muted); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-map .repository-row .text-button { flex: none; }

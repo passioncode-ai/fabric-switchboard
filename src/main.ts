@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -290,7 +290,93 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), rulesSection());
+  main.append(projectsSection(), diskMapSection(), rulesSection());
+}
+/** SB-135 part 2: the Git repositories under the folders the person chose, each with its project or none; one moves or joins in place. Read only when the section is open. */
+let mapOpen = false; let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';
+let mapFolders = storedMapFolders(noticeStore());
+function saveMapFolders() { try { noticeStore()?.setItem(MAP_FOLDERS_KEY, JSON.stringify(mapFolders)); } catch { /* kept for this window only */ } }
+function loadMap() {
+  if (mapLoading) return;
+  mapLoading = true; mapError = ''; render();
+  void adapter.repositoryMap(mapFolders).then((map) => { diskMap = map; }, (error) => { mapError = t(safeError(error)); }).finally(() => { mapLoading = false; render(); });
+}
+function diskMapSection() {
+  const section = el('section', 'project-section disk-map'); section.setAttribute('aria-labelledby', 'disk-map-heading');
+  const heading = el('h2', 'section-heading', t('Repositories on disk')); heading.id = 'disk-map-heading';
+  const toggle = button(mapOpen ? t('Hide repositories') : t('Show repositories'), () => { mapOpen = !mapOpen; if (mapOpen && !diskMap) loadMap(); else render(); restoreFocus('disk-map-toggle'); }, 'text-button', 'disk-map-toggle');
+  toggle.setAttribute('aria-expanded', String(mapOpen));
+  section.append(heading, el('p', 'surface-note', t('Every Git repository under the folders you choose, with the project it belongs to. Add one to a project, or move it with its worktrees and clones to another.')), toggle);
+  if (!mapOpen) return section;
+  // The folders looked under: chosen with the system picker, remembered; none means ~/DATA (else home).
+  const where = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
+  const shown = mapFolders.length ? mapFolders : diskMap?.under ?? [];
+  if (!shown.length) list.append(el('li', 'folder-path is-empty', t('~/DATA, or your home folder')));
+  for (const folder of shown) {
+    const item = el('li', 'folder-item'); const path = el('span', 'folder-path', folder); path.title = folder; item.append(path);
+    if (mapFolders.length) {
+      const remove = button('×', () => { mapFolders = mapFolders.filter((f) => f !== folder); saveMapFolders(); loadMap(); restoreFocus('disk-map-add'); }, 'icon-button', '');
+      remove.setAttribute('aria-label', t('Stop looking under {folder}', { folder })); item.append(remove);
+    }
+    list.append(item);
+  }
+  const add = button(t('Add folder…'), () => void chooseFolder(mapFolders.at(-1) ?? diskMap?.under[0] ?? '', (text) => { mapError = text; render(); }).then((folder) => { if (folder && !mapFolders.includes(folder)) { mapFolders = [...mapFolders, folder]; saveMapFolders(); loadMap(); } }), 'button row-button', 'disk-map-add');
+  const again = button(t('Look again'), () => loadMap(), 'text-button', 'disk-map-refresh'); again.disabled = mapLoading;
+  where.append(list, add, again);
+  section.append(groupField(t('Look under'), where));
+  const filters = el('div', 'segmented'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', t('Show'));
+  const all = mapRows(diskMap, 'all'); const loose = all.filter((r) => !r.pool).length;
+  for (const [value, label] of [['unassigned', t('Not in a project ({n})', { n: loose })], ['all', t('All ({n})', { n: all.length })]] as [MapFilter, string][]) {
+    const choice = button(label, () => { mapFilter = value; render(); restoreFocus(`disk-map-${value}`); }, mapFilter === value ? 'segment is-on' : 'segment', `disk-map-${value}`);
+    choice.setAttribute('aria-pressed', String(mapFilter === value)); filters.append(choice);
+  }
+  section.append(filters);
+  if (mapError) section.append(el('p', 'form-error', mapError));
+  if (mapLoading) { section.append(el('p', 'surface-note', t('Looking for repositories…'))); return section; }
+  const rows = mapRows(diskMap, mapFilter);
+  if (!rows.length) { section.append(el('p', 'surface-note', mapFilter === 'unassigned' ? t('Every repository here belongs to a project.') : t('No Git repositories here.'))); return section; }
+  const listing = el('ul', 'project-folders repository-map'); listing.setAttribute('aria-label', t('Repositories'));
+  for (const row of rows) {
+    const item = el('li', 'account-meta repository-row');
+    const text = el('div', 'repository-text'); const name = el('span', 'repository-name', row.name); name.title = row.folder;
+    const where = row.project === null ? t('Not in a project') : row.place === 'inside' ? t('Inside a folder of “{name}”', { name: row.project }) : t('Project “{name}”', { name: row.project });
+    text.append(name, el('span', 'folder-note', ` · ${where}${row.branch ? ` · ${row.branch}` : ''}`), el('span', 'repository-path', row.folder));
+    item.append(text);
+    if (row.action) {
+      const act = button(row.action === 'assign' ? t('Add to project…') : t('Move…'), () => moveRootDialog(row), 'text-button', `move-root-${row.folder}`);
+      act.setAttribute('aria-label', row.action === 'assign' ? t('Add {name} to a project', { name: row.name }) : t('Move {name} to another project', { name: row.name }));
+      item.append(act);
+    }
+    listing.append(item);
+  }
+  section.append(listing);
+  if (diskMap?.truncated) section.append(el('p', 'form-note', t('Only the first repositories found are listed. Choose a narrower folder to see the rest.')));
+  return section;
+}
+function moveRootDialog(row: MapRow) {
+  const joining = row.pool === null;
+  const context = openDialog(joining ? t('Add to a project') : t('Move to another project'), joining ? t('Choose the project “{name}” belongs to. Its worktrees and clones join it by themselves.', { name: row.name }) : t('Choose where “{name}” goes. Its worktrees and clones go with it.', { name: row.name }));
+  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Project')));
+  const targets = rootTargets(row.pool, snapshot?.projects ?? []);
+  const radios: HTMLInputElement[] = [];
+  for (const target of targets) {
+    const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-root'; radio.value = target.pool; radio.checked = target.current; radio.required = true;
+    const text = t('Project “{name}”', { name: target.name });
+    option.append(radio, el('span', '', target.current ? t('{target} (now)', { target: text }) : text)); group.append(option); radios.push(radio);
+  }
+  context.body.append(group);
+  if (!targets.length) context.body.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects first.')));
+  const confirm = submit(joining ? t('Add') : t('Move')); context.actions.append(confirm);
+  const sync = () => { const chosen = radios.find((r) => r.checked); confirm.disabled = !chosen || chosen.value === row.pool; };
+  radios.forEach((radio) => radio.addEventListener('change', sync)); sync();
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === row.pool) return;
+    const target = targets.find((x) => x.pool === chosen.value)!;
+    const success = joining ? t('{name} added to project “{project}”.', { name: row.name, project: target.name }) : t('{name} moved to project “{project}”.', { name: row.name, project: target.name });
+    void dialogSave(context, async () => { await adapter.moveRoot(row.folder, chosen.value); diskMap = null; loadMap(); }, success);
+  });
+  (radios.find((r) => !r.checked) ?? radios[0])?.focus();
 }
 /** Projects (0.6): folders that reserve their own accounts (core `save_project`). */
 function projectsSection() {

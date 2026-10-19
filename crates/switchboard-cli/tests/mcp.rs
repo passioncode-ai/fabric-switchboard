@@ -175,6 +175,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_context",
             "switchboard_projects",
             "switchboard_project_edit",
+            "switchboard_project_move_root",
+            "switchboard_repository_map",
             "switchboard_events",
             "switchboard_account_update",
             "switchboard_account_move",
@@ -788,6 +790,18 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         json!({"pool": pool, "add_folders": ["relative/x"]}),
     );
     assert!(error, "{refused}");
+    // SB-135 part 2: the disk map and moving a repository between projects.
+    let (error, map) = agent.tool(
+        "switchboard_repository_map",
+        json!({"under": [projects.path().to_string_lossy()]}),
+    );
+    assert!(!error, "{map}");
+    assert!(map["repositories"].is_array(), "{map}");
+    let (error, refused) = agent.tool(
+        "switchboard_project_move_root",
+        json!({"folder": "relative/x", "pool": pool}),
+    );
+    assert!(error, "{refused}");
     let mut reader = Agent::start(data.path(), projects.path(), &[], true);
     let names: Vec<String> = reader.request("tools/list", json!({}))["result"]["tools"]
         .as_array()
@@ -797,6 +811,8 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         .collect();
     assert!(names.contains(&"switchboard_projects".to_owned()));
     assert!(!names.contains(&"switchboard_project_edit".to_owned()));
+    assert!(names.contains(&"switchboard_repository_map".to_owned()));
+    assert!(!names.contains(&"switchboard_project_move_root".to_owned()));
 }
 
 #[tokio::test(flavor = "multi_thread")]
