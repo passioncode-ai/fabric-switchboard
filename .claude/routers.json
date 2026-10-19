@@ -1,0 +1,9 @@
+{
+  "copywriting": {
+    "materialised": [
+      "docs/brand/voice.md",
+      "docs/brand/terminology.md",
+      "docs/brand/facts.md"
+    ]
+  }
+}
