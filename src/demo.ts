@@ -25,7 +25,7 @@ export function createDemoAdapter(): Adapter {
       ...['north', 'south', 'east', 'west', 'harbor', 'summit', 'meadow'].map((name, index): Account => ({ id: `demo-claude-${name}`, label: `${name[0].toUpperCase()}${name.slice(1)} team`, provider: 'claude', kind: 'oauth', pool: index < 5 ? 'work' : 'personal', enabled: true, created_at: now() + index + 1, identity: null, external_identity: { account_id: `synthetic-${name}`, organization_id: 'synthetic-work', email: `${name}@example.test` }, usage: index === 6 ? null : { used_percent: [12, 47, 91, 64, 5, 33][index], observed_at: now() - 60 * (index + 1), resets_at: now() + 3600 * (index + 1), source: 'Synthetic fixture' } })),
     ],
     policies: [{ provider: 'claude', pool: 'work', target: 'managed', enabled: false, threshold_percent: 90, hysteresis_percent: 10, cooldown_seconds: 1800, max_age_seconds: 300, last_switched_at: null }],
-    routes: { 'claude:work': 'demo-claude-work', 'codex:work': 'demo-codex-work' },
+    routes: { 'claude:work': 'demo-claude-work', 'claude:personal': 'demo-claude-summit', 'codex:work': 'demo-codex-work' },
     events: [{ at: now() - 95, action: 'usage', account_id: 'demo-claude-work', detail: 'observed' }],
     rules: [
       { path: '/srv/projects/alpha-web', provider: 'claude', account_id: 'demo-claude-work', target: 'managed', enabled: true, created_at: now() - 3600, expires_at: now() + 6 * 3600 },

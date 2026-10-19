@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.47, one mark per meaning in the account list (SB-142); SB-143, SB-144 designed
+
+Operator 2026-10-19 (dictated): Codex not attributed to projects; buttons drifted; the blue bar
+read as selected in one project and not in others; more agents; a Tokens tab so an agent on an
+API key uses its project's key by the folder it starts in.
+
+- **SB-142 (0.6.47).** The blue bar was `is-current`, the ordinary CLI's login (one per machine),
+  so it showed in one pool only. Now the gold bar marks each pool's or project's used account, every
+  pool heading says which account its sessions use, and the CLI login is named on the provider
+  heading. Header buttons in one row; project and rule actions at the top right; Kimi windows one
+  per line. Checked in WebKit on the demo, 760 and 1100 px, Russian.
+- **SB-143 designed:** Codex ignores `model_provider`/`openai_base_url` in a project config, so the
+  route is an opt-in user-level provider at the proxy that picks the project by the request's
+  folder and passes other folders through. Measure first.
+- **SB-144 designed:** a key per project pool, resolved by the folder the agent's key command runs
+  in; a Tokens page.
+
+**Checks.** `./scripts/check.sh` exit 0.
+
+**Exact next task.** SB-144 (fully inside Switchboard), then SB-143 after measuring codex 0.163.
+
 ## 2026-10-19: 0.6.46, launched sessions keep the operator's setup (SB-137, SB-130)
 
 - **SB-137.** `crates/switchboard-runtime/src/carry.rs`: a Claude Code home links the operator's

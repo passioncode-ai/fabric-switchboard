@@ -384,6 +384,10 @@ export function openrouterCreditLine(credit: Pick<OpenrouterCredit, 'limit' | 'l
 export interface KimiWindow { name: string; used_percent: number; resets_at: number | null }
 /** The plan windows of a Kimi Code account on one line: "5 hours 25% · resets in 3h 10m · 7 days 50%". */
 export function kimiWindowsLine(windows: KimiWindow[], nowSeconds: number): string {
+  return kimiWindowsLines(windows, nowSeconds).join(' · ');
+}
+/** The same windows, one per line (SB-142: an account row shows them stacked, not as one long line). */
+export function kimiWindowsLines(windows: KimiWindow[], nowSeconds: number): string[] {
   const names: Record<string, string> = { '5h': t('5 hours'), '7d': t('7 days'), month: t('Month'), month_code: t('Month · code') };
   return windows.map((w) => {
     const name = names[w.name] ?? w.name;
@@ -391,7 +395,7 @@ export function kimiWindowsLine(windows: KimiWindow[], nowSeconds: number): stri
     if (w.resets_at && w.resets_at <= nowSeconds) return `${name} ${t('reset, refresh to see it')}`;
     const part = `${name} ${Math.round(w.used_percent)}%`;
     return w.resets_at ? `${part}, ${t('resets in {time}', { time: compactCountdown(w.resets_at, nowSeconds) })}` : part;
-  }).join(' · ');
+  });
 }
 /**
  * Provider terms notice (operator decision 2026-10-08, SCN-049). About shows it always; Accounts
