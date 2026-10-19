@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.45 — 2026-10-19
+
+- **Repositories on disk lists everything under a folder that is a repository itself.** When the chosen folder (such as `~/DATA`) had a `.git` of its own, the list stopped there and showed one row. It now looks inside it too: 185 repositories under `~/DATA` in under a second on the operator's machine.
+
 ## 0.6.44 — 2026-10-19
 
 - **Repositories Codex works in join their project too (SB-132).** Switchboard already added a repository to a project when a Claude Code session of that project changed it. It now reads Codex sessions the same way: a file Codex patches or a commit it makes in another repository adds that repository to the project the session works in. Only paths are read and kept.

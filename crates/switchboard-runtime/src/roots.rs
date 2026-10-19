@@ -232,7 +232,11 @@ pub fn disk_map(under: &[PathBuf], snapshot: &switchboard_core::Snapshot) -> Dis
             if meta.is_dir() {
                 repositories.push(found(&dir, snapshot));
             }
-            continue;
+            // A chosen folder is walked even when it is a repository itself (`~/DATA` with a
+            // `.git` of its own, 2026-10-19: the map listed one row instead of hundreds).
+            if depth > 0 {
+                continue;
+            }
         }
         if depth >= MAP_DEPTH {
             continue;
@@ -468,5 +472,25 @@ mod tests {
         );
         assert_eq!(map.repositories[1].pool.as_deref(), Some("p"));
         assert!(!map.truncated);
+    }
+
+    #[test]
+    fn a_chosen_folder_that_is_a_repository_itself_is_still_walked() {
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        for d in [work.clone(), work.join("app"), work.join("app/module")] {
+            std::fs::create_dir_all(d.join(".git")).unwrap();
+        }
+        let map = disk_map(
+            std::slice::from_ref(&work),
+            &switchboard_core::Snapshot::default(),
+        );
+        let listed: Vec<String> = map.repositories.iter().map(|r| r.folder.clone()).collect();
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        assert_eq!(
+            listed,
+            [text(&work), text(&work.join("app"))],
+            "the chosen folder and the repositories in it; not into a repository below it"
+        );
     }
 }
