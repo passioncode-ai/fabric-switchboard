@@ -2,6 +2,40 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.42, analytics on PassionCode's host (SB-H01) and the next owner stall
+
+- **0.6.41 checked live.** The owner restarted into it by itself at 2026-10-18 23:44 UTC
+  (`update_restart outcome:idle`), so the broker's failed restart no longer matters. Since then:
+  209 folders bound, `capability-migration.json` present, no `Proxy is busy` in any transcript
+  written after the start. `recovery_hook registered` is not seen yet: no session stopped in a
+  project folder since the start.
+- **SB-122 closed live.** `switchboard accounts move` took claude7@sshlg.me into
+  `heygen-hyperframes-vr` and back to `default`; both answered `moved: true` and the project list
+  followed.
+- **New stall found and fixed (SB-138 follow-up).** The log named `suggest_found` holding the
+  owner transaction 15 times in 90 minutes, up to 56,813 ms, and `vanish` 12,138 ms. The machine
+  had a load average of about 100 and 10 of 11 GB of swap in use. `settle` read every project
+  repository's Git files and each candidate's under the transaction, on an async worker. Now
+  `suggest::assess_all` reads them in a blocking section before the transaction; under it only
+  the suggestion list is written (`settle_assessed`), and only when the projects did not change
+  meanwhile (otherwise the scanner starts over at the next pass and finds them again). `vanish`
+  writes in a blocking section.
+- **SB-H01.** `analytics::HOST` is `https://analytics.passioncode.ai`. The vault key
+  `passioncode-platform/prod/APTABASE_APP_KEY_SWITCHBOARD` answered a debug event with HTTP 200 and
+  was set as the `release` environment secret `SWITCHBOARD_ANALYTICS_APP_KEY` from stdin
+  (2026-10-19 03:20 UTC), never printed. docs/ANALYTICS.md updated.
+- **Board.** Rows released in 0.6.36 to 0.6.40 no longer say «unreleased»; SB-H01 added.
+- **Machine.** 6 GB free on `/` and swap nearly full: noted, not this repository's work.
+
+**Checks.** `./scripts/check.sh` exit 0 on the branch; new tests
+`assessing_found_folders_writes_nothing_and_settling_records_them`,
+`release_builds_send_to_passioncodes_own_host`.
+
+**Exact next task.** After 0.6.42 runs: no `transaction_held` from `suggest_found` above a few
+seconds in the log (re-measure SB-138), and answer passioncode-platform on thread 0cc62467 with the
+publish time if not done. Then SB-135 part 2 (disk map of unassigned repositories), SB-132 (Codex
+rollouts), SB-137.
+
 ## 2026-10-18 — 0.6.41: hot fixes from the live check (proxy slots, update drain, recovery hook)
 
 - **Measured live on 0.6.39/0.6.40.** Proxy port had 15 to 25 connections in every one of 90

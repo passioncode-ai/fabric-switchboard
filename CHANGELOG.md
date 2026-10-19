@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.42 — 2026-10-19
+
+- **Usage counts go to PassionCode's own analytics host (SB-H01).** The anonymous counts the desktop app sends (docs/ANALYTICS.md) now go to `analytics.passioncode.ai` instead of the operator's personal host. What is sent is unchanged, and so is the switch in About that turns it off.
+- **Agents' requests to Switchboard no longer wait up to a minute.** Looking at new folders next to a project's read every project repository's Git files while holding the lock every change waits on; on a busy machine that took up to 57 seconds, and `switchboard` commands and MCP calls waited with it. The reading now happens before the lock, which is taken only to write down what was found. Removing a deleted folder from its project no longer holds up the app's other background work either.
+
 ## 0.6.41 — 2026-10-18
 
 - **Sessions no longer get "Proxy is busy".** The local proxy relayed at most 16 requests at once; with two dozen agent sessions streaming, the rest got a 503 (154 times in a day). It now relays 64.
