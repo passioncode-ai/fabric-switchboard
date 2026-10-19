@@ -2,6 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.46, launched sessions keep the operator's setup (SB-137, SB-130)
+
+- **SB-137.** `crates/switchboard-runtime/src/carry.rs`: a Claude Code home links the operator's
+  `CLAUDE.md`, skills, commands, agents, output styles, plugins and hooks and gets their settings
+  without `env`, sign-in helpers or secret-shaped keys (the account's own `env` on top when
+  isolated). Pi's `agent-home` and Codex homes likewise (Pi: `AGENTS.md`, skills, extensions,
+  prompts, themes, settings; Codex: `AGENTS.md`). Links, not copies: the operator's edits reach
+  running homes. `Host::user_scope` keeps tests off the real folders.
+- **SB-130, decided.** A continuation home starts past the first-run screen and trusts only the
+  folder the workflow's previous agent worked in; a person's own launch still asks.
+- **Open:** Windows (no links yet); Pi's skill listing (it reads `~/.agents/skills` from `$HOME`);
+  a live console hand-over that reaches its first prompt.
+
+**Checks.** `./scripts/check.sh` exit 0.
+
+**Exact next task.** Watch the next console hand-over (SB-130 live). SB-141 when CT-57 lands.
+Then the SB-135 rest and SB-114/115 live outcome.
+
 ## 2026-10-19: status report (operator's request, board thread bd1c9611, reply b963d929)
 
 Measured on `origin/main` `802238d`.

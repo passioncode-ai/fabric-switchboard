@@ -560,13 +560,26 @@ struct Host {
     agent_cli: fn() -> Option<PathBuf>,
     board: fn(Provider) -> Option<McpServer>,
     start_terminal: fn(&Path) -> Result<(), String>,
+    /// The operator's own user folder for the provider (`~/.claude`, `~/.codex`), carried into a
+    /// launched home (SB-137); None: nothing is carried.
+    user_scope: fn(Provider) -> Option<PathBuf>,
 }
 const NATIVE: Host = Host {
     binary,
     agent_cli,
     board: board_server,
     start_terminal,
+    user_scope,
 };
+fn user_scope(provider: Provider) -> Option<PathBuf> {
+    match provider {
+        Provider::Claude => crate::carry::claude_user_dir(),
+        Provider::Codex => std::env::var_os("CODEX_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|h| h.join(".codex"))),
+    }
+}
 pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     start_terminal(&write_launch_script(home, content)?)
 }
@@ -2009,6 +2022,23 @@ mcp_servers:\n  observatory:\n    command: {}\n    args: [{args}]\n",
 }
 /// Writes the session of an OpenRouter launch and returns its script and the answer. Separate
 /// from starting Terminal so tests read the script a real launch would run.
+/// SB-137: Pi's own folder gets the operator's `AGENTS.md`, skills and extensions as links and
+/// their settings without anything that signs in; the launch's key still wins (`auth.json` is
+/// never carried).
+fn carry_pi(own: &Path) -> Result<(), String> {
+    let Some(user) = crate::carry::pi_user_dir() else {
+        return Ok(());
+    };
+    crate::carry::link_into(own, &user, crate::carry::PI_LINKS);
+    if let Some(settings) = crate::carry::pi_settings(&user) {
+        private_write(
+            &own.join("settings.json"),
+            serde_json::to_string(&settings).unwrap().as_bytes(),
+            false,
+        )?;
+    }
+    Ok(())
+}
 fn openrouter_session(
     root: &Path,
     store: &Store,
@@ -2056,6 +2086,9 @@ fn openrouter_session(
     if let Some(isolate) = &recipe.isolate_env {
         let own = home.join("agent-home");
         private_dir(&own)?;
+        if isolate == "PI_CODING_AGENT_DIR" {
+            carry_pi(&own)?;
+        }
         env.insert(isolate.clone(), own.to_string_lossy().into_owned());
     }
     let mut args = recipe.args.clone();
@@ -2354,6 +2387,36 @@ fn launch_full(
     };
     let cli = (host.agent_cli)();
     let board = (host.board)(account.provider);
+    // SB-137/SB-130: the operator's instructions, skills and settings come along as links; a
+    // Claude Code home skips the first-run screens and, for a continuation, trusts the folder its
+    // previous agent worked in. Nothing that signs in is carried.
+    let user = (host.user_scope)(account.provider);
+    if let Some(user) = &user {
+        match account.provider {
+            Provider::Claude => {
+                crate::carry::link_into(&home, user, crate::carry::CLAUDE_LINKS);
+            }
+            Provider::Codex => {
+                crate::carry::link_into(&home, user, &["AGENTS.md"]);
+            }
+        }
+    }
+    if account.provider == Provider::Claude {
+        crate::carry::claude_state(&home, continuation.map(|_| working_directory.as_path()))?;
+        let settings_path = home.join("settings.json");
+        let settings = crate::carry::claude_settings(user.as_deref(), None);
+        // Managed: the account comes through the proxy, so the file holds only the operator's
+        // carried settings, and exists only when there are some (or an earlier launch wrote it).
+        if mode == "managed"
+            && (settings.as_object().is_some_and(|s| !s.is_empty()) || settings_path.exists())
+        {
+            private_write(
+                &settings_path,
+                serde_json::to_string(&settings).unwrap().as_bytes(),
+                false,
+            )?;
+        }
+    }
     let tools = agent_tools(
         cli.as_deref(),
         root,
@@ -2422,11 +2485,15 @@ fn launch_full(
                 } else {
                     "CLAUDE_CODE_OAUTH_TOKEN"
                 };
+                // SB-137: the operator's settings (hooks, permissions, plugins), without what
+                // signs in, then this account's own credential.
+                let settings = crate::carry::claude_settings(
+                    user.as_deref(),
+                    Some(json!({name: credential.access_token})),
+                );
                 private_write(
                     &home.join("settings.json"),
-                    serde_json::to_string(&json!({"env":{name:credential.access_token}}))
-                        .unwrap()
-                        .as_bytes(),
+                    serde_json::to_string(&settings).unwrap().as_bytes(),
                     false,
                 )?;
             }
@@ -3654,11 +3721,15 @@ mod tests {
     fn terminal_fails(_: &Path) -> Result<(), String> {
         Err("Terminal could not open.".into())
     }
+    fn no_user_scope(_: Provider) -> Option<PathBuf> {
+        None
+    }
     const TEST_HOST: Host = Host {
         binary: synthetic_program,
         agent_cli: no_agent_cli,
         board: no_board,
         start_terminal: terminal_opens,
+        user_scope: no_user_scope,
     };
     fn openrouter_key(f: &Fixture, model: Option<&str>) {
         f.store
@@ -4285,6 +4356,7 @@ mod tests {
             agent_cli: synthetic_agent_cli,
             board: no_board,
             start_terminal: terminal_must_not_open,
+            user_scope: no_user_scope,
         };
         let extra = vec!["--resume".to_string(), "it's; rm -rf ~".to_string()];
         let (_, script) = launch_full(
@@ -4407,6 +4479,7 @@ mod tests {
             agent_cli: synthetic_agent_cli,
             board: no_board,
             start_terminal: terminal_must_not_open,
+            user_scope: no_user_scope,
         };
         let context = [
             (
@@ -4574,6 +4647,7 @@ mod tests {
             agent_cli: synthetic_agent_cli,
             board: no_board,
             start_terminal: never,
+            user_scope: no_user_scope,
         };
         let resumed = Continuation {
             workflow_id: "wf_0123456789abcdef".into(),
@@ -4596,6 +4670,71 @@ mod tests {
         assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
         assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
     }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_launched_home_carries_the_operators_setup_and_a_continuation_trusts_its_folder() {
+        // SB-137/SB-130: the operator's instructions and settings come along; their sign-in does
+        // not; a continuation does not stop at the first-run or trust screens.
+        static USER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let user = tempfile::tempdir().unwrap();
+        fs::write(user.path().join("CLAUDE.md"), "operator rules").unwrap();
+        fs::create_dir(user.path().join("skills")).unwrap();
+        fs::write(
+            user.path().join("settings.json"),
+            json!({"hooks": {"Stop": []}, "env": {"OPERATOR_SECRET": "synthetic"}}).to_string(),
+        )
+        .unwrap();
+        USER.set(user.path().to_path_buf()).unwrap();
+        fn fixture_scope(_: Provider) -> Option<PathBuf> {
+            USER.get().cloned()
+        }
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        fn never(_: &Path) -> Result<(), String> {
+            panic!("Terminal was opened for an in-place continuation")
+        }
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            board: no_board,
+            start_terminal: never,
+            user_scope: fixture_scope,
+        };
+        let resumed = Continuation {
+            workflow_id: "wf_0123456789abcdef".into(),
+            handoff_id: "handoff:fedcba9876543210".into(),
+            observatory: McpServer {
+                command: "/opt/Observatory/bin/python".into(),
+                args: vec!["/opt/Observatory/engine/mcp/server.py".into()],
+            },
+            previous_provider: None,
+        };
+        continuation_here_with(
+            &f.root, &f.store, &proxy, &id, "isolated", &f.project, &host, &resumed,
+        )
+        .unwrap();
+        let home = f.root.join("homes").join(&id);
+        assert_eq!(
+            fs::read_to_string(home.join("CLAUDE.md")).unwrap(),
+            "operator rules"
+        );
+        assert!(home.join("skills").is_dir());
+        let settings: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(settings["hooks"], json!({"Stop": []}));
+        assert_eq!(
+            settings["env"],
+            json!({"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-access"}),
+            "the operator's env is never carried"
+        );
+        let state: serde_json::Value =
+            serde_json::from_slice(&fs::read(home.join(".claude.json")).unwrap()).unwrap();
+        assert_eq!(state["hasCompletedOnboarding"], true);
+        let trusted: Vec<&String> = state["projects"].as_object().unwrap().keys().collect();
+        assert_eq!(trusted.len(), 1, "only the workflow's folder: {trusted:?}");
+        assert!(Path::new(trusted[0]).ends_with(f.project.file_name().unwrap()));
+    }
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_continuation_launch_carries_the_ids_the_observatory_server_and_the_first_prompt() {
@@ -4607,6 +4746,7 @@ mod tests {
             agent_cli: synthetic_agent_cli,
             board: no_board,
             start_terminal: terminal_opens,
+            user_scope: no_user_scope,
         };
         let resumed = Continuation {
             workflow_id: "wf_0123456789abcdef".into(),

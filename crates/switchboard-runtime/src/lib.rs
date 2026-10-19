@@ -7,6 +7,7 @@ pub mod agents;
 pub mod analytics;
 mod bindings;
 mod blocking;
+mod carry;
 pub mod continuation;
 pub mod control;
 pub mod external;
