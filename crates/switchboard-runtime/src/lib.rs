@@ -965,15 +965,29 @@ impl Runtime {
         if candidates.is_empty() || stopped() {
             return;
         }
+        // Reading the candidates' and the projects' Git files is file work too: outside the
+        // transaction, which held every control request for up to 57 s while it ran under it on a
+        // swapping machine (2026-10-19).
+        let assessed = blocking::run(|| suggest::assess_all(&snapshot, candidates));
+        if stopped() {
+            return;
+        }
         let _transaction = self.hold("suggest_found").await;
-        let Ok(snapshot) = self.store.snapshot() else {
+        let Ok(fresh) = self.store.snapshot() else {
             return;
         };
-        let found = match self.suggest.lock() {
-            Ok(mut scanner) => scanner.settle(&self.root, &snapshot, candidates, time),
-            Err(_) => return,
-        };
-        self.add_found(found, time);
+        // Projects changed meanwhile: what was decided may be stale. The scanner starts over on
+        // the new projects at the next pass (`collect`), so nothing found is lost.
+        if suggest::projects_key(&fresh) != suggest::projects_key(&snapshot) {
+            return;
+        }
+        blocking::run(|| {
+            let found = match self.suggest.lock() {
+                Ok(mut scanner) => scanner.settle_assessed(&self.root, assessed, time),
+                Err(_) => return,
+            };
+            self.add_found(found, time);
+        });
     }
     /// SB-131: the repositories agents of a project changed since the last pass join it. The
     /// project is the one the session works in (its `cwd`); a repository changed by agents of two
@@ -1321,71 +1335,75 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
-        let mut removed = 0;
-        for project in &snapshot.projects {
-            let gone: Vec<String> = confirmed
-                .iter()
-                .filter(|(pool, f)| pool == &project.pool && project.folders.contains(f))
-                .map(|(_, f)| f.clone())
-                .collect();
-            if gone.is_empty() {
-                continue;
-            }
-            let mut kept: Vec<PathBuf> = project
-                .folders
-                .iter()
-                .filter(|f| !gone.contains(f))
-                .map(PathBuf::from)
-                .collect();
-            let mut gone = gone;
-            if kept.is_empty() {
-                // A project keeps its last folder: it has to have one.
-                if self.first_time(&format!("last:{}", project.pool)) {
-                    oplog::event(
-                        "project_folder_gone",
-                        &[("outcome", oplog::Field::Code("kept_last"))],
-                    );
-                }
-                let Some(last) = gone.pop() else {
-                    continue;
-                };
-                kept.push(PathBuf::from(last));
+        // Saving the projects writes the store: a blocking section, so the async worker and the
+        // tasks queued on it do not wait with it (12 s on a swapping machine, 2026-10-19).
+        blocking::run(|| {
+            let mut removed = 0;
+            for project in &snapshot.projects {
+                let gone: Vec<String> = confirmed
+                    .iter()
+                    .filter(|(pool, f)| pool == &project.pool && project.folders.contains(f))
+                    .map(|(_, f)| f.clone())
+                    .collect();
                 if gone.is_empty() {
                     continue;
                 }
-            }
-            let accounts: Vec<String> = snapshot
-                .accounts
-                .iter()
-                .filter(|a| a.pool == project.pool)
-                .map(|a| a.id.clone())
-                .collect();
-            match self
-                .store
-                .save_project(Some(&project.pool), &project.name, &kept, &accounts)
-            {
-                Ok(_) => {
-                    removed += gone.len();
-                    if suggest::mark_gone(&self.root, &project.pool, &gone, time).is_err() {
+                let mut kept: Vec<PathBuf> = project
+                    .folders
+                    .iter()
+                    .filter(|f| !gone.contains(f))
+                    .map(PathBuf::from)
+                    .collect();
+                let mut gone = gone;
+                if kept.is_empty() {
+                    // A project keeps its last folder: it has to have one.
+                    if self.first_time(&format!("last:{}", project.pool)) {
                         oplog::event(
-                            "project_suggestion",
-                            &[("remember", oplog::Field::Code("failed"))],
+                            "project_folder_gone",
+                            &[("outcome", oplog::Field::Code("kept_last"))],
                         );
                     }
+                    let Some(last) = gone.pop() else {
+                        continue;
+                    };
+                    kept.push(PathBuf::from(last));
+                    if gone.is_empty() {
+                        continue;
+                    }
                 }
-                Err(_) => oplog::event(
-                    "project_folder_gone",
-                    &[("outcome", oplog::Field::Code("refused"))],
-                ),
+                let accounts: Vec<String> = snapshot
+                    .accounts
+                    .iter()
+                    .filter(|a| a.pool == project.pool)
+                    .map(|a| a.id.clone())
+                    .collect();
+                match self
+                    .store
+                    .save_project(Some(&project.pool), &project.name, &kept, &accounts)
+                {
+                    Ok(_) => {
+                        removed += gone.len();
+                        if suggest::mark_gone(&self.root, &project.pool, &gone, time).is_err() {
+                            oplog::event(
+                                "project_suggestion",
+                                &[("remember", oplog::Field::Code("failed"))],
+                            );
+                        }
+                    }
+                    Err(_) => oplog::event(
+                        "project_folder_gone",
+                        &[("outcome", oplog::Field::Code("refused"))],
+                    ),
+                }
             }
-        }
-        if removed > 0 {
-            oplog::event(
-                "project_folder_gone",
-                &[("removed", oplog::Field::Number(removed as i64))],
-            );
-            self.suggestions_changed();
-        }
+            if removed > 0 {
+                oplog::event(
+                    "project_folder_gone",
+                    &[("removed", oplog::Field::Number(removed as i64))],
+                );
+                self.suggestions_changed();
+            }
+        });
     }
     fn begin_login(
         &self,

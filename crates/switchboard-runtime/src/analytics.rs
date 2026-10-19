@@ -1,7 +1,8 @@
 //! Anonymous product analytics (operator request 2026-10-05; docs/ANALYTICS.md). The desktop
 //! app reports how many people install and use Switchboard and how many accounts they connect,
-//! to the self-hosted Aptabase at `analytics.sshlg.me`, so one person using several PassionCode
-//! apps can be counted once across them.
+//! to PassionCode's self-hosted Aptabase at `analytics.passioncode.ai` (SB-H01, passioncode-platform
+//! PLAT-019; the personal `analytics.sshlg.me` until 0.6.41), so one person using several
+//! PassionCode apps can be counted once across them.
 //!
 //! What is sent: event names, counts and kinds (provider, credential type, how an account was
 //! added, what caused a switch), the app version and OS, and one random installation id shared
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 use switchboard_core::Snapshot;
 
-pub const HOST: &str = "https://analytics.sshlg.me";
+pub const HOST: &str = "https://analytics.passioncode.ai";
 /// Compiled into release builds only.
 pub const APP_KEY: Option<&str> = option_env!("SWITCHBOARD_ANALYTICS_APP_KEY");
 /// The installation file every PassionCode app shares: `<data dir>/PassionCode/installation.json`.
@@ -562,6 +563,12 @@ mod tests {
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
     use std::sync::Arc;
     use switchboard_core::{Account, AuthKind, Provider};
+
+    #[test]
+    fn release_builds_send_to_passioncodes_own_host() {
+        // SB-H01: PassionCode's apps moved off the personal instance (passioncode-platform PLAT-019).
+        assert_eq!(HOST, "https://analytics.passioncode.ai");
+    }
 
     #[derive(Clone, Default)]
     struct Server {

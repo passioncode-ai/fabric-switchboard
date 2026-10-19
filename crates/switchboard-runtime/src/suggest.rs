@@ -519,28 +519,60 @@ pub(crate) fn record(
     folder: &Path,
     now: i64,
 ) -> Result<Outcome, String> {
+    match assess(snapshot, repos, folder) {
+        Assessed::Decided(outcome) => Ok(outcome),
+        Assessed::Ours {
+            text,
+            pool,
+            reason,
+            repository,
+        } => record_row(root, text, pool, reason, repository, now),
+    }
+}
+
+/// What `record` decides from the folder and the projects alone, before the list is read.
+pub(crate) enum Assessed {
+    /// Settled without writing anything.
+    Decided(Outcome),
+    /// A project claims it: `record_row` writes it down.
+    Ours {
+        text: String,
+        pool: String,
+        reason: Reason,
+        repository: String,
+    },
+}
+
+/// The read-only half of `record`: file reads (the folder's Git files, canonical paths) and no
+/// write, so the owner runs it outside its transaction.
+pub(crate) fn assess(snapshot: &Snapshot, repos: &[(String, Repo)], folder: &Path) -> Assessed {
     let Ok(folder) = folder.canonicalize() else {
-        return Ok(Outcome::NotOurs { settled: true });
+        return Assessed::Decided(Outcome::NotOurs { settled: true });
     };
     let Some(text) = folder
         .to_str()
         .filter(|t| t.len() <= MAX_FOLDER)
         .map(str::to_owned)
     else {
-        return Ok(Outcome::NotOurs { settled: true });
+        return Assessed::Decided(Outcome::NotOurs { settled: true });
     };
     if snapshot.project_for(&folder).is_some() {
-        return Ok(Outcome::InProject);
+        return Assessed::Decided(Outcome::InProject);
     }
     if transient(&folder) {
-        return Ok(Outcome::NotOurs { settled: true });
+        return Assessed::Decided(Outcome::NotOurs { settled: true });
     }
     // Decided before the list is read: most folders a pass looks at are no project's.
     let Some((pool, reason, repository)) = classify(snapshot, repos, &folder) else {
         let settled = repo(&folder).is_none_or(|r| r.remote.is_some());
-        return Ok(Outcome::NotOurs { settled });
+        return Assessed::Decided(Outcome::NotOurs { settled });
     };
-    record_row(root, text, pool, reason, repository, now)
+    Assessed::Ours {
+        text,
+        pool,
+        reason,
+        repository,
+    }
 }
 
 /// Records a repository an agent of the project `pool` changed (SB-131), with the same rules as
@@ -996,7 +1028,8 @@ impl Scanner {
         candidates.dedup();
         candidates
     }
-    /// Records what `collect` found; the owner runs it under its transaction.
+    /// Records what `collect` found: `assess_all`, then `settle_assessed`.
+    #[cfg(test)]
     pub(crate) fn settle(
         &mut self,
         root: &Path,
@@ -1004,17 +1037,38 @@ impl Scanner {
         candidates: Vec<PathBuf>,
         now: i64,
     ) -> Vec<Suggestion> {
-        if candidates.is_empty() {
-            return vec![];
-        }
-        let repos = project_repos(snapshot);
+        let assessed = assess_all(snapshot, candidates);
+        self.settle_assessed(root, assessed, now)
+    }
+    /// Writes down what `assess_all` decided; the owner runs it under its transaction. Only the
+    /// list of found folders is read and written here, never a repository's files.
+    pub(crate) fn settle_assessed(
+        &mut self,
+        root: &Path,
+        assessed: Vec<Candidate>,
+        now: i64,
+    ) -> Vec<Suggestion> {
         let mut found = Vec::new();
-        for path in candidates {
-            if !path.join(".git").exists() {
+        for Candidate {
+            path,
+            assessed,
+            stamp,
+        } in assessed
+        {
+            let Some(assessed) = assessed else {
                 self.unsettled.remove(&path);
                 continue;
-            }
-            match record(root, snapshot, &repos, &path, now) {
+            };
+            let outcome = match assessed {
+                Assessed::Decided(outcome) => Ok(outcome),
+                Assessed::Ours {
+                    text,
+                    pool,
+                    reason,
+                    repository,
+                } => record_row(root, text, pool, reason, repository, now),
+            };
+            match outcome {
                 Ok(Outcome::New(s)) => {
                     self.unsettled.remove(&path);
                     self.seen.insert(path);
@@ -1022,7 +1076,6 @@ impl Scanner {
                 }
                 Ok(Outcome::NotOurs { settled: false }) => {
                     if self.unsettled.len() < MAX_UNSETTLED || self.unsettled.contains_key(&path) {
-                        let stamp = config_stamp(&path);
                         self.unsettled.insert(path.clone(), stamp);
                     }
                     self.seen.insert(path);
@@ -1041,6 +1094,46 @@ impl Scanner {
         }
         found
     }
+}
+
+/// One folder `collect` listed, with what `assess` made of it. `assessed: None`: it is no Git
+/// repository (any more). `stamp`: its config's time, for a repository without an `origin` yet.
+pub(crate) struct Candidate {
+    path: PathBuf,
+    assessed: Option<Assessed>,
+    stamp: Option<SystemTime>,
+}
+
+/// The read-only half of a pass's recording (SB-138 follow-up, 2026-10-19): every project
+/// folder's Git files and each candidate's are read here, outside the owner transaction. Under
+/// it, with the machine swapping, this held every control request for up to 57 s.
+pub(crate) fn assess_all(snapshot: &Snapshot, candidates: Vec<PathBuf>) -> Vec<Candidate> {
+    if candidates.is_empty() {
+        return vec![];
+    }
+    let repos = project_repos(snapshot);
+    candidates
+        .into_iter()
+        .map(|path| {
+            if !path.join(".git").exists() {
+                return Candidate {
+                    path,
+                    assessed: None,
+                    stamp: None,
+                };
+            }
+            let assessed = assess(snapshot, &repos, &path);
+            let stamp = match assessed {
+                Assessed::Decided(Outcome::NotOurs { settled: false }) => config_stamp(&path),
+                _ => None,
+            };
+            Candidate {
+                path,
+                assessed: Some(assessed),
+                stamp,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1582,5 +1675,34 @@ mod tests {
         assert!(scan.pass(root.path(), &s, 220).is_empty());
         git(&slow, Some("git@github.com:org/slow.git"));
         assert_eq!(scan.pass(root.path(), &s, 250).len(), 1);
+    }
+
+    #[test]
+    fn assessing_found_folders_writes_nothing_and_settling_records_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let main = data.join("app");
+        git(&main, Some("git@github.com:org/app.git"));
+        let s = snapshot(&[("p", &[&main], &["github.com/org"])]);
+        let mut scan = Scanner::default();
+        let sibling = data.join("api");
+        git(&sibling, Some("git@github.com:org/api.git"));
+        let gone = data.join("gone");
+        std::fs::create_dir_all(&gone).unwrap();
+        let candidates = vec![sibling.clone(), gone];
+        // The owner runs this half outside its transaction: it reads Git files, writes nothing.
+        let assessed = assess_all(&s, candidates);
+        assert_eq!(assessed.len(), 2);
+        assert!(
+            read(root.path()).unwrap().is_empty(),
+            "nothing recorded yet"
+        );
+        assert!(scan.seen.is_empty(), "the scanner is not touched yet");
+        let found = scan.settle_assessed(root.path(), assessed, 130);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].reason, Reason::Ecosystem);
+        assert_eq!(read(root.path()).unwrap().len(), 1);
+        assert!(scan.seen.contains(&sibling));
     }
 }

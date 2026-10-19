@@ -5,8 +5,12 @@ an App Key. Source: [`crates/switchboard-runtime/src/analytics.rs`](../crates/sw
 
 Switchboard counts installs, days of use and connected accounts so PassionCode can see how its
 apps are used, and so one person using several PassionCode.ai tools (Switchboard, Fabric, Fabric
-Inbox) counts once. Events go to the self-hosted Aptabase at `https://analytics.sshlg.me`
-(`ssheleg/sshlg-analytics`, [ingestion contract](https://github.com/ssheleg/sshlg-analytics/blob/main/docs/client-contract.md)).
+Inbox) counts once. Events go to PassionCode's self-hosted Aptabase at
+`https://analytics.passioncode.ai` (passioncode-platform `infra/analytics/README.md`, PLAT-019;
+the ingestion contract is unchanged: [client contract](https://github.com/ssheleg/sshlg-analytics/blob/main/docs/client-contract.md)).
+Releases up to 0.6.41 sent to the personal `https://analytics.sshlg.me`; their history to
+2026-10-17 00:30 UTC was copied to the new host, and the delta after it is copied by
+passioncode-platform (SB-H01).
 
 ## What is sent
 
@@ -72,14 +76,17 @@ Other apps adopt the same file, fields and rule (Fabric and Fabric Inbox tasks b
 
 `SWITCHBOARD_ANALYTICS_APP_KEY` is read at compile time (`option_env!`). Only the release
 workflow sets it, from the repository secret of the same name, which holds the Aptabase App Key
-of the app *Fabric Switchboard* (vault `sshlg-analytics/prod/APTABASE_APP_KEY_SWITCHBOARD`).
+of the app *Fabric Switchboard* on `analytics.passioncode.ai` (vault
+`passioncode-platform/prod/APTABASE_APP_KEY_SWITCHBOARD`; set in the `release` environment on
+2026-10-19 from stdin, never printed).
 Source builds, forks, `npm run app:build` without the variable, tests and the smoke check send
 nothing, and About shows the switch as unavailable. Only the desktop app owning the real data
 folder starts analytics — not `switchboard serve`, not the CLI, not a `--data-dir` store.
 
 ## Reading the numbers
 
-The Aptabase dashboard at `analytics.sshlg.me` (app *Fabric Switchboard*, id `sVX004YjufDn0d4BiULQpF`; a debug event from `scripts/send-test-event.sh` was stored as `sVX004YjufDn0d4BiULQpF_DEBUG` on 2026-10-05); cross-app questions —
+The Aptabase dashboard at `analytics.passioncode.ai` (app *Fabric Switchboard*). On the old
+`analytics.sshlg.me` the app had id `sVX004YjufDn0d4BiULQpF`; a debug event from `scripts/send-test-event.sh` was stored as `sVX004YjufDn0d4BiULQpF_DEBUG` on 2026-10-05); cross-app questions —
 one `install_id` across apps — through ClickHouse, which `sshlg-growth` queries
 (`growth.analytics.*`). Registering the app in growth's app registry is growth's task.
 
