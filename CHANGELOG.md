@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.46 — 2026-10-19
+
+- **Sessions Switchboard launches keep your setup (SB-137).** A Claude Code session started from Switchboard ran in a fresh settings folder: without your `CLAUDE.md`, skills, commands, plugins, hooks and permissions. They now come along as links, so changes to your own files reach these sessions too, and your settings are carried without anything that signs in. Pi started by Switchboard gets your `AGENTS.md`, skills and extensions the same way, and Codex your `AGENTS.md`.
+- **A workflow handed to another account no longer stops at a question nobody sees (SB-130).** A continuation started in Fabric's console waited at Claude Code's first-run and "Do you trust this folder?" screens. It now starts past the first-run screen and trusts the one folder the workflow's previous agent worked in. A session you launch yourself still asks.
+
 ## 0.6.45 — 2026-10-19
 
 - **Repositories on disk lists everything under a folder that is a repository itself.** When the chosen folder (such as `~/DATA`) had a `.git` of its own, the list stopped there and showed one row. It now looks inside it too: 185 repositories under `~/DATA` in under a second on the operator's machine.
