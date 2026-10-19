@@ -22,8 +22,12 @@
 **Checks.** `./scripts/check.sh` exit 0; new test
 `a_chosen_folder_that_is_a_repository_itself_is_still_walked`.
 
-**Exact next task.** After 0.6.45 runs: open *Repositories on disk* in the app, add one loose
-repository to a project and move one there and back (closes SB-135 part 2 live). Watch for the
+**Published:** v0.6.45 (run 39215128665 and its nightly green). Root move checked live through the
+owner on 0.6.44: `nicegram-app-web` from `dataroom` to `my-nicegram-app-web` and back, and the
+last-folder refusal (board SB-135).
+
+**Exact next task.** Open *Repositories on disk* in the installed 0.6.45 app once (the section
+itself was checked in WebKit on the demo only). Watch for the
 first `recovery_hook registered` in a project folder (0.6.41's fix, not observed yet: no stop
 since). When CT-57 lands, SB-141. Then SB-137.
 
