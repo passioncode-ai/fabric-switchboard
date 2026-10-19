@@ -27,6 +27,7 @@ pub mod projects;
 pub mod recovery;
 mod refresh;
 pub mod roots;
+mod statistics;
 pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
@@ -243,6 +244,13 @@ pub enum Operation {
     /// default in the window), each with the project it belongs to or none. Reads only.
     RepositoryMap {
         under: Vec<PathBuf>,
+    },
+    /// SB-145: what the proxy relayed in the last `days` days (1 to 90, default 30), by project,
+    /// account, coding agent and day: requests, outcomes and the provider's token counts. Reads
+    /// only.
+    Statistics {
+        #[serde(default)]
+        days: Option<i64>,
     },
     /// The third-party agent catalog (`agent_catalog`).
     AgentCatalog,
@@ -583,6 +591,8 @@ pub struct Runtime {
     suggest: Mutex<suggest::Scanner>,
     /// Moves on every new, added or declined suggestion; the app reads the list only then.
     suggestions_seq: std::sync::atomic::AtomicU64,
+    /// SB-145: the proxy's counts, kept for 90 days in `statistics.json`.
+    statistics: statistics::Statistics,
     /// SB-121/SB-131: when the folders that could not be added are tried again (never asked).
     suggest_retry_at: std::sync::atomic::AtomicI64,
     /// SB-131: how far recent Claude Code transcripts were read for agents' work.
@@ -679,6 +689,7 @@ impl Runtime {
         let usage_gate =
             usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
+        let statistics = statistics::Statistics::load(&root);
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -697,6 +708,7 @@ impl Runtime {
             kimi_watch: kimi::KimiWatch::default(),
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
+            statistics,
             suggest_retry_at: std::sync::atomic::AtomicI64::new(0),
             activity: Mutex::new(activity::Activity::default()),
             worked: Mutex::new((0, HashSet::new())),
@@ -786,6 +798,7 @@ impl Runtime {
                 | Operation::ProjectSuggestions
                 | Operation::ProjectBindings
                 | Operation::RepositoryMap { .. }
+                | Operation::Statistics { .. }
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
@@ -2190,6 +2203,8 @@ impl Owner {
             .await;
         // SB-143: no Codex should be pointed at a proxy that is gone.
         runtime.codex_route_sync(false);
+        runtime.statistics.absorb(runtime.proxy.take_statistics());
+        runtime.statistics.save(&runtime.root, monitor::now(), true);
         let _ = runtime.store.flush();
         drop(transaction);
         let millis = started.elapsed().as_millis() as u64;
@@ -3824,6 +3839,17 @@ async fn execute(
             Ok(
                 json!({"folder": stored, "from": source, "pool": pool, "moved": true, "folders": tree.len()}),
             )
+        }
+        Operation::Statistics { days } => {
+            let snapshot = store.snapshot()?;
+            let days = days.unwrap_or(30);
+            Ok(match runtime {
+                Some(rt) => {
+                    rt.statistics.absorb(rt.proxy.take_statistics());
+                    rt.statistics.report(&snapshot, days, monitor::now())
+                }
+                None => statistics::Statistics::load(root).report(&snapshot, days, monitor::now()),
+            })
         }
         Operation::RepositoryMap { under } => {
             let snapshot = store.snapshot()?;

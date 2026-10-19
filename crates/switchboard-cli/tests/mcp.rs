@@ -178,6 +178,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_codex_route",
             "switchboard_project_move_root",
             "switchboard_repository_map",
+            "switchboard_statistics",
             "switchboard_events",
             "switchboard_account_update",
             "switchboard_account_move",
@@ -873,6 +874,14 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         .clone();
     assert_eq!(policy["threshold_percent"], 80.0, "{again}");
     assert_eq!(policy["enabled"], true);
+    // SB-145: nothing relayed yet is empty tables, not an error; a range outside 1-90 is refused.
+    let (error, stats) = agent.tool("switchboard_statistics", json!({"days": 7}));
+    assert!(
+        !error && stats["days"] == 7 && stats["total"]["requests"] == 0,
+        "{stats}"
+    );
+    let (error, stats) = agent.tool("switchboard_statistics", json!({"days": 365}));
+    assert!(error, "{stats}");
     let (error, events) = agent.tool("switchboard_events", json!({"limit": 5}));
     assert!(!error && events["events"].as_array().is_some(), "{events}");
     let (error, handovers) = agent.tool("switchboard_handovers", json!({}));

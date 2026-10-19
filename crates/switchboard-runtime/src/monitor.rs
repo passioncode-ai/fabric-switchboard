@@ -232,6 +232,9 @@ impl Pass {
         // Quota timestamps wait in memory; they reach the disk with the next real change or
         // after a quarter of an hour.
         let _ = runtime.store.flush_if_older(time, FLUSH_SECONDS);
+        // SB-145: the proxy's counts, written at most every quarter of an hour.
+        runtime.statistics.absorb(runtime.proxy.take_statistics());
+        runtime.statistics.save(&runtime.root, time, false);
     }
 
     async fn sync_sources(&mut self, runtime: &Runtime, claude: bool, time: i64) {

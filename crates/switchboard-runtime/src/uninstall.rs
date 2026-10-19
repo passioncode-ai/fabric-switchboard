@@ -29,6 +29,7 @@ const OWNED: &[&str] = &[
     "pool-salts.json",
     "capability-migration.json",
     "agents-settings.json",
+    "statistics.json",
     // A `serve --data-dir` over this folder logs here (SB-112).
     "logs",
     "fabric-handovers",

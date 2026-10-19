@@ -196,6 +196,7 @@ switchboard project save --pool client-alpha --name "Client Alpha" --folder /wor
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written
 switchboard project codex [on|off]     # SB-143: Codex sessions in project folders use the projects' Codex accounts (one provider in Codex's config.toml)
+switchboard stats [--days 30]            # SB-145: requests and the provider's token counts by project, account, agent and day (1-90 days)
 switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none (default ~/DATA, else home)
 switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another project, in one step
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved

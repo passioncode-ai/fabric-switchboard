@@ -589,4 +589,18 @@ check(() => {
   assert.equal(logic.tokenCount(200_000), '200K');
   assert.equal(logic.modelMeta({ maker: 'DeepSeek', context: 1_048_576, input_usd_per_million: 0.04 }), 'DeepSeek · 1.05M context · $0.04 per 1M input tokens');
 });
+// SB-145: Statistics counts as people read them; tokens are every kind the provider reported.
+check(() => {
+  assert.equal(logic.compactCount(950), '950');
+  assert.equal(logic.compactCount(12_400), '12.4K');
+  assert.equal(logic.compactCount(3_210_000), '3.21M');
+  const c = { requests: 8, ok: 6, limited: 1, failed: 1, input_tokens: 10, output_tokens: 5, cache_read_tokens: 100, cache_write_tokens: 2 };
+  assert.equal(logic.statTokens(c), 117);
+  assert.equal(logic.statTrouble(c), 25);
+  assert.equal(logic.statTrouble({ ...c, requests: 0 }), null, 'no requests is no share, not 0%');
+  assert.equal(logic.statTroubleText({ ...c, requests: 1000 }), '<1%', 'two failures in a thousand are not 0%');
+  assert.equal(logic.statTroubleText(c), '25%');
+  assert.equal(logic.statAgentName('codex'), 'Codex CLI');
+  assert.equal(logic.statAgentName('something-new'), 'Other client');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

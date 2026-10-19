@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.50 — 2026-10-19
+
+- **A Statistics page: who works where, and where tokens go (SB-145).** Every request that goes through Switchboard is counted by day, account, project and coding agent (Claude Code, Codex, OpenCode, Hermes and others, told apart by the client's name), with how it ended and the tokens the provider itself reports in its answer: sent, read from cache and received. The page shows the last 7, 30 or 90 days as tiles and tables by project, account, agent, project with account and agent, and day. Counts only, never a prompt, an answer or a path, kept for 90 days on this computer in `statistics.json`. A session that does not go through Switchboard is not counted, and the page says so. Also `switchboard stats --days 30` and the MCP tool `switchboard_statistics`.
+
 ## 0.6.49 — 2026-10-19
 
 - **Codex in a project's folders can use the project's Codex accounts (SB-143).** Codex does not let a folder choose where it sends requests, so this is one switch under Projects → *Codex in project folders*. When it is on, Switchboard adds one provider to Codex's own settings that goes through its local proxy: a Codex session in a project's folder then runs on that project's Codex account, and Codex anywhere else keeps your own sign-in. Your own lines in Codex's settings are never changed, another provider you chose is never replaced, and while Switchboard is not running its lines are taken out so Codex works as before. Agents: `switchboard project codex on|off`, MCP `switchboard_codex_route`.

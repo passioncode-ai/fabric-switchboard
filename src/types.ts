@@ -82,6 +82,8 @@ export interface Adapter {
   /** SB-143: Codex in project folders. */
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
+  /** SB-145: what the proxy relayed in the last `days` days. */
+  statistics(days: number): Promise<import('./ui-logic').Statistics>;
   /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */
   projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[]; added?: ProjectSuggestion[]; removed?: ProjectSuggestion[] }>;
   acceptProjectSuggestion(folder: string): Promise<unknown>;

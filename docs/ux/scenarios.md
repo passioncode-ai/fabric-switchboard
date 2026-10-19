@@ -74,6 +74,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-064 | Find repositories on disk and put each in its project | draft |
 | SCN-065 | Give a project its own API key for agents | draft |
 | SCN-066 | Codex in a project's folders uses the project's Codex accounts | draft |
+| SCN-067 | See which accounts and agents work where, and where tokens go | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1384,3 +1385,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo.
 **Product:** unobserved
 **Traces:** SB-143
+
+## SCN-067 — See which accounts and agents work where, and where tokens go
+**Persona:** P-01
+**Goal:** See, per project, account and coding agent, how many requests went through Switchboard and how many tokens they took (operator 2026-10-19: «отдельный экран статистики … куда токены уходят»).
+**Preconditions:** sessions or agents sent requests through Switchboard (managed launches, project folders, the agent capability).
+**Entry point:** sidebar → *Statistics* · `switchboard stats --days 30` · MCP `switchboard_statistics`.
+**Steps:**
+1. Open *Statistics* → the 30-day range is chosen; four tiles read requests (and how many were answered), tokens (sent and received), read from cache, and limits and errors with their share.
+2. Read *By project*, *By account*, *By agent*: each row has requests, tokens sent, from cache, received, and limits and errors; the busiest is first.
+3. Read *Who works where* → one row per project, account and agent that worked together.
+4. Choose *7 days* or *90 days* → every table and tile shows that range; *By day* lists one row per day with traffic, newest first.
+**Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “No project”; the read fails → “Statistics are unavailable. Refresh to retry.”; a few failures among many requests read “<1%”, never “0%”.
+**Expected result:** where requests and tokens went over the chosen range is visible without reading a transcript.
+**UI elements:** range control, four tiles, five tables, the note on what is counted.
+**States covered:** reading, empty, filled, read failed, removed account, default pool.
+**Errors & recovery:** a failed read keeps the page and says to refresh.
+**Status:** draft
+**Meaning:** operator request 2026-10-19 (SB-145). Counts only, from the provider's own `usage`; a session that bypasses Switchboard is not counted, and the page says so.
+**Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only`, `stats::tests::*`; runtime `statistics::tests::*`; MCP handshake; ui-logic SB-145 case; WebKit demo (ru and en, 1280 and 760 wide, 7-day range, no overflow).
+**Product:** unobserved
+**Traces:** SB-145
