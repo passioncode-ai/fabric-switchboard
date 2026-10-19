@@ -85,6 +85,14 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_agents","title":"Coding agents on this computer","description":"The coding agents Switchboard knows: which are installed here, which the operator enabled for taking over work (fallback chains and switchboard continue; account switching is separate), the machine's default agent (null is Auto: switchboard continue without an account hands work to it, and Fabric starts with it unless a project sets its own), the command Switchboard runs for each, and the recommended OpenRouter models. Changing these is the operator's (the Agents page or switchboard agents enable|disable|default).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_kimi_accounts","title":"Kimi Code accounts","description":"The operator's Kimi Code subscription accounts saved in Switchboard: label, region, membership tier and each plan window's used percent and reset (5-hour, 7-day, monthly), asked of Kimi; plus the ordinary kimi CLI's sign-in. Never a token. Signing in, launching and removing are the operator's (the app or switchboard kimi).","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_kimi_login","title":"Sign in a Kimi Code account","description":"Start the official Kimi Code sign-in for a new account (action begin: label, region; the person finishes it in the browser), follow it (status, finish once the person signed in, cancel), or sign an existing account in again (again: id). The person signs in; this never takes a password or a token. Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel","again"]},"id":{"type":"string","minLength":1},"label":{"type":"string","maxLength":80},"region":{"type":"string","enum":["mainland-cn","global"],"description":"mainland-cn (kimi.com, the default) or global (kimi.ai)."}},"required":["action"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_kimi_rename","title":"Rename a Kimi Code account","description":"Rename a saved Kimi Code account. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","minLength":1,"description":"The account id from switchboard_kimi_accounts."},"label":{"type":"string","minLength":1,"maxLength":80}},"required":["id","label"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_handovers_set","title":"Hand-overs in Fabric's console","description":"Whether hand-overs open in Fabric's console (on) or straight in Terminal (off). Only when the operator asks.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_openrouter_models","title":"OpenRouter models","description":"The models OpenRouter offers (its public list, kept six hours), with the recommended ones first: id, name, maker, context and price per million tokens. No key is used. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_project_suggestions","title":"Folders joining groups","description":"Folders Switchboard is still adding to a group (retried by itself, never asked), and those added or taken out as deleted in the last day, each with its group and why (worktree, clone, worked in). Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_project_bindings","title":"Folder bindings","description":"Each group folder whose Claude Code sessions are routed to the group's accounts (its .claude/settings.local.json), with its state. Never a capability value. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_suggestion","title":"Accept or decline a folder","description":"Add a folder Switchboard is still trying to add to its group now (accept), or keep it out for good (dismiss). Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["accept","dismiss"]},"folder":{"type":"string","minLength":1,"description":"The folder as switchboard_project_suggestions lists it."}},"required":["action","folder"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_sources","title":"A group's repository owners","description":"The repository owners (such as github.com/passioncode-ai) whose new repositories join a group by themselves; add and remove change the list by delta, none of them reads it. Only when the operator asks to change it.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1},"add":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}},"remove":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."},"pool":{"type":"string","description":"A project's pool for its own key; omit for the machine's key."}},"required":["model"],"additionalProperties":false}})),
     ]
     .into_iter()
@@ -565,6 +573,92 @@ impl Server {
             _ => Err("action is begin, status, finish or cancel.".into()),
         }
     }
+    async fn kimi_login(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let id = || required(args, "id").map(str::to_owned);
+        match required(args, "action")? {
+            "begin" => {
+                self.call(Operation::KimiLoginBegin {
+                    label: args
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .into(),
+                    region: args
+                        .get("region")
+                        .and_then(Value::as_str)
+                        .unwrap_or("mainland-cn")
+                        .into(),
+                })
+                .await
+            }
+            "status" => self.call(Operation::KimiLoginStatus { id: id()? }).await,
+            "finish" => self.call(Operation::KimiLoginFinish { id: id()? }).await,
+            "cancel" => self.call(Operation::KimiLoginCancel { id: id()? }).await,
+            "again" => self.call(Operation::KimiSignInAgain { id: id()? }).await,
+            _ => Err("action is begin, status, finish, cancel or again.".into()),
+        }
+    }
+    async fn kimi_rename(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::KimiRename {
+            id: required(args, "id")?.into(),
+            label: required(args, "label")?.into(),
+        })
+        .await
+    }
+    async fn project_suggestion(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let folder: String = required(args, "folder")?.into();
+        match required(args, "action")? {
+            "accept" => {
+                self.call(Operation::ProjectSuggestionAccept { folder })
+                    .await
+            }
+            "dismiss" => {
+                self.call(Operation::ProjectSuggestionDismiss { folder })
+                    .await
+            }
+            _ => Err("action is accept or dismiss.".into()),
+        }
+    }
+    /// The repository owners of a group by delta, as `switchboard project source` does.
+    async fn project_sources(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let pool = required(args, "pool")?;
+        let list = |k: &str| -> Vec<String> {
+            args.get(k)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let (add, remove) = (list("add"), list("remove"));
+        let snapshot = self.call(Operation::Snapshot).await?;
+        let project = snapshot["projects"]
+            .as_array()
+            .and_then(|ps| ps.iter().find(|p| p["pool"] == pool))
+            .ok_or("Project not found.")?;
+        let mut sources: Vec<String> = project["sources"]
+            .as_array()
+            .map(|s| {
+                s.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if add.is_empty() && remove.is_empty() {
+            return Ok(json!({"pool": pool, "sources": sources}));
+        }
+        let key = |s: &str| s.trim().trim_end_matches('/').to_ascii_lowercase();
+        sources.retain(|s| !remove.iter().any(|r| key(r) == *s));
+        sources.extend(add.iter().map(|a| key(a)));
+        sources.dedup();
+        self.call(Operation::ProjectSources {
+            pool: pool.to_owned(),
+            sources,
+        })
+        .await
+    }
     async fn project_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let hours = match args.get("expires_in_hours") {
             None => None,
@@ -748,6 +842,17 @@ impl Server {
             }
             "switchboard_agents" => self.call(Operation::AgentsOverview).await,
             "switchboard_kimi_accounts" => self.call(Operation::KimiAccounts).await,
+            "switchboard_kimi_login" => self.kimi_login(args).await,
+            "switchboard_kimi_rename" => self.kimi_rename(args).await,
+            "switchboard_handovers_set" => match args.get("on").and_then(Value::as_bool) {
+                Some(on) => self.call(Operation::HandoverSetting { on: Some(on) }).await,
+                None => Err("on must be true or false.".into()),
+            },
+            "switchboard_openrouter_models" => self.call(Operation::OpenrouterModels).await,
+            "switchboard_project_suggestions" => self.call(Operation::ProjectSuggestions).await,
+            "switchboard_project_bindings" => self.call(Operation::ProjectBindings).await,
+            "switchboard_project_suggestion" => self.project_suggestion(args).await,
+            "switchboard_project_sources" => self.project_sources(args).await,
             "switchboard_hermes_status" => self.call(Operation::HermesModel).await,
             "switchboard_hermes_set" => {
                 self.call(Operation::HermesSetModel {
