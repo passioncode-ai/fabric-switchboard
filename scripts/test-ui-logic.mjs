@@ -49,6 +49,18 @@ check(() => {
   // A worktree whose root is not in the project stays a root of its own.
   assert.deepEqual(logic.folderRows(['/wt/bot-card'], roots).map((r) => r.depth), [0]);
   assert.deepEqual(logic.withoutFolder(folders, roots, '/bot'), ['/web', '/new']);
+  // SB-135 part 2: the disk map's rows and where a repository can move.
+  const map = { under: ['/d'], truncated: false, repositories: [
+    { folder: '/d/app', remote: null, branch: 'main', pool: 'p', project: 'P', place: 'folder' },
+    { folder: '/d/shared/tool', remote: null, branch: null, pool: 'p', project: 'P', place: 'inside' },
+    { folder: '/d/loose', remote: null, branch: 'main', pool: null, project: null, place: null },
+  ] };
+  assert.deepEqual(logic.mapRows(map, 'unassigned').map((r) => [r.name, r.action]), [['loose', 'assign']]);
+  assert.deepEqual(logic.mapRows(map, 'all').map((r) => r.action), ['move', null, 'assign'], 'inside a project folder: no action of its own');
+  assert.deepEqual(logic.mapRows(null, 'all'), []);
+  assert.deepEqual(logic.rootTargets('b', [{ pool: 'b', name: 'Beta' }, { pool: 'a', name: 'Alpha' }]), [{ pool: 'a', name: 'Alpha', current: false }, { pool: 'b', name: 'Beta', current: true }]);
+  assert.deepEqual(logic.storedMapFolders({ getItem: () => '["/x", 3, ""]' }), ['/x']);
+  assert.deepEqual(logic.storedMapFolders({ getItem: () => 'not json' }), []);
   assert.equal(logic.folderName('/srv/projects/.worktrees/alpha-web-wt-login'), 'alpha-web-wt-login');
   assert.equal(logic.folderName('C:\\Users\\me\\app\\'), 'app');
   assert.equal(logic.folderName('/'), '/');

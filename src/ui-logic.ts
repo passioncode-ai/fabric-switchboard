@@ -475,6 +475,29 @@ export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, fo
   const gone = new Set([folder, ...((roots ?? []).find((r) => r.folder === folder)?.derived.map((d) => d.folder) ?? [])]);
   return folders.filter((f) => !gone.has(f));
 }
+/** SB-135 part 2: the Git repositories on disk with their projects (`repository_map`). */
+export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null }
+export interface RepositoryMap { under: string[]; repositories: FoundRepository[]; truncated: boolean }
+export type MapFilter = 'unassigned' | 'all';
+export interface MapRow extends FoundRepository { name: string; action: 'assign' | 'move' | null }
+/** The rows the disk map shows: the unassigned ones only, or all; a repository inside a project folder moves with that folder, so it has no action of its own. */
+export function mapRows(map: RepositoryMap | null, filter: MapFilter): MapRow[] {
+  return (map?.repositories ?? [])
+    .filter((r) => filter === 'all' || !r.pool)
+    .map((r) => ({ ...r, name: folderName(r.folder), action: !r.pool ? 'assign' as const : r.place === 'folder' ? 'move' as const : null }));
+}
+/** Where a repository can go: each project by name, the one it is in now marked (and not chosen again). */
+export function rootTargets(currentPool: string | null, projects: { pool: string; name: string }[]): { pool: string; name: string; current: boolean }[] {
+  return [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: p.name, current: p.pool === currentPool }));
+}
+/** The folders the disk map looks under, remembered across restarts; none: the default (`~/DATA`, else home). */
+export const MAP_FOLDERS_KEY = 'switchboard.map-folders';
+export function storedMapFolders(store: Pick<Storage, 'getItem'> | null): string[] {
+  try {
+    const value: unknown = JSON.parse(store?.getItem(MAP_FOLDERS_KEY) ?? '[]');
+    return Array.isArray(value) ? value.filter((f): f is string => typeof f === 'string' && f.trim() !== '').slice(0, 16) : [];
+  } catch { return []; }
+}
 /** The last launch folder, remembered across restarts as a per-window convenience; anything but a non-empty string reads as none. */
 export const LAST_FOLDER_KEY = 'switchboard.last-folder';
 export function storedFolder(store: Pick<Storage, 'getItem'> | null): string {

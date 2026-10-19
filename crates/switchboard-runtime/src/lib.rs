@@ -223,6 +223,19 @@ pub enum Operation {
         id: String,
         pool: String,
     },
+    /// SB-135 (part 2): moves a project root, with the worktrees and clones under it, into another
+    /// project in one step; a repository in no project joins the named one. Two project saves
+    /// (`ProjectEdit`): out of the old project, then into the new; a refused second save puts the
+    /// folders back.
+    MoveRoot {
+        folder: PathBuf,
+        pool: String,
+    },
+    /// SB-135 (part 2): the Git repositories under `under` (the person's folders, `~/DATA` by
+    /// default in the window), each with the project it belongs to or none. Reads only.
+    RepositoryMap {
+        under: Vec<PathBuf>,
+    },
     /// The third-party agent catalog (`agent_catalog`).
     AgentCatalog,
     /// How to connect one agent to `switchboard mcp` and, when it can, the proxy's `pool`.
@@ -709,6 +722,7 @@ impl Runtime {
                 | Operation::Backups
                 | Operation::ProjectSuggestions
                 | Operation::ProjectBindings
+                | Operation::RepositoryMap { .. }
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
@@ -2334,6 +2348,13 @@ fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Op
 /// SB-122: an account moves only into a project's pool or back to `default`.
 pub const MOVE_ACCOUNT_NO_PROJECT: &str =
     "No project uses that pool. Choose a project, or Default.";
+/// SB-135: a root moves only into a project.
+pub const MOVE_ROOT_NO_PROJECT: &str = "No project uses that pool. Choose a project.";
+/// SB-135: a project keeps at least one folder.
+pub const MOVE_ROOT_LAST: &str = "This is the project's only repository. Add another folder to the project first, or delete the project.";
+/// SB-135: a repository inside a project folder belongs to that folder.
+pub const MOVE_ROOT_INSIDE: &str =
+    "This repository is inside a folder of a project. Move that folder instead.";
 /// Refusals of a project delta (SB-134).
 pub const PROJECT_EDIT_NO_FOLDER: &str =
     "This project does not hold that folder. List the project's folders and name one of them.";
@@ -2420,6 +2441,7 @@ impl Reported {
             Operation::RemoveProject { .. } => Self::Project("removed"),
             Operation::ProjectEdit { .. } => Self::Project("updated"),
             Operation::MoveAccount { .. } => Self::Project("updated"),
+            Operation::MoveRoot { .. } => Self::Project("updated"),
             Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
             Operation::Select { provider, .. } => Self::Switch {
                 provider: *provider,
@@ -3598,6 +3620,102 @@ async fn execute(
                 store.return_to_default(&id)?;
             }
             Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
+        }
+        Operation::MoveRoot { folder, pool } => {
+            let snapshot = store.snapshot()?;
+            if snapshot.project_of_pool(&pool).is_none() {
+                return Err(MOVE_ROOT_NO_PROJECT.into());
+            }
+            let named = canonical_near(&folder);
+            let edit =
+                |pool: &str, add: Vec<PathBuf>, remove: Vec<PathBuf>| Operation::ProjectEdit {
+                    pool: pool.to_owned(),
+                    name: None,
+                    add_accounts: Vec::new(),
+                    remove_accounts: Vec::new(),
+                    add_folders: add,
+                    remove_folders: remove,
+                };
+            let from = snapshot.projects.iter().find_map(|p| {
+                p.folders
+                    .iter()
+                    .find(|f| canonical_near(Path::new(f)) == named)
+                    .map(|f| (p, f.clone()))
+            });
+            let Some((from, stored)) = from else {
+                if snapshot.project_for(&named).is_some() {
+                    return Err(MOVE_ROOT_INSIDE.into());
+                }
+                Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(&pool, vec![named.clone()], Vec::new()),
+                ))
+                .await?;
+                return Ok(
+                    json!({"folder": named, "from": null, "pool": pool, "moved": true, "folders": 1}),
+                );
+            };
+            if from.pool == pool {
+                return Ok(
+                    json!({"folder": stored, "from": pool, "pool": pool, "moved": false, "folders": 0}),
+                );
+            }
+            let folders = from.folders.clone();
+            let roots = blocking::run(|| roots::tree(&folders));
+            let mut tree: Vec<PathBuf> = vec![PathBuf::from(&stored)];
+            tree.extend(
+                roots::derived_of(&roots, &stored)
+                    .into_iter()
+                    .map(PathBuf::from),
+            );
+            if tree.len() >= from.folders.len() {
+                return Err(MOVE_ROOT_LAST.into());
+            }
+            let source = from.pool.clone();
+            Box::pin(execute(
+                store.clone(),
+                root,
+                runtime,
+                edit(&source, Vec::new(), tree.clone()),
+            ))
+            .await?;
+            if let Err(refused) = Box::pin(execute(
+                store.clone(),
+                root,
+                runtime,
+                edit(&pool, tree.clone(), Vec::new()),
+            ))
+            .await
+            {
+                // Back where they were: a move is all or nothing.
+                if Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(&source, tree.clone(), Vec::new()),
+                ))
+                .await
+                .is_err()
+                {
+                    oplog::event("move_root", &[("rollback", oplog::Field::Code("failed"))]);
+                }
+                return Err(refused);
+            }
+            Ok(
+                json!({"folder": stored, "from": source, "pool": pool, "moved": true, "folders": tree.len()}),
+            )
+        }
+        Operation::RepositoryMap { under } => {
+            let snapshot = store.snapshot()?;
+            let under = if under.is_empty() {
+                vec![roots::default_under().ok_or("Home folder unavailable. Choose a folder.")?]
+            } else {
+                under
+            };
+            let map = blocking::run(|| roots::disk_map(&under, &snapshot));
+            serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
         Operation::RemoveProject { pool } => {
             let project = store.remove_project(&pool)?;
@@ -5104,6 +5222,166 @@ mod owner_tests {
             .folders
             .clone();
         assert_eq!(left, [other.to_string_lossy().into_owned()]);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn a_root_moves_to_another_project_with_its_worktrees_in_one_step() {
+        // SB-135 part 2: moving a repository between projects moves its tree; a repository in
+        // no project joins; a project keeps its last folder; a repository inside a project
+        // folder moves with that folder.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (main, wt, web, docs, loose) = (
+            work.join("bot"),
+            work.join("bot-card"),
+            work.join("web"),
+            work.join("docs"),
+            work.join("loose"),
+        );
+        let git = |args: &[&str], dir: &Path| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        for d in [&main, &web, &docs, &loose] {
+            std::fs::create_dir_all(d).unwrap();
+            git(&["init", "-q", "-b", "main"], d);
+        }
+        git(
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@e.test",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            &main,
+        );
+        git(
+            &["worktree", "add", "-q", "-b", "card", wt.to_str().unwrap()],
+            &main,
+        );
+        for (name, folders) in [
+            ("Apps", vec![main.clone(), wt.clone(), web.clone()]),
+            ("Docs", vec![docs.clone()]),
+        ] {
+            runtime
+                .execute(Operation::SaveProject {
+                    pool: None,
+                    name: name.into(),
+                    folders,
+                    account_ids: vec![],
+                    base_folders: None,
+                })
+                .await
+                .unwrap();
+        }
+        let folders_of = |pool: &str| {
+            let mut f = runtime
+                .store
+                .snapshot()
+                .unwrap()
+                .project_of_pool(pool)
+                .unwrap()
+                .folders
+                .clone();
+            f.sort();
+            f
+        };
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        let moved = runtime
+            .execute(Operation::MoveRoot {
+                folder: main.clone(),
+                pool: "docs".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(moved["moved"], true);
+        assert_eq!(moved["folders"], 2);
+        assert_eq!(moved["from"], "apps");
+        assert_eq!(folders_of("apps"), [text(&web)]);
+        let mut want = vec![text(&main), text(&wt), text(&docs)];
+        want.sort();
+        assert_eq!(folders_of("docs"), want);
+        // The last repository of a project stays.
+        let last = runtime
+            .execute(Operation::MoveRoot {
+                folder: web.clone(),
+                pool: "docs".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(last, MOVE_ROOT_LAST);
+        // A repository in no project joins one.
+        let joined = runtime
+            .execute(Operation::MoveRoot {
+                folder: loose.clone(),
+                pool: "apps".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(joined["from"], Value::Null);
+        assert!(folders_of("apps").contains(&text(&loose)));
+        // Inside a project folder: it goes with that folder.
+        let nested = docs.join("module");
+        std::fs::create_dir_all(&nested).unwrap();
+        git(&["init", "-q", "-b", "main"], &nested);
+        let inside = runtime
+            .execute(Operation::MoveRoot {
+                folder: nested,
+                pool: "apps".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(inside, MOVE_ROOT_INSIDE);
+        // No such project.
+        let none = runtime
+            .execute(Operation::MoveRoot {
+                folder: web,
+                pool: "nowhere".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(none, MOVE_ROOT_NO_PROJECT);
+        // The map sees all of them, with their projects.
+        let map = runtime
+            .execute(Operation::RepositoryMap {
+                under: vec![work.clone()],
+            })
+            .await
+            .unwrap();
+        let rows = map["repositories"].as_array().unwrap();
+        let row = |f: &Path| {
+            rows.iter()
+                .find(|r| r["folder"] == text(f))
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(row(&main)["pool"], "docs");
+        assert_eq!(row(&main)["place"], "folder");
+        assert!(
+            row(&docs.join("module")).is_null(),
+            "the walk does not go into a repository"
+        );
+        assert_eq!(row(&loose)["pool"], "apps");
+        assert!(
+            row(&wt).is_null(),
+            "a linked worktree is listed under its root only"
+        );
     }
 
     #[tokio::test]

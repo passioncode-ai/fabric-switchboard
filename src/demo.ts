@@ -96,6 +96,7 @@ export function createDemoAdapter(): Adapter {
     return { default: agentDefault, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
   };
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
+  let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   return {
@@ -235,6 +236,23 @@ export function createDemoAdapter(): Adapter {
       if (email && state.accounts.some((b) => b.id !== id && b.provider === account.provider && b.pool === pool && b.external_identity?.email === email)) throw new Error('This account is already saved in that pool. Remove the other copy first.');
       const old = `${account.provider}:${account.pool}`; if (state.routes[old] === id) delete state.routes[old];
       account.pool = pool; log('project', '', 'updated');
+    },
+    async moveRoot(folder, pool) {
+      await pause();
+      const target = (state.projects ?? []).find((p) => p.pool === pool); if (!target) throw new Error('No project uses that pool. Choose a project.');
+      const from = (state.projects ?? []).find((p) => p.folders.includes(folder));
+      if (!from) { if (!looseRepositories.includes(folder)) throw new Error('This repository is inside a folder of a project. Move that folder instead.'); target.folders.push(folder); looseRepositories = looseRepositories.filter((f) => f !== folder); log('project', '', 'updated'); return; }
+      if (from.pool === pool) return;
+      // A synthetic tree: the worktrees named after the folder go with it.
+      const tree = from.folders.filter((f) => f === folder || (/-wt-|\/\.worktrees\//.test(f) && from.folders.indexOf(folder) === 0));
+      if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
+      from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
+    },
+    async repositoryMap(under) {
+      await pause();
+      const folders = (state.projects ?? []).flatMap((p) => p.folders.filter((f) => !/-wt-|\/\.worktrees\//.test(f)).map((folder) => ({ folder, remote: null, branch: 'main', pool: p.pool, project: p.name, place: 'folder' as const })));
+      const loose = looseRepositories.map((folder) => ({ folder, remote: null, branch: 'main', pool: null, project: null, place: null }));
+      return { under: under.length ? under : ['/srv/projects'], repositories: [...folders, ...loose].sort((a, b) => a.folder.localeCompare(b.folder)), truncated: false };
     },
     async projectRoots() {
       await pause();

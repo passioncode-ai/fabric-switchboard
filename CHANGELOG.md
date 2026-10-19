@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.43 — 2026-10-19
+
+- **Repositories on disk, and where each belongs (SB-135).** The Projects page has *Repositories on disk*: every Git repository under the folders you choose (`~/DATA` by default), with its project, or *Not in a project*. *Add to project…* puts a loose repository in a project; *Move…* moves a project's repository with its worktrees and clones to another project in one step, and puts everything back if the other project refuses. Agents do the same with `switchboard project map` and `switchboard project move-root`, or the MCP tools `switchboard_repository_map` and `switchboard_project_move_root`.
+
 ## 0.6.42 — 2026-10-19
 
 - **Usage counts go to PassionCode's own analytics host (SB-H01).** The anonymous counts the desktop app sends (docs/ANALYTICS.md) now go to `analytics.passioncode.ai` instead of the operator's personal host. What is sent is unchanged, and so is the switch in About that turns it off.

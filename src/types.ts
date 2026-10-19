@@ -78,6 +78,8 @@ export interface Adapter {
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
   moveAccount(id: string, pool: string): Promise<unknown>;
+  moveRoot(folder: string, pool: string): Promise<unknown>;
+  repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */
   projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[]; added?: ProjectSuggestion[]; removed?: ProjectSuggestion[] }>;
   acceptProjectSuggestion(folder: string): Promise<unknown>;

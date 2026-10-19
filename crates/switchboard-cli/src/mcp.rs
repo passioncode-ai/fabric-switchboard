@@ -56,6 +56,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_project_context","title":"Project context","description":"The project a folder belongs to (its name, pool, folders and reserved accounts, possibly empty; null when none), and the optional project rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A project's accounts serve only sessions launched from its folders; a provider with no enabled project account keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_projects","title":"Projects","description":"Every project: its pool, name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources and the accounts reserved for it (empty for an automatically created project), then every optional project rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_edit","title":"Change a project","description":"Change a project by delta: reserve accounts for it (add_accounts), give accounts back to the default pool (remove_accounts), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it. Everything not named stays as it is; naming an account or folder the project does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a project.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The project's pool, from switchboard_projects."},"name":{"type":"string"},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the project, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_move_root","title":"Move a repository to another project","description":"Move a project's repository (its root folder) with the worktrees and clones under it into another project in one step, or add a repository that is in no project. Only when the operator asks. A project keeps at least one folder; a repository inside a project folder moves with that folder.","inputSchema":{"type":"object","properties":{"folder":{"type":"string","minLength":1,"description":"The repository's absolute folder, as switchboard_projects or switchboard_repository_map lists it."},"pool":{"type":"string","minLength":1,"description":"The project's pool from switchboard_projects."}},"required":["folder","pool"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its project (pool, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, projects, rotation, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, or enable or disable it (a disabled account is never selected or switched to). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another pool","description":"Move an account into a project's pool, or back to the default pool (pool: default). Only when the operator asks. Joining or leaving a project is that project's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a project, and a second copy of a login already in that pool is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A project's pool from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
@@ -402,6 +404,33 @@ impl Server {
         })
         .await
     }
+    async fn project_move_root(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let folder = PathBuf::from(required(args, "folder")?);
+        if !folder.is_absolute() {
+            return Err("folder must be absolute.".into());
+        }
+        self.call(Operation::MoveRoot {
+            folder,
+            pool: required(args, "pool")?.into(),
+        })
+        .await
+    }
+    async fn repository_map(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let under = match args.get("under") {
+            None => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .map(PathBuf::from)
+                        .filter(|p| p.is_absolute())
+                        .ok_or("under lists absolute folders.".to_owned())
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => return Err("under lists absolute folders.".into()),
+        };
+        self.call(Operation::RepositoryMap { under }).await
+    }
     async fn account_move(&self, args: &Map<String, Value>) -> Result<Value, String> {
         self.call(Operation::MoveAccount {
             id: required(args, "account_id")?.into(),
@@ -629,6 +658,8 @@ impl Server {
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
+            "switchboard_project_move_root" => self.project_move_root(args).await,
+            "switchboard_repository_map" => self.repository_map(args).await,
             "switchboard_rotation" => match self.call(Operation::Snapshot).await {
                 Ok(v) => {
                     let monitor = self.call(Operation::MonitorStatus).await.unwrap_or(

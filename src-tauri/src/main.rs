@@ -447,6 +447,29 @@ async fn move_account(id: String, pool: String, state: State<'_, Slot>) -> Resul
         .execute(Operation::MoveAccount { id, pool })
         .await
 }
+/// SB-135: a repository with its worktrees and clones into another project, in one step.
+#[tauri::command]
+async fn move_root(folder: String, pool: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::MoveRoot {
+            folder: folder.into(),
+            pool,
+        })
+        .await
+}
+/// SB-135: the Git repositories under the chosen folders, with their projects.
+#[tauri::command]
+async fn repository_map(under: Vec<String>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RepositoryMap {
+            under: under.into_iter().map(Into::into).collect(),
+        })
+        .await
+}
 /// SB-135: every project's folders as roots with their worktrees and clones, read from Git.
 #[tauri::command]
 async fn project_roots(state: State<'_, Slot>) -> Result<Value, String> {
@@ -993,6 +1016,8 @@ fn main() {
             kimi_remove,
             remove_project,
             project_roots,
+            move_root,
+            repository_map,
             move_account,
             agents_overview,
             agent_enable,
