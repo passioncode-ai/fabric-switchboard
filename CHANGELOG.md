@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.44 — 2026-10-19
+
+- **Repositories Codex works in join their project too (SB-132).** Switchboard already added a repository to a project when a Claude Code session of that project changed it. It now reads Codex sessions the same way: a file Codex patches or a commit it makes in another repository adds that repository to the project the session works in. Only paths are read and kept.
+- **Background account switching no longer slows the rest of the app on a busy machine.** Switching the ordinary Claude Code account and recording repositories agents worked in now run apart from the threads that serve sessions' requests and agents' commands.
+
 ## 0.6.43 — 2026-10-19
 
 - **Repositories on disk, and where each belongs (SB-135).** The Projects page has *Repositories on disk*: every Git repository under the folders you choose (`~/DATA` by default), with its project, or *Not in a project*. *Add to project…* puts a loose repository in a project; *Move…* moves a project's repository with its worktrees and clones to another project in one step, and puts everything back if the other project refuses. Agents do the same with `switchboard project map` and `switchboard project move-root`, or the MCP tools `switchboard_repository_map` and `switchboard_project_move_root`.

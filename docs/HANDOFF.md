@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.44, Codex sessions' repositories join their project (SB-132)
+
+- **SB-132.** `NativeSources::rollouts` (`limits::codex_rollout_files`) lists Codex rollouts of
+  the last 15 minutes in the latest 31 day folders; the SB-131 scan reads them where they grew.
+  `activity::codex_evidence` takes the session folder from `turn_context`/`session_meta` (on a
+  first read from the tail, from the file's first line) and the changed folders from `apply_patch`
+  patches and `exec_command({cmd, workdir})` git writes in code-mode scripts, or `shell` calls in
+  older versions. A template with `${…}` is skipped, never guessed. Only paths are kept. On 8
+  real rollouts of this machine it found 8 folders, each with its session's folder.
+- **SB-138 follow-up.** On 0.6.41 the log also showed `rotate` holding the owner transaction up
+  to 49,184 ms and `worked` 10,398 ms (load ~100, swap 10/11 GB). Both now run as blocking
+  sections; the transaction still waits for the disk, the async workers do not.
+- **Open in SB-132:** Claude sessions Switchboard launches isolated are still not read.
+- **Fabric board:** the reply to passioncode-platform about SB-H01 (thread 0cc62467, key
+  `sb-h01-switch-0.6.42`) could not be sent: the hub answered "cannot check credentials right
+  now" and the session's Fabric tools dropped. Send it with the same key when the board answers.
+
+**Checks.** `./scripts/check.sh` exit 0 on the branch.
+
+**Exact next task.** Send the SB-H01 reply on the board (same idempotency key). After 0.6.44 runs:
+re-measure `transaction_held` (suggest_found, rotate, worked), open *Repositories on disk* once and
+time the walk, then SB-137.
+
 ## 2026-10-19: 0.6.43, repositories on disk and moving a repository between projects (SB-135 part 2)
 
 - **0.6.42 published** 2026-10-19 04:39:27 UTC (run 39197312600, 25 assets; nightly on the tag
