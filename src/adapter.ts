@@ -48,6 +48,7 @@ export const nativeAdapter: Adapter = {
   moveRoot: (folder, pool) => invoke('move_root', { folder, pool }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
+  statistics: (days) => invoke('statistics', { days }),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),
   projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
   acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),

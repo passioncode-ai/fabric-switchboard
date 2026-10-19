@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -34,7 +34,7 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-type Page = 'accounts' | 'tokens' | 'projects' | 'agents' | 'activity' | 'about';
+type Page = 'accounts' | 'tokens' | 'projects' | 'agents' | 'activity' | 'stats' | 'about';
 let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
@@ -235,8 +235,8 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
+    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
@@ -249,8 +249,8 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per project.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per project.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which projects, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -270,6 +270,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
+  else if (page === 'stats') renderStats(main);
   else if (loadError) {
     const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load projects') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
@@ -1410,6 +1411,75 @@ function renderPolicies(main: HTMLElement) {
   for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {pool}', { pool: policy.pool }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for this provider, pool and target.'), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} · {pool} · {target}…', { provider: providerName(policy.provider), pool: policy.pool, target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New policy…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
+}
+/** SB-145: the proxy's counts for the chosen range (7, 30 or 90 days). */
+let stats: Statistics | null = null;
+let statsError = false;
+let statsDays = 30;
+async function loadStats() {
+  try { stats = await adapter.statistics(statsDays); statsError = false; } catch { statsError = true; }
+  backgroundRender();
+}
+function statTile(label: string, value: string, note: string) {
+  const tile = el('div', 'stat-tile'); tile.append(el('span', 'stat-label', label), el('strong', 'stat-value', value), el('span', 'stat-note', note)); return tile;
+}
+/** One table: a name column (or several) and the counts every row has. */
+function statTable(id: string, title: string, names: string[], rows: { cells: string[]; counts: StatCounts }[], compact = false) {
+  const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', id);
+  const heading = el('h2', '', title); heading.id = id; section.append(heading);
+  const wrap = el('div', 'stat-scroll'); const table = el('table', 'stat-table');
+  const head = el('tr');
+  for (const name of names) head.append(el('th', '', name));
+  for (const name of compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')]) { const th = el('th', 'num', name); head.append(th); }
+  const thead = el('thead'); thead.append(head); table.append(thead);
+  const body = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    row.cells.forEach((cell, i) => tr.append(el(i === 0 ? 'th' : 'td', '', cell)));
+    tr.firstElementChild?.setAttribute('scope', 'row');
+    const c = row.counts; const trouble = statTrouble(c);
+    const values = compact ? [compactCount(c.requests), compactCount(statTokens(c))] : [compactCount(c.requests), compactCount(c.input_tokens + c.cache_write_tokens), compactCount(c.cache_read_tokens), compactCount(c.output_tokens)];
+    for (const v of values) tr.append(el('td', 'num', v));
+    tr.append(el('td', `num${c.limited + c.failed ? ' is-trouble' : ''}`, trouble === null ? '–' : `${compactCount(c.limited + c.failed)} · ${statTroubleText(c)}`));
+    body.append(tr);
+  }
+  table.append(body); wrap.append(table); section.append(wrap);
+  return section;
+}
+function renderStats(main: HTMLElement) {
+  if (!stats && !statsError) void loadStats();
+  const range = el('div', 'segmented'); range.setAttribute('role', 'group'); range.setAttribute('aria-label', t('Period'));
+  for (const days of [7, 30, 90]) {
+    const choice = button(plural(days, { one: '{n} day', other: '{n} days' }), () => { statsDays = days; stats = null; void loadStats(); render(); }, `segment${statsDays === days ? ' is-on' : ''}`, `stats-${days}`);
+    choice.setAttribute('aria-pressed', String(statsDays === days)); range.append(choice);
+  }
+  const bar = el('div', 'stat-bar'); bar.append(range); main.append(bar);
+  if (statsError) { main.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.'))); return; }
+  if (!stats) { main.append(el('p', 'form-note', t('Reading statistics…'))); return; }
+  const s = stats;
+  if (!s.total.requests) {
+    main.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by project, account and agent, with the tokens the provider reports.')));
+  } else {
+    const trouble = statTrouble(s.total);
+    const tiles = el('div', 'stat-tiles');
+    tiles.append(
+      statTile(t('Requests'), compactCount(s.total.requests), t('{count} answered', { count: compactCount(s.total.ok) })),
+      statTile(t('Tokens'), compactCount(statTokens(s.total)), t('{sent} sent · {received} received', { sent: compactCount(s.total.input_tokens + s.total.cache_write_tokens), received: compactCount(s.total.output_tokens) })),
+      statTile(t('From cache'), compactCount(s.total.cache_read_tokens), t('read again instead of sent anew')),
+      statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), trouble === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
+    );
+    main.append(tiles);
+    const projectName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No project') : pool);
+    const accountName = (label: string | null) => label ?? t('Removed account');
+    main.append(
+      statTable('stat-projects', t('By project'), [t('Project')], s.projects.map((r) => ({ cells: [projectName(r.pool, r.name)], counts: r }))),
+      statTable('stat-accounts', t('By account'), [t('Account'), t('Provider')], s.accounts.map((r) => ({ cells: [accountName(r.label), r.provider ? providerName(r.provider as Provider) : '–'], counts: r }))),
+      statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r }))),
+      statTable('stat-routes', t('Who works where'), [t('Project'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
+      statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r })), true),
+    );
+  }
+  main.append(el('p', 'surface-note', t('Only requests that go through Switchboard are counted: a session on its own sign-in outside Switchboard is not. Token counts are the ones the provider reports in its answer. Counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;

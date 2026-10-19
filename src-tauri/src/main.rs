@@ -479,6 +479,15 @@ async fn repository_map(under: Vec<String>, state: State<'_, Slot>) -> Result<Va
         })
         .await
 }
+/// SB-145: what the proxy relayed in the last `days` days.
+#[tauri::command]
+async fn statistics(days: i64, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Statistics { days: Some(days) })
+        .await
+}
 /// SB-135: every project's folders as roots with their worktrees and clones, read from Git.
 #[tauri::command]
 async fn project_roots(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1050,6 +1059,7 @@ fn main() {
             move_root,
             codex_route,
             repository_map,
+            statistics,
             move_account,
             agents_overview,
             agent_enable,

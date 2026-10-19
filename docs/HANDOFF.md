@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.50, Statistics page (SB-145); next: project groups (SB-146)
+
+- **Done.** The proxy counts each relayed request per UTC day, account, pool and client family
+  (`crates/switchboard-proxy/src/stats.rs`), with the provider's own `usage` read from the response
+  stream; the owner keeps 90 days in `statistics.json` (`crates/switchboard-runtime/src/statistics.rs`),
+  `Statistics { days }`, CLI `switchboard stats`, MCP `switchboard_statistics`, page *Statistics*
+  (SCN-067). Contract: [CONTRACTS.md](CONTRACTS.md) → Statistics.
+- **Checks run.** `./scripts/check.sh` exit 0; WebKit demo screenshots ru/en at 1280 and 760.
+- **Not counted (by design, written on the page):** off-project Codex passed through on the
+  person's own sign-in, and anything outside the proxy.
+- **Next task.** SB-146 (operator 2026-10-19): sessions bind to a *group* of projects, a project may
+  be in several groups, a hover on a group lists its unique projects (not worktrees or subfolders),
+  and the current scattered projects are regrouped.
+
 ## 2026-10-19: 0.6.48, Tokens tab and a key per project (SB-144)
 
 - An agent on OpenRouter now runs on the key of the project its launch folder belongs to, else on

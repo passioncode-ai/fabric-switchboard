@@ -1,4 +1,5 @@
 //! Credential-injecting loopback gateway. A request owns its route snapshot until EOF.
+pub mod stats;
 use axum::{
     body::{to_bytes, Body},
     extract::{Path, State},
@@ -85,6 +86,7 @@ struct Gateway {
     codex_folders: CodexFolders,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
+    stats: stats::Stats,
 }
 /// SB-133: each pool's folder capabilities (`folder_token`), one per folder that is part of the
 /// pool's project now. `None` until the owner sets them at start.
@@ -110,6 +112,7 @@ pub struct ProxyHandle {
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
+    stats: stats::Stats,
 }
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
@@ -233,6 +236,7 @@ impl ProxyHandle {
         let codex_folders: CodexFolders = Arc::default();
         let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stats: stats::Stats = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -248,6 +252,7 @@ impl ProxyHandle {
             codex_folders: codex_folders.clone(),
             legacy_until: legacy_until.clone(),
             draining: draining.clone(),
+            stats: stats.clone(),
         };
         let slots = state.slots.clone();
         let router = Router::new()
@@ -274,6 +279,7 @@ impl ProxyHandle {
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
             slots,
+            stats,
         })
     }
     /// Managed requests in flight, streams included: zero means no managed session is waiting
@@ -283,6 +289,14 @@ impl ProxyHandle {
     }
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+    /// SB-145: the counts gathered since the last call, handed over and cleared; the owner adds
+    /// them to what it keeps on disk.
+    pub fn take_statistics(&self) -> stats::Tallies {
+        self.stats
+            .lock()
+            .map(|mut s| std::mem::take(&mut *s))
+            .unwrap_or_default()
     }
     pub fn token(&self) -> &str {
         &self.token
@@ -382,7 +396,43 @@ struct AuditedStream {
     id: String,
     finished: bool,
     success: bool,
+    /// SB-145: the tally this response's tokens go to, once, when it ends or is dropped.
+    stats: stats::Stats,
+    key: String,
+    scanner: Option<stats::UsageScanner>,
     _permit: tokio::sync::OwnedSemaphorePermit,
+}
+impl AuditedStream {
+    fn settle(&mut self) {
+        let Some(mut scan) = self.scanner.take() else {
+            return;
+        };
+        scan.finish();
+        if scan.input_tokens + scan.output_tokens + scan.cache_read_tokens + scan.cache_write_tokens
+            == 0
+        {
+            return;
+        }
+        if let Ok(mut all) = self.stats.lock() {
+            let t = all.entry(std::mem::take(&mut self.key)).or_default();
+            t.input_tokens += scan.input_tokens;
+            t.output_tokens += scan.output_tokens;
+            t.cache_read_tokens += scan.cache_read_tokens;
+            t.cache_write_tokens += scan.cache_write_tokens;
+        }
+    }
+}
+/// SB-145: one request's outcome in the day's tally of its account, pool and client.
+fn count(stats: &stats::Stats, key: &str, status: Option<StatusCode>) {
+    if let Ok(mut all) = stats.lock() {
+        let t = all.entry(key.to_owned()).or_default();
+        t.requests += 1;
+        match status {
+            Some(s) if s.is_success() => t.ok += 1,
+            Some(StatusCode::TOO_MANY_REQUESTS) => t.limited += 1,
+            _ => t.failed += 1,
+        }
+    }
 }
 impl futures_util::Stream for AuditedStream {
     type Item = Result<axum::body::Bytes, std::io::Error>;
@@ -391,15 +441,23 @@ impl futures_util::Stream for AuditedStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let poll = self.inner.as_mut().poll_next(cx);
+        if let std::task::Poll::Ready(Some(Ok(chunk))) = &poll {
+            let chunk = chunk.clone();
+            if let Some(scan) = self.scanner.as_mut() {
+                scan.feed(&chunk);
+            }
+        }
         match &poll {
             // A non-success status was journaled at headers. A completed success is not
             // journaled: it is the common case, and one event per request would evict the
             // activation and rotation history from the bounded journal.
             std::task::Poll::Ready(None) => {
                 self.finished = true;
+                self.settle();
             }
             std::task::Poll::Ready(Some(Err(_))) => {
                 self.finished = true;
+                self.settle();
                 if self.success {
                     let _ = self.store.record("proxy", Some(&self.id), "aborted");
                 }
@@ -411,6 +469,7 @@ impl futures_util::Stream for AuditedStream {
 }
 impl Drop for AuditedStream {
     fn drop(&mut self) {
+        self.settle();
         if !self.finished && self.success {
             let _ = self.store.record("proxy", Some(&self.id), "aborted");
         }
@@ -573,6 +632,13 @@ async fn relay(
         );
     }
     let (parts, body) = request.into_parts();
+    let client = stats::client_of(
+        parts
+            .headers
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok()),
+    );
+    let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client);
     let bytes =
         match tokio::time::timeout(Duration::from_secs(30), to_bytes(body, BODY_LIMIT)).await {
             Ok(Ok(b)) => b,
@@ -672,6 +738,7 @@ async fn relay(
         let upstream = match outgoing.send().await {
             Ok(r) => r,
             Err(_) => {
+                count(&g.stats, &tally(&account.id), None);
                 let _ = g
                     .store
                     .record("request", Some(&account.id), "network_error");
@@ -697,6 +764,11 @@ async fn relay(
                 api_key_only,
             };
             if let Ok(Some(next)) = g.store.failover(provider, &pool, &account.id, fits, now()) {
+                count(
+                    &g.stats,
+                    &tally(&account.id),
+                    Some(StatusCode::TOO_MANY_REQUESTS),
+                );
                 (account, credential) = next;
                 moved = true;
                 continue;
@@ -706,6 +778,8 @@ async fn relay(
         break (upstream, false);
     };
     let status = upstream.status();
+    let key = tally(&account.id);
+    count(&g.stats, &key, Some(status));
     if status.is_redirection() {
         return error(StatusCode::BAD_GATEWAY, "Provider redirect refused.");
     }
@@ -743,6 +817,9 @@ async fn relay(
             id: account.id,
             finished: false,
             success: status.is_success(),
+            stats: g.stats.clone(),
+            key,
+            scanner: status.is_success().then(stats::UsageScanner::default),
             _permit: permit,
         };
     response

@@ -381,3 +381,19 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .pool-heading h3 { margin: 0; font-size: inherit; font-weight: inherit; }
 .group-note { color: var(--muted); font-size: var(--t-label); }
 .pool-heading .group-note { font-weight: 400; letter-spacing: 0; }
+/* SB-145: Statistics. */
+.stat-bar { margin-bottom: var(--space-4); }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); max-width: 980px; }
+.stat-tile { display: flex; flex-direction: column; gap: var(--space-1); border: 1px solid var(--border); background: var(--panel); border-radius: var(--r-card); padding: var(--space-4); }
+.stat-label { color: var(--muted); font-size: var(--t-label); }
+.stat-value { font-family: var(--font-data); font-size: var(--t-section); font-variant-numeric: tabular-nums; }
+.stat-note { color: var(--muted); font-size: var(--t-chip); }
+.stat-panel { max-width: 980px; }
+.stat-scroll { overflow-x: auto; }
+.stat-table { width: 100%; border-collapse: collapse; font-size: var(--t-label); }
+.stat-table th, .stat-table td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.stat-table thead th { color: var(--muted); font-weight: 550; }
+.stat-table tbody th { font-weight: 550; white-space: normal; }
+.stat-table .num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.stat-table .is-trouble { color: var(--warn); }
+.stat-table tbody tr:last-child th, .stat-table tbody tr:last-child td { border-bottom: 0; }

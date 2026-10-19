@@ -452,6 +452,9 @@ async fn incomplete_stream_is_aborted_instead_of_success() {
         id: a.id.clone(),
         finished: false,
         success: true,
+        stats: Arc::default(),
+        key: String::new(),
+        scanner: None,
         _permit: permit,
     };
     drop(stream);
@@ -2041,4 +2044,61 @@ fn a_request_names_its_newest_folder_and_the_deepest_project_folder_wins() {
         None,
         "a prefix that is not a folder"
     );
+}
+#[tokio::test]
+async fn statistics_count_each_request_and_the_providers_own_token_usage_only() {
+    let (_r, s) = store();
+    let a = add(&s, Provider::Claude, AuthKind::ApiKey, "a", "synthetic-a");
+    let b = add(&s, Provider::Claude, AuthKind::ApiKey, "b", "synthetic-b");
+    s.select(Provider::Claude, "default", &a.id).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let c = c.clone();
+            async move {
+                // The first call is refused for a limit and moves to b (SB-98); b answers.
+                if c.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return (StatusCode::TOO_MANY_REQUESTS, "limit").into_response();
+                }
+                let body = "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":11,\"cache_read_input_tokens\":7}}}\n\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"SECRET_ANSWER_TEXT\"}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n";
+                Response::builder()
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(body))
+                    .unwrap()
+            }
+        }),
+    ))
+    .await;
+    let p = start(s.clone(), url).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/claude/default/v1/messages", p.address()))
+        .bearer_auth(p.token())
+        .header("user-agent", "claude-cli/2.1.300 (external, cli)")
+        .body("{\"messages\":[{\"content\":\"SECRET_PROMPT_TEXT\"}]}")
+        .send()
+        .await
+        .unwrap();
+    assert!(response.text().await.unwrap().contains("message_delta"));
+    let tallies = p.take_statistics();
+    let day = stats::day_of(now());
+    let on_a = &tallies[&stats::key(&day, &a.id, "default", "claude-code")];
+    assert_eq!((on_a.requests, on_a.limited, on_a.ok), (1, 1, 0));
+    let on_b = &tallies[&stats::key(&day, &b.id, "default", "claude-code")];
+    assert_eq!((on_b.requests, on_b.ok), (1, 1));
+    assert_eq!(
+        (
+            on_b.input_tokens,
+            on_b.output_tokens,
+            on_b.cache_read_tokens
+        ),
+        (11, 5, 7)
+    );
+    let json = serde_json::to_string(&tallies).unwrap();
+    assert!(!json.contains("SECRET"));
+    // Handed over once: the next call starts from nothing.
+    assert!(p.take_statistics().is_empty());
+    p.shutdown().await;
+    up.abort();
 }

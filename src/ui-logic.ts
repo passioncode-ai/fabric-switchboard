@@ -582,3 +582,37 @@ export function tokenCount(n: number): string {
 export function modelMeta(m: Pick<RecommendedModel, 'maker' | 'context' | 'input_usd_per_million'>): string {
   return t('{maker} · {context} context · ${price} per 1M input tokens', { maker: m.maker, context: tokenCount(m.context), price: m.input_usd_per_million.toFixed(2) });
 }
+
+/** SB-145: one row of the proxy's counts. */
+export interface StatCounts { requests: number; ok: number; limited: number; failed: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
+export interface StatAccount extends StatCounts { account_id: string; label: string | null; provider: string | null; kind: string | null }
+export interface StatProject extends StatCounts { pool: string; name: string | null }
+export interface StatAgent extends StatCounts { agent: string }
+export interface StatRoute extends StatAccount { pool: string; name: string | null; agent: string }
+export interface StatDay extends StatCounts { day: string }
+export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
+/** A count as people read it in a table: 950, 12.4K, 3.21M. */
+export function compactCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${Number((n / 1000).toFixed(1))}K`;
+  return `${Number((n / 1_000_000).toFixed(2))}M`;
+}
+/** Tokens a request spent: what was sent (new and from cache) and what came back. */
+export function statTokens(c: StatCounts): number {
+  return c.input_tokens + c.cache_read_tokens + c.cache_write_tokens + c.output_tokens;
+}
+/** The share of requests that ended in a limit or an error, as a whole percent; null with none. */
+export function statTrouble(c: StatCounts): number | null {
+  return c.requests ? Math.round(((c.limited + c.failed) * 100) / c.requests) : null;
+}
+/** The trouble share as text: a few failures among many requests read as under 1%, never 0%. */
+export function statTroubleText(c: StatCounts): string {
+  const share = statTrouble(c);
+  if (share === null) return '–';
+  return share === 0 && c.limited + c.failed > 0 ? '<1%' : `${share}%`;
+}
+/** A coding agent's name as the proxy recorded it (from its user-agent). */
+export function statAgentName(agent: string): string {
+  const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', pi: 'Pi', 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
+  return names[agent] ?? t('Other client');
+}

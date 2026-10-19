@@ -47,6 +47,14 @@ enum Command {
     /// Recent sanitized activity.
     #[command(alias = "activity")]
     Events,
+    /// What the proxy relayed (SB-145): requests, outcomes and the provider's token counts by
+    /// project, account, coding agent and day. Reads only.
+    #[command(alias = "statistics")]
+    Stats {
+        /// Days back, 1 to 90.
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(i64).range(1..=90))]
+        days: i64,
+    },
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// Sessions Switchboard launched (Claude Code, Codex) that are starting or running: account,
@@ -1020,6 +1028,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
+        Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Sessions { all } => Operation::Sessions { all: *all },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
@@ -2355,6 +2364,7 @@ mod mcp_parity {
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),
         ("events", Tool("switchboard_events")),
+        ("stats", Tool("switchboard_statistics")),
         ("status", Tool("switchboard_status")),
         ("sessions", Tool("switchboard_sessions")),
         ("current", Tool("switchboard_status")),
