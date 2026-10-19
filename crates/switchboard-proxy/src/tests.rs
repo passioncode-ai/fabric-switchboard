@@ -1946,3 +1946,99 @@ async fn a_session_never_meets_409_while_the_pool_has_a_usable_account() {
     p.shutdown().await;
     up.abort();
 }
+#[tokio::test]
+async fn codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders() {
+    // SB-143: one user-level provider for every Codex session. A request from a project's folder
+    // runs on the project's Codex account; any other passes on with the person's own sign-in.
+    let (_r, s) = store();
+    let a = add(
+        &s,
+        Provider::Codex,
+        AuthKind::OAuth,
+        "work",
+        "synthetic-project",
+    );
+    s.select(Provider::Codex, "default", &a.id).unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (url, up) = fixture(Router::new().route(
+        "/backend-api/codex/responses",
+        post(move |h: HeaderMap| {
+            let tx = tx.clone();
+            async move {
+                tx.send(h).unwrap();
+                "ok"
+            }
+        }),
+    ))
+    .await;
+    let p = start(s, url).await;
+    p.set_codex_folders(vec![("/w/app".into(), "default".into())]);
+    let body = |cwd: &str| {
+        serde_json::json!({"model": "gpt-5", "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/w/elsewhere</cwd>\n</environment_context>"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": format!("<environment_context>\n  <cwd>{cwd}</cwd>\n</environment_context>")}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}]}
+        ]})
+        .to_string()
+    };
+    let send = |cwd: &str, capability: Option<String>| {
+        let mut call = reqwest::Client::new()
+            .post(format!("http://{}/codex/_auto/v1/responses", p.address()))
+            .bearer_auth("person-own-token")
+            .header("chatgpt-account-id", "person-account")
+            .body(body(cwd));
+        if let Some(c) = capability {
+            call = call.header(CAPABILITY_HEADER, c);
+        }
+        call.send()
+    };
+    // Without the capability nothing reaches upstream.
+    assert_eq!(send("/w/app", None).await.unwrap().status(), 401);
+    assert_eq!(
+        send("/w/app", Some(p.pool_capability("default")))
+            .await
+            .unwrap()
+            .status(),
+        401,
+        "a pool's capability is not the route's"
+    );
+    // A project's folder (the newest context wins): the project's account, never the person's.
+    let response = send("/w/app/src", Some(p.auto_capability())).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let h = rx.recv().await.unwrap();
+    assert_eq!(h["authorization"], "Bearer synthetic-project");
+    assert_eq!(h["chatgpt-account-id"], "identity-work");
+    assert!(!h.contains_key(CAPABILITY_HEADER));
+    // Any other folder: the person's own request, unchanged.
+    let response = send("/w/other", Some(p.auto_capability())).await.unwrap();
+    assert_eq!(response.status(), 200);
+    let h = rx.recv().await.unwrap();
+    assert_eq!(h["authorization"], "Bearer person-own-token");
+    assert_eq!(h["chatgpt-account-id"], "person-account");
+    assert!(!h.contains_key(CAPABILITY_HEADER));
+    p.shutdown().await;
+    up.abort();
+}
+#[test]
+fn a_request_names_its_newest_folder_and_the_deepest_project_folder_wins() {
+    let body = serde_json::json!({"input": [
+        {"content": [{"text": "<environment_context><cwd>/w/a</cwd></environment_context>"}]},
+        {"content": [{"text": "<environment_context><cwd>/w/b/c</cwd></environment_context>"}]},
+        {"content": [{"text": "said <cwd>relative</cwd> in passing"}]}
+    ]})
+    .to_string();
+    assert_eq!(request_folder(body.as_bytes()).as_deref(), Some("/w/b/c"));
+    assert_eq!(request_folder(b"not json"), None);
+    assert_eq!(request_folder(br#"{"input": "hello"}"#), None);
+    let folders = vec![
+        ("/w/b".to_owned(), "outer".to_owned()),
+        ("/w/b/c".to_owned(), "inner".to_owned()),
+    ];
+    assert_eq!(project_pool(&folders, "/w/b/c/d").as_deref(), Some("inner"));
+    assert_eq!(project_pool(&folders, "/w/b").as_deref(), Some("outer"));
+    assert_eq!(
+        project_pool(&folders, "/w/bb"),
+        None,
+        "a prefix that is not a folder"
+    );
+}

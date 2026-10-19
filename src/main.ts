@@ -8,7 +8,7 @@ import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFro
 import type { CardState } from './ui-logic';
 import { APPEARANCE_KEY, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -293,7 +293,33 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), diskMapSection(), rulesSection());
+  main.append(projectsSection(), codexRouteSection(), diskMapSection(), rulesSection());
+}
+/** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
+let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = '';
+function loadCodexRoute() {
+  if (codexRouteLoading) return;
+  codexRouteLoading = true;
+  void adapter.codexRoute(null).then((r) => { codexRouteState = r; codexRouteError = ''; }, (e) => { codexRouteError = t(safeError(e)); }).finally(() => { codexRouteLoading = false; render(); });
+}
+function codexRouteSection() {
+  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'codex-route-heading');
+  const heading = el('h2', 'section-heading', t('Codex in project folders')); heading.id = 'codex-route-heading';
+  section.append(heading, el('p', 'surface-note', t('Codex sessions started in a project\'s folders use that project\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside projects keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
+  if (!codexRouteState && !codexRouteError) { loadCodexRoute(); section.append(el('p', 'form-note', t('Reading Codex\'s settings…'))); return section; }
+  if (codexRouteError) section.append(el('p', 'form-error', codexRouteError));
+  const r = codexRouteState;
+  if (r) {
+    const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
+    section.append(el('p', 'account-meta', line));
+    if (r.projects.length) section.append(el('p', 'form-note', t('Projects with a Codex account: {names}.', { names: r.projects.join(', ') })));
+    else section.append(el('p', 'form-note', t('No project has a Codex account yet. Move one into a project first.')));
+    if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
+    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in project folders now use their projects\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on ? 'button' : 'button primary', 'codex-route-toggle');
+    act.disabled = !r.on && !!r.conflict;
+    section.append(act);
+  }
+  return section;
 }
 /** SB-135 part 2: the Git repositories under the folders the person chose, each with its project or none; one moves or joins in place. Read only when the section is open. */
 let mapOpen = false; let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';

@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.49 — 2026-10-19
+
+- **Codex in a project's folders can use the project's Codex accounts (SB-143).** Codex does not let a folder choose where it sends requests, so this is one switch under Projects → *Codex in project folders*. When it is on, Switchboard adds one provider to Codex's own settings that goes through its local proxy: a Codex session in a project's folder then runs on that project's Codex account, and Codex anywhere else keeps your own sign-in. Your own lines in Codex's settings are never changed, another provider you chose is never replaced, and while Switchboard is not running its lines are taken out so Codex works as before. Agents: `switchboard project codex on|off`, MCP `switchboard_codex_route`.
+
 ## 0.6.48 — 2026-10-19
 
 - **A Tokens tab, and a key per project for agents (SB-144).** Agents that run on an API key, such as Hermes, OpenCode or Pi on OpenRouter, now take the key of the project whose folder they start in: give a client's project its own key under Tokens → Project keys, and agents started there spend it, while every other folder keeps the machine's key. Each launch reads its key when it starts, so agents in different projects run at the same time on different keys. The machine's key moved from Agents to Tokens. Agents: `switchboard agents openrouter set --pool`, `switchboard agents openrouter list`, and `switchboard_openrouter_status` lists every project's key. A store with a project key cannot be read by 0.6.47 or older.

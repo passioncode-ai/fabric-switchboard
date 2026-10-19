@@ -82,6 +82,7 @@ struct Gateway {
     chatgpt: String,
     salts: PoolSalts,
     folders: FolderTokens,
+    codex_folders: CodexFolders,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -89,6 +90,11 @@ struct Gateway {
 /// pool's project now. `None` until the owner sets them at start.
 pub type FolderTokens =
     Arc<std::sync::RwLock<Option<std::collections::HashMap<String, Vec<String>>>>>;
+/// SB-143: the folders of projects whose pool has a Codex account, each with its pool, for the
+/// `/codex/_auto/v1` route. `None` until the owner sets them.
+pub type CodexFolders = Arc<std::sync::RwLock<Option<Vec<(String, String)>>>>;
+/// SB-143: the route a user-level Codex provider points at; no pool can start with `_`.
+pub const AUTO_POOL: &str = "_auto";
 /// Per-pool salts of the folders' capabilities (`pool_token_salted`): a pool whose capability was
 /// rotated has one; the rest keep the unsalted capability.
 pub type PoolSalts = Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>;
@@ -98,6 +104,7 @@ pub struct ProxyHandle {
     agent_token: String,
     salts: PoolSalts,
     folders: FolderTokens,
+    codex_folders: CodexFolders,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
@@ -223,6 +230,7 @@ impl ProxyHandle {
         let agent = agent_token(&token);
         let salts: PoolSalts = Arc::default();
         let folders: FolderTokens = Arc::default();
+        let codex_folders: CodexFolders = Arc::default();
         let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let state = Gateway {
@@ -237,6 +245,7 @@ impl ProxyHandle {
             chatgpt,
             salts: salts.clone(),
             folders: folders.clone(),
+            codex_folders: codex_folders.clone(),
             legacy_until: legacy_until.clone(),
             draining: draining.clone(),
         };
@@ -259,6 +268,7 @@ impl ProxyHandle {
             agent_token: agent,
             salts,
             folders,
+            codex_folders,
             legacy_until,
             draining,
             stop: std::sync::Mutex::new(Some(stop)),
@@ -287,6 +297,17 @@ impl ProxyHandle {
     pub fn pool_capability(&self, pool: &str) -> String {
         let salt = self.salts.read().ok().and_then(|s| s.get(pool).cloned());
         pool_token_salted(&self.token, pool, salt.as_deref())
+    }
+    /// SB-143: the capability a user-level Codex provider sends to `/codex/_auto/v1`.
+    pub fn auto_capability(&self) -> String {
+        self.pool_capability(AUTO_POOL)
+    }
+    /// SB-143: the folders of projects with a Codex account and their pools, set at start and
+    /// whenever projects or accounts change.
+    pub fn set_codex_folders(&self, folders: Vec<(String, String)>) {
+        if let Ok(mut current) = self.codex_folders.write() {
+            *current = Some(folders);
+        }
     }
     /// SB-133: the folder capabilities of every pool, set at start and whenever the project
     /// folders change.
@@ -426,6 +447,9 @@ async fn relay(
             StatusCode::NOT_IMPLEMENTED,
             "Managed mode supports HTTP/SSE only.",
         );
+    }
+    if provider == "codex" && pool == AUTO_POOL {
+        return Box::pin(codex_auto(g, operation, request)).await;
     }
     // Claude Code and Codex present the session token as a bearer; other agents present the
     // agent token, as a bearer or as `x-api-key` (what Anthropic SDKs send for an API key).
@@ -724,6 +748,185 @@ async fn relay(
     response
         .body(Body::from_stream(stream))
         .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, "Provider response invalid."))
+}
+/// SB-143: a Codex session's request through the user-level provider. The request names the
+/// folder the session works in (`<cwd>` in its environment context); a folder of a project whose
+/// pool has a Codex account goes on as that pool's managed request, with its account and
+/// fail-over; any other request goes on unchanged with the person's own sign-in.
+async fn codex_auto(g: Gateway, operation: String, request: Request<Body>) -> Response {
+    let header = request
+        .headers()
+        .get(CAPABILITY_HEADER)
+        .map(|x| x.as_bytes().to_vec())
+        .unwrap_or_default();
+    let salt = g.salts.read().ok().and_then(|s| s.get(AUTO_POOL).cloned());
+    let capability = pool_token_salted(&g.token, AUTO_POOL, salt.as_deref());
+    if !bool::from(header.ct_eq(capability.as_bytes())) {
+        return error(StatusCode::UNAUTHORIZED, "Local capability required.");
+    }
+    if operation != "responses" || request.uri().query().is_some() {
+        return error(StatusCode::NOT_FOUND, "Unsupported provider operation.");
+    }
+    if g.draining.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut response = error(StatusCode::SERVICE_UNAVAILABLE, RESTARTING);
+        response
+            .headers_mut()
+            .insert("retry-after", axum::http::HeaderValue::from_static("5"));
+        return response;
+    }
+    let (mut parts, body) = request.into_parts();
+    let bytes =
+        match tokio::time::timeout(Duration::from_secs(30), to_bytes(body, BODY_LIMIT)).await {
+            Ok(Ok(b)) => b,
+            Ok(Err(_)) => {
+                return error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "Request exceeds the body limit.",
+                )
+            }
+            Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "Request body timed out."),
+        };
+    let pool = request_folder(&bytes).and_then(|folder| {
+        let map = g.codex_folders.read().ok()?;
+        project_pool(map.as_deref()?, &folder)
+    });
+    if let Some(pool) = pool {
+        // The pool's managed route, as the session token: its account, its fail-over, its
+        // journal. The person's own sign-in is never forwarded.
+        parts.headers.remove("authorization");
+        parts.headers.remove("chatgpt-account-id");
+        parts.headers.remove(CAPABILITY_HEADER);
+        if let Ok(value) = axum::http::HeaderValue::from_str(&format!("Bearer {}", g.token)) {
+            parts.headers.insert("authorization", value);
+        }
+        let request = Request::from_parts(parts, Body::from(bytes));
+        return Box::pin(relay(
+            State(g),
+            Path(("codex".to_owned(), pool, operation)),
+            request,
+        ))
+        .await;
+    }
+    let permit = match g.slots.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Proxy is busy. Retry later.",
+            )
+        }
+    };
+    // Not a project's folder: the person's own request, to where Codex itself would send it.
+    let url = if parts.headers.contains_key("chatgpt-account-id") {
+        format!("{}/backend-api/codex/responses", g.chatgpt)
+    } else {
+        format!("{}/v1/responses", g.openai)
+    };
+    let hop = connection_fields(&parts.headers);
+    let mut headers = HeaderMap::new();
+    for (name, value) in &parts.headers {
+        let n = name.as_str();
+        if hop.contains(n)
+            || matches!(
+                n,
+                "host" | "content-length" | "connection" | "origin" | CAPABILITY_HEADER
+            )
+        {
+            continue;
+        }
+        headers.append(name.clone(), value.clone());
+    }
+    let upstream = match g.client.post(url).headers(headers).body(bytes).send().await {
+        Ok(r) => r,
+        Err(_) => {
+            return error(
+                StatusCode::BAD_GATEWAY,
+                "Provider connection failed. Request was not replayed.",
+            )
+        }
+    };
+    let status = upstream.status();
+    if status.is_redirection() {
+        return error(StatusCode::BAD_GATEWAY, "Provider redirect refused.");
+    }
+    let mut response = Response::builder().status(status);
+    let response_hop_fields = connection_fields(upstream.headers());
+    for (name, value) in upstream.headers() {
+        let name = name.as_str();
+        let relayed = RESPONSE_HEADERS.contains(&name)
+            || RESPONSE_HEADER_PREFIXES.iter().any(|p| name.starts_with(p));
+        if relayed && !response_hop_fields.contains(name) {
+            response = response.header(name, value);
+        }
+    }
+    let stream =
+        PassStream {
+            inner: Box::pin(upstream.bytes_stream().map(|item| {
+                item.map_err(|_| std::io::Error::other("Provider stream interrupted"))
+            })),
+            _permit: permit,
+        };
+    response
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, "Provider response invalid."))
+}
+/// A passed-through response: it holds its slot until the stream ends, and records nothing (no
+/// account of Switchboard's served it).
+struct PassStream {
+    inner: std::pin::Pin<
+        Box<dyn futures_util::Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send>,
+    >,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+impl futures_util::Stream for PassStream {
+    type Item = Result<axum::body::Bytes, std::io::Error>;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+/// The last folder a Codex request names in its environment context (`<cwd>…</cwd>`), read from
+/// the request's JSON text values; None when it names none.
+pub fn request_folder(body: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    // Walked in document order, so the last match is the newest environment context.
+    let mut last = None;
+    let mut stack = vec![&value];
+    let mut seen = 0usize;
+    while let Some(v) = stack.pop() {
+        seen += 1;
+        if seen > 200_000 {
+            break;
+        }
+        match v {
+            serde_json::Value::String(s) => {
+                if let Some(at) = s.rfind("<cwd>") {
+                    let rest = &s[at + 5..];
+                    if let Some(end) = rest.find("</cwd>") {
+                        let folder = rest[..end].trim();
+                        if folder.starts_with('/') || folder.chars().nth(1) == Some(':') {
+                            last = Some(folder.to_owned());
+                        }
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => stack.extend(items.iter().rev()),
+            serde_json::Value::Object(map) => stack.extend(map.values().rev()),
+            _ => {}
+        }
+    }
+    last
+}
+/// The pool of the project folder holding `folder`, the deepest one when folders nest.
+pub fn project_pool(folders: &[(String, String)], folder: &str) -> Option<String> {
+    let path = std::path::Path::new(folder);
+    folders
+        .iter()
+        .filter(|(f, _)| path.starts_with(f))
+        .max_by_key(|(f, _)| f.len())
+        .map(|(_, pool)| pool.clone())
 }
 pub fn now() -> i64 {
     std::time::SystemTime::now()

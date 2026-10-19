@@ -79,6 +79,8 @@ export interface Adapter {
   /** SB-122: an account into a project's pool, or back to `default`. */
   moveAccount(id: string, pool: string): Promise<unknown>;
   moveRoot(folder: string, pool: string): Promise<unknown>;
+  /** SB-143: Codex in project folders. */
+  codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-131: `suggestions` are folders still being added (retried, never asked); `added` and `removed` are the last day's. */
   projectSuggestions(): Promise<{ suggestions: ProjectSuggestion[]; added?: ProjectSuggestion[]; removed?: ProjectSuggestion[] }>;
@@ -143,6 +145,8 @@ export interface AgentsOverview { schema?: number; revision?: string; updated_at
 /** SB-119: OpenRouter's tool-capable models; `available: false` when its list could not be read. */
 export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
+/** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
+export interface CodexRoute { on: boolean; applied: boolean; config: string | null; conflict: string | null; projects: string[] }
 /** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
 export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }

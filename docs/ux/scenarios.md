@@ -73,6 +73,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-063 | See a project's repositories with their worktrees under them | draft |
 | SCN-064 | Find repositories on disk and put each in its project | draft |
 | SCN-065 | Give a project its own API key for agents | draft |
+| SCN-066 | Codex in a project's folders uses the project's Codex accounts | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1362,3 +1363,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines` (core storage), launch tests asserting `--dir` in every key command, MCP handshake; checked in WebKit on the demo in English and Russian (a project key added from Tokens, notice, no page errors).
 **Product:** unobserved
 **Traces:** SB-144
+
+## SCN-066 — Codex in a project's folders uses the project's Codex accounts
+**Persona:** P-01
+**Goal:** A Codex session started in a project's folder runs on that project's Codex account, exactly like Claude Code there, while Codex anywhere else keeps the person's own sign-in (operator 2026-10-19: «кодекс не атрибуцирован»).
+**Preconditions:** a project with an enabled Codex account (the account the ordinary Codex CLI is signed in to cannot join a project).
+**Entry point:** Projects → *Codex in project folders* · `switchboard project codex on` · MCP `switchboard_codex_route`.
+**Steps:**
+1. Read the section → “Off: Codex uses your own sign-in in every folder.” and the projects that have a Codex account.
+2. *Turn on* → “Codex sessions in project folders now use their projects' Codex accounts. Start a new Codex session to pick it up.”; the state reads “On: Codex goes through Switchboard.”
+3. Start `codex` in a folder of that project → its requests run on the project's account (Activity journals them under it); start it in any other folder → it runs on the person's own sign-in.
+4. *Turn off* → Codex's settings lose Switchboard's lines; the person's own lines were never touched.
+**Alt paths:** Codex already has another `model_provider` → the section names the line, *Turn on* is disabled, nothing is written; Codex's settings do not parse → nothing is written, the reason is shown; no project has a Codex account → the section says to move one in first; Switchboard quits → its lines leave Codex's settings and a new Codex uses the person's sign-in; it starts again → they come back.
+**Expected result:** which account a Codex session uses follows the folder it runs in, with no per-folder file.
+**UI elements:** section heading, explanation, state line, projects line, conflict line, *Turn on* / *Turn off*.
+**States covered:** reading, off, on and applied, on but not applied, conflict, unreadable, no project with a Codex account.
+**Errors & recovery:** every refusal names its cause and leaves Codex's file as it was.
+**Status:** draft
+**Meaning:** operator request 2026-10-19 (SB-143).
+**Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo.
+**Product:** unobserved
+**Traces:** SB-143

@@ -98,6 +98,7 @@ export function createDemoAdapter(): Adapter {
     return { default: agentDefault, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
   };
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
+  let codexOn = false;
   let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
@@ -249,6 +250,11 @@ export function createDemoAdapter(): Adapter {
       const tree = from.folders.filter((f) => f === folder || (/-wt-|\/\.worktrees\//.test(f) && from.folders.indexOf(folder) === 0));
       if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
       from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
+    },
+    async codexRoute(enabled) {
+      await pause();
+      if (typeof enabled === 'boolean') codexOn = enabled;
+      return { on: codexOn, applied: codexOn, config: '~/.codex/config.toml', conflict: null, projects: (state.projects ?? []).filter((p) => state.accounts.some((a) => a.pool === p.pool && a.provider === 'codex')).map((p) => p.name) };
     },
     async repositoryMap(under) {
       await pause();

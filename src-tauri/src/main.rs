@@ -447,6 +447,15 @@ async fn move_account(id: String, pool: String, state: State<'_, Slot>) -> Resul
         .execute(Operation::MoveAccount { id, pool })
         .await
 }
+/// SB-143: Codex in project folders: the state, or `enabled` to switch it.
+#[tauri::command]
+async fn codex_route(enabled: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::CodexRoute { enabled })
+        .await
+}
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
 async fn move_root(folder: String, pool: String, state: State<'_, Slot>) -> Result<Value, String> {
@@ -1039,6 +1048,7 @@ fn main() {
             remove_project,
             project_roots,
             move_root,
+            codex_route,
             repository_map,
             move_account,
             agents_overview,
