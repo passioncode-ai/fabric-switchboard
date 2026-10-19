@@ -75,6 +75,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-065 | Give a project its own API key for agents | draft |
 | SCN-066 | Codex in a project's folders uses the project's Codex accounts | draft |
 | SCN-067 | See which accounts and agents work where, and where tokens go | draft |
+| SCN-068 | Groups of projects: one repository in several groups, and the projects a group holds on hover | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1142,24 +1143,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 ## SCN-055 — Git folders and projects register by themselves
 **Persona:** P-01
 **Goal:** Keep every coding agent's Git repository and every project's folder list registered without hunting for them, assigning accounts by hand, or being asked about any of them (operator 2026-10-14: «не надо у меня ничего спрашивать, просто показывай, что добавлен в проект, и уведомление один раз»; 2026-10-15: «автодобавление всех репозиториев нужных в проект, когда там агент работает … чтобы не показывать подтверждения»; 2026-10-17: an eligible unassigned Git repository must become a project, not only attach to an existing one).
-**Preconditions:** for a new project, an eligible unassigned Git repository or worktree opened by a coding agent; for attachment, an existing project with at least one folder that is a Git repository and optionally its sources (`switchboard project source --pool <pool> --add github.com/<owner>`). No account is required for creation.
+**Preconditions:** an existing group with at least one folder that is a Git repository (or a Git folder whose parent folder holds a group's repository).
 **Entry point:** none — a system notification tells the person afterwards.
 **Steps:**
-1. A coding agent opens an eligible unassigned Git repository or worktree → `ProjectSuggest` resolves the existing project identity first, then creates an account-less project from the nearest Git root (REQ-002). No account IDs move and provider fallback rules are unchanged.
+1. A coding agent opens a Git repository in no group → nothing is created: it stays in the default group and is listed under Repositories on disk (SB-146; REQ-002 used to make a group of its own for it, which scattered repositories that belonged together).
 2. An agent creates a worktree of an existing project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard adds the folder to that existing project (SB-121); its accounts serve it from the next session.
 3. An agent working in a project's folder changes another repository — edits or writes a file in it, or commits, pushes, stages, merges, rebases or makes a worktree there, or creates it with `git init` → within one pass that repository joins the project (SB-131). The same background activity path creates the unassigned session's project when there is no existing match. Reading a repository never counts.
 4. One system notification per addition: “Folder added to a project — {folder} is now part of {project}.” (several at once: “{n} folders added ({projects}).”). Nothing is asked: no question, no banner, no tray count.
-5. A session started there by the hook gets one line in its context: a created project reports that no accounts were moved; an attached folder reports the existing project it joined.
+5. A session started there by the hook gets one line in its context only when its folder joined a group; a repository in no group gets none.
 **Alt paths:** Re-entry returns `in_project` and creates nothing. The person removes a project or folder → it is never created or added back, whatever agents do there. Existing identity matches still attach; two projects matching equally is a conflict, never a guessed new project. Creation is refused by the ordinary `save_project` bounds and overlap checks. A refused existing-project add is retried every ten minutes and logs `project_suggestion add: refused`; the hook's line says it “could not be added yet; Switchboard tries again by itself”. Questions left by 0.6.30/0.6.31 are added by the first pass after the update. A folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`), a tool's own folder, the home folder, a filesystem root or a non-Git folder never joins or creates. A worktree of a project repository kept in a tool folder (`~/.codex/worktrees/…`) still joins as a worktree. A repository agents of two projects work in (an organisation wiki, a common docs repository) belongs to neither: if it joined one project by work and another project's agent then works in it, it leaves the first one, and it is never added by work again (log `worked: shared`). A folder the person added is never taken out this way. Saving an Edit dialog opened before a folder joined keeps that folder. A folder already in a project or one containing another project's folder is never added or created. Read: Claude Code sessions and their subagents; Codex sessions and sessions Switchboard launches isolated are not read yet (SB-132). For a provider with an enabled account in the project, accounts of other pools are refused there (SCN-034); a provider with no enabled project account keeps its existing launch fallback, while automatic `--provider` selection still requires the project's selected account. The CLI shows what was added (`switchboard project suggestions` → `added`).
-**Expected result:** every eligible unassigned agent Git root becomes a project once with an empty account set; every new folder of an existing project, and every repository its Claude Code agents work in, joins it once; the person learns it from one notification, and their own removals stand.
+**Expected result:** every new folder of an existing group (worktree, clone, a repository its agents create or work in) joins that group once, by itself; a repository in no group stays in the default group, and no group is ever made for it.
 **UI elements:** system notification and one SessionStart context line only.
-**States covered:** unassigned created, existing attached, re-entry idempotent, removed not recreated, conflict refused, non-Git or broad folder refused, added (found, worked in), several added, added then removed by the person, add refused (retried, never asked), temporary or hidden folder ignored, two projects' work, questions left by an older version.
+**States covered:** unassigned left in the default group, existing attached, re-entry idempotent, removed not recreated, conflict refused, non-Git or broad folder refused, added (found, worked in), several added, added then removed by the person, add refused (retried, never asked), temporary or hidden folder ignored, two projects' work, questions left by an older version.
 **Errors & recovery:** a refused existing-project add is retried every ten minutes; an unreadable suggestions file adds or creates nothing and is logged; the SessionStart hook always exits 0.
 **Status:** draft
-**Meaning:** operator request 2026-10-14 (SB-117), changed the same day (SB-121), on 2026-10-15 (SB-131) and automatic account-less registration on 2026-10-17 (REQ-002).
+**Meaning:** operator request 2026-10-14 (SB-117), changed the same day (SB-121), on 2026-10-15 (SB-131) and automatic account-less registration on 2026-10-17 (REQ-002), superseded by groups on 2026-10-19 (SB-146).
 **Coverage:** `suggest::tests` (incl. `temporary_and_cache_folders_never_join_a_project`, `a_worked_repository_is_recorded_once_and_a_deleted_one_is_found_again`, `a_repository_is_the_nearest_folder_with_git_and_never_the_home_folder`, `unassigned_repositories_are_not_guessed_from_conflicts_or_remembered_removals`); `activity::tests` (`a_shell_command_names_the_folders_it_commits_in_and_nothing_it_only_reads`, `edits_and_commits_count_with_the_sessions_folder_and_reads_do_not`, `a_transcript_is_read_only_where_it_grew_and_a_line_being_written_waits`); owner `an_unassigned_git_repository_becomes_a_project_without_changing_provider_fallback`, `the_background_pass_creates_an_unassigned_agents_project_once`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`, `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither`; CLI `an_unassigned_repository_becomes_a_project_through_the_session_hook`, `project_suggestions_work_from_the_cli_and_the_hook_never_fails`; the app's `suggestions::tests::one_folder_is_named_and_several_are_counted`.
 **Product:** unobserved
-**Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121, SB-131, REQ-002
+**Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121, SB-131, REQ-002, SB-146
 
 ## SCN-061 — A deleted folder leaves its project by itself
 **Persona:** P-01
@@ -1406,3 +1407,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only`, `stats::tests::*`; runtime `statistics::tests::*`; MCP handshake; ui-logic SB-145 case; WebKit demo (ru and en, 1280 and 760 wide, 7-day range, no overflow).
 **Product:** unobserved
 **Traces:** SB-145
+
+## SCN-068 — Groups of projects: one repository in several groups, and the projects a group holds on hover
+**Persona:** P-01
+**Goal:** Sessions bind to a group of projects with its accounts; a group may hold one project or many, one project may be in several groups, and the person sees at a glance which projects a group holds (operator 2026-10-19: «проекты, определённые в группы … проект может сразу в несколько групп входить … навёл на группу и всплывашка показала мне проекты»).
+**Preconditions:** at least one group.
+**Entry point:** sidebar → *Groups*; a group's name anywhere (its card, a pool heading on Accounts, the move dialogs).
+**Steps:**
+1. Hover or focus a group's name → a tooltip lists “{n} projects” and their names: one per repository, never a worktree, a clone or a subfolder.
+2. *Groups* → *Repositories on disk* → *All* → a repository in several groups reads “Groups «A», «B»”.
+3. *Also add…* on a repository → a dialog lists only the groups it is not in yet → *Add* → “{name} added to group «B».”; it stays in its other groups.
+4. *Move…* on a repository in several groups → it leaves the group shown and joins the chosen one.
+5. A session started in a folder held by several groups works on the first of them that has an account for its provider; a launch from a group's own card uses that group.
+**Alt paths:** one group's folder inside another group's folder → refused (“A folder sits inside a folder of another group. Add the repository itself to that group instead.”); a group's only folder cannot leave it; a repository already in every group has no *Also add…*; a repository in no group stays in the default group and is offered *Add to group…*.
+**Expected result:** groups read as sets of projects, a project can be shared, and nothing creates a group by itself.
+**UI elements:** group name with tooltip, *Also add…*, the add-to-group dialog, the “Groups …” line.
+**States covered:** one group, several groups, no group, nested refused, last folder refused, Git not read yet (folder names until it is).
+**Errors & recovery:** a refusal keeps the dialog open with its reason.
+**Status:** draft
+**Meaning:** operator request 2026-10-19 (SB-146).
+**Coverage:** runtime `a_repository_may_be_in_several_groups_and_sessions_take_the_one_with_accounts`, `an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made`; CLI `an_unassigned_repository_stays_in_the_default_group_through_the_session_hook`; ui-logic SB-146 case; WebKit demo (tooltip, *Also add…*, “Groups «Alpha Web», «Tools»”).
+**Product:** unobserved
+**Traces:** SB-146

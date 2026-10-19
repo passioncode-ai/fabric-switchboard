@@ -19,6 +19,10 @@ pub struct Root {
     pub folder: String,
     pub branch: Option<String>,
     pub derived: Vec<Derived>,
+    /// SB-146: the `origin` as `host/owner/repo`, so two roots of one repository read as one
+    /// project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
 }
 
 /// What Git says about one folder.
@@ -111,6 +115,7 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
             folder: folders[g.root].0.clone(),
             branch: folders[g.root].1.as_ref().and_then(|c| c.branch.clone()),
             derived: g.members.iter().map(|&m| derived(m, "worktree")).collect(),
+            remote: g.remote.clone(),
         };
         if let Some(remote) = &g.remote {
             // Clones of the same repository: only under a main checkout, and only once.
@@ -139,6 +144,7 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
             folder: folders[i].0.clone(),
             branch: None,
             derived: Vec::new(),
+            remote: None,
         };
         (i, root)
     }));
@@ -168,6 +174,14 @@ pub struct Found {
     /// `folder`: it is one of the project's folders; `inside`: it sits inside one, so it moves
     /// with that folder and not on its own.
     pub place: Option<&'static str>,
+    /// SB-146: every group that holds it (as itself or around it), in creation order.
+    pub groups: Vec<GroupRef>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct GroupRef {
+    pub pool: String,
+    pub name: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -286,6 +300,14 @@ fn found(dir: &Path, snapshot: &switchboard_core::Snapshot) -> Found {
         pool: project.map(|p| p.pool.clone()),
         project: project.map(|p| p.name.clone()),
         place,
+        groups: snapshot
+            .projects_for(dir)
+            .into_iter()
+            .map(|p| GroupRef {
+                pool: p.pool.clone(),
+                name: p.name.clone(),
+            })
+            .collect(),
     }
 }
 

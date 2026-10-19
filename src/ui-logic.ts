@@ -94,7 +94,7 @@ export function eventAction(action: string): string {
     case 'request': return t('Managed request');
     case 'proxy': return t('Proxy');
     case 'project_rule': return t('Project rule');
-    case 'project': return t('Project');
+    case 'project': return t('Group');
     case 'fallback_chain': return t('Fallback chain');
     case 'agent_key': return t('Agent key');
     case 'kimi_account': return t('Kimi Code account');
@@ -453,7 +453,7 @@ export function moveTargets(currentPool: string, projects: { pool: string; name:
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
 export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone'; branch: string | null }
-export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[] }
+export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[]; remote?: string | null }
 export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | null; branch: string | null; derived: number }
 /** The rows of a folder list: each root, then (when `open`) its derived folders under it; a folder the tree does not know (just added, or the tree not read yet) is a root of its own, in its place. */
 export function folderRows(folders: string[], roots: ProjectRoot[] | null, open = true): FolderRow[] {
@@ -474,13 +474,29 @@ export function folderRows(folders: string[], roots: ProjectRoot[] | null, open 
 export function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
+/**
+ * SB-146: the projects a group holds, by name: one per repository (its root folders, never a
+ * worktree, a clone or a subfolder of a listed folder), two roots of one `origin` read once.
+ */
+export function groupProjects(folders: string[], roots: ProjectRoot[] | null): string[] {
+  const byRoot = new Map((roots ?? []).map((r) => [r.folder, r]));
+  const inside = (f: string) => folders.some((g) => g !== f && (f.startsWith(`${g}/`) || f.startsWith(`${g}\\`)));
+  const seen = new Map<string, string>();
+  for (const row of folderRows(folders, roots, false)) {
+    if (inside(row.folder)) continue;
+    const remote = byRoot.get(row.folder)?.remote ?? null;
+    const key = remote ?? row.folder;
+    if (!seen.has(key)) seen.set(key, remote ? folderName(remote) : folderName(row.folder));
+  }
+  return [...new Set(seen.values())].sort((a, b) => a.localeCompare(b));
+}
 /** SB-135: taking a root out of the list takes its worktrees and clones with it. */
 export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, folder: string): string[] {
   const gone = new Set([folder, ...((roots ?? []).find((r) => r.folder === folder)?.derived.map((d) => d.folder) ?? [])]);
   return folders.filter((f) => !gone.has(f));
 }
 /** SB-135 part 2: the Git repositories on disk with their projects (`repository_map`). */
-export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null }
+export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null; groups?: { pool: string; name: string }[] }
 export interface RepositoryMap { under: string[]; repositories: FoundRepository[]; truncated: boolean }
 export type MapFilter = 'unassigned' | 'all';
 export interface MapRow extends FoundRepository { name: string; action: 'assign' | 'move' | null }

@@ -1533,12 +1533,17 @@ pub(crate) fn project_allows(
             return Err(PROJECT_ACCOUNT_OUTSIDE.into());
         }
     }
-    if let Some(here) = snapshot.project_for(folder) {
-        let has_own = snapshot
-            .accounts
-            .iter()
-            .any(|a| a.pool == here.pool && a.provider == account.provider && a.enabled);
-        if has_own && account.pool != here.pool {
+    // SB-146: a folder in several groups may run on any of them; another account is refused
+    // only while one of its groups has its own account for the provider.
+    let here = snapshot.projects_for(folder);
+    if !here.iter().any(|p| p.pool == account.pool) {
+        let has_own = here.iter().any(|p| {
+            snapshot
+                .accounts
+                .iter()
+                .any(|a| a.pool == p.pool && a.provider == account.provider && a.enabled)
+        });
+        if has_own {
             return Err(PROJECT_FOLDER_FOREIGN.into());
         }
     }

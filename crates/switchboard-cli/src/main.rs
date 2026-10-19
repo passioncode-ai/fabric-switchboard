@@ -314,6 +314,12 @@ enum Project {
         /// The project to move it to (`switchboard project list`).
         #[arg(long)]
         pool: String,
+        /// SB-146: add it to this group and keep it in its other groups.
+        #[arg(long)]
+        also: bool,
+        /// SB-146: the group it leaves, when it is in several.
+        #[arg(long, conflicts_with = "also")]
+        from: Option<String>,
     },
     /// The Git repositories on disk, each with the project it belongs to or none (SB-135). Looks
     /// up to three folders deep and not into a repository, a hidden folder or dependencies.
@@ -1365,9 +1371,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 // A folder to take out may be gone from disk: taken as given.
                 remove_folders: remove_folders.clone(),
             },
-            Project::MoveRoot { folder: path, pool } => Operation::MoveRoot {
+            Project::MoveRoot {
+                folder: path,
+                pool,
+                also,
+                from,
+            } => Operation::MoveRoot {
                 folder: folder(path)?,
                 pool: pool.clone(),
+                from: from.clone(),
+                also: *also,
             },
             Project::Map { under } => Operation::RepositoryMap {
                 under: under
@@ -1632,18 +1645,15 @@ pub(crate) async fn onboard_status(
 }
 /// `switchboard project suggest --from-hook` (SB-117/REQ-002): Claude Code's `SessionStart` hook
 /// names the session's folder as `cwd`. Its output joins the session's context, so it prints one
-/// line only when a folder was added or its project was created, or when an add waits; it exits 0.
+/// line only when a folder was added to its group, or when an add waits; it exits 0.
 async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
     let value = project_suggest_hook(root).await;
     let project = value["suggestion"]["project"]
         .as_str()
         .or_else(|| value["project"]["name"].as_str())
         .unwrap_or("?");
-    if value["created"] == true {
-        println!(
-            "Switchboard: this Git folder is now the project \"{project}\"; no accounts were moved, and provider fallback is unchanged."
-        );
-    } else if value["added"] == true {
+    // SB-146: a repository in no group stays in the default group; nothing to say.
+    if value["added"] == true {
         println!(
             "Switchboard: this folder was added to the project \"{project}\"; its sessions use the project's accounts from their next start."
         );

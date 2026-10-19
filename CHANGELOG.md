@@ -6,7 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.50 — 2026-10-19
+## 0.6.51 — 2026-10-19
+
+- **Projects are now groups, and one project can be in several groups (SB-146).** What Switchboard called a project is shown as a group: a set of projects (repositories) with accounts of their own. The same repository can now be in several groups (*Repositories on disk* → *Also add…*); a session in its folder works on the first of its groups that has an account, and a launch from a group's card uses that group. Hover or focus a group's name to see the projects it holds, one per repository, without worktrees, clones or subfolders.
+- **No more one-repository groups made by themselves.** Since 0.6.38 a repository an agent opened outside every group became a group of its own, without accounts, so related repositories were scattered and their sessions had no accounts. Such a repository now stays in the default group and is listed under *Repositories on disk*; worktrees, clones and repositories a group's agents create or work in still join that group by themselves.
+- 0.6.50 was tagged but not published (a Windows test did not build); its Statistics page ships here:
 
 - **A Statistics page: who works where, and where tokens go (SB-145).** Every request that goes through Switchboard is counted by day, account, project and coding agent (Claude Code, Codex, OpenCode, Hermes and others, told apart by the client's name), with how it ended and the tokens the provider itself reports in its answer: sent, read from cache and received. The page shows the last 7, 30 or 90 days as tiles and tables by project, account, agent, project with account and agent, and day. Counts only, never a prompt, an answer or a path, kept for 90 days on this computer in `statistics.json`. A session that does not go through Switchboard is not counted, and the page says so. Also `switchboard stats --days 30` and the MCP tool `switchboard_statistics`.
 

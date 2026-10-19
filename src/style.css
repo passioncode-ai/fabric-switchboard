@@ -397,3 +397,14 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .stat-table .num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .stat-table .is-trouble { color: var(--warn); }
 .stat-table tbody tr:last-child th, .stat-table tbody tr:last-child td { border-bottom: 0; }
+/* SB-146: a group's projects on hover or focus. */
+.group-hint { position: relative; display: inline-flex; align-items: center; cursor: help; border-radius: 4px; }
+.group-hint-name { text-decoration: underline dotted var(--border-strong); text-underline-offset: 3px; }
+.group-hint:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
+.group-tip { display: none; position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 220px; max-width: 360px; max-height: 320px; overflow-y: auto; padding: var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); box-shadow: 0 6px 24px rgb(0 0 0 / .18); color: var(--ink); font-size: var(--t-label); font-weight: 400; text-align: left; white-space: normal; cursor: default; }
+.group-hint:hover .group-tip, .group-hint:focus .group-tip, .group-hint:focus-within .group-tip { display: block; }
+.group-tip strong { display: block; margin-bottom: var(--space-1); font-weight: 600; }
+.group-tip-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.group-tip-more { color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { .group-tip { animation: group-tip-in 120ms ease-out; } }
+@keyframes group-tip-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }

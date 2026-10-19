@@ -332,6 +332,9 @@ fn write(root: &Path, rows: &[Suggestion]) -> Result<(), String> {
     switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
 }
 
+/// SB-146: an agent's repository in no group is not made a group of its own.
+pub(crate) const UNASSIGNED: &str = "This repository is in no group, so it works with the default group. Put it in a group on the Projects page, or with switchboard project move-root.";
+
 /// What `record` did with a folder.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -364,7 +367,8 @@ impl Outcome {
     }
     pub(crate) fn message(&self) -> &'static str {
         match self {
-            Outcome::New(_) | Outcome::Unassigned { .. } => "",
+            Outcome::New(_) => "",
+            Outcome::Unassigned { .. } => UNASSIGNED,
             Outcome::Waiting => WAITING,
             Outcome::Declined => DECLINED,
             Outcome::InProject => IN_PROJECT,
@@ -658,28 +662,6 @@ fn record_row(
     rows.push(suggestion.clone());
     write(root, &rows)?;
     Ok(Outcome::New(suggestion))
-}
-
-/// Remembers a project created for an agent's unassigned Git root, using the same bounded storage
-/// and added/removed memory as an existing project's accepted suggestion.
-pub(crate) fn remember_created(
-    root: &Path,
-    folder: &str,
-    pool: &str,
-    repository: String,
-    now: i64,
-) -> Result<(), String> {
-    match record_row(
-        root,
-        folder.to_owned(),
-        pool.to_owned(),
-        Reason::Unassigned,
-        repository,
-        now,
-    )? {
-        Outcome::New(_) => mark_added(root, folder, now),
-        other => Err(other.message().into()),
-    }
 }
 
 /// The open suggestions: still pending, the folder still there and still in no project.
@@ -1427,18 +1409,21 @@ mod tests {
             panic!("expected an unassigned repository, got {first:?}");
         };
         assert_eq!(folder, &fresh);
-        remember_created(
+        // A folder Switchboard added to a group and that later left it is not offered again.
+        record_row(
             root.path(),
-            &fresh.to_string_lossy(),
-            "fresh",
+            fresh.to_string_lossy().into_owned(),
+            "fresh".into(),
+            Reason::Worked,
             String::new(),
             1,
         )
         .unwrap();
+        mark_added(root.path(), &fresh.to_string_lossy(), 1).unwrap();
         assert_eq!(
             unassigned(root.path(), &s, &repos, &fresh).unwrap(),
             Outcome::Declined,
-            "a project folder removed later is not created again"
+            "a folder that left its group is not offered again"
         );
         mark_gone(
             root.path(),

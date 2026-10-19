@@ -78,7 +78,8 @@ export interface Adapter {
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
   moveAccount(id: string, pool: string): Promise<unknown>;
-  moveRoot(folder: string, pool: string): Promise<unknown>;
+  /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
+  moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
   /** SB-143: Codex in project folders. */
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;

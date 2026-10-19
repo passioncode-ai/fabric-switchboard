@@ -159,8 +159,11 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
             }
         }
     }
+    // SB-146: a folder in several groups is written for the first group with a Claude account
+    // (creation order), the one `Snapshot::project_for` names.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|(f, _)| seen.insert(f.clone()));
     out.sort();
-    out.dedup_by(|a, b| a.0 == b.0);
     out
 }
 

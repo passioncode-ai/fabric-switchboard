@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.51, project groups (SB-146) and Statistics (SB-145)
+
+- **Done.** Groups: a repository may be in several groups; sessions take the first group with an
+  account; REQ-002 no longer makes a group per repository; hover a group's name for its projects;
+  *Also add…* in the disk map. Contract: [CONTRACTS.md](CONTRACTS.md) → Groups (SB-146).
+- **Operator data, 2026-10-19 (decision recorded here).** The seven account-less groups REQ-002
+  had made were deleted: company-assessment-agent, dataroom (with nicegram-product-workspace and
+  nicegram-app-web), hyperframes-agent, my-nicegram-app-web, nicegram-ad-manager-bot and
+  nicegram-business moved into Agents (where the other Nicegram and agent repositories are);
+  sshlg-skills went back to the default group. Groups now: Agents, Apps & Soft, PassionCode.
+- **0.6.50** was tagged and not published: `statistics::tests` used `std::os::unix` and the
+  Windows nightly did not build; fixed with `#[cfg(unix)]`, shipped in 0.6.51.
+- **Checks run.** `./scripts/check.sh`; WebKit demo (tooltip, *Also add…*).
+- **Next task.** Watch the 0.6.51 release, update the plugin; then SB-134 part 3 (rest of the CLI
+  over MCP), SB-64/74 `switchboard_continue`, SB-07.
+
 ## 2026-10-19: 0.6.50, Statistics page (SB-145); next: project groups (SB-146)
 
 - **Done.** The proxy counts each relayed request per UTC day, account, pool and client family
