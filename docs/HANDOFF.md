@@ -2,7 +2,12 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-10-19: 0.6.51, project groups (SB-146) and Statistics (SB-145)
+## 2026-10-19: 0.6.52, project groups (SB-146), Statistics (SB-145), MCP parity (SB-134 part 3)
+
+- **0.6.51** was tagged and not published: Rust 1.99's clippy on CI refused `sort_by` in
+  `statistics.rs` (`sort_by_key` with `Reverse` now). The local toolchain was 1.92 and missed it;
+  it is 1.99 now. Run `rustup update stable` before a release gate.
+- **SB-134 part 3:** eight MCP tools; `mcp_parity::PARITY` has no `LATER` row.
 
 - **Done.** Groups: a repository may be in several groups; sessions take the first group with an
   account; REQ-002 no longer makes a group per repository; hover a group's name for its projects;

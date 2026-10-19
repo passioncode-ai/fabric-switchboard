@@ -164,7 +164,7 @@ impl Statistics {
             Value::Object(fields)
         };
         let busiest = |mut rows: Vec<(Value, u64)>| {
-            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            rows.sort_by_key(|r| std::cmp::Reverse(r.1));
             rows.into_iter().map(|r| r.0).collect::<Vec<_>>()
         };
         let weight =
