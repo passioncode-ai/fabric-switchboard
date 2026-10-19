@@ -33,7 +33,7 @@ export function createDemoAdapter(): Adapter {
       { path: '/srv/projects/beta-api', provider: 'codex', account_id: 'demo-codex-work', target: 'managed', enabled: false, created_at: now() - 86400, expires_at: null },
     ],
     // SB-135: a project whose main checkout has two worktrees beside it (shown under it).
-    projects: [{ pool: 'alpha-web', name: 'Alpha Web', folders: ['/srv/projects/.worktrees/alpha-web-wt-login', '/srv/projects/alpha-web', '/srv/projects/.worktrees/alpha-web-wt-pricing', '/srv/projects/alpha-docs'], created_at: now() - 86400 }],
+    projects: [{ pool: 'alpha-web', name: 'Alpha Web', folders: ['/srv/projects/.worktrees/alpha-web-wt-login', '/srv/projects/alpha-web', '/srv/projects/.worktrees/alpha-web-wt-pricing', '/srv/projects/alpha-docs'], created_at: now() - 86400 }, { pool: 'tools', name: 'Tools', folders: ['/srv/projects/tools-cli', '/srv/projects/alpha-docs'], created_at: now() - 3600 }],
   };
   const hermes: HermesModel = { installed: true, configured: true, model: 'deepseek/deepseek-v4-pro-0813', provider: 'openrouter', base_url: 'https://openrouter.ai/api/v1', api_mode: 'chat_completions', providers: ['openrouter', 'anthropic', 'nous', 'openai-codex', 'kimi-coding', 'deepseek', 'gemini', 'xai', 'auto'], error: null };
   const kimi: KimiAccounts = { installed: true, current: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 18, resets_at: now() + 9000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null, region: 'global', checked_at: now() - 40 }, accounts: [{ account: { id: '00000000-0000-4000-8000-0000000000a1', label: 'Kimi · work', region: 'global', added_at: now() - 86_400, nickname: 'Demo', tier: 'Allegretto' }, status: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 64, resets_at: now() + 4200 }, { name: '7d', used_percent: 31, resets_at: now() + 300_000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null, checked_at: now() - 40 } }] };
@@ -218,7 +218,7 @@ export function createDemoAdapter(): Adapter {
         while (pool === 'default' || projects.some((p) => p.pool === pool) || state.accounts.some((a) => a.pool === pool && !input.accountIds.includes(a.id))) pool = `${base}-${n++}`;
       }
       if (input.accountIds.some((id) => (current.claude.account_id === id || current.codex.account_id === id) && state.accounts.find((a) => a.id === id)?.pool !== pool)) throw new Error('This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.');
-      for (const other of projects.filter((p) => p.pool !== pool)) for (const f of folders) if (other.folders.some((g) => inside(f, g) || inside(g, f))) throw new Error('A folder is already part of another project.');
+      for (const other of projects.filter((p) => p.pool !== pool)) for (const f of folders) if (other.folders.some((g) => g !== f && (inside(f, g) || inside(g, f)))) throw new Error('A folder sits inside a folder of another group. Add the repository itself to that group instead.');
       for (const account of state.accounts) {
         const target = input.accountIds.includes(account.id) ? pool : account.pool === pool ? 'default' : account.pool;
         if (target !== account.pool) { const old = `${account.provider}:${account.pool}`; if (state.routes[old] === account.id) delete state.routes[old]; account.pool = target; }
@@ -241,10 +241,12 @@ export function createDemoAdapter(): Adapter {
       const old = `${account.provider}:${account.pool}`; if (state.routes[old] === id) delete state.routes[old];
       account.pool = pool; log('project', '', 'updated');
     },
-    async moveRoot(folder, pool) {
+    async moveRoot(folder, pool, also, leave) {
       await pause();
       const target = (state.projects ?? []).find((p) => p.pool === pool); if (!target) throw new Error('No project uses that pool. Choose a project.');
-      const from = (state.projects ?? []).find((p) => p.folders.includes(folder));
+      // SB-146: a repository may be in several groups.
+      if (also) { if (!target.folders.includes(folder)) target.folders.push(folder); looseRepositories = looseRepositories.filter((f) => f !== folder); log('project', '', 'updated'); return; }
+      const from = (state.projects ?? []).find((p) => p.folders.includes(folder) && (!leave || p.pool === leave));
       if (!from) { if (!looseRepositories.includes(folder)) throw new Error('This repository is inside a folder of a project. Move that folder instead.'); target.folders.push(folder); looseRepositories = looseRepositories.filter((f) => f !== folder); log('project', '', 'updated'); return; }
       if (from.pool === pool) return;
       // A synthetic tree: the worktrees named after the folder go with it.
@@ -263,7 +265,13 @@ export function createDemoAdapter(): Adapter {
     },
     async repositoryMap(under) {
       await pause();
-      const folders = (state.projects ?? []).flatMap((p) => p.folders.filter((f) => !/-wt-|\/\.worktrees\//.test(f)).map((folder) => ({ folder, remote: null, branch: 'main', pool: p.pool, project: p.name, place: 'folder' as const })));
+      // SB-146: one row per repository, with every group that holds it.
+      const seen = new Map<string, { folder: string; remote: null; branch: string; pool: string; project: string; place: 'folder'; groups: { pool: string; name: string }[] }>();
+      for (const p of state.projects ?? []) for (const folder of p.folders.filter((f) => !/-wt-|\/\.worktrees\//.test(f))) {
+        const row = seen.get(folder); if (row) row.groups.push({ pool: p.pool, name: p.name });
+        else seen.set(folder, { folder, remote: null, branch: 'main', pool: p.pool, project: p.name, place: 'folder', groups: [{ pool: p.pool, name: p.name }] });
+      }
+      const folders = [...seen.values()];
       const loose = looseRepositories.map((folder) => ({ folder, remote: null, branch: 'main', pool: null, project: null, place: null }));
       return { under: under.length ? under : ['/srv/projects'], repositories: [...folders, ...loose].sort((a, b) => a.folder.localeCompare(b.folder)), truncated: false };
     },

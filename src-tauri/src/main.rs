@@ -458,13 +458,21 @@ async fn codex_route(enabled: Option<bool>, state: State<'_, Slot>) -> Result<Va
 }
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
-async fn move_root(folder: String, pool: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn move_root(
+    folder: String,
+    pool: String,
+    also: Option<bool>,
+    from: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::MoveRoot {
             folder: folder.into(),
             pool,
+            from,
+            also: also.unwrap_or(false),
         })
         .await
 }

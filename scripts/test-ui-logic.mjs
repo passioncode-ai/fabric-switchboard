@@ -603,4 +603,15 @@ check(() => {
   assert.equal(logic.statAgentName('codex'), 'Codex CLI');
   assert.equal(logic.statAgentName('something-new'), 'Other client');
 });
+// SB-146: a group's projects are its repositories by name: no worktree, clone or subfolder, one per origin.
+check(() => {
+  const folders = ['/d/app', '/d/app/docs', '/w/app-wt-login', '/d/api', '/d/api-copy', '/d/loose'];
+  const roots = [
+    { folder: '/d/app', branch: 'main', remote: 'github.com/o/app', derived: [{ folder: '/w/app-wt-login', kind: 'worktree', branch: 'login' }] },
+    { folder: '/d/api', branch: 'main', remote: 'github.com/o/api', derived: [] },
+    { folder: '/d/api-copy', branch: 'main', remote: 'github.com/o/api', derived: [] },
+  ];
+  assert.deepEqual(logic.groupProjects(folders, roots), ['api', 'app', 'loose']);
+  assert.deepEqual(logic.groupProjects(['/d/x', '/d/x/sub'], null), ['x'], 'before Git is read: folder names, subfolders left out');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

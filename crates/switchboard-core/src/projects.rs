@@ -222,6 +222,8 @@ const MAX_SOURCES: usize = 16;
 /// SB-117). 1024 paths × `MAX_PATH` keeps the metadata worst case at 1 MiB of the 2 MiB file.
 const MAX_ALL_FOLDERS: usize = 1024;
 
+/// One group's folder inside another group's (SB-146 keeps a shared repository legal).
+pub const FOLDER_NESTED: &str = "A folder sits inside a folder of another group. Add the repository itself to that group instead.";
 /// `a` inside `b`, by path components: `/a/b` is inside `/a`, `/ab` is not.
 fn inside(a: &str, b: &str) -> bool {
     Path::new(a).starts_with(Path::new(b))
@@ -270,10 +272,10 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
     if all.len() > MAX_ALL_FOLDERS {
         return Err("Invalid project metadata".into());
     }
-    // A folder belongs to one project: no folder of one project inside another's.
+    // SB-146: a folder may be in several groups as itself, never inside another group's folder.
     for (i, (pool_a, a)) in all.iter().enumerate() {
         for (pool_b, b) in &all[i + 1..] {
-            if pool_a != pool_b && (inside(a, b) || inside(b, a)) {
+            if pool_a != pool_b && a != b && (inside(a, b) || inside(b, a)) {
                 return Err("Invalid project metadata".into());
             }
         }
@@ -282,11 +284,21 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
 }
 
 impl Snapshot {
-    /// The project whose folder contains `path`, if any.
+    /// The group a session in `path` works in (SB-146): of the groups holding the folder, the
+    /// first (in creation order) with an enabled account, else the first.
     pub fn project_for(&self, path: &Path) -> Option<&Project> {
+        let all = self.projects_for(path);
+        all.iter()
+            .find(|p| self.accounts.iter().any(|a| a.pool == p.pool && a.enabled))
+            .or(all.first())
+            .copied()
+    }
+    /// Every group whose folder contains `path` (SB-146: a repository may be in several).
+    pub fn projects_for(&self, path: &Path) -> Vec<&Project> {
         self.projects
             .iter()
-            .find(|p| p.folders.iter().any(|f| path.starts_with(Path::new(f))))
+            .filter(|p| p.folders.iter().any(|f| path.starts_with(Path::new(f))))
+            .collect()
     }
     /// The project that reserves `pool`, if any.
     pub fn project_of_pool(&self, pool: &str) -> Option<&Project> {
@@ -362,8 +374,14 @@ impl Store {
         }
         for other in candidate.projects.iter().filter(|p| p.pool != pool) {
             for f in &folder_list {
-                if other.folders.iter().any(|g| inside(f, g) || inside(g, f)) {
-                    return Err("A folder is already part of another project.".into());
+                // SB-146: the same repository may be in several groups; one group's folder
+                // inside another's stays ambiguous and is refused.
+                if other
+                    .folders
+                    .iter()
+                    .any(|g| g != f && (inside(f, g) || inside(g, f)))
+                {
+                    return Err(FOLDER_NESTED.into());
                 }
             }
         }

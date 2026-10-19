@@ -221,7 +221,7 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
     assert_eq!(hooked(&hook.to_string()), "", "already in the project");
 }
 #[test]
-fn an_unassigned_repository_becomes_a_project_through_the_session_hook() {
+fn an_unassigned_repository_stays_in_the_default_group_through_the_session_hook() {
     let tmp = tempfile::tempdir().unwrap();
     let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let work = work.path().canonicalize().unwrap();
@@ -268,27 +268,15 @@ fn an_unassigned_repository_becomes_a_project_through_the_session_hook() {
     let hook =
         serde_json::json!({"session_id": "s", "cwd": repo, "hook_event_name": "SessionStart"});
 
-    let said = hooked(&hook.to_string());
-    assert!(said.contains("project \"solo\""), "{said}");
-    assert!(said.contains("no accounts were moved"), "{said}");
-    assert_eq!(said.lines().count(), 1);
+    // SB-146: a repository in no group stays in the default group; the hook says nothing.
+    assert_eq!(hooked(&hook.to_string()), "");
     let (ok, listed, err) = run(&["project", "list"]);
     assert!(ok, "{err}");
-    let projects = listed["data"]["projects"].as_array().unwrap();
-    assert_eq!(projects.len(), 1, "{listed}");
-    assert_eq!(projects[0]["accounts"], serde_json::json!([]));
-    assert_eq!(projects[0]["folders"].as_array().unwrap().len(), 1);
-    assert_eq!(hooked(&hook.to_string()), "", "idempotent re-entry");
-
-    let (ok, _, err) = run(&["project", "delete", "--pool", "solo"]);
-    assert!(ok, "{err}");
     assert_eq!(
-        hooked(&hook.to_string()),
-        "",
-        "a project the person removed is not created again"
+        listed["data"]["projects"].as_array().unwrap().len(),
+        0,
+        "{listed}"
     );
-    let (_, listed, _) = run(&["project", "list"]);
-    assert_eq!(listed["data"]["projects"].as_array().unwrap().len(), 0);
 
     let plain_hook =
         serde_json::json!({"session_id": "s", "cwd": "/", "hook_event_name": "SessionStart"});

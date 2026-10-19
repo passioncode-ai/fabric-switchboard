@@ -134,12 +134,12 @@ pub fn steps(probe: &Probe) -> Value {
             "project",
             "optional",
             format!(
-                "{} belongs to no project yet: its sessions use the default pool. An eligible Git repository becomes a project when a coding agent opens it, without moving accounts.",
+                "{} is in no group yet: its sessions use the default group. A repository a group's agents create or work in joins that group by itself; to put this one in a group, name the group.",
                 folder.display()
             ),
             json!({
                 "command": format!(
-                    "{cli} project suggest --folder {}",
+                    "{cli} project move-root --folder {} --pool <group>",
                     shell_word(&folder.to_string_lossy())
                 ),
             }),
@@ -372,12 +372,12 @@ mod tests {
         assert_eq!(project["state"], "optional");
         assert_eq!(
             project["next"]["command"],
-            "/Users/x/.local/bin/switchboard project suggest --folder '/work/my app'"
+            "/Users/x/.local/bin/switchboard project move-root --folder '/work/my app' --pool <group>"
         );
         assert!(project["summary"]
             .as_str()
             .unwrap()
-            .contains("without moving accounts"));
+            .contains("joins that group by itself"));
         let mcp = by_id(&answer, "mcp");
         assert_eq!(mcp["state"], "todo");
         assert_eq!(

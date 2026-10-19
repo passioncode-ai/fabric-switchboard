@@ -236,9 +236,15 @@ pub enum Operation {
     /// project in one step; a repository in no project joins the named one. Two project saves
     /// (`ProjectEdit`): out of the old project, then into the new; a refused second save puts the
     /// folders back.
+    /// SB-146: `also` adds it to `pool` and keeps it in its other groups; `from` names the group
+    /// it leaves when it is in several (default: the first that holds it).
     MoveRoot {
         folder: PathBuf,
         pool: String,
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        also: bool,
     },
     /// SB-135 (part 2): the Git repositories under `under` (the person's folders, `~/DATA` by
     /// default in the window), each with the project it belongs to or none. Reads only.
@@ -1172,7 +1178,6 @@ impl Runtime {
         let mut claims: HashMap<PathBuf, HashSet<String>> = HashMap::new();
         // Folders of one project another project's agent works in: (folder, its project).
         let mut contested: HashMap<String, String> = HashMap::new();
-        let mut unassigned = Vec::new();
         {
             let Ok(mut worked) = self.worked.lock() else {
                 return;
@@ -1186,10 +1191,9 @@ impl Runtime {
                     cwd: canonical_near(&w.cwd),
                     target: canonical_near(&w.target),
                 };
+                // SB-146: an agent's repository in no group stays in the default group; it is
+                // listed under the repositories on disk, never made a group of its own.
                 let Some(project) = snapshot.project_for(&w.cwd) else {
-                    if let Some(root) = suggest::repo_root(&w.cwd) {
-                        unassigned.push(root);
-                    }
                     continue;
                 };
                 // Work inside a project folder is that project's already — unless another
@@ -1216,9 +1220,7 @@ impl Runtime {
                 claims.entry(root).or_default().insert(project.pool.clone());
             }
         }
-        unassigned.sort();
-        unassigned.dedup();
-        if claims.is_empty() && contested.is_empty() && unassigned.is_empty() {
+        if claims.is_empty() && contested.is_empty() {
             return;
         }
         let _transaction = self.hold("worked").await;
@@ -1270,51 +1272,6 @@ impl Runtime {
                 self.suggestions_changed();
             }
             self.add_found(found, time);
-
-            let mut created = 0;
-            for folder in unassigned {
-                let Ok(current) = self.store.snapshot() else {
-                    return;
-                };
-                let repos = suggest::project_repos(&current);
-                match suggest::unassigned(&self.root, &current, &repos, &folder) {
-                    Ok(suggest::Outcome::Unassigned { folder, repository }) => {
-                        match create_unassigned_project(
-                            &self.store,
-                            &self.root,
-                            folder,
-                            repository,
-                            time,
-                        ) {
-                            Ok(_) => created += 1,
-                            Err(_) => {
-                                if self.first_time("create:refused") {
-                                    oplog::event(
-                                        "project_suggestion",
-                                        &[("create", oplog::Field::Code("refused"))],
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(_) => {
-                        if self.first_time("create:unrecorded") {
-                            oplog::event(
-                                "project_suggestion",
-                                &[("create", oplog::Field::Code("unrecorded"))],
-                            );
-                        }
-                    }
-                }
-            }
-            if created > 0 {
-                oplog::event(
-                    "project_suggestion",
-                    &[("created", oplog::Field::Number(created))],
-                );
-                self.suggestions_changed();
-            }
         });
     }
     /// SB-131: a folder that joined its project because that project's agents worked in it, and
@@ -2284,42 +2241,6 @@ fn add_suggested_folder(
     Ok(projects::project_view(&store.snapshot()?, &saved))
 }
 
-/// Creates the project for an agent's unassigned Git root. Creation never moves accounts: the
-/// empty account list is deliberate, and `save_project` supplies the usual name, bounds and event.
-fn create_unassigned_project(
-    store: &Store,
-    root: &Path,
-    folder: PathBuf,
-    repository: String,
-    now: i64,
-) -> Result<(Value, Value), String> {
-    let admitted = projects::project_dir(root, &folder)?;
-    let name = admitted
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "project".into());
-    let saved = store.save_project(None, &name, std::slice::from_ref(&admitted), &[])?;
-    let suggestion = suggest::Suggestion {
-        folder: admitted.to_string_lossy().into_owned(),
-        pool: saved.pool.clone(),
-        reason: suggest::Reason::Unassigned,
-        repository: repository.clone(),
-        first_seen: now,
-        state: suggest::State::Added,
-    };
-    if suggest::remember_created(root, &suggestion.folder, &saved.pool, repository, now).is_err() {
-        oplog::event(
-            "project_suggestion",
-            &[("remember", oplog::Field::Code("failed"))],
-        );
-    }
-    let snapshot = store.snapshot()?;
-    Ok((
-        projects::project_view(&snapshot, &saved),
-        suggestion_view(&snapshot, &suggestion),
-    ))
-}
-
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
@@ -2439,6 +2360,9 @@ fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Op
 pub const MOVE_ACCOUNT_NO_PROJECT: &str =
     "No project uses that pool. Choose a project, or Default.";
 /// SB-135: a root moves only into a project.
+/// SB-146: `from` names a group that does not hold the repository.
+pub const MOVE_ROOT_NOT_IN_GROUP: &str =
+    "That group does not hold this repository. Choose one of the groups it is in.";
 pub const MOVE_ROOT_NO_PROJECT: &str = "No project uses that pool. Choose a project.";
 /// SB-135: a project keeps at least one folder.
 pub const MOVE_ROOT_LAST: &str = "This is the project's only repository. Add another folder to the project first, or delete the project.";
@@ -3567,19 +3491,6 @@ async fn execute(
                         }
                     })
                 }
-                suggest::Outcome::Unassigned { folder, repository } => {
-                    let (project, suggestion) =
-                        create_unassigned_project(&store, root, folder, repository, now)?;
-                    if let Some(rt) = runtime {
-                        oplog::event(
-                            "project_suggestion",
-                            &[("created", oplog::Field::Number(1))],
-                        );
-                        rt.suggestions_changed();
-                    }
-                    Ok(json!({"suggested": false, "added": true, "created": true,
-                        "suggestion": suggestion, "project": project}))
-                }
                 other => Ok(
                     json!({"suggested": false, "reason": other.code(), "message": other.message()}),
                 ),
@@ -3754,7 +3665,12 @@ async fn execute(
                 .collect::<Vec<_>>());
             Ok(status)
         }
-        Operation::MoveRoot { folder, pool } => {
+        Operation::MoveRoot {
+            folder,
+            pool,
+            from: leave,
+            also,
+        } => {
             let snapshot = store.snapshot()?;
             if snapshot.project_of_pool(&pool).is_none() {
                 return Err(MOVE_ROOT_NO_PROJECT.into());
@@ -3769,12 +3685,28 @@ async fn execute(
                     add_folders: add,
                     remove_folders: remove,
                 };
-            let from = snapshot.projects.iter().find_map(|p| {
+            let holds = |p: &&switchboard_core::Project| {
                 p.folders
                     .iter()
-                    .find(|f| canonical_near(Path::new(f)) == named)
-                    .map(|f| (p, f.clone()))
-            });
+                    .any(|f| canonical_near(Path::new(f)) == named)
+            };
+            if leave
+                .as_deref()
+                .is_some_and(|l| !snapshot.projects.iter().any(|p| p.pool == l && holds(&p)))
+            {
+                return Err(MOVE_ROOT_NOT_IN_GROUP.into());
+            }
+            let from = snapshot
+                .projects
+                .iter()
+                .filter(holds)
+                .find(|p| leave.as_deref().is_none_or(|l| p.pool == l))
+                .and_then(|p| {
+                    p.folders
+                        .iter()
+                        .find(|f| canonical_near(Path::new(f)) == named)
+                        .map(|f| (p, f.clone()))
+                });
             let Some((from, stored)) = from else {
                 if snapshot.project_for(&named).is_some() {
                     return Err(MOVE_ROOT_INSIDE.into());
@@ -3790,9 +3722,10 @@ async fn execute(
                     json!({"folder": named, "from": null, "pool": pool, "moved": true, "folders": 1}),
                 );
             };
-            if from.pool == pool {
+            let target_holds = snapshot.project_of_pool(&pool).is_some_and(|p| holds(&p));
+            if from.pool == pool || (also && target_holds) {
                 return Ok(
-                    json!({"folder": stored, "from": pool, "pool": pool, "moved": false, "folders": 0}),
+                    json!({"folder": stored, "from": from.pool, "pool": pool, "moved": false, "folders": 0}),
                 );
             }
             let folders = from.folders.clone();
@@ -3803,6 +3736,38 @@ async fn execute(
                     .into_iter()
                     .map(PathBuf::from),
             );
+            // SB-146: into one more group, out of none.
+            if also {
+                let count = tree.len();
+                Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(&pool, tree, Vec::new()),
+                ))
+                .await?;
+                return Ok(
+                    json!({"folder": stored, "from": null, "pool": pool, "moved": true, "also": true, "folders": count}),
+                );
+            }
+            // Already in the target too: leaving the source is the whole move.
+            if target_holds {
+                if tree.len() >= from.folders.len() {
+                    return Err(MOVE_ROOT_LAST.into());
+                }
+                let count = tree.len();
+                let source = from.pool.clone();
+                Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    edit(&source, Vec::new(), tree),
+                ))
+                .await?;
+                return Ok(
+                    json!({"folder": stored, "from": source, "pool": pool, "moved": true, "folders": count}),
+                );
+            }
             if tree.len() >= from.folders.len() {
                 return Err(MOVE_ROOT_LAST.into());
             }
@@ -4863,13 +4828,16 @@ mod owner_tests {
     }
 
     #[tokio::test]
-    async fn an_unassigned_git_repository_becomes_a_project_without_changing_provider_fallback() {
+    async fn an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made() {
+        // SB-146 (operator 2026-10-19): REQ-002 made each such repository a group of its own,
+        // without accounts, scattering what belonged together. It now stays in the default group.
         let root = tempfile::tempdir().unwrap();
         let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
         let work = tempfile::tempdir().unwrap();
         let work = work.path().canonicalize().unwrap();
         let repo = work.join("solo");
         std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
         std::fs::write(
             repo.join(".git/config"),
             "[remote \"origin\"]\n\turl = git@github.com:org/solo.git\n",
@@ -4880,56 +4848,19 @@ mod owner_tests {
             .store
             .select(Provider::Claude, "default", &default.id)
             .unwrap();
-
         let answer = runtime
             .execute(Operation::ProjectSuggest {
                 folder: repo.clone(),
             })
             .await
             .unwrap();
-        assert_eq!(answer["added"], true, "{answer}");
-        assert_eq!(answer["created"], true, "{answer}");
-        assert_eq!(answer["project"]["accounts"], json!([]));
+        assert_eq!(answer["reason"], "unassigned", "{answer}");
+        assert_eq!(answer["message"], suggest::UNASSIGNED, "{answer}");
         let snapshot = runtime.store.snapshot().unwrap();
-        assert_eq!(snapshot.projects.len(), 1);
-        let project = &snapshot.projects[0];
-        assert_eq!(project.name, "solo");
-        assert_eq!(project.folders, [repo.to_string_lossy().into_owned()]);
-        assert!(!snapshot.accounts.iter().any(|a| a.pool == project.pool));
-        assert_eq!(snapshot.routes["claude:default"], default.id);
-        assert!(
-            launch::project_allows(&snapshot, &default, &repo).is_ok(),
-            "a provider with no account in the new project keeps its default fallback"
-        );
+        assert!(snapshot.projects.is_empty());
+        assert!(launch::project_allows(&snapshot, &default, &repo).is_ok());
 
-        let again = runtime
-            .execute(Operation::ProjectSuggest {
-                folder: repo.clone(),
-            })
-            .await
-            .unwrap();
-        assert_eq!(again["reason"], "in_project", "{again}");
-        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
-        let plain = work.join("plain");
-        std::fs::create_dir_all(&plain).unwrap();
-        let refused = runtime
-            .execute(Operation::ProjectSuggest { folder: plain })
-            .await
-            .unwrap();
-        assert_eq!(refused["reason"], "not_ours", "{refused}");
-        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn the_background_pass_creates_an_unassigned_agents_project_once() {
-        let root = tempfile::tempdir().unwrap();
-        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
-        let work = tempfile::tempdir().unwrap();
-        let work = work.path().canonicalize().unwrap();
-        let repo = work.join("background");
-        std::fs::create_dir_all(repo.join(".git")).unwrap();
-        std::fs::create_dir_all(repo.join("src")).unwrap();
-        std::fs::write(repo.join(".git/config"), "").unwrap();
+        // The background pass leaves it alone too.
         let transcript = work.join("session.jsonl");
         std::fs::write(
             &transcript,
@@ -4941,21 +4872,90 @@ mod owner_tests {
         .unwrap();
         let now = monitor::now();
         *runtime.transcript_list.lock().unwrap() = Some((now, vec![transcript]));
-
         runtime.suggest_pass(now).await;
+        assert!(runtime.store.snapshot().unwrap().projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_repository_may_be_in_several_groups_and_sessions_take_the_one_with_accounts() {
+        // SB-146: «проект может сразу в несколько групп входить».
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (shared, own) = (work.join("shared"), work.join("own"));
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        for (name, folders) in [
+            ("Empty", vec![shared.clone()]),
+            ("Agents", vec![own.clone()]),
+        ] {
+            runtime
+                .execute(Operation::SaveProject {
+                    pool: None,
+                    name: name.into(),
+                    folders,
+                    account_ids: vec![],
+                    base_folders: None,
+                })
+                .await
+                .unwrap();
+        }
+        let account = save(&runtime.store, "synthetic-agents", "agents");
+        let moved = runtime
+            .execute(Operation::MoveRoot {
+                folder: shared.clone(),
+                pool: "agents".into(),
+                from: None,
+                also: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(moved["also"], true, "{moved}");
         let snapshot = runtime.store.snapshot().unwrap();
-        assert_eq!(snapshot.projects.len(), 1);
-        assert_eq!(snapshot.projects[0].name, "background");
-        assert_eq!(
-            snapshot.projects[0].folders,
-            [repo.to_string_lossy().into_owned()]
-        );
-        assert!(!snapshot
-            .accounts
+        let text = shared.to_string_lossy().into_owned();
+        assert!(snapshot
+            .projects
             .iter()
-            .any(|a| a.pool == snapshot.projects[0].pool));
-        runtime.suggest_pass(now + 1).await;
-        assert_eq!(runtime.store.snapshot().unwrap().projects.len(), 1);
+            .all(|p| p.folders.contains(&text) || p.pool != "empty"));
+        assert_eq!(snapshot.projects_for(&shared).len(), 2);
+        // The group with an account is the one a session there works in.
+        assert_eq!(snapshot.project_for(&shared).unwrap().pool, "agents");
+        assert!(launch::project_allows(&snapshot, &account, &shared).is_ok());
+        // One group's folder inside another group's folder stays refused.
+        let nested = runtime
+            .execute(Operation::SaveProject {
+                pool: Some("empty".into()),
+                name: "Empty".into(),
+                folders: vec![shared.clone(), own.join("sub")],
+                account_ids: vec![],
+                base_folders: None,
+            })
+            .await;
+        assert!(nested.is_err());
+        // Leaving one group keeps it in the other.
+        let left = runtime
+            .execute(Operation::MoveRoot {
+                folder: shared.clone(),
+                pool: "agents".into(),
+                from: Some("empty".into()),
+                also: false,
+            })
+            .await;
+        assert_eq!(
+            left.unwrap_err(),
+            MOVE_ROOT_LAST,
+            "a group keeps one folder"
+        );
+        let wrong = runtime
+            .execute(Operation::MoveRoot {
+                folder: own.clone(),
+                pool: "agents".into(),
+                from: Some("empty".into()),
+                also: false,
+            })
+            .await;
+        assert_eq!(wrong.unwrap_err(), MOVE_ROOT_NOT_IN_GROUP);
     }
 
     #[tokio::test]
@@ -5451,6 +5451,8 @@ mod owner_tests {
             .execute(Operation::MoveRoot {
                 folder: main.clone(),
                 pool: "docs".into(),
+                from: None,
+                also: false,
             })
             .await
             .unwrap();
@@ -5466,6 +5468,8 @@ mod owner_tests {
             .execute(Operation::MoveRoot {
                 folder: web.clone(),
                 pool: "docs".into(),
+                from: None,
+                also: false,
             })
             .await
             .unwrap_err();
@@ -5475,6 +5479,8 @@ mod owner_tests {
             .execute(Operation::MoveRoot {
                 folder: loose.clone(),
                 pool: "apps".into(),
+                from: None,
+                also: false,
             })
             .await
             .unwrap();
@@ -5488,6 +5494,8 @@ mod owner_tests {
             .execute(Operation::MoveRoot {
                 folder: nested,
                 pool: "apps".into(),
+                from: None,
+                also: false,
             })
             .await
             .unwrap_err();
@@ -5497,6 +5505,8 @@ mod owner_tests {
             .execute(Operation::MoveRoot {
                 folder: web,
                 pool: "nowhere".into(),
+                from: None,
+                also: false,
             })
             .await
             .unwrap_err();

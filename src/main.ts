@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -46,7 +46,7 @@ const tour = (): { page: Page; target: string | null; title: string; text: strin
   { page: 'accounts', target: null, title: t('Welcome to Switchboard'), text: t('Switchboard keeps your Claude Code and Codex accounts on this computer and moves your work between them, so you can keep working on another account when one reaches its limit.') },
   { page: 'accounts', target: '[data-focus="menu-add"]', title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
   { page: 'accounts', target: '.rotation-bar', title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
-  { page: 'projects', target: '[data-focus="new-project"]', title: t('Give a project its own accounts'), text: t('Press + New project, add the project\'s folders and choose its accounts. Sessions launched from those folders use only them, and other projects never switch to them.') },
+  { page: 'projects', target: '[data-focus="new-project"]', title: t('Give a group its own accounts'), text: t('Press + New group, add the group\'s projects (repository folders) and choose its accounts. Sessions launched from those folders use only them, and other groups never switch to them.') },
   { page: 'agents', target: '[data-focus="copy-onboard"]', title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
@@ -235,7 +235,7 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Projects'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
+  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Groups'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
     const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
@@ -249,14 +249,14 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Projects'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per project.'), projects: t('Give a project its own accounts, and keep other projects off them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which projects, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Groups'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of projects with accounts of their own; other groups never switch to them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
     if (page === 'accounts') actions.append(addMenu());
-    if (page === 'projects') actions.append(button(t('+ New project'), () => projectDialog(), 'button primary', 'new-project'));
+    if (page === 'projects') actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
     header.append(actions);
   }
   main.append(header);
@@ -272,7 +272,7 @@ function render(options: { background?: boolean } = {}): boolean {
   else if (page === 'tokens') renderTokens(main);
   else if (page === 'stats') renderStats(main);
   else if (loadError) {
-    const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load projects') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
+    const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load groups') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
     const state = emptyState(t('Loading your workbench'), t('Reading account metadata from the native app…')); state.setAttribute('role', 'status'); main.append(state);
   } else if (snapshot) {
@@ -305,18 +305,18 @@ function loadCodexRoute() {
 }
 function codexRouteSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'codex-route-heading');
-  const heading = el('h2', 'section-heading', t('Codex in project folders')); heading.id = 'codex-route-heading';
-  section.append(heading, el('p', 'surface-note', t('Codex sessions started in a project\'s folders use that project\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside projects keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
+  const heading = el('h2', 'section-heading', t('Codex in group folders')); heading.id = 'codex-route-heading';
+  section.append(heading, el('p', 'surface-note', t('Codex sessions started in a group\'s folders use that group\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside groups keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
   if (!codexRouteState && !codexRouteError) { loadCodexRoute(); section.append(el('p', 'form-note', t('Reading Codex\'s settings…'))); return section; }
   if (codexRouteError) section.append(el('p', 'form-error', codexRouteError));
   const r = codexRouteState;
   if (r) {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
     section.append(el('p', 'account-meta', line));
-    if (r.projects.length) section.append(el('p', 'form-note', t('Projects with a Codex account: {names}.', { names: r.projects.join(', ') })));
-    else section.append(el('p', 'form-note', t('No project has a Codex account yet. Move one into a project first.')));
+    if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
+    else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
-    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in project folders now use their projects\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on ? 'button' : 'button primary', 'codex-route-toggle');
+    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on ? 'button' : 'button primary', 'codex-route-toggle');
     act.disabled = !r.on && !!r.conflict;
     section.append(act);
   }
@@ -336,7 +336,7 @@ function diskMapSection() {
   const heading = el('h2', 'section-heading', t('Repositories on disk')); heading.id = 'disk-map-heading';
   const toggle = button(mapOpen ? t('Hide repositories') : t('Show repositories'), () => { mapOpen = !mapOpen; if (mapOpen && !diskMap) loadMap(); else render(); restoreFocus('disk-map-toggle'); }, 'text-button', 'disk-map-toggle');
   toggle.setAttribute('aria-expanded', String(mapOpen));
-  section.append(heading, el('p', 'surface-note', t('Every Git repository under the folders you choose, with the project it belongs to. Add one to a project, or move it with its worktrees and clones to another.')), toggle);
+  section.append(heading, el('p', 'surface-note', t('Every Git repository under the folders you choose, with the groups it is in. Add one to a group, or move it with its worktrees and clones to another.')), toggle);
   if (!mapOpen) return section;
   // The folders looked under: chosen with the system picker, remembered; none means ~/DATA (else home).
   const where = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
@@ -356,7 +356,7 @@ function diskMapSection() {
   section.append(groupField(t('Look under'), where));
   const filters = el('div', 'segmented'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', t('Show'));
   const all = mapRows(diskMap, 'all'); const loose = all.filter((r) => !r.pool).length;
-  for (const [value, label] of [['unassigned', t('Not in a project ({n})', { n: loose })], ['all', t('All ({n})', { n: all.length })]] as [MapFilter, string][]) {
+  for (const [value, label] of [['unassigned', t('Not in a group ({n})', { n: loose })], ['all', t('All ({n})', { n: all.length })]] as [MapFilter, string][]) {
     const choice = button(label, () => { mapFilter = value; render(); restoreFocus(`disk-map-${value}`); }, mapFilter === value ? 'segment is-on' : 'segment', `disk-map-${value}`);
     choice.setAttribute('aria-pressed', String(mapFilter === value)); filters.append(choice);
   }
@@ -364,18 +364,25 @@ function diskMapSection() {
   if (mapError) section.append(el('p', 'form-error', mapError));
   if (mapLoading) { section.append(el('p', 'surface-note', t('Looking for repositories…'))); return section; }
   const rows = mapRows(diskMap, mapFilter);
-  if (!rows.length) { section.append(el('p', 'surface-note', mapFilter === 'unassigned' ? t('Every repository here belongs to a project.') : t('No Git repositories here.'))); return section; }
+  if (!rows.length) { section.append(el('p', 'surface-note', mapFilter === 'unassigned' ? t('Every repository here is in a group.') : t('No Git repositories here.'))); return section; }
   const listing = el('ul', 'project-folders repository-map'); listing.setAttribute('aria-label', t('Repositories'));
   for (const row of rows) {
     const item = el('li', 'account-meta repository-row');
     const text = el('div', 'repository-text'); const name = el('span', 'repository-name', row.name); name.title = row.folder;
-    const where = row.project === null ? t('Not in a project') : row.place === 'inside' ? t('Inside a folder of “{name}”', { name: row.project }) : t('Project “{name}”', { name: row.project });
+    const groups = row.groups ?? (row.pool && row.project ? [{ pool: row.pool, name: row.project }] : []);
+    const where = row.project === null ? t('Not in a group') : row.place === 'inside' ? t('Inside a folder of “{name}”', { name: row.project }) : groups.length > 1 ? t('Groups {names}', { names: groups.map((g) => t('“{name}”', { name: g.name })).join(', ') }) : t('Group “{name}”', { name: row.project });
     text.append(name, el('span', 'folder-note', ` · ${where}${row.branch ? ` · ${row.branch}` : ''}`), el('span', 'repository-path', row.folder));
     item.append(text);
     if (row.action) {
-      const act = button(row.action === 'assign' ? t('Add to project…') : t('Move…'), () => moveRootDialog(row), 'text-button', `move-root-${row.folder}`);
-      act.setAttribute('aria-label', row.action === 'assign' ? t('Add {name} to a project', { name: row.name }) : t('Move {name} to another project', { name: row.name }));
+      const act = button(row.action === 'assign' ? t('Add to group…') : t('Move…'), () => moveRootDialog(row), 'text-button', `move-root-${row.folder}`);
+      act.setAttribute('aria-label', row.action === 'assign' ? t('Add {name} to a group', { name: row.name }) : t('Move {name} to another group', { name: row.name }));
       item.append(act);
+      // SB-146: a project may be in several groups.
+      if (row.action === 'move' && groups.length < (snapshot?.projects?.length ?? 0)) {
+        const also = button(t('Also add…'), () => moveRootDialog(row, true), 'text-button', `also-root-${row.folder}`);
+        also.setAttribute('aria-label', t('Also add {name} to another group', { name: row.name }));
+        item.append(also);
+      }
     }
     listing.append(item);
   }
@@ -383,48 +390,69 @@ function diskMapSection() {
   if (diskMap?.truncated) section.append(el('p', 'form-note', t('Only the first repositories found are listed. Choose a narrower folder to see the rest.')));
   return section;
 }
-function moveRootDialog(row: MapRow) {
+function moveRootDialog(row: MapRow, also = false) {
   const joining = row.pool === null;
-  const context = openDialog(joining ? t('Add to a project') : t('Move to another project'), joining ? t('Choose the project “{name}” belongs to. Its worktrees and clones join it by themselves.', { name: row.name }) : t('Choose where “{name}” goes. Its worktrees and clones go with it.', { name: row.name }));
-  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Project')));
-  const targets = rootTargets(row.pool, snapshot?.projects ?? []);
+  const held = new Set(row.groups?.map((g) => g.pool) ?? (row.pool ? [row.pool] : []));
+  const context = also
+    ? openDialog(t('Also add to a group'), t('“{name}” stays in its groups and joins one more. Sessions in its folders use the first of its groups that has an account.', { name: row.name }))
+    : openDialog(joining ? t('Add to a group') : t('Move to another group'), joining ? t('Choose the group “{name}” goes to. Its worktrees and clones join it by themselves.', { name: row.name }) : t('Choose where “{name}” goes. Its worktrees and clones go with it.', { name: row.name }));
+  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
+  const targets = rootTargets(row.pool, snapshot?.projects ?? []).filter((x) => !also || !held.has(x.pool)).map((x) => also ? { ...x, current: false } : x);
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-root'; radio.value = target.pool; radio.checked = target.current; radio.required = true;
-    const text = t('Project “{name}”', { name: target.name });
-    option.append(radio, el('span', '', target.current ? t('{target} (now)', { target: text }) : text)); group.append(option); radios.push(radio);
+    const text = t('Group “{name}”', { name: target.name });
+    option.append(radio, groupHint(target.current ? t('{target} (now)', { target: text }) : text, target.pool)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
-  if (!targets.length) context.body.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects first.')));
-  const confirm = submit(joining ? t('Add') : t('Move')); context.actions.append(confirm);
+  if (!targets.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups first.')));
+  const confirm = submit(joining || also ? t('Add') : t('Move')); context.actions.append(confirm);
   const sync = () => { const chosen = radios.find((r) => r.checked); confirm.disabled = !chosen || chosen.value === row.pool; };
   radios.forEach((radio) => radio.addEventListener('change', sync)); sync();
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === row.pool) return;
     const target = targets.find((x) => x.pool === chosen.value)!;
-    const success = joining ? t('{name} added to project “{project}”.', { name: row.name, project: target.name }) : t('{name} moved to project “{project}”.', { name: row.name, project: target.name });
-    void dialogSave(context, async () => { await adapter.moveRoot(row.folder, chosen.value); diskMap = null; loadMap(); }, success);
+    const success = joining || also ? t('{name} added to group “{project}”.', { name: row.name, project: target.name }) : t('{name} moved to group “{project}”.', { name: row.name, project: target.name });
+    void dialogSave(context, async () => { await adapter.moveRoot(row.folder, chosen.value, also, also || joining ? null : row.pool); diskMap = null; loadMap(); }, success);
   });
   (radios.find((r) => !r.checked) ?? radios[0])?.focus();
+}
+/** SB-146: a group's name; hovering or focusing it shows the projects it holds (repositories, never worktrees or subfolders). */
+let hintSeq = 0;
+function groupHint(text: string, pool: string) {
+  wantRoots();
+  const project = snapshot?.projects?.find((p) => p.pool === pool);
+  const wrap = el('span', 'group-hint'); wrap.tabIndex = 0;
+  wrap.append(el('span', 'group-hint-name', text));
+  if (!project) return wrap;
+  const names = groupProjects(project.folders, projectRoots?.[pool] ?? null);
+  const tip = el('span', 'group-tip'); tip.setAttribute('role', 'tooltip'); tip.id = `group-tip-${++hintSeq}`;
+  tip.append(el('strong', '', plural(names.length, { one: '{n} project', other: '{n} projects' })));
+  const list = el('ul', 'group-tip-list');
+  for (const name of names.slice(0, 40)) list.append(el('li', '', name));
+  if (names.length > 40) list.append(el('li', 'group-tip-more', t('and {n} more', { n: names.length - 40 })));
+  tip.append(list); wrap.append(tip); wrap.setAttribute('aria-describedby', tip.id);
+  return wrap;
 }
 /** Projects (0.6): folders that reserve their own accounts (core `save_project`). */
 function projectsSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'projects-heading');
-  const heading = el('h2', 'section-heading', t('Projects')); heading.id = 'projects-heading';
-  section.append(heading, el('p', 'surface-note', t('A project is one or more folders, such as related repositories, with accounts of its own. Sessions launched from its folders use only its accounts, rotation stays inside them, and no other project or the ordinary Claude Code switches to them.')));
+  const heading = el('h2', 'section-heading', t('Groups')); heading.id = 'projects-heading';
+  section.append(heading, el('p', 'surface-note', t('A group holds one or more projects (repository folders) with accounts of its own, and a project may be in several groups. Sessions launched from its folders use only its accounts, rotation stays inside them, and no other group or the ordinary Claude Code switches to them.')));
   const projects = snapshot!.projects ?? [];
   if (!projects.length) {
-    const empty = emptyState(t('No projects yet'), t('Create one when a client or a team should work only on its own subscriptions. Its accounts move into the project, and its folders stay on them.'));
-    empty.append(button(t('New project'), () => projectDialog(), 'button primary', 'empty-new-project'));
+    const empty = emptyState(t('No groups yet'), t('Create one when a client or a team should work only on its own subscriptions. Its accounts move into the group, and its folders stay on them.'));
+    empty.append(button(t('New group'), () => projectDialog(), 'button primary', 'empty-new-project'));
     section.append(empty); return section;
   }
-  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Projects'));
+  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Groups'));
   for (const project of projects) {
     const accounts = snapshot!.accounts.filter((a) => a.pool === project.pool);
     const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${project.name}, ${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`);
     const details = el('div', 'account-details'); const title = el('div', 'account-title');
-    title.append(el('h2', '', project.name), el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
+    const name = el('h2', ''); name.append(groupHint(project.name, project.pool));
+    title.append(name, el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
     const folders = projectFolderList(project);
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet — sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
@@ -470,26 +498,26 @@ function projectFolderList(project: Project) {
   return wrap;
 }
 function projectDialog(existing?: Project) {
-  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New project'), t('Add the project\'s folders and choose the accounts that belong to it. An account belongs to one project at a time.'));
+  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s projects (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a project may be in several groups.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
   const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
-  if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the project now and add them later.')));
+  if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
   for (const account of usable) {
     const owner = projectOf(account.pool);
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = !!existing && account.pool === existing.pool;
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     option.append(box, el('span', '', `${account.label} · ${providerName(account.provider)}${note}`)); picker.append(option);
   }
-  const grid = el('div', 'form-grid'); grid.append(field(t('Project name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this project. Subfolders are included. Repositories its agents work in join it by themselves, and folders deleted from disk leave it.')));
+  const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The projects and folders of this group. Subfolders are included. Repositories its agents create or work in join it by themselves, and folders deleted from disk leave it.')));
   context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default pool.')));
-  context.actions.append(submit(existing ? t('Save project') : t('Create project')));
+  context.actions.append(submit(existing ? t('Save group') : t('Create group')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
     const list = folders.require(); if (!list) return;
-    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders }), existing ? t('Project “{name}” saved.', { name: name.value.trim() }) : t('Project “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
+    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
 function rulesSection() {
@@ -688,24 +716,24 @@ async function loadOpenrouter() {
 /** SB-144: the Tokens page: the key every folder uses, and each project's own. */
 function renderTokens(main: HTMLElement) {
   if (!openrouter && !openrouterError) void loadOpenrouter();
-  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the project whose folder they start in. A folder outside every project, or a project without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
+  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
 }
 /** On Agents, where the key used to be: one line to the Tokens page. */
 function tokensPointer() {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'tokens-pointer');
   const heading = el('h2', '', t('OpenRouter keys')); heading.id = 'tokens-pointer';
-  section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each project\'s own key are under Tokens.')), button(t('Open Tokens'), () => { page = 'tokens'; void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'button', 'open-tokens'));
+  section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each group\'s own key are under Tokens.')), button(t('Open Tokens'), () => { page = 'tokens'; void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'button', 'open-tokens'));
   return section;
 }
 /** SB-144: each project, with its own key or the machine's. */
 function projectKeysPanel() {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'project-keys-heading');
-  const heading = el('h2', '', t('Project keys')); heading.id = 'project-keys-heading';
-  section.append(heading, el('p', '', t('Give a project its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
+  const heading = el('h2', '', t('Group keys')); heading.id = 'project-keys-heading';
+  section.append(heading, el('p', '', t('Give a group its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
   const projects = openrouterKeys?.projects ?? [];
   if (!openrouterKeys) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
-  if (!projects.length) { section.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects, then give it a key here.'))); return section; }
-  const list = el('ul', 'project-folders repository-map'); list.setAttribute('aria-label', t('Project keys'));
+  if (!projects.length) { section.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then give it a key here.'))); return section; }
+  const list = el('ul', 'project-folders repository-map'); list.setAttribute('aria-label', t('Group keys'));
   for (const project of projects) {
     const own = openrouterKeys.keys.find((k) => k.pool === project.pool);
     const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
@@ -747,7 +775,7 @@ function openrouterPanel() {
 function openrouterKeyDialog(target?: { pool: string; name: string }) {
   const own = target ? openrouterKeys?.keys.find((k) => k.pool === target.pool) : null;
   const replacing = target ? !!own : !!openrouter?.saved;
-  const context = openDialog(target ? (replacing ? t('Replace the key of “{name}”', { name: target.name }) : t('A key for “{name}”', { name: target.name })) : replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.') + (target ? ' ' + t('Agents started in this project\'s folders run on it.') : ''));
+  const context = openDialog(target ? (replacing ? t('Replace the key of “{name}”', { name: target.name }) : t('A key for “{name}”', { name: target.name })) : replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.') + (target ? ' ' + t('Agents started in this group\'s folders run on it.') : ''));
   const key = input('', 'password'); key.placeholder = 'sk-or-…';
   const picker = modelPicker((target ? own?.model : openrouter?.model) ?? '', 'key-model'); const model = picker.value;
   const grid = el('div', 'form-grid');
@@ -807,7 +835,7 @@ function openrouterRemoveDialog(target?: { pool: string; name: string }) {
 async function agentDialog(agent: AgentInfo) {
   const context = openDialog(t('Set up {agent}', { agent: agent.name }), agent.level === 'mcp' ? t('This agent can use Switchboard\'s tools; its model requests go to its own service.') : t('Register Switchboard\'s tools, then point the agent at Switchboard\'s proxy for one pool.'));
   const pools = [...new Set(snapshot!.accounts.map((a) => a.pool))];
-  const pool = select((pools.length ? pools : ['default']).map((p) => [p, projectOf(p) ? t('{pool} (project {name})', { pool: p, name: projectOf(p)!.name }) : p]));
+  const pool = select((pools.length ? pools : ['default']).map((p) => [p, projectOf(p) ? t('{pool} (group {name})', { pool: p, name: projectOf(p)!.name }) : p]));
   const out = el('div', 'agent-setup');
   const show = async () => {
     out.replaceChildren(el('p', 'form-note', t('Reading the setup…')));
@@ -1074,7 +1102,8 @@ function renderAccounts(main: HTMLElement) {
       const owner = projectOf(pool.pool);
       if (group.pools.length > 1 || owner || anyProject) {
         const poolHead = el('div', 'pool-heading');
-        poolHead.append(el('h3', '', owner ? t('Project · {name}', { name: owner.name }) : pool.pool === 'default' ? t('Default pool') : t('Pool · {pool}', { pool: pool.pool })));
+        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default pool') : t('Pool · {pool}', { pool: pool.pool })));
+        poolHead.append(poolTitle);
         // SB-142: which account this pool's sessions use, so every pool reads the same way.
         const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
         const chosen = pool.accounts.find((a) => a.id === routed);
@@ -1458,7 +1487,7 @@ function renderStats(main: HTMLElement) {
   if (!stats) { main.append(el('p', 'form-note', t('Reading statistics…'))); return; }
   const s = stats;
   if (!s.total.requests) {
-    main.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by project, account and agent, with the tokens the provider reports.')));
+    main.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by group, account and agent, with the tokens the provider reports.')));
   } else {
     const trouble = statTrouble(s.total);
     const tiles = el('div', 'stat-tiles');
@@ -1469,13 +1498,13 @@ function renderStats(main: HTMLElement) {
       statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), trouble === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
     main.append(tiles);
-    const projectName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No project') : pool);
+    const projectName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No group') : pool);
     const accountName = (label: string | null) => label ?? t('Removed account');
     main.append(
-      statTable('stat-projects', t('By project'), [t('Project')], s.projects.map((r) => ({ cells: [projectName(r.pool, r.name)], counts: r }))),
+      statTable('stat-projects', t('By group'), [t('Group')], s.projects.map((r) => ({ cells: [projectName(r.pool, r.name)], counts: r }))),
       statTable('stat-accounts', t('By account'), [t('Account'), t('Provider')], s.accounts.map((r) => ({ cells: [accountName(r.label), r.provider ? providerName(r.provider as Provider) : '–'], counts: r }))),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r }))),
-      statTable('stat-routes', t('Who works where'), [t('Project'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
+      statTable('stat-routes', t('Who works where'), [t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r })), true),
     );
   }
@@ -1809,18 +1838,19 @@ function editDialog(account: Account) {
 }
 /** SB-122: the account card's ⋯ → *Move to another pool…*: the default pool or a project, the current one marked (SCN-062). */
 function moveDialog(account: Account, inCli: boolean) {
-  const context = openDialog(t('Move to another pool'), t('Choose where “{label}” is used. A project’s accounts work only in its folders; the default pool works in every other folder.', { label: account.label }));
+  const context = openDialog(t('Move to another pool'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default pool works in every other folder.', { label: account.label }));
   const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Pool')));
   const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
-    const text = target.name === null ? t('Default pool') : t('Project “{name}”', { name: target.name });
-    option.append(radio, el('span', '', target.current ? t('{target} (now)', { target: text }) : text)); group.append(option); radios.push(radio);
+    const text = target.name === null ? t('Default pool') : t('Group “{name}”', { name: target.name });
+    const label = target.current ? t('{target} (now)', { target: text }) : text;
+    option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
-  if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a project. Switch the CLI to another account first.')));
-  if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no projects yet. Create one under Projects, then move accounts into it.')));
+  if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
+  if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then move accounts into it.')));
   const confirm = submit(t('Move')); context.actions.append(confirm);
   const sync = () => { const chosen = radios.find((r) => r.checked); confirm.disabled = !chosen || chosen.value === account.pool; };
   radios.forEach((radio) => radio.addEventListener('change', sync)); sync();
@@ -1828,7 +1858,7 @@ function moveDialog(account: Account, inCli: boolean) {
     event.preventDefault();
     const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === account.pool) return;
     const target = targets.find((x) => x.pool === chosen.value)!;
-    const success = target.name === null ? t('{label} moved to the default pool.', { label: account.label }) : t('{label} moved to project “{name}”.', { label: account.label, name: target.name });
+    const success = target.name === null ? t('{label} moved to the default pool.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
     void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
   });
   (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();
@@ -1844,9 +1874,9 @@ function removeDialog(account: Account) {
 
 /** SB-69: deleting a project asks first, like removing an account (SCN-042). */
 function deleteProjectDialog(project: Project) {
-  const context = openDialog(t('Delete project?'), t('Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.', { name: project.name, pool: project.pool }));
-  const confirm = submit(t('Delete project')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Project “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.', { name: project.name, pool: project.pool })); });
+  const context = openDialog(t('Delete group?'), t('Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.', { name: project.name, pool: project.pool }));
+  const confirm = submit(t('Delete group')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Group “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.', { name: project.name, pool: project.pool })); });
   context.actions.querySelector('button')?.focus();
 }
 /** SB-69: removing a project rule asks first; pausing it is the reversible choice (SCN-042). */

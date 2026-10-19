@@ -33,7 +33,13 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
             })
         })
         .flat_map(|p| p.folders.iter().map(move |f| (f.clone(), p.pool.clone())))
-        .collect()
+        // SB-146: a folder in several groups goes to the first with a Codex account.
+        .fold(Vec::new(), |mut out: Vec<(String, String)>, (f, pool)| {
+            if !out.iter().any(|(g, _)| *g == f) {
+                out.push((f, pool));
+            }
+            out
+        })
 }
 
 /// `<CODEX_HOME or ~/.codex>/config.toml`.

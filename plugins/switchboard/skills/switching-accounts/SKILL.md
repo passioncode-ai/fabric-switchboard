@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.6.50"
+  version: "0.6.51"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -187,11 +187,12 @@ between. A spend, credit or billing limit is the operator's to pay; report it on
 not retry it. `switchboard recovery` lists registered stops with `mode` `capacity` or
 `probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
 
-## 7. Git folders and projects register by themselves
+## 7. Groups, and repositories that join them by themselves
 
-An eligible unassigned Git repository you open becomes a Switchboard project through the same
-suggestion path used for existing projects. Creation uses an empty account set and never moves
-account IDs. Re-entry is idempotent; a project or folder the person removed is not recreated.
+A Switchboard project is a group (SB-146): it holds repositories with accounts of its own, and one
+repository may be in several groups. A repository in no group stays in the default group; it is
+never made a group of its own. Sessions in a folder held by several groups use the first of them
+that has an account for the provider.
 
 A Switchboard project may reserve accounts to its folders, and Switchboard keeps the folder list
 for it, with nothing asked. These join an existing project by themselves within half a minute:
@@ -201,11 +202,18 @@ for it, with nothing asked. These join an existing project by themselves within 
 - a clone of a new repository of the same product;
 - **any repository you edit, write or commit in while working in the project**.
 
-A project folder deleted from disk leaves the project by itself. To attach or create at once, for
-example one you create and do not start a session in:
+A project folder deleted from disk leaves the project by itself. To attach a related folder at
+once, for example one you create and do not start a session in:
 
 ```sh
 switchboard project suggest --folder <the new folder>
+```
+
+To put a repository in a group, or in one more group, only when the operator asks:
+
+```sh
+switchboard project move-root --folder <repository> --pool <group>          # move (or add one in no group)
+switchboard project move-root --folder <repository> --pool <group> --also   # one more group, keep the others
 ```
 
 Before you change files or commit in another repository, know that it becomes part of your

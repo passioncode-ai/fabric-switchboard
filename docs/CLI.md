@@ -149,7 +149,7 @@ A folder joins its existing project when it is:
 - a repository of one of the project's sources (`host/owner`);
 - a repository an agent working in the project changes (SB-131). An agent changes it when it edits or writes a file there (Claude Code `Edit`/`Write`), or commits, pushes, stages, merges, rebases, runs `git init` or makes a worktree there. Reading it does not count.
 
-When no existing project matches, an eligible unassigned Git repository or worktree a coding agent opens becomes a new project instead (REQ-002). Its nearest Git root is used, `projects::project_dir` and `Store::save_project` admit it with an empty account set, and no account IDs move. Re-entry is idempotent; a project or folder the person removed is not created again.
+When no group matches, the repository stays in the default group: since SB-146 Switchboard never makes a group of its own for it (REQ-002 did, and scattered repositories that belonged together). Put it in a group with `project move-root`.
 
 Where the signals come from:
 
@@ -178,14 +178,14 @@ A project folder deleted from disk leaves its project once it is still missing f
 - **Comes back:** a deleted folder that comes back is found again.
 
 ```sh
-switchboard project suggest --folder /work/app-review   # attach to an existing project or create an account-less one (default: the current folder)
+switchboard project suggest --folder /work/app-review   # attach to the group it belongs to (worktree, clone, worked in); a repository in no group stays in the default group (default: the current folder)
 switchboard project suggestions                         # {suggestions: still being added, added: last 24 h, removed: taken out as deleted, last 24 h}
 switchboard project accept /work/app-review             # add a folder still being added now
 switchboard project dismiss /work/app-review            # never add it
 switchboard project source --pool app --add github.com/example   # also adopt new repositories of this owner
 ```
 
-`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when the folder was added, its account-less project was created, or an add could not finish yet, and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md), SCN-055 and SCN-061; `suggest::tests`, `activity::tests`, `an_unassigned_git_repository_becomes_a_project_without_changing_provider_fallback`, `the_background_pass_creates_an_unassigned_agents_project_once`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`, `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither`, `a_deleted_project_folder_leaves_its_project_once_it_stays_gone`, `an_unassigned_repository_becomes_a_project_through_the_session_hook` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
+`suggest --from-hook` reads Claude Code's hook input on stdin. It prints one line, which joins the session's context, only when the folder was added to its group, or an add could not finish yet, and it always exits 0. See the [SB-117 packet](packets/sb-117-project-suggestions.md), SCN-055 and SCN-061; `suggest::tests`, `activity::tests`, `an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made`, `a_repository_may_be_in_several_groups_and_sessions_take_the_one_with_accounts`, `a_projects_new_folders_join_it_by_themselves_and_a_removed_one_stays_out`, `a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither`, `a_deleted_project_folder_leaves_its_project_once_it_stays_gone`, `an_unassigned_repository_stays_in_the_default_group_through_the_session_hook` and `project_suggestions_work_from_the_cli_and_the_hook_never_fails`.
 
 Project rules are optional: a folder and its subfolders start on a chosen account, rules never stop rotation, and the desktop app lists them under Projects, where each can be paused.
 
@@ -198,7 +198,8 @@ switchboard project rotate-capability --pool client-alpha   # the folders' capab
 switchboard project codex [on|off]     # SB-143: Codex sessions in project folders use the projects' Codex accounts (one provider in Codex's config.toml)
 switchboard stats [--days 30]            # SB-145: requests and the provider's token counts by project, account, agent and day (1-90 days)
 switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none (default ~/DATA, else home)
-switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another project, in one step
+switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another group, in one step
+switchboard project move-root --folder /work/bot --pool tools --also   # SB-146: into one more group; it stays in its others (--from <group> picks the one it leaves)
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8

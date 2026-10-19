@@ -272,13 +272,16 @@ mod tests {
         // Not yet: nothing written before a quarter of an hour, unless forced.
         s.save(root.path(), now, false);
         s.save(root.path(), now, true);
-        let mode = std::fs::metadata(root.path().join(FILE))
-            .unwrap()
-            .permissions();
-        assert_eq!(
-            std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
-            0o600
-        );
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(root.path().join(FILE))
+                .unwrap()
+                .permissions();
+            assert_eq!(
+                std::os::unix::fs::PermissionsExt::mode(&mode) & 0o777,
+                0o600
+            );
+        }
         let again = Statistics::load(root.path());
         let kept = again.inner.lock().unwrap().tallies.clone();
         assert_eq!(kept.len(), 1);
