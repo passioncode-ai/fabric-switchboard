@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: status report (operator's request, board thread bd1c9611, reply b963d929)
+
+Measured on `origin/main` `802238d`.
+
+- **Status:** v0.6.45 is the latest release (published 08:02 UTC); the operator's app updated itself
+  to it. No open PR, no unmerged branch on origin.
+- **What we worked on (since 0.6.41):** SB-H01, SB-138, SB-135 part 2, SB-132, SB-122 live check,
+  board hygiene; new row SB-141.
+- **Done:** v0.6.42 (PR #237: analytics host; scan reads off the owner transaction, no
+  `transaction_held` 05:14 to 07:10 UTC against 15 in the 90 minutes before), v0.6.43 (PR #238:
+  repositories on disk, `MoveRoot`, CLI and MCP), v0.6.44 (PR #239: Codex sessions' repositories;
+  rotation and recording off the async workers), v0.6.45 (PR #240: the map walks into a chosen
+  folder that is a repository). Every release run and its nightly on the tag green. SB-122 closed
+  live. Board items to us answered: lifecycle (cb31a510), update check (92c37fc0), SB-H01 (0cc62467).
+- **Left (priority):** SB-137 with SB-130 (a session Switchboard launches in its own home loses the
+  operator's instructions, settings and folder trust); SB-141; SB-135 rest (module checkouts, the
+  map opened once in the installed app); SB-114/115 live limit stop; SB-96, SB-47, SB-71,
+  SB-109 to SB-111.
+- **Blocked by:** SB-141 on fabric-agent-contract CT-57 (PR targeted 2026-10-22, thread 617c8cbe);
+  SB-96 on Observatory's grant registry; SB-47 on Fabric COM-03. Human gates: SB-01/SB-15 live
+  sign-ins and a day of switching, SB-02 a Windows host, SB-125 the operator's decision.
+- **When it can ship:** every merged change ships the same day (preflight, release run, nightly on
+  the tag). Next: 0.6.46 with SB-137/SB-130; SB-141 within one working day after CT-57 merges.
+- **Next action now:** SB-137/SB-130.
+
 ## 2026-10-19: 0.6.45, the disk map walks into a chosen folder that is a repository
 
 - **Released today:** 0.6.42 (04:39 UTC), 0.6.43 (05:38), 0.6.44 (06:24); each release and its
