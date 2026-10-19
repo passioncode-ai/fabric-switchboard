@@ -207,7 +207,10 @@ impl Pass {
         }
         {
             let _mutation = runtime.hold("rotate").await;
-            let _ = rotate(runtime, native_sources);
+            // A native switch writes Claude Code's files and Keychain item: a blocking section, so
+            // the proxy and control tasks on this worker do not wait with it (up to 49 s on a
+            // swapping machine, 2026-10-19).
+            let _ = crate::blocking::run(|| rotate(runtime, native_sources));
         }
         // A workflow whose executor hit its limit goes to the next agent of its chain (SB-73);
         // nothing happens without a chain. Outside the lock: the hand-over takes it itself.

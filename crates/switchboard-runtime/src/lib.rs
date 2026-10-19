@@ -467,6 +467,8 @@ pub(crate) struct NativeSources {
     pub(crate) swap_signature: fn() -> Option<(u64, u64, u128)>,
     /// Claude Code's recent session transcripts, for its limit markers.
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
+    /// Codex's recent rollouts, for the repositories its sessions change (SB-132).
+    pub(crate) rollouts: fn(i64) -> Vec<PathBuf>,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -486,6 +488,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_activity: external::SwapActivity::none,
     swap_signature: || None,
     transcripts: |_| Vec::new(),
+    rollouts: |_| Vec::new(),
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -504,6 +507,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_activity: external::claude_swap_activity,
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
+    rollouts: limits::codex_rollout_files,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
@@ -1041,6 +1045,8 @@ impl Runtime {
         if let Some((_, subagents)) = cached.as_ref() {
             files.extend(subagents.iter().cloned());
         }
+        // SB-132: Codex sessions' rollouts, read by the same scan.
+        files.extend((self.native.rollouts)(time));
         files
     }
     /// The recent Claude Code transcripts, walked at most once per background pass (SB-131).
@@ -1141,96 +1147,100 @@ impl Runtime {
             return;
         }
         let _transaction = self.hold("worked").await;
-        let Ok(snapshot) = self.store.snapshot() else {
-            return;
-        };
-        let mut found = Vec::new();
-        let mut settled = Vec::new();
-        let mut changed = self.unshare(&snapshot, &contested, time);
-        for (root, pools) in claims {
-            if pools.len() != 1 {
-                // Two projects' work: it joins neither, now or later.
-                oplog::event(
-                    "project_suggestion",
-                    &[("worked", oplog::Field::Code("two_projects"))],
-                );
-                if let Ok(text) = root
-                    .canonicalize()
-                    .map(|r| r.to_string_lossy().into_owned())
-                {
-                    if suggest::mark_shared(&self.root, &text, time).is_ok() {
-                        changed = true;
-                    }
-                }
-                settled.push(root);
-                continue;
-            }
-            let pool = pools.into_iter().next().unwrap_or_default();
-            match suggest::record_worked(&self.root, &snapshot, &root, &pool, time) {
-                Ok(suggest::Outcome::New(s)) => {
-                    found.push(s);
-                    settled.push(root);
-                }
-                // A failed recording is tried again with the next evidence.
-                Err(_) => oplog::event(
-                    "project_suggestion",
-                    &[("worked", oplog::Field::Code("unrecorded"))],
-                ),
-                Ok(_) => settled.push(root),
-            }
-        }
-        if let Ok(mut worked) = self.worked.lock() {
-            worked.1.extend(settled);
-        }
-        if found.is_empty() && changed {
-            self.suggestions_changed();
-        }
-        self.add_found(found, time);
-
-        let mut created = 0;
-        for folder in unassigned {
-            let Ok(current) = self.store.snapshot() else {
+        // Recording reads Git files and writes the list: a blocking section (2026-10-19: up to
+        // 10 s on a swapping machine).
+        blocking::run(|| {
+            let Ok(snapshot) = self.store.snapshot() else {
                 return;
             };
-            let repos = suggest::project_repos(&current);
-            match suggest::unassigned(&self.root, &current, &repos, &folder) {
-                Ok(suggest::Outcome::Unassigned { folder, repository }) => {
-                    match create_unassigned_project(
-                        &self.store,
-                        &self.root,
-                        folder,
-                        repository,
-                        time,
-                    ) {
-                        Ok(_) => created += 1,
-                        Err(_) => {
-                            if self.first_time("create:refused") {
-                                oplog::event(
-                                    "project_suggestion",
-                                    &[("create", oplog::Field::Code("refused"))],
-                                );
+            let mut found = Vec::new();
+            let mut settled = Vec::new();
+            let mut changed = self.unshare(&snapshot, &contested, time);
+            for (root, pools) in claims {
+                if pools.len() != 1 {
+                    // Two projects' work: it joins neither, now or later.
+                    oplog::event(
+                        "project_suggestion",
+                        &[("worked", oplog::Field::Code("two_projects"))],
+                    );
+                    if let Ok(text) = root
+                        .canonicalize()
+                        .map(|r| r.to_string_lossy().into_owned())
+                    {
+                        if suggest::mark_shared(&self.root, &text, time).is_ok() {
+                            changed = true;
+                        }
+                    }
+                    settled.push(root);
+                    continue;
+                }
+                let pool = pools.into_iter().next().unwrap_or_default();
+                match suggest::record_worked(&self.root, &snapshot, &root, &pool, time) {
+                    Ok(suggest::Outcome::New(s)) => {
+                        found.push(s);
+                        settled.push(root);
+                    }
+                    // A failed recording is tried again with the next evidence.
+                    Err(_) => oplog::event(
+                        "project_suggestion",
+                        &[("worked", oplog::Field::Code("unrecorded"))],
+                    ),
+                    Ok(_) => settled.push(root),
+                }
+            }
+            if let Ok(mut worked) = self.worked.lock() {
+                worked.1.extend(settled);
+            }
+            if found.is_empty() && changed {
+                self.suggestions_changed();
+            }
+            self.add_found(found, time);
+
+            let mut created = 0;
+            for folder in unassigned {
+                let Ok(current) = self.store.snapshot() else {
+                    return;
+                };
+                let repos = suggest::project_repos(&current);
+                match suggest::unassigned(&self.root, &current, &repos, &folder) {
+                    Ok(suggest::Outcome::Unassigned { folder, repository }) => {
+                        match create_unassigned_project(
+                            &self.store,
+                            &self.root,
+                            folder,
+                            repository,
+                            time,
+                        ) {
+                            Ok(_) => created += 1,
+                            Err(_) => {
+                                if self.first_time("create:refused") {
+                                    oplog::event(
+                                        "project_suggestion",
+                                        &[("create", oplog::Field::Code("refused"))],
+                                    );
+                                }
                             }
                         }
                     }
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    if self.first_time("create:unrecorded") {
-                        oplog::event(
-                            "project_suggestion",
-                            &[("create", oplog::Field::Code("unrecorded"))],
-                        );
+                    Ok(_) => {}
+                    Err(_) => {
+                        if self.first_time("create:unrecorded") {
+                            oplog::event(
+                                "project_suggestion",
+                                &[("create", oplog::Field::Code("unrecorded"))],
+                            );
+                        }
                     }
                 }
             }
-        }
-        if created > 0 {
-            oplog::event(
-                "project_suggestion",
-                &[("created", oplog::Field::Number(created))],
-            );
-            self.suggestions_changed();
-        }
+            if created > 0 {
+                oplog::event(
+                    "project_suggestion",
+                    &[("created", oplog::Field::Number(created))],
+                );
+                self.suggestions_changed();
+            }
+        });
     }
     /// SB-131: a folder that joined its project because that project's agents worked in it, and
     /// that another project's agents now work in too, is a shared repository (an organisation

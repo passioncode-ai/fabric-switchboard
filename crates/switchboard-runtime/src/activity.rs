@@ -5,6 +5,11 @@
 //! `git -C`). Each piece of evidence is paired with the session's working folder (the entry's
 //! `cwd`), which says whose project the work is for. Reading a repository never counts.
 //!
+//! SB-132: Codex sessions too. A Codex rollout (`<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-*.jsonl`)
+//! names its working folder in `turn_context` (and `session_meta`), its file changes in
+//! `apply_patch` patches (`*** Update File: …`) and its commands in `exec_command` calls (`cmd`,
+//! `workdir`) or, in older versions, `shell` function calls; the same rules apply to them.
+//!
 //! Only paths leave this module: the transcript text is read in memory, lines are filtered by
 //! cheap byte checks before any parsing, and nothing of a prompt, a file's content or a command
 //! is kept or logged. Like the limit scan (SB-49), a transcript is read only where it grew.
@@ -52,6 +57,8 @@ struct Seen {
     len: u64,
     /// The end of the last complete line read.
     scanned_to: u64,
+    /// A Codex rollout's working folder as last read (its lines do not carry one each).
+    cwd: Option<PathBuf>,
 }
 
 /// How far each recent transcript was read.
@@ -132,7 +139,19 @@ impl Activity {
         } else {
             &bytes
         };
-        let found = body.split(|b| *b == b'\n').flat_map(evidence).collect();
+        let codex = is_rollout(path);
+        let mut cwd = self.files.get(path).and_then(|s| s.cwd.clone());
+        if codex && cwd.is_none() {
+            // A first read from the tail may hold no `turn_context`: the session's start does.
+            cwd = rollout_start_cwd(path);
+        }
+        let found = if codex {
+            body.split(|b| *b == b'\n')
+                .flat_map(|line| codex_evidence(line, &mut cwd))
+                .collect()
+        } else {
+            body.split(|b| *b == b'\n').flat_map(evidence).collect()
+        };
         self.files.insert(
             path.clone(),
             Seen {
@@ -140,6 +159,7 @@ impl Activity {
                 modified,
                 len,
                 scanned_to: end,
+                cwd,
             },
         );
         found
@@ -213,6 +233,195 @@ pub(crate) fn evidence(line: &[u8]) -> Vec<Worked> {
         }));
     }
     found
+}
+
+/// A Codex rollout, by its file name.
+fn is_rollout(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+}
+
+/// The first line of a rollout (`session_meta`) carries the folder the session started in; it
+/// can be long (the base instructions), so up to ROLLOUT_HEAD bytes are read for it.
+const ROLLOUT_HEAD: u64 = 512 * 1024;
+fn rollout_start_cwd(path: &Path) -> Option<PathBuf> {
+    let file = fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(ROLLOUT_HEAD).read_to_end(&mut bytes).ok()?;
+    let line = &bytes[..bytes.iter().position(|b| *b == b'\n')?];
+    let mut cwd = None;
+    codex_evidence(line, &mut cwd);
+    cwd
+}
+
+/// The evidence in one rollout line. `turn_context` and `session_meta` lines move `cwd`; tool
+/// calls that change something are paired with it.
+pub(crate) fn codex_evidence(line: &[u8], cwd: &mut Option<PathBuf>) -> Vec<Worked> {
+    let context = contains(line, b"\"turn_context\"") || contains(line, b"\"session_meta\"");
+    if !context
+        && !(contains(line, b"\"response_item\"")
+            && (contains(line, b"Begin Patch") || contains(line, b"git ")))
+    {
+        return vec![];
+    }
+    let Ok(entry) = serde_json::from_slice::<serde_json::Value>(line) else {
+        return vec![];
+    };
+    let payload = &entry["payload"];
+    if entry["type"] == "turn_context" || entry["type"] == "session_meta" {
+        if let Some(dir) = payload["cwd"].as_str().map(PathBuf::from) {
+            if dir.is_absolute() {
+                *cwd = Some(dir);
+            }
+        }
+        return vec![];
+    }
+    let Some(here) = cwd.clone() else {
+        return vec![];
+    };
+    let mut targets: Vec<PathBuf> = Vec::new();
+    match (payload["type"].as_str(), payload["name"].as_str()) {
+        // Code mode: a script calling `tools.exec_command({cmd, workdir})` and `tools.apply_patch`.
+        (Some("custom_tool_call"), Some("exec")) => {
+            if let Some(script) = payload["input"].as_str().filter(|s| s.len() <= MAX_SCRIPT) {
+                targets.extend(patch_targets(script, &here));
+                for (command, workdir) in exec_commands(script) {
+                    let dir = workdir
+                        .as_deref()
+                        .and_then(|w| resolve(w, &here))
+                        .unwrap_or_else(|| here.clone());
+                    targets.extend(git_targets(&command, &dir));
+                }
+            }
+        }
+        (Some("custom_tool_call"), Some("apply_patch")) => {
+            if let Some(patch) = payload["input"].as_str().filter(|s| s.len() <= MAX_SCRIPT) {
+                targets.extend(patch_targets(patch, &here));
+            }
+        }
+        // Older versions: a `shell` function call with JSON arguments.
+        (
+            Some("function_call"),
+            Some("shell" | "shell_command" | "exec_command" | "local_shell"),
+        ) => {
+            let args: serde_json::Value = payload["arguments"]
+                .as_str()
+                .and_then(|a| serde_json::from_str(a).ok())
+                .unwrap_or_default();
+            let command = match (&args["command"], &args["cmd"]) {
+                (serde_json::Value::Array(words), _) => {
+                    words.last().and_then(|w| w.as_str()).map(str::to_owned)
+                }
+                (serde_json::Value::String(c), _) | (_, serde_json::Value::String(c)) => {
+                    Some(c.clone())
+                }
+                _ => None,
+            };
+            if let Some(command) = command.filter(|c| c.len() <= MAX_COMMAND) {
+                let dir = args["workdir"]
+                    .as_str()
+                    .and_then(|w| resolve(w, &here))
+                    .unwrap_or_else(|| here.clone());
+                targets.extend(git_targets(&command, &dir));
+            }
+        }
+        _ => {}
+    }
+    let mut seen = HashSet::new();
+    targets.retain(|t| seen.insert(t.clone()));
+    targets
+        .into_iter()
+        .map(|target| Worked {
+            cwd: here.clone(),
+            target,
+        })
+        .collect()
+}
+
+/// A Codex script longer than this is not read.
+const MAX_SCRIPT: usize = 256 * 1024;
+
+/// The folders an `apply_patch` patch changes: each file it adds, updates, deletes or moves to,
+/// as its folder. The patch may sit in a script as text with real line breaks or as `\n` escapes.
+fn patch_targets(text: &str, cwd: &Path) -> Vec<PathBuf> {
+    const HEADS: [&str; 4] = [
+        "*** Update File: ",
+        "*** Add File: ",
+        "*** Delete File: ",
+        "*** Move to: ",
+    ];
+    let mut out = Vec::new();
+    for line in text.split('\n').flat_map(|l| l.split("\\n")) {
+        let line = line.trim_start();
+        let Some(raw) = HEADS.iter().find_map(|h| line.strip_prefix(h)) else {
+            continue;
+        };
+        let raw = raw.trim().trim_end_matches(['"', '\'', '`', ',', ';']);
+        if let Some(folder) = resolve(raw, cwd).and_then(|p| p.parent().map(Path::to_path_buf)) {
+            if !out.contains(&folder) {
+                out.push(folder);
+            }
+        }
+    }
+    out
+}
+
+/// Each `exec_command({cmd: …, workdir: …})` in a Codex script: its command and folder, when both
+/// are plain string literals. A template with `${…}` is decided at run time and skipped.
+fn exec_commands(script: &str) -> Vec<(String, Option<String>)> {
+    let calls: Vec<usize> = script
+        .match_indices("exec_command(")
+        .map(|(i, _)| i)
+        .collect();
+    let mut out = Vec::new();
+    for (n, start) in calls.iter().enumerate() {
+        let end = calls.get(n + 1).copied().unwrap_or(script.len());
+        let call = &script[*start..end];
+        let Some(command) = js_value(call, "cmd").filter(|c| c.len() <= MAX_COMMAND) else {
+            continue;
+        };
+        out.push((command, js_value(call, "workdir")));
+    }
+    out
+}
+
+/// The string literal after `key:` in a piece of script ('…', "…" or `…` with escapes).
+fn js_value(text: &str, key: &str) -> Option<String> {
+    let mut from = 0;
+    while let Some(at) = text[from..].find(key).map(|i| i + from) {
+        from = at + key.len();
+        let before = text[..at].chars().next_back();
+        if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let rest = text[from..].trim_start();
+        let Some(rest) = rest.strip_prefix(':') else {
+            continue;
+        };
+        return js_string(rest.trim_start());
+    }
+    None
+}
+
+fn js_string(text: &str) -> Option<String> {
+    let mut chars = text.chars();
+    let quote = chars.next().filter(|q| matches!(q, '"' | '\'' | '`'))?;
+    let mut out = String::new();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'r' => out.push('\r'),
+                other => out.push(other),
+            },
+            '$' if quote == '`' && chars.clone().next() == Some('{') => return None,
+            c if c == quote => return Some(out),
+            c => out.push(c),
+        }
+    }
+    None
 }
 
 /// The folders a shell command changes with git: each `git <write>` in it, in the folder its
@@ -734,6 +943,106 @@ mod tests {
         // A transcript no longer recent is forgotten.
         activity.collect(&[]);
         assert!(activity.files.is_empty());
+    }
+
+    fn rollout(kind: &str, payload: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({"timestamp": "t", "type": kind, "payload": payload}))
+            .unwrap()
+    }
+    fn exec(script: &str) -> Vec<u8> {
+        rollout(
+            "response_item",
+            serde_json::json!({"type": "custom_tool_call", "name": "exec", "status": "completed", "call_id": "c", "input": script}),
+        )
+    }
+
+    #[test]
+    fn codex_patches_and_commits_count_with_the_turns_folder_and_reads_do_not() {
+        // SB-132: a Codex session's work, from its rollout.
+        let mut cwd = None;
+        assert!(
+            codex_evidence(
+                &exec("tools.exec_command({cmd: \"git -C /w/b commit -m x\"})"),
+                &mut cwd
+            )
+            .is_empty(),
+            "no folder yet"
+        );
+        codex_evidence(
+            &rollout(
+                "turn_context",
+                serde_json::json!({"cwd": "/w/app", "model": "m"}),
+            ),
+            &mut cwd,
+        );
+        assert_eq!(cwd, Some(PathBuf::from("/w/app")));
+        let targets = |line: Vec<u8>, cwd: &mut Option<PathBuf>| -> Vec<String> {
+            codex_evidence(&line, cwd)
+                .into_iter()
+                .map(|w| {
+                    assert_eq!(w.cwd, PathBuf::from("/w/app"));
+                    w.target.to_string_lossy().into_owned()
+                })
+                .collect()
+        };
+        let script = "const r = await tools.exec_command({cmd: \"git add -A && git commit -m 'a; b'\", workdir: \"/w/lib\"});\ntext(await tools.exec_command({cmd: 'git status'}));";
+        assert_eq!(targets(exec(script), &mut cwd), ["/w/lib"]);
+        let patch = "await tools.apply_patch(`*** Begin Patch\n*** Update File: src/a.rs\n@@\n-x\n+y\n*** Add File: /w/docs/new.md\n+z\n*** End Patch`);";
+        assert_eq!(targets(exec(patch), &mut cwd), ["/w/app/src", "/w/docs"]);
+        let escaped = "await tools.apply_patch(\"*** Begin Patch\\n*** Delete File: ../other/x.txt\\n*** End Patch\");";
+        assert_eq!(targets(exec(escaped), &mut cwd), ["/w/other"]);
+        let dynamic = "await tools.exec_command({cmd: `git -C ${dir} commit -m x`});";
+        assert!(
+            targets(exec(dynamic), &mut cwd).is_empty(),
+            "decided at run time: skipped"
+        );
+        let legacy = rollout(
+            "response_item",
+            serde_json::json!({"type": "function_call", "name": "shell", "call_id": "c",
+                "arguments": serde_json::json!({"command": ["bash", "-lc", "git commit -m x"], "workdir": "/w/old"}).to_string()}),
+        );
+        assert_eq!(targets(legacy, &mut cwd), ["/w/old"]);
+        let message = rollout(
+            "response_item",
+            serde_json::json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "run git commit in /w/x"}]}),
+        );
+        assert!(
+            targets(message, &mut cwd).is_empty(),
+            "text about a commit is not a commit"
+        );
+    }
+
+    #[test]
+    fn a_rollout_read_from_its_tail_takes_the_folder_its_session_started_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-2026-10-19T00-00-00-x.jsonl");
+        let mut text = rollout(
+            "session_meta",
+            serde_json::json!({"cwd": "/w/app", "id": "s"}),
+        );
+        text.push(b'\n');
+        let filler = rollout(
+            "event_msg",
+            serde_json::json!({"type": "token_count", "info": "x".repeat(1000)}),
+        );
+        while (text.len() as u64) < TAIL_BYTES + 4096 {
+            text.extend_from_slice(&filler);
+            text.push(b'\n');
+        }
+        text.extend(exec(
+            "await tools.exec_command({cmd: \"git commit -m x\"});",
+        ));
+        text.push(b'\n');
+        fs::write(&path, &text).unwrap();
+        let mut activity = Activity::default();
+        let found = activity.collect(std::slice::from_ref(&path));
+        assert_eq!(
+            found,
+            [Worked {
+                cwd: PathBuf::from("/w/app"),
+                target: PathBuf::from("/w/app"),
+            }]
+        );
     }
 
     #[test]
