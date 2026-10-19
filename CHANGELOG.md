@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- **Every CLI command now has an MCP tool or a stated reason (SB-134, part 3).** Eight more tools for agents: `switchboard_kimi_login` and `switchboard_kimi_rename` (Kimi Code sign-in and naming), `switchboard_handovers_set`, `switchboard_openrouter_models`, `switchboard_project_suggestions`, `switchboard_project_bindings`, `switchboard_project_suggestion` (accept or keep out a waiting folder) and `switchboard_project_sources` (a group's repository owners, by delta). The parity check has no command left for later.
+
 ## 0.6.51 — 2026-10-19
 
 - **Projects are now groups, and one project can be in several groups (SB-146).** What Switchboard called a project is shown as a group: a set of projects (repositories) with accounts of their own. The same repository can now be in several groups (*Repositories on disk* → *Also add…*); a session in its folder works on the first of its groups that has an account, and a launch from a group's card uses that group. Hover or focus a group's name to see the projects it holds, one per repository, without worktrees, clones or subfolders.

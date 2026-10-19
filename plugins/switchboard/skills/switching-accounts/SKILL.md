@@ -70,6 +70,14 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |
 | `switchboard_agents` | no | coding agents installed here, which are enabled for taking over work, the machine's default agent and the recommended OpenRouter models |
 | `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in — never a token |
+| `switchboard_kimi_login` | yes | start, follow, finish or cancel a Kimi Code sign-in, or sign an account in again; the person signs in, only when the operator asks |
+| `switchboard_kimi_rename` | yes | rename a Kimi Code account, only when the operator asks |
+| `switchboard_handovers_set` | yes | whether hand-overs open in Fabric's console, only when the operator asks |
+| `switchboard_openrouter_models` | no | OpenRouter's model list, recommended first; no key used |
+| `switchboard_project_suggestions` | no | folders still joining a group, and those added or taken out in the last day |
+| `switchboard_project_bindings` | no | group folders routed to their group's accounts, never a capability |
+| `switchboard_project_suggestion` | yes | add a waiting folder now or keep it out for good, only when the operator asks |
+| `switchboard_project_sources` | yes | a group's repository owners whose new repositories join it, by delta; only when the operator asks to change them |
 | `switchboard_openrouter_model` | yes | change the model agents start on, only when the operator asks |
 
 Arguments, result fields and fixed error texts: read `references/tools.md` before the

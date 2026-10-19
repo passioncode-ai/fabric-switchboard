@@ -2360,7 +2360,6 @@ mod mcp_parity {
     const PROCESS: &str = "a process mode, not an operation";
     const HOST: &str =
         "plumbing that hooks, consoles or hosts call; the state is readable over MCP";
-    const LATER: &str = "not over MCP yet: SB-134 part 3 (board)";
     const LAUNCH: &str = "launching an agent from an agent is SB-64/SB-74";
     const PARITY: &[(&str, Over)] = &[
         ("accounts list", Tool("switchboard_accounts")),
@@ -2393,7 +2392,7 @@ mod mcp_parity {
         ("agents enable", Tool("switchboard_agent_set")),
         ("agents disable", Tool("switchboard_agent_set")),
         ("agents default", Tool("switchboard_agent_set")),
-        ("agents models", Not(LATER)),
+        ("agents models", Tool("switchboard_openrouter_models")),
         ("agents connect", Tool("switchboard_onboarding")),
         ("agents key", Not(PERSON)),
         ("agents openrouter set", Not(PERSON)),
@@ -2414,12 +2413,12 @@ mod mcp_parity {
         ("agents hermes set", Tool("switchboard_hermes_set")),
         ("agents launch", Not(LAUNCH)),
         ("kimi list", Tool("switchboard_kimi_accounts")),
-        ("kimi login", Not(LATER)),
-        ("kimi finish", Not(LATER)),
-        ("kimi cancel", Not(LATER)),
-        ("kimi relogin", Not(LATER)),
+        ("kimi login", Tool("switchboard_kimi_login")),
+        ("kimi finish", Tool("switchboard_kimi_login")),
+        ("kimi cancel", Tool("switchboard_kimi_login")),
+        ("kimi relogin", Tool("switchboard_kimi_login")),
         ("kimi launch", Not(LAUNCH)),
-        ("kimi rename", Not(LATER)),
+        ("kimi rename", Tool("switchboard_kimi_rename")),
         ("kimi remove", Not(PERSON)),
         ("recovery register", Not(HOST)),
         ("recovery claim", Not(HOST)),
@@ -2427,7 +2426,7 @@ mod mcp_parity {
         ("recovery finish", Not(HOST)),
         ("handovers list", Tool("switchboard_handovers")),
         ("handovers run", Not(HOST)),
-        ("handovers set", Not(LATER)),
+        ("handovers set", Tool("switchboard_handovers_set")),
         ("chain list", Tool("switchboard_chain_get")),
         ("chain set", Tool("switchboard_chain_set")),
         ("chain clear", Tool("switchboard_chain_set")),
@@ -2443,11 +2442,14 @@ mod mcp_parity {
         ("project save", Tool("switchboard_project_edit")),
         ("project delete", Not(PERSON)),
         ("project suggest", Not(HOST)),
-        ("project suggestions", Not(LATER)),
-        ("project bindings", Not(LATER)),
-        ("project accept", Not(LATER)),
-        ("project dismiss", Not(LATER)),
-        ("project source", Not(LATER)),
+        (
+            "project suggestions",
+            Tool("switchboard_project_suggestions"),
+        ),
+        ("project bindings", Tool("switchboard_project_bindings")),
+        ("project accept", Tool("switchboard_project_suggestion")),
+        ("project dismiss", Tool("switchboard_project_suggestion")),
+        ("project source", Tool("switchboard_project_sources")),
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),

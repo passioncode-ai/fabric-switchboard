@@ -200,6 +200,14 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_hermes_set",
             "switchboard_agents",
             "switchboard_kimi_accounts",
+            "switchboard_kimi_login",
+            "switchboard_kimi_rename",
+            "switchboard_handovers_set",
+            "switchboard_openrouter_models",
+            "switchboard_project_suggestions",
+            "switchboard_project_bindings",
+            "switchboard_project_suggestion",
+            "switchboard_project_sources",
             "switchboard_openrouter_model"
         ]
     );
@@ -884,6 +892,20 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(error, "{stats}");
     let (error, events) = agent.tool("switchboard_events", json!({"limit": 5}));
     assert!(!error && events["events"].as_array().is_some(), "{events}");
+    // SB-134 part 3: the last CLI commands over MCP.
+    let (error, found) = agent.tool("switchboard_project_suggestions", json!({}));
+    assert!(!error && found["suggestions"].is_array(), "{found}");
+    let (error, bindings) = agent.tool("switchboard_project_bindings", json!({}));
+    assert!(!error, "{bindings}");
+    let (error, sources) = agent.tool("switchboard_project_sources", json!({"pool": "nope"}));
+    assert!(error, "{sources}");
+    let (error, refused) = agent.tool(
+        "switchboard_project_suggestion",
+        json!({"action": "nope", "folder": "/x"}),
+    );
+    assert!(error, "{refused}");
+    let (error, kimi) = agent.tool("switchboard_kimi_login", json!({"action": "nope"}));
+    assert!(error, "{kimi}");
     let (error, handovers) = agent.tool("switchboard_handovers", json!({}));
     assert!(!error && handovers["handovers"] == json!([]), "{handovers}");
     let (error, backups) = agent.tool("switchboard_backups", json!({}));
