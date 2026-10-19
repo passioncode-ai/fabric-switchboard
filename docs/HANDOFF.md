@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-19: 0.6.45, the disk map walks into a chosen folder that is a repository
+
+- **Released today:** 0.6.42 (04:39 UTC), 0.6.43 (05:38), 0.6.44 (06:24); each release and its
+  nightly on the tag green. The owner moved from 0.6.41 to 0.6.42 by the new drain at 05:14
+  (`update_restart outcome:drained`, 35 s, no request in flight) and on to 0.6.44 by itself.
+- **Measured on the new owner:** no `transaction_held` from 05:14 to 07:10 UTC, against 15 in the
+  90 minutes before on 0.6.41. Load had also fallen (from ~100 to 12-21), so part of it is the
+  machine; `suggest_found` no longer shows at all.
+- **Defect found live in 0.6.43's map:** `~/DATA` carries an empty `.git` of its own (since
+  2026-09-29, not Switchboard's, left in place), so the walk stopped at the chosen folder and
+  listed one row. A chosen folder is now always walked into. 185 repositories in 173 ms on this
+  machine.
+- **SB-H01 answered** on the board (thread 0cc62467, message cb9a714f).
+- **New row SB-141** (unified folder attribution, board thread 617c8cbe): waits for
+  fabric-agent-contract CT-57 (vectors, PR targeted 2026-10-22). Replied on the thread with that
+  plan.
+
+**Checks.** `./scripts/check.sh` exit 0; new test
+`a_chosen_folder_that_is_a_repository_itself_is_still_walked`.
+
+**Exact next task.** After 0.6.45 runs: open *Repositories on disk* in the app, add one loose
+repository to a project and move one there and back (closes SB-135 part 2 live). Watch for the
+first `recovery_hook registered` in a project folder (0.6.41's fix, not observed yet: no stop
+since). When CT-57 lands, SB-141. Then SB-137.
+
 ## 2026-10-19: 0.6.44, Codex sessions' repositories join their project (SB-132)
 
 - **SB-132.** `NativeSources::rollouts` (`limits::codex_rollout_files`) lists Codex rollouts of
