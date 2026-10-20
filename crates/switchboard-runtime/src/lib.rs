@@ -1006,7 +1006,7 @@ impl Runtime {
             .map(|mut told| told.len() < 4096 && told.insert(key.to_owned()))
             .unwrap_or(false)
     }
-    /// The background half of SB-117/SB-121/SB-131 and REQ-002, under the owner transaction like
+    /// The background half of SB-117/SB-121/SB-131, under the owner transaction like
     /// any other write: folders found next to a project's, repositories its agents changed, an
     /// agent's unassigned Git root, folders that could not be added yet, and deleted folders.
     /// The owner transaction for a background step, logged when held long.

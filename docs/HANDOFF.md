@@ -4,6 +4,16 @@
 
 ## 2026-10-20: 0.6.53, projects inside groups and Statistics by project (SB-147)
 
+- **Published** 2026-10-20 03:49 UTC (release run 39361759501, 25 assets; nightly on the tag
+  39361948284 green). Docs synced the same day: AGENTS.md lifecycle rows no longer describe REQ-002
+  and name the statistics folder field; README's release status and feature table say groups,
+  Statistics and Tokens (its em dashes removed); CONTRACTS and code comments no longer speak of
+  account-less creation.
+- **fabric-workspace knowledge** (products.md, roadmap.md rows for 0.6.53) is staged on branch
+  `agent/switchboard-0.6.53-20261020` in `~/DATA/_worktrees/fw-sb053`; both files were leased by
+  other runs at 03:45 and 03:57 UTC, so `~/DATA/_worktrees/fw-sb053-land.sh` lands it when the
+  leases free (it gives up after 60 minutes; then run it again).
+
 - **Decision (recorded here and in SB-147).** A project is a repository with all its checkouts
   (one `origin` identity), or a folder outside Git: DEC-0089's AT-6, AT-7 and AT-15, and what
   Fabric's Projects are. Its key is Switchboard's own (the identity or the path) until SB-141

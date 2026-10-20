@@ -1643,7 +1643,7 @@ pub(crate) async fn onboard_status(
     probe.folder = Some(folder);
     Ok(onboarding::steps(&probe))
 }
-/// `switchboard project suggest --from-hook` (SB-117/REQ-002): Claude Code's `SessionStart` hook
+/// `switchboard project suggest --from-hook` (SB-117, SB-146): Claude Code's `SessionStart` hook
 /// names the session's folder as `cwd`. Its output joins the session's context, so it prints one
 /// line only when a folder was added to its group, or when an add waits; it exits 0.
 async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
