@@ -22,7 +22,9 @@ and Linux (x64 and ARM), built by
 
 | Task | In Switchboard |
 |---|---|
-| Keep work and personal accounts separate | Account pools, project rules and isolated session homes |
+| Keep work and personal accounts separate | Groups of projects with accounts of their own (a project is a repository with its worktrees and clones; one project may be in several groups), project rules and isolated session homes |
+| See where accounts and tokens go | Statistics: requests and the provider's own token counts by group, project, account, coding agent and day, with a daily chart |
+| Give agents on API keys a key per project | Tokens: the machine's OpenRouter key and a key per group, picked by the folder an agent starts in |
 | See when another account is needed | Reported usage, reset countdowns and explicit unknown or expired states |
 | Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
 | Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |
@@ -37,18 +39,13 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.24](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.24)** · October 12, 2026.
-Work keeps going when the accounts run out: a fallback chain such as `claude-code → kimi-code →
-hermes` hands an Observatory workflow to a saved Kimi Code account, then to Hermes on your
-OpenRouter key and the model your Hermes uses there (else the key's default); the account a session works on is checked every
-minute from 95 % and every 30 seconds from 98 %, and the next one every minute; a limit the usage
-figures miss reads *Hidden personal limit*; a waiting update keeps checking and never waits
-forever. 0.6.21 finishes the Hermes hand-overs after a second review (bounded, listed under
-Sessions); 0.6.24 makes hand-overs to saved Claude, Codex and Kimi accounts pass Project
-Observatory again (it refused their ids as credential-shaped). 0.6.19, 0.6.22 and 0.6.23 were
-tagged but never published. Release run
-[38313811475](https://github.com/passioncode-ai/fabric-switchboard/actions/runs/38313811475).
-From 0.6.16 Windows installers and the CLI are Authenticode-signed; 0.6.15 added Linux and Windows on ARM.
+**Latest published: [v0.6.53](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.53)** · October 20, 2026.
+Groups list their projects, and Statistics counts requests and tokens by project as well as by
+group, account, agent and day, with a daily chart (0.6.53). 0.6.52 made projects groups (one
+project in several groups, no group made by itself for a stray repository), added Statistics
+and gave every CLI command an MCP tool. 0.6.48 added a key per group for agents on OpenRouter;
+0.6.49 lets Codex in a group's folders use the group's Codex accounts. Release notes for each
+version are in [CHANGELOG.md](CHANGELOG.md).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,
 arm64) are built natively and Authenticode-signed (Azure Artifact Signing, timestamped). Linux
@@ -64,7 +61,7 @@ Open source under the **GNU AGPL-3.0**, with a commercial license available.
 ## Quick start for a new teammate
 
 With a coding agent: once the CLI is on `PATH` (step 3), ask the agent to run `switchboard onboard`
-and follow it — it does every setup step it can and tells you the ones that are yours (opening the
+and follow it: it does every setup step it can and tells you the ones that are yours (opening the
 app, signing in). `switchboard onboard --status` shows where setup stands.
 
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
@@ -118,7 +115,7 @@ app, signing in). `switchboard onboard --status` shows where setup stands.
 - [Distribution](docs/DISTRIBUTION.md): macOS universal app/CLI, signing, Windows
   installer/CLI.
 - [Agents Switchboard works with](docs/AGENT-SUPPORT.md): the 30 popular coding agents
-  (Hermes, Kilo Code, Cline, Goose, OpenCode, …) — tools, proxy and launch, with sources.
+  (Hermes, Kilo Code, Cline, Goose, OpenCode, …): tools, proxy and launch, with sources.
 - [Usage analytics](docs/ANALYTICS.md): what release builds send (counts and kinds, never
   account names, e-mail addresses or sign-ins), the installation id PassionCode.ai tools share, and
   the switch that turns it off for all of them.
@@ -167,21 +164,21 @@ demo has no real accounts, no CLI launch and no network calls to providers.
 
 ## Using it
 
-1. **Add account** — official sign-in in a separate profile, an API key, a Claude setup
+1. **Add account**: official sign-in in a separate profile, an API key, a Claude setup
    token, or explicitly imported OAuth JSON. Switchboard reads the current Claude Code and Codex
    sign-in to show which saved account is in use, but never saves or switches it without you.
 2. Set a label and a pool, for example `work` or `personal`. The pool is the routing
    boundary; accounts of different providers are not interchangeable.
-3. **Select** — choose the account for the next managed requests.
-4. **Launch…** — pick the project folder with the system folder picker and start the CLI
+3. **Select**: choose the account for the next managed requests.
+4. **Launch…**: pick the project folder with the system folder picker and start the CLI
    there. Cleared, the **Isolated session** box sends it through the local proxy as a managed
    session (the pool's selected account; the app or `switchboard serve` must stay open; one
    managed home per provider/pool). Ticked, it runs in the account's own home with a direct
    connection to the provider, and later **Select** actions do not affect it.
-6. **Check usage** — quota is checked in the background (every 3 minutes for accounts in use or
+6. **Check usage**: quota is checked in the background (every 3 minutes for accounts in use or
    in a rotation pool, every 10 minutes otherwise); **Check usage** asks at once. An API key does
    not report a reliable subscription quota; an unknown quota is never shown as zero.
-7. **Language** — the window speaks English or Russian, following the operating system;
+7. **Language**: the window speaks English or Russian, following the operating system;
    About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041--use-switchboard-in-russian)).
 
 Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can
@@ -211,8 +208,8 @@ cargo test -p switchboard-core native_vault_roundtrip_uses_only_random_app_owned
 | `src` | TypeScript interface and the clearly labelled demo |
 | `docs` | research, specification, scenarios, contracts and evidence |
 
-Full hosted CI runs nightly — the macOS gate and build, and the native Windows fixtures —
-and push and pull requests do not run the full suite. A workflow existing does not mean it
+Full hosted CI runs nightly (the macOS gate and build, and the native Windows fixtures),
+and pushes and pull requests do not run the full suite. A workflow existing does not mean it
 passed.
 
 ## Releases
@@ -234,7 +231,7 @@ dependencies.
 ## License
 
 Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
-available for use that does not meet the AGPL's terms — [passioncode.ai/business](https://passioncode.ai/business/).
+available for use that does not meet the AGPL's terms: [passioncode.ai/business](https://passioncode.ai/business/).
 v0.4.1-beta.1 is the first release under the AGPL. Versions up to and including v0.4.0-beta.1 were released under PolyForm Noncommercial or Internal Use (v0.4.0-beta.1) and the MIT License (v0.3.1-beta.1 and earlier, commits up to and including `7c36f4a`); those releases keep their licence.
 
 The built app and CLI include third-party components under their own licenses; see

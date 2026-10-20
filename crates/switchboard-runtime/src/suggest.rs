@@ -56,7 +56,7 @@ pub enum Reason {
     Ecosystem,
     /// SB-131: an agent working in the project changed files or committed in it.
     Worked,
-    /// An agent opened a Git repository that belonged to no project (REQ-002).
+    /// An agent opened a Git repository that belongs to no group (REQ-002; since SB-146 it stays in the default group).
     Unassigned,
 }
 
@@ -342,7 +342,7 @@ pub(crate) enum Outcome {
     Waiting,
     Declined,
     InProject,
-    /// A Git repository an agent opened that no existing project claims (REQ-002).
+    /// A Git repository an agent opened that no group claims; nothing is created for it (SB-146).
     Unassigned {
         folder: PathBuf,
         repository: String,
