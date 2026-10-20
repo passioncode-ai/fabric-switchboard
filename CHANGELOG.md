@@ -6,8 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.6.53 — 2026-10-20
 
+- **A group lists its projects (SB-147).** Inside a group, folders are now shown by project: a project is a repository with its worktrees and clones (one `origin`), or a folder outside Git, the same way Fabric and Observatory count projects. Each project shows its folders under its name.
+- **Statistics by project, and a chart.** Each request is placed in the project of the folder it came from: the folder's own key, or the working folder Claude Code and Codex name in the request (only the path is read, nothing of the request is kept). *By project* and *By group* sit side by side with *By account* and *By agent*, and a chart of tokens or requests per day by group opens the page. Two more figures: the share of input read from the cache, and tokens per request.
+- **Tidier Statistics and Activity.** One width for every panel, column headers in the interface font, tables that fit without scrolling, and the events of Activity in their own titled panel.
 - Russian messages for refusals about groups now say «группа», like the rest of the window (SB-146).
 
 ## 0.6.52 — 2026-10-19

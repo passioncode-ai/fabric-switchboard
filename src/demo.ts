@@ -333,7 +333,7 @@ export function createDemoAdapter(): Adapter {
   };
 }
 
-/** SB-145: synthetic counts, the same for the same range: projects, accounts, agents and days. */
+/** SB-145/SB-147: synthetic counts, the same for the same range: groups, projects, accounts, agents and days. */
 function demoStatistics(state: Snapshot, days: number): Statistics {
   const day = (back: number) => new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
   const counts = (seed: number): StatCounts => {
@@ -341,33 +341,41 @@ function demoStatistics(state: Snapshot, days: number): Statistics {
     const limited = seed % 5 === 0 ? 3 : 0; const failed = seed % 7 === 0 ? 1 : 0;
     return { requests, ok: requests - limited - failed, limited, failed, input_tokens: requests * (900 + (seed % 9) * 120), output_tokens: requests * (300 + (seed % 4) * 90), cache_read_tokens: requests * 14_000, cache_write_tokens: requests * 400 };
   };
-  const add = (into: StatCounts, c: StatCounts) => { for (const k of Object.keys(zero()) as (keyof StatCounts)[]) into[k] += c[k]; };
   const zero = (): StatCounts => ({ requests: 0, ok: 0, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
-  const project = (pool: string) => (state.projects ?? []).find((p) => p.pool === pool)?.name ?? null;
-  const routes = [
-    { pool: 'alpha-web', account_id: 'demo-claude-work', agent: 'claude-code' },
-    { pool: 'alpha-web', account_id: 'demo-codex-work', agent: 'codex' },
-    { pool: 'work', account_id: 'demo-claude-north', agent: 'claude-code' },
-    { pool: 'personal', account_id: 'demo-codex-lab', agent: 'opencode' },
-    { pool: 'personal', account_id: 'demo-codex-lab', agent: 'hermes' },
-  ].map((r, i) => {
+  const keys = Object.keys(zero()) as (keyof StatCounts)[];
+  const add = (into: StatCounts, c: StatCounts) => { for (const k of keys) into[k] += c[k]; };
+  const tokens = (c: StatCounts) => c.input_tokens + c.output_tokens + c.cache_read_tokens + c.cache_write_tokens;
+  const groupName = (pool: string) => (state.projects ?? []).find((p) => p.pool === pool)?.name ?? null;
+  const base = [
+    { pool: 'alpha-web', project: 'github.com/demo/alpha-web', account_id: 'demo-claude-work', agent: 'claude-code' },
+    { pool: 'alpha-web', project: 'github.com/demo/alpha-docs', account_id: 'demo-codex-work', agent: 'codex' },
+    { pool: 'work', project: 'github.com/demo/api', account_id: 'demo-claude-north', agent: 'claude-code' },
+    { pool: 'personal', project: '', account_id: 'demo-codex-lab', agent: 'opencode' },
+    { pool: 'tools', project: 'github.com/demo/tools-cli', account_id: 'demo-codex-lab', agent: 'hermes' },
+  ];
+  const perDay = (d: number, i: number) => ((d + i) % 3 !== 2 ? counts(d * 5 + i) : null);
+  const routes = base.map((r, i) => {
     const a = state.accounts.find((x) => x.id === r.account_id);
-    const total = zero(); for (let d = 0; d < days; d += 1) if ((d + i) % 3 !== 2) add(total, counts(d * 5 + i));
-    return { ...r, name: project(r.pool), label: a?.label ?? null, provider: a?.provider ?? null, kind: a?.kind ?? null, ...total };
+    const total = zero(); for (let d = 0; d < days; d += 1) { const c = perDay(d, i); if (c) add(total, c); }
+    return { ...r, name: groupName(r.pool), project_name: r.project ? r.project.split('/').pop()! : null, label: a?.label ?? null, provider: a?.provider ?? null, kind: a?.kind ?? null, ...total };
   });
-  const group = <K extends string>(key: (r: typeof routes[number]) => K) => {
-    const m = new Map<K, StatCounts & { first: typeof routes[number] }>();
-    for (const r of routes) { const k = key(r); const g = m.get(k) ?? { ...zero(), first: r }; add(g, r); m.set(k, g); }
-    return [...m.values()].sort((a, b) => b.requests - a.requests);
+  const sum = <K extends string>(key: (r: typeof routes[number]) => K) => {
+    const m = new Map<K, { c: StatCounts; first: typeof routes[number]; pools: Set<string> }>();
+    for (const r of routes) { const k = key(r); const g = m.get(k) ?? { c: zero(), first: r, pools: new Set<string>() }; add(g.c, r); g.pools.add(r.pool); m.set(k, g); }
+    return [...m.values()].sort((a, b) => b.c.requests - a.c.requests);
   };
-  const strip = ({ first: _f, ...c }: StatCounts & { first: unknown }) => c as StatCounts;
-  const by_day = Array.from({ length: days }, (_, d) => { const c = zero(); routes.forEach((_r, i) => { if ((d + i) % 3 !== 2) add(c, counts(d * 5 + i)); }); return { day: day(d), ...c }; });
+  const by_day = Array.from({ length: days }, (_, d) => {
+    const c = zero(); const groups = new Map<string, { requests: number; tokens: number }>();
+    base.forEach((r, i) => { const x = perDay(d, i); if (!x) return; add(c, x); const g = groups.get(r.pool) ?? { requests: 0, tokens: 0 }; g.requests += x.requests; g.tokens += tokens(x); groups.set(r.pool, g); });
+    return { day: day(d), groups: [...groups.entries()].map(([pool, g]) => ({ pool, ...g })), ...c };
+  });
   const total = zero(); routes.forEach((r) => add(total, r));
   return {
     days, from: day(days - 1), to: day(0), since: day(89), total,
-    projects: group((r) => r.pool).map((g) => ({ pool: g.first.pool, name: g.first.name, ...strip(g) })),
-    accounts: group((r) => r.account_id).map((g) => ({ account_id: g.first.account_id, label: g.first.label, provider: g.first.provider, kind: g.first.kind, ...strip(g) })),
-    agents: group((r) => r.agent).map((g) => ({ agent: g.first.agent, ...strip(g) })),
+    groups: sum((r) => r.pool).map((g) => ({ pool: g.first.pool, name: g.first.name, ...g.c })),
+    projects: sum((r) => r.project).map((g) => ({ project: g.first.project, name: g.first.project_name, groups: [...g.pools].map((pool) => ({ pool, name: groupName(pool) })), ...g.c })),
+    accounts: sum((r) => r.account_id).map((g) => ({ account_id: g.first.account_id, label: g.first.label, provider: g.first.provider, kind: g.first.kind, ...g.c })),
+    agents: sum((r) => r.agent).map((g) => ({ agent: g.first.agent, ...g.c })),
     routes: [...routes].sort((a, b) => b.requests - a.requests),
     by_day,
   };

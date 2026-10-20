@@ -894,6 +894,7 @@ impl Runtime {
         match synced {
             Ok(report) => {
                 self.proxy.set_folder_tokens(report.tokens.clone());
+                self.proxy.set_stat_folders(stat_folders(&snapshot));
                 oplog::event(
                     "claude_binding",
                     &[
@@ -917,6 +918,7 @@ impl Runtime {
                     self.proxy.token(),
                     &salts,
                 ));
+                self.proxy.set_stat_folders(stat_folders(&snapshot));
                 oplog::event(
                     "claude_binding",
                     &[("result", oplog::Field::Code("unreadable"))],
@@ -1936,6 +1938,7 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
             proxy.token(),
             &salts,
         ));
+        proxy.set_stat_folders(stat_folders(&snapshot));
         proxy.set_codex_folders(codex_route::folders(&snapshot));
     }
     let port = proxy.address().port();
@@ -2239,6 +2242,24 @@ fn add_suggested_folder(
         );
     }
     Ok(projects::project_view(&store.snapshot()?, &saved))
+}
+
+/// SB-147: every group folder with its group, and the worktrees the bindings route, for the
+/// proxy's statistics (`ProxyHandle::set_stat_folders`).
+fn stat_folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = snapshot
+        .projects
+        .iter()
+        .flat_map(|p| p.folders.iter().map(move |f| (f.clone(), p.pool.clone())))
+        .collect();
+    out.extend(
+        bindings::desired(snapshot)
+            .into_iter()
+            .filter_map(|(f, pool)| f.to_str().map(|t| (t.to_owned(), pool))),
+    );
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
@@ -3534,6 +3555,7 @@ async fn execute(
             let report =
                 bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
             rt.proxy.set_folder_tokens(report.tokens.clone());
+            rt.proxy.set_stat_folders(stat_folders(&snapshot));
             if let Ok(mut key) = rt.bindings_key.lock() {
                 *key = None;
             }
@@ -3808,12 +3830,20 @@ async fn execute(
         Operation::Statistics { days } => {
             let snapshot = store.snapshot()?;
             let days = days.unwrap_or(30);
+            // SB-147: folders resolve to projects through Git, off the async thread.
+            let index = blocking::run(|| statistics::ProjectIndex::build(&snapshot));
             Ok(match runtime {
                 Some(rt) => {
                     rt.statistics.absorb(rt.proxy.take_statistics());
-                    rt.statistics.report(&snapshot, days, monitor::now())
+                    rt.statistics
+                        .report(&snapshot, &index, days, monitor::now())
                 }
-                None => statistics::Statistics::load(root).report(&snapshot, days, monitor::now()),
+                None => statistics::Statistics::load(root).report(
+                    &snapshot,
+                    &index,
+                    days,
+                    monitor::now(),
+                ),
             })
         }
         Operation::RepositoryMap { under } => {

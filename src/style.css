@@ -392,7 +392,7 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .stat-scroll { overflow-x: auto; }
 .stat-table { width: 100%; border-collapse: collapse; font-size: var(--t-label); }
 .stat-table th, .stat-table td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); white-space: nowrap; }
-.stat-table thead th { color: var(--muted); font-weight: 550; }
+.stat-table thead th { color: var(--muted); font-weight: 550; font-family: var(--font-ui); }
 .stat-table tbody th { font-weight: 550; white-space: normal; }
 .stat-table .num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .stat-table .is-trouble { color: var(--warn); }
@@ -408,3 +408,40 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .group-tip-more { color: var(--muted); }
 @media (prefers-reduced-motion: no-preference) { .group-tip { animation: group-tip-in 120ms ease-out; } }
 @keyframes group-tip-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+/* SB-147: one width for Statistics and Activity, the chart, the tables side by side when they fit. */
+.stat-page { max-width: 980px; }
+.stat-page .stat-tiles, .stat-page .stat-panel { max-width: none; }
+.stat-page > * + * { margin-top: var(--space-4); }
+.stat-page .stat-bar { margin-bottom: 0; }
+.stat-page .stat-tiles { margin-bottom: 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--space-4); }
+.stat-grid > .stat-panel { margin: 0; min-width: 0; }
+.about-panel.stat-panel + .about-panel.stat-panel { margin-top: var(--space-4); }
+.stat-chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.stat-chart-head h2 { margin: 0; }
+.stat-chart-svg { display: block; width: 100%; height: auto; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis { fill: var(--muted); font-family: var(--font-data); font-size: 11px; }
+.chart-bar { transition: opacity var(--dur-hover) var(--motion-ease); }
+g:hover > .chart-bar { opacity: .82; }
+.chart-s0 { fill: var(--chart-1); background: var(--chart-1); }
+.chart-s1 { fill: var(--chart-2); background: var(--chart-2); }
+.chart-s2 { fill: var(--chart-3); background: var(--chart-3); }
+.chart-s3 { fill: var(--chart-4); background: var(--chart-4); }
+.chart-s4 { fill: var(--chart-5); background: var(--chart-5); }
+.chart-s5 { fill: var(--chart-6); background: var(--chart-6); }
+.chart-legend { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); font-size: var(--t-label); color: var(--muted); }
+.chart-legend li { display: inline-flex; align-items: center; gap: var(--space-2); }
+.chart-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .chart-bar { transition: none; } }
+/* Activity: sessions and events in panels of one width. */
+.about-panel:has(> .event-list), .about-panel:has(> .session-list), .about-panel[aria-labelledby="sessions-heading"] { max-width: 980px; }
+.about-panel > .event-list { border: 0; border-radius: 0; background: transparent; margin: 0 calc(-1 * var(--space-4)); }
+/* SB-147: a group's folders by project. */
+.group-projects { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-3); }
+.group-project-title { display: flex; align-items: baseline; gap: var(--space-2); }
+.group-project-name { font-weight: 600; }
+.group-project .project-folders { margin-top: var(--space-1); }
+.stat-grid > .about-panel.stat-panel + .about-panel.stat-panel { margin-top: 0; }
+.stat-table thead th.num { font-family: var(--font-ui); }
+.stat-table .cell-note { display: block; color: var(--muted); font-weight: 400; font-size: var(--t-chip); }

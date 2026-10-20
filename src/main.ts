@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -477,20 +477,28 @@ const derivedText = (kind: 'worktree' | 'clone' | null, branch: string | null) =
 function projectFolderList(project: Project) {
   wantRoots();
   const wrap = el('div', 'project-folder-block');
-  const folders = el('ul', 'project-folders');
   const open = expandedProjects.has(project.pool);
-  const rows = folderRows(project.folders, projectRoots?.[project.pool] ?? null, open);
-  const shown = open ? rows : rows.slice(0, FOLDERS_SHOWN);
-  for (const row of shown) {
-    const item = el('li', row.depth ? 'account-meta derived-folder' : 'account-meta', row.depth ? folderName(row.folder) : row.folder); item.title = row.folder;
-    const note = row.depth ? derivedText(row.kind, row.branch) : row.derived ? plural(row.derived, { one: '+{n} worktree or clone', other: '+{n} worktrees and clones' }) : '';
-    if (note) item.append(el('span', 'folder-note', ` · ${note}`));
-    folders.append(item);
+  // SB-147: the group's projects, each with its folders (the repository, its worktrees and clones).
+  const projects = groupProjectRows(project.folders, projectRoots?.[project.pool] ?? null);
+  const shown = open ? projects : projects.slice(0, FOLDERS_SHOWN);
+  const list = el('ul', 'group-projects'); list.setAttribute('aria-label', t('Projects'));
+  for (const entry of shown) {
+    const item = el('li', 'group-project');
+    const title = el('div', 'group-project-title');
+    title.append(el('span', 'group-project-name', entry.name), el('span', 'folder-note', plural(entry.rows.length, { one: '{n} folder', other: '{n} folders' })));
+    item.append(title);
+    const folders = el('ul', 'project-folders');
+    for (const row of entry.rows) {
+      const line = el('li', row.depth ? 'account-meta derived-folder' : 'account-meta', row.depth ? folderName(row.folder) : row.folder); line.title = row.folder;
+      const note = row.depth ? derivedText(row.kind, row.branch) : row.branch ?? '';
+      if (note) line.append(el('span', 'folder-note', ` · ${note}`));
+      folders.append(line);
+    }
+    item.append(folders); list.append(item);
   }
-  wrap.append(folders);
-  const hidden = project.folders.length - shown.length;
-  if (hidden > 0 || open) {
-    const label = open ? t('Show fewer folders') : t('Show all folders ({n})', { n: project.folders.length });
+  wrap.append(list);
+  if (projects.length > FOLDERS_SHOWN || open) {
+    const label = open ? t('Show fewer projects') : t('Show all projects ({n})', { n: projects.length });
     const toggle = button(label, () => { if (open) expandedProjects.delete(project.pool); else expandedProjects.add(project.pool); render(); restoreFocus(`folders-${project.pool}`); }, 'text-button', `folders-${project.pool}`);
     toggle.setAttribute('aria-expanded', String(open));
     wrap.append(toggle);
@@ -1441,10 +1449,11 @@ function renderPolicies(main: HTMLElement) {
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} · {pool} · {target}…', { provider: providerName(policy.provider), pool: policy.pool, target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New policy…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
 }
-/** SB-145: the proxy's counts for the chosen range (7, 30 or 90 days). */
+/** SB-145/SB-147: the proxy's counts for the chosen range (7, 30 or 90 days). */
 let stats: Statistics | null = null;
 let statsError = false;
 let statsDays = 30;
+let chartMetric: ChartMetric = 'tokens';
 async function loadStats() {
   try { stats = await adapter.statistics(statsDays); statsError = false; } catch { statsError = true; }
   backgroundRender();
@@ -1452,19 +1461,70 @@ async function loadStats() {
 function statTile(label: string, value: string, note: string) {
   const tile = el('div', 'stat-tile'); tile.append(el('span', 'stat-label', label), el('strong', 'stat-value', value), el('span', 'stat-note', note)); return tile;
 }
+const SVG = 'http://www.w3.org/2000/svg';
+function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string | number>) {
+  const node = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node;
+}
+/** SB-147: tokens or requests per day, stacked by group; each bar names its day and values on hover. */
+function statChart(s: Statistics) {
+  const section = el('section', 'about-panel stat-panel stat-chart'); section.setAttribute('aria-labelledby', 'stat-chart-heading');
+  const head = el('div', 'stat-chart-head');
+  const heading = el('h2', '', chartMetric === 'tokens' ? t('Tokens per day') : t('Requests per day')); heading.id = 'stat-chart-heading';
+  const toggle = el('div', 'segmented'); toggle.setAttribute('role', 'group'); toggle.setAttribute('aria-label', t('Show'));
+  for (const [value, label] of [['tokens', t('Tokens')], ['requests', t('Requests')]] as [ChartMetric, string][]) {
+    const b = button(label, () => { chartMetric = value; render(); restoreFocus(`chart-${value}`); }, `segment${chartMetric === value ? ' is-on' : ''}`, `chart-${value}`);
+    b.setAttribute('aria-pressed', String(chartMetric === value)); toggle.append(b);
+  }
+  head.append(heading, toggle); section.append(head);
+  const names = (pool: string) => s.groups.find((g) => g.pool === pool)?.name ?? (pool === 'default' ? t('No group') : pool);
+  const { days, series } = chartSeries(s, chartMetric, names);
+  if (!series.length) { section.append(el('p', 'form-note', t('No traffic in this period.'))); return section; }
+  const totals = days.map((_, i) => series.reduce((sum, x) => sum + x.values[i], 0));
+  const max = niceMax(Math.max(...totals));
+  const W = 900, H = 220, L = 52, B = 26, T = 8, plotW = W - L - 8, plotH = H - B - T;
+  const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, class: 'stat-chart-svg', role: 'img', 'aria-label': t('{metric} per day by group', { metric: chartMetric === 'tokens' ? t('Tokens') : t('Requests') }) });
+  for (const f of [0, 0.5, 1]) {
+    const y = T + plotH - plotH * f;
+    chart.append(svg('line', { x1: L, x2: W - 8, y1: y, y2: y, class: 'chart-grid' }));
+    const label = svg('text', { x: L - 8, y: y + 4, class: 'chart-axis', 'text-anchor': 'end' }); label.textContent = compactCount(max * f); chart.append(label);
+  }
+  const slot = plotW / days.length; const barW = Math.min(28, Math.max(2, slot * 0.7));
+  const every = Math.max(1, Math.ceil(days.length / 8));
+  days.forEach((day, i) => {
+    const x = L + i * slot + (slot - barW) / 2; let y = T + plotH;
+    const group = svg('g', {});
+    const tip = svg('title', {}); tip.textContent = [day, ...series.filter((x) => x.values[i]).map((x) => `${x.name}: ${compactCount(x.values[i])}`)].join('\n'); group.append(tip);
+    series.forEach((ser, si) => {
+      const h = (ser.values[i] / max) * plotH; if (h <= 0) return;
+      y -= h; group.append(svg('rect', { x, y, width: barW, height: Math.max(h, 1), class: `chart-bar chart-s${si % 6}`, rx: 1.5 }));
+    });
+    chart.append(group);
+    // Counted from the last day, so today always has its label and none run together.
+    if ((days.length - 1 - i) % every === 0) { const label = svg('text', { x: x + barW / 2, y: H - 8, class: 'chart-axis', 'text-anchor': 'middle' }); label.textContent = day.slice(5); chart.append(label); }
+  });
+  section.append(chart);
+  const legend = el('ul', 'chart-legend'); legend.setAttribute('aria-label', t('Groups'));
+  series.forEach((x, si) => { const item = el('li', ''); item.append(el('span', `chart-swatch chart-s${si % 6}`), el('span', '', `${x.name} · ${compactCount(x.values.reduce((a, b) => a + b, 0))}`)); legend.append(item); });
+  section.append(legend);
+  return section;
+}
 /** One table: a name column (or several) and the counts every row has. */
-function statTable(id: string, title: string, names: string[], rows: { cells: string[]; counts: StatCounts }[], compact = false) {
+function statTable(id: string, title: string, names: string[], rows: { cells: (string | [string, string])[]; counts: StatCounts }[], compact = false) {
   const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', id);
   const heading = el('h2', '', title); heading.id = id; section.append(heading);
   const wrap = el('div', 'stat-scroll'); const table = el('table', 'stat-table');
   const head = el('tr');
   for (const name of names) head.append(el('th', '', name));
-  for (const name of compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')]) { const th = el('th', 'num', name); head.append(th); }
+  for (const name of compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')]) head.append(el('th', 'num', name));
   const thead = el('thead'); thead.append(head); table.append(thead);
   const body = el('tbody');
   for (const row of rows) {
     const tr = el('tr');
-    row.cells.forEach((cell, i) => tr.append(el(i === 0 ? 'th' : 'td', '', cell)));
+    row.cells.forEach((cell, i) => {
+      const td = el(i === 0 ? 'th' : 'td', '', typeof cell === 'string' ? cell : cell[0]);
+      if (typeof cell !== 'string' && cell[1]) td.append(el('span', 'cell-note', cell[1]));
+      tr.append(td);
+    });
     tr.firstElementChild?.setAttribute('scope', 'row');
     const c = row.counts; const trouble = statTrouble(c);
     const values = compact ? [compactCount(c.requests), compactCount(statTokens(c))] : [compactCount(c.requests), compactCount(c.input_tokens + c.cache_write_tokens), compactCount(c.cache_read_tokens), compactCount(c.output_tokens)];
@@ -1482,33 +1542,40 @@ function renderStats(main: HTMLElement) {
     const choice = button(plural(days, { one: '{n} day', other: '{n} days' }), () => { statsDays = days; stats = null; void loadStats(); render(); }, `segment${statsDays === days ? ' is-on' : ''}`, `stats-${days}`);
     choice.setAttribute('aria-pressed', String(statsDays === days)); range.append(choice);
   }
-  const bar = el('div', 'stat-bar'); bar.append(range); main.append(bar);
-  if (statsError) { main.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.'))); return; }
-  if (!stats) { main.append(el('p', 'form-note', t('Reading statistics…'))); return; }
+  const page = el('div', 'stat-page');
+  const bar = el('div', 'stat-bar'); bar.append(range); page.append(bar); main.append(page);
+  if (statsError) { page.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.'))); return; }
+  if (!stats) { page.append(el('p', 'form-note', t('Reading statistics…'))); return; }
   const s = stats;
   if (!s.total.requests) {
-    main.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by group, account and agent, with the tokens the provider reports.')));
+    page.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by group, account and agent, with the tokens the provider reports.')));
   } else {
-    const trouble = statTrouble(s.total);
+    const cache = statCacheShare(s.total); const perRequest = statTokensPerRequest(s.total);
     const tiles = el('div', 'stat-tiles');
     tiles.append(
       statTile(t('Requests'), compactCount(s.total.requests), t('{count} answered', { count: compactCount(s.total.ok) })),
       statTile(t('Tokens'), compactCount(statTokens(s.total)), t('{sent} sent · {received} received', { sent: compactCount(s.total.input_tokens + s.total.cache_write_tokens), received: compactCount(s.total.output_tokens) })),
-      statTile(t('From cache'), compactCount(s.total.cache_read_tokens), t('read again instead of sent anew')),
-      statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), trouble === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
+      statTile(t('From cache'), cache === null ? '–' : `${cache}%`, t('{count} tokens read from the cache', { count: compactCount(s.total.cache_read_tokens) })),
+      statTile(t('Per request'), perRequest === null ? '–' : compactCount(perRequest), t('tokens on average')),
+      statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), statTrouble(s.total) === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
-    main.append(tiles);
-    const projectName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No group') : pool);
+    page.append(tiles, statChart(s));
+    const groupName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No group') : pool);
+    const projectName = (name: string | null) => name ?? t('Folder not known');
     const accountName = (label: string | null) => label ?? t('Removed account');
-    main.append(
-      statTable('stat-projects', t('By group'), [t('Group')], s.projects.map((r) => ({ cells: [projectName(r.pool, r.name)], counts: r }))),
-      statTable('stat-accounts', t('By account'), [t('Account'), t('Provider')], s.accounts.map((r) => ({ cells: [accountName(r.label), r.provider ? providerName(r.provider as Provider) : '–'], counts: r }))),
-      statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r }))),
-      statTable('stat-routes', t('Who works where'), [t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
-      statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r })), true),
+    const grid = el('div', 'stat-grid');
+    grid.append(
+      statTable('stat-groups', t('By group'), [t('Group')], s.groups.map((r) => ({ cells: [groupName(r.pool, r.name)], counts: r })), true),
+      statTable('stat-projects', t('By project'), [t('Project')], s.projects.map((r) => ({ cells: [[projectName(r.name), r.groups.map((g) => groupName(g.pool, g.name)).join(', ')]], counts: r })), true),
+      statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
+      statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
+    );
+    page.append(grid,
+      statTable('stat-routes', t('Who works where'), [t('Project'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
+      statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
     );
   }
-  main.append(el('p', 'surface-note', t('Only requests that go through Switchboard are counted: a session on its own sign-in outside Switchboard is not. Token counts are the ones the provider reports in its answer. Counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
+  page.append(el('p', 'surface-note', t('Only requests that go through Switchboard are counted: a session on its own sign-in outside Switchboard is not. Token counts are the ones the provider reports in its answer. A request is placed in a project by its group folder; “Folder not known” is a request that named none. Counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;
@@ -1537,6 +1604,8 @@ function sessionsPanel() {
 function renderActivity(main: HTMLElement) {
   main.append(sessionsPanel());
   if (!snapshot!.events.length) { main.append(emptyState(t('No activity yet'), t('Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.'))); return; }
+  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'events-heading');
+  const heading = el('h2', '', t('Events')); heading.id = 'events-heading'; panel.append(heading);
   const list = el('ol', 'event-list');
   for (const event of [...snapshot!.events].reverse()) {
     const row = el('li', 'event-row'); const title = el('div', 'event-title');
@@ -1545,7 +1614,8 @@ function renderActivity(main: HTMLElement) {
     row.append(title, el('p', '', eventDetail(event.detail)));
     if (event.account_id) row.append(el('span', 'event-id', `${account ? `${account.label} · ` : ''}${event.account_id}`)); list.append(row);
   }
-  main.append(list, el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
+  panel.append(list, el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
+  main.append(panel);
 }
 function renderAbout(main: HTMLElement) {
   const section = el('section', 'about-panel');
