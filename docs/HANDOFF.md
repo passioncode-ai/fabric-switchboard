@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.56, Statistics tables stacked and sortable (SB-153) with SB-152
+
+- **Done.** Statistics tables run one under another at full width and sort by a click on a
+  column title (`sortStatRows`, `nextStatSort`, ui-logic SB-153 case); billions read as B. 0.6.55
+  (SB-152 alone) was cancelled at its guard and ships in 0.6.56, tag `f636220`, release run
+  39413879646.
+- **Checks run.** Every step of `./scripts/check.sh` except the Cargo build and tests, which ran
+  out of disk (0.6 to 3.8 GB free while 40 agent sessions swap 27 GB); Rust changed only by the
+  version line since the green gate on `7619bb3`. The release guard runs the full nightly on the
+  tag (run 39414127875).
+- **Data.** The installed app took the 30 husk folders out: groups hold 111, 21 and 120 folders,
+  no husk roots left.
+- **Next task.** Confirm 0.6.56 published, update the plugin and CLI, announce on the board;
+  then SB-151, then SB-141.
+
 ## 2026-10-20: 0.6.55, removed worktrees leave their groups (SB-152); call to every agent
 
 - **Found.** 26 folders shown as projects in Agents and PassionCode were removed worktrees under
