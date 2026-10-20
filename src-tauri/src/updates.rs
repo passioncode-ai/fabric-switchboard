@@ -214,6 +214,34 @@ pub fn relaunch_args(program: OsString, background: bool) -> Vec<OsString> {
         .collect()
 }
 
+/// SB-151: how long the relaunch helper waits for this process to end before starting the new
+/// copy anyway (the hard exit ends it after `HARD_EXIT_AFTER`, 10 s).
+#[cfg(unix)]
+pub const RELAUNCH_WAIT_SECONDS: u32 = 60;
+
+/// SB-151: the helper that starts the new copy once this one has ended, however it ends: a
+/// drained exit, or the hard exit when the drain overruns (2026-10-20: the drain overran, the
+/// hard exit fired and nothing relaunched for 20 minutes). `/bin/sh` waits while `pid` lives
+/// (at most `RELAUNCH_WAIT_SECONDS`) and then execs the program with its arguments.
+#[cfg(unix)]
+pub fn relaunch_helper(pid: u32, args: &[OsString]) -> std::process::Command {
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .arg("-c")
+        .arg(format!(
+            "pid=$1; shift; n=0; while kill -0 \"$pid\" 2>/dev/null && [ $n -lt {} ]; do sleep 0.2; n=$((n+1)); done; exec \"$@\"",
+            RELAUNCH_WAIT_SECONDS * 5
+        ))
+        .arg("switchboard-relaunch")
+        .arg(pid.to_string())
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command
+}
+
 /// The NSIS arguments the updater adds after its own `/P /UPDATE` when the app should come back:
 /// `/R` relaunches it, `/ARGS` hands it the background flag.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -263,6 +291,9 @@ impl Ready {
 struct Restart {
     #[cfg_attr(windows, allow(dead_code))]
     background: bool,
+    /// SB-151: a relaunch helper waits for this process to end; `finish` starts nothing then.
+    #[cfg(not(windows))]
+    helper: bool,
     /// Windows: the same release, checked again with the relaunch arguments for this window
     /// state. None falls back to relaunching with the arguments this process started with.
     #[cfg(windows)]
@@ -1030,8 +1061,31 @@ async fn restart_as(app: AppHandle, background: bool) -> Result<Value, String> {
         background,
         #[cfg(windows)]
         relaunching,
+        #[cfg(not(windows))]
+        helper: false,
     });
     drop(swap);
+    // SB-151: the new copy is started by a helper that outlives this process, before the drain:
+    // a drain that overruns into the hard exit must not cost the relaunch.
+    #[cfg(not(windows))]
+    {
+        let program = app.env().args_os.first().cloned().unwrap_or_default();
+        let spawned = relaunch_helper(std::process::id(), &relaunch_args(program, background))
+            .spawn()
+            .is_ok();
+        if spawned {
+            if let Some(restart) = state.lock().restart.as_mut() {
+                restart.helper = true;
+            }
+        }
+        event(
+            "update_relaunch_helper",
+            &[(
+                "outcome",
+                Field::Code(if spawned { "started" } else { "failed" }),
+            )],
+        );
+    }
     event(
         "update_restart",
         &[(
@@ -1085,7 +1139,7 @@ pub fn finish(app: &AppHandle) {
     #[cfg(not(windows))]
     {
         let _ = (ready, signal);
-        if let Some(restart) = restart {
+        if let Some(restart) = restart.filter(|r| !r.helper) {
             let mut env = app.env();
             let program = env.args_os.first().cloned().unwrap_or_default();
             env.args_os = relaunch_args(program, restart.background);
@@ -1097,6 +1151,34 @@ pub fn finish(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_relaunch_helper_starts_the_new_copy_only_after_the_old_one_ended() {
+        // SB-151: the old copy may end by the hard exit; the helper waits for it either way.
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("relaunched");
+        let mut old = std::process::Command::new("/bin/sleep")
+            .arg("1")
+            .spawn()
+            .unwrap();
+        let started = std::time::Instant::now();
+        let mut helper = relaunch_helper(
+            old.id(),
+            &[
+                OsString::from("/usr/bin/touch"),
+                marker.clone().into_os_string(),
+            ],
+        )
+        .spawn()
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert!(!marker.exists(), "not while the old copy lives");
+        old.wait().unwrap();
+        helper.wait().unwrap();
+        assert!(marker.exists(), "started once it ended");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(900));
+    }
 
     #[test]
     fn an_update_waiting_only_for_requests_drains_after_half_an_hour() {
