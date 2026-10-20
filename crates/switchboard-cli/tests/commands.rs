@@ -286,6 +286,124 @@ fn an_unassigned_repository_stays_in_the_default_group_through_the_session_hook(
 }
 
 #[test]
+#[cfg(unix)]
+fn the_session_start_hook_gives_up_quickly_when_the_owner_does_not_answer() {
+    // 2026-10-20: the owner held `ProjectSuggest` behind its transaction and the hook ran into
+    // Claude Code's 10 s timeout at 42 of 44 session starts. An owner that accepts the
+    // connection and never answers must cost the session at most the hook's own deadline,
+    // print nothing and exit 0.
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    // Accept and hold every connection without a byte in reply, as a busy owner does.
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            held.push(stream);
+        }
+    });
+    let control = tmp.path().join("control.json");
+    std::fs::write(
+        &control,
+        serde_json::json!({
+            "protocol": 1,
+            "address": address.to_string(),
+            "token": "a".repeat(64),
+            "pid": std::process::id(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&control, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let hook = serde_json::json!({
+        "session_id": "s",
+        "cwd": tmp.path(),
+        "hook_event_name": "SessionStart",
+    });
+    let started = std::time::Instant::now();
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["project", "suggest", "--from-hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(hook.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let elapsed = started.elapsed();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    // The deadline is 1.5 s; the plugin's hook timeout is 3 s. Without the deadline the
+    // client waited its 30 s control timeout.
+    assert!(
+        elapsed < std::time::Duration::from_millis(2900),
+        "the hook took {elapsed:?}"
+    );
+    assert!(
+        elapsed >= std::time::Duration::from_millis(1400),
+        "the hook gave up before its deadline: {elapsed:?}"
+    );
+}
+
+#[test]
+fn the_session_start_hook_waits_for_no_input_it_was_not_given() {
+    // A host that never closes the hook's stdin must not hold the session either.
+    let tmp = tempfile::tempdir().unwrap();
+    let started = std::time::Instant::now();
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["project", "suggest", "--from-hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    // Bounded here too: before SB-149 this child waited for its input forever.
+    while child.try_wait().unwrap().is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(10) {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("the hook still waited for its input after 10 s");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let elapsed = started.elapsed();
+    let output = child.wait_with_output().unwrap();
+    drop(stdin);
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+    assert!(
+        elapsed < std::time::Duration::from_millis(2900),
+        "the hook took {elapsed:?}"
+    );
+}
+
+#[test]
+fn the_plugin_bounds_its_session_start_hook() {
+    let hooks: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../plugins/switchboard/hooks/hooks.json"
+    ))
+    .unwrap();
+    let session_start = &hooks["hooks"]["SessionStart"][0]["hooks"][0];
+    assert!(session_start["command"]
+        .as_str()
+        .unwrap()
+        .contains("project suggest --from-hook"));
+    assert_eq!(session_start["timeout"], 3);
+}
+
+#[test]
 fn recovery_hook_never_fails_the_session() {
     // SB-115: Claude Code's StopFailure hook runs `switchboard recovery hook`; whatever the
     // input or the owner's state, it exits 0 and says why nothing was registered.
