@@ -1159,4 +1159,5 @@ export const RU: Record<string, string> = {
   "Other groups": "Другие группы",
   "{n} folder": "{n} папка",
   "{count} tokens read from the cache": "{count} токенов прочитано из кэша",
+  "Sort by {column}": "Сортировать по столбцу «{column}»",
 };

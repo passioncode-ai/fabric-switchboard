@@ -1394,7 +1394,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** sidebar → *Statistics* · `switchboard stats --days 30` · MCP `switchboard_statistics`.
 **Steps:**
 1. Open *Statistics* → the 30-day range is chosen; five tiles read requests (and how many were answered), tokens (sent and received), the share of input read from the cache, tokens per request, and limits and errors with their share.
-2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By project*, *By account* and *By agent* side by side when the window is wide enough: requests, tokens, and limits and errors; the busiest first.
+2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By project*, *By account* and *By agent*, one under another at full width so long names fit: requests, tokens, and limits and errors; the busiest first.
+2a. A click on a column title sorts that table by it (a count largest first, a name A to Z); a second click reverses it; the title shows ↑ or ↓ and the table keeps its order until the window closes (SB-153).
 3. Read *Who works where* → one row per project, group, account and agent that worked together; *By project* names each project's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “Folder not known” holds requests that named no group folder.
 4. Choose *7 days* or *90 days* → every table and tile shows that range; *By day* lists one row per day with traffic, newest first.
 **Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “No project”; the read fails → “Statistics are unavailable. Refresh to retry.”; a few failures among many requests read “<1%”, never “0%”.
@@ -1404,9 +1405,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** a failed read keeps the page and says to refresh.
 **Status:** draft
 **Meaning:** operator request 2026-10-19 (SB-145). Counts only, from the provider's own `usage`; a session that bypasses Switchboard is not counted, and the page says so.
-**Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only` (folder by the request's `Working directory`), `stats::tests::*` (`a_request_names_its_folder_without_its_body_being_kept`); runtime `statistics::tests::*` (two checkouts are one project; a 0.6.52 key reads); MCP handshake; ui-logic SB-145 and SB-147 cases (chart days and series, axis, cache share); WebKit demo (ru, 1180 and 960 wide, no overflow, no table scrolling).
+**Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only` (folder by the request's `Working directory`), `stats::tests::*` (`a_request_names_its_folder_without_its_body_being_kept`); runtime `statistics::tests::*` (two checkouts are one project; a 0.6.52 key reads); MCP handshake; ui-logic SB-145 and SB-147 cases (chart days and series, axis, cache share); WebKit demo (ru, 1180 and 960 wide, no overflow, no table scrolling). ui-logic SB-153 case (sort by name and count, second click reverses, B for billions); WebKit demo (tables stacked, sort clicks).
 **Product:** unobserved
-**Traces:** SB-145, SB-147
+**Traces:** SB-145, SB-147, SB-153
 
 ## SCN-068 — Groups of projects: one repository in several groups, and the projects a group holds on hover
 **Persona:** P-01

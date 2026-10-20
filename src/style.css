@@ -414,7 +414,7 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .stat-page > * + * { margin-top: var(--space-4); }
 .stat-page .stat-bar { margin-bottom: 0; }
 .stat-page .stat-tiles { margin-bottom: 0; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: var(--space-4); }
+.stat-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
 .stat-grid > .stat-panel { margin: 0; min-width: 0; }
 .about-panel.stat-panel + .about-panel.stat-panel { margin-top: var(--space-4); }
 .stat-chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
@@ -445,3 +445,9 @@ g:hover > .chart-bar { opacity: .82; }
 .stat-grid > .about-panel.stat-panel + .about-panel.stat-panel { margin-top: 0; }
 .stat-table thead th.num { font-family: var(--font-ui); }
 .stat-table .cell-note { display: block; color: var(--muted); font-weight: 400; font-size: var(--t-chip); }
+/* SB-153: sortable column titles. */
+.stat-table thead th { padding: 0; }
+.sort-button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: var(--space-2) var(--space-3); cursor: pointer; color: var(--muted); font: inherit; font-weight: 550; text-align: inherit; white-space: nowrap; border-radius: 4px; }
+.stat-table thead th.num .sort-button { text-align: right; }
+.sort-button:hover, .sort-button.is-on { color: var(--ink); }
+.sort-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }

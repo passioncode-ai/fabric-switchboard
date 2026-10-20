@@ -639,4 +639,21 @@ check(() => {
   const projects = logic.groupProjectRows(folders, roots);
   assert.deepEqual(projects.map((p) => [p.name, p.rows.map((r) => r.folder)]), [['app', ['/d/app', '/w/app-wt', '/d/app-copy']], ['notes', ['/d/notes']]]);
 });
+// SB-153: a click on a column title sorts the table; billions read as B.
+check(() => {
+  assert.equal(logic.compactCount(3_045_860_000), '3.05B');
+  const z = { requests: 0, ok: 0, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+  const rows = [
+    { cells: ['Agents'], counts: { ...z, requests: 6600, input_tokens: 100, limited: 405 } },
+    { cells: ['PassionCode'], counts: { ...z, requests: 4700, input_tokens: 900, limited: 247 } },
+    { cells: [['Apps & Soft', 'note']], counts: { ...z, requests: 619, input_tokens: 50, limited: 42 } },
+  ];
+  assert.equal(logic.sortStatRows(rows, null, true), rows, 'no sort keeps the order');
+  assert.deepEqual(logic.sortStatRows(rows, { column: 0, descending: false }, true).map((r) => r.counts.requests), [6600, 619, 4700], 'by name (Agents, Apps & Soft, PassionCode), the note ignored');
+  assert.deepEqual(logic.sortStatRows(rows, { column: 2, descending: true }, true).map((r) => r.counts.requests), [4700, 6600, 619], 'by tokens');
+  assert.deepEqual(logic.sortStatRows(rows, { column: 1, descending: false }, true).map((r) => r.counts.requests), [619, 4700, 6600]);
+  assert.deepEqual(logic.nextStatSort(null, 1, true), { column: 1, descending: true });
+  assert.deepEqual(logic.nextStatSort({ column: 1, descending: true }, 1, true), { column: 1, descending: false });
+  assert.deepEqual(logic.nextStatSort({ column: 1, descending: true }, 0, false), { column: 0, descending: false });
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

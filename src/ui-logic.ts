@@ -613,7 +613,8 @@ export interface Statistics { days: number; from: string; to: string; since: str
 export function compactCount(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${Number((n / 1000).toFixed(1))}K`;
-  return `${Number((n / 1_000_000).toFixed(2))}M`;
+  if (n < 1_000_000_000) return `${Number((n / 1_000_000).toFixed(2))}M`;
+  return `${Number((n / 1_000_000_000).toFixed(2))}B`;
 }
 /** Tokens a request spent: what was sent (new and from cache) and what came back. */
 export function statTokens(c: StatCounts): number {
@@ -695,4 +696,34 @@ export function groupProjectRows(folders: string[], roots: ProjectRoot[] | null)
     out.push(current);
   }
   return out;
+}
+
+/** SB-153: a statistics table's row: its name cells (text, or text with a note) and its counts. */
+export interface StatRow { cells: (string | [string, string])[]; counts: StatCounts }
+export interface StatSort { column: number; descending: boolean }
+/**
+ * SB-153: rows sorted by one column. Columns are the name cells first, then the counts:
+ * compact tables show requests, tokens, limits and errors; full ones requests, sent, from cache,
+ * received, limits and errors. Text sorts by the visible name, counts by the number; equal
+ * rows keep their order (the busiest first). No sort keeps the order given.
+ */
+export function sortStatRows(rows: StatRow[], sort: StatSort | null, compact: boolean): StatRow[] {
+  if (!sort) return rows;
+  const names = rows[0]?.cells.length ?? 0;
+  const text = (r: StatRow) => { const c = r.cells[sort.column]; return typeof c === 'string' ? c : c?.[0] ?? ''; };
+  const counts: ((c: StatCounts) => number)[] = compact
+    ? [(c) => c.requests, statTokens, (c) => c.limited + c.failed]
+    : [(c) => c.requests, (c) => c.input_tokens + c.cache_write_tokens, (c) => c.cache_read_tokens, (c) => c.output_tokens, (c) => c.limited + c.failed];
+  const pick = sort.column < names ? null : counts[sort.column - names];
+  const indexed = rows.map((row, i) => ({ row, i }));
+  indexed.sort((a, b) => {
+    const order = pick ? pick(a.row.counts) - pick(b.row.counts) : text(a.row).localeCompare(text(b.row), undefined, { numeric: true, sensitivity: 'base' });
+    return (sort.descending ? -order : order) || a.i - b.i;
+  });
+  return indexed.map((x) => x.row);
+}
+/** SB-153: the next sort after a click on a column: a new column starts descending for a count and ascending for a name; the same column flips. */
+export function nextStatSort(current: StatSort | null, column: number, isCount: boolean): StatSort {
+  if (current && current.column === column) return { column, descending: !current.descending };
+  return { column, descending: isCount };
 }

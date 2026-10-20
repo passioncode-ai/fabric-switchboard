@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, type StatCounts, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -1508,17 +1508,28 @@ function statChart(s: Statistics) {
   section.append(legend);
   return section;
 }
-/** One table: a name column (or several) and the counts every row has. */
-function statTable(id: string, title: string, names: string[], rows: { cells: (string | [string, string])[]; counts: StatCounts }[], compact = false) {
+/** SB-153: each statistics table's sort, by table id; kept while the window is open. */
+const statSorts: Record<string, StatSort> = {};
+/** One table: a name column (or several) and the counts every row has; a click on a column title sorts by it. */
+function statTable(id: string, title: string, names: string[], rows: StatRow[], compact = false) {
   const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', id);
   const heading = el('h2', '', title); heading.id = id; section.append(heading);
   const wrap = el('div', 'stat-scroll'); const table = el('table', 'stat-table');
   const head = el('tr');
-  for (const name of names) head.append(el('th', '', name));
-  for (const name of compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')]) head.append(el('th', 'num', name));
+  const sort = statSorts[id] ?? null;
+  const countNames = compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')];
+  [...names, ...countNames].forEach((name, column) => {
+    const isCount = column >= names.length;
+    const th = el('th', isCount ? 'num' : ''); th.setAttribute('scope', 'col');
+    const on = sort?.column === column;
+    th.setAttribute('aria-sort', on ? (sort!.descending ? 'descending' : 'ascending') : 'none');
+    const b = button(`${name}${on ? (sort!.descending ? ' ↓' : ' ↑') : ''}`, () => { statSorts[id] = nextStatSort(sort, column, isCount); render(); restoreFocus(`${id}-sort-${column}`); }, `sort-button${on ? ' is-on' : ''}`, `${id}-sort-${column}`);
+    b.setAttribute('aria-label', t('Sort by {column}', { column: name }));
+    th.append(b); head.append(th);
+  });
   const thead = el('thead'); thead.append(head); table.append(thead);
   const body = el('tbody');
-  for (const row of rows) {
+  for (const row of sortStatRows(rows, sort, compact)) {
     const tr = el('tr');
     row.cells.forEach((cell, i) => {
       const td = el(i === 0 ? 'th' : 'td', '', typeof cell === 'string' ? cell : cell[0]);
