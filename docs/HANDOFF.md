@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.57, an update restart always brings the app back (SB-151)
+
+- **Cause.** The relaunch ran in `updates::finish`, after the owner's drain; at 05:31 the drain
+  overran and `hard_exit` ended the process first (no `owner_stopped` between `launch` and
+  `hard_exit`). Successful restarts log `owner_stopped` within 22 to 124 ms.
+- **Fix.** macOS and Linux spawn `relaunch_helper` before the drain: a detached `/bin/sh` that
+  waits for this pid (at most 60 s) and execs the new copy. Windows keeps its NSIS relaunch.
+- **Checks run.** `cargo test -p fabric-switchboard relaunch` (2 passed), `cargo clippy -p
+  fabric-switchboard --all-targets -D warnings` clean, every non-Cargo step of the gate; the full
+  Cargo gate could not run (1.5 to 2.9 GB free); the release guard runs it on the tag.
+- **Next task.** Verification of the installed app (thread `0abdfd6f`); then SB-141, SB-154.
+
 ## 2026-10-20: 0.6.56 published; iteration closed for Switchboard
 
 - **Published** 2026-10-20 12:06 UTC (release run 39413879646, 25 assets; nightly on the tag

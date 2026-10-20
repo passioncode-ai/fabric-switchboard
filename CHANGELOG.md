@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.57 (2026-10-20)
+
+- **An update restart always brings the app back (SB-151).** When Switchboard restarted itself into an update and its shutdown took longer than its 10-second limit, the forced exit came before the relaunch and nothing came back (on 2026-10-20 it stayed down for 20 minutes, with managed sessions left without their route). On macOS and Linux the new copy is now started by a small helper that waits for the old one to end, however it ends, and then launches it.
+
 ## 0.6.56 (2026-10-20)
 
 - **Statistics tables one under another, and sortable (SB-153).** *By group*, *By project*, *By account* and *By agent* now run at full width, one after another, so long names fit; click a column title to sort by it, click again to reverse. Large counts read as billions (3.05B, not 3045.86M).
