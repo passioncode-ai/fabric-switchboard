@@ -4,6 +4,10 @@
 
 ## 2026-10-20: 0.6.57, an update restart always brings the app back (SB-151)
 
+- **Published** 2026-10-20 15:52 UTC (release run 39445035684, 25 assets). Plugin at 0.6.57; the
+  app takes it by its own update check. The restart into 0.6.57 still runs 0.6.56's exit path;
+  the helper protects the restarts after it.
+
 - **Cause.** The relaunch ran in `updates::finish`, after the owner's drain; at 05:31 the drain
   overran and `hard_exit` ended the process first (no `owner_stopped` between `launch` and
   `hard_exit`). Successful restarts log `owner_stopped` within 22 to 124 ms.
