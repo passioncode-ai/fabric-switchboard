@@ -4,6 +4,10 @@
 
 ## 2026-10-19: 0.6.52, project groups (SB-146), Statistics (SB-145), MCP parity (SB-134 part 3)
 
+- **Published** 2026-10-19 22:30 UTC (release run 39325461704, 25 assets; nightly on the tag green
+  on every job). Installed here: app, CLI and plugin at 0.6.52. Announced on the board, thread
+  `c764dc65` (fabric, contract, dashboards, adapter, workspace, Observatory).
+
 - **0.6.51** was tagged and not published: Rust 1.99's clippy on CI refused `sort_by` in
   `statistics.rs` (`sort_by_key` with `Reverse` now). The local toolchain was 1.92 and missed it;
   it is 1.99 now. Run `rustup update stable` before a release gate.
