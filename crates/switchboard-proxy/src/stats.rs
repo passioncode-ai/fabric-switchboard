@@ -30,18 +30,82 @@ impl Tally {
     }
 }
 
-/// `day\taccount\tpool\tclient` → its tally. Day is the UTC date (`YYYY-MM-DD`).
+/// `day\taccount\tpool\tclient\tfolder` → its tally. Day is the UTC date (`YYYY-MM-DD`);
+/// folder is the group folder the request came from (SB-147), empty when it is not known.
 pub type Tallies = BTreeMap<String, Tally>;
 pub type Stats = Arc<Mutex<Tallies>>;
 
-pub fn key(day: &str, account: &str, pool: &str, client: &str) -> String {
-    format!("{day}\t{account}\t{pool}\t{client}")
+pub fn key(day: &str, account: &str, pool: &str, client: &str, folder: &str) -> String {
+    format!("{day}\t{account}\t{pool}\t{client}\t{folder}")
 }
-/// The parts of a key, or None for one that is not four fields.
-pub fn parts(key: &str) -> Option<(&str, &str, &str, &str)> {
-    let mut it = key.split('\t');
-    let p = (it.next()?, it.next()?, it.next()?, it.next()?);
-    it.next().is_none().then_some(p)
+/// One key's parts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parts<'a> {
+    pub day: &'a str,
+    pub account: &'a str,
+    pub pool: &'a str,
+    pub client: &'a str,
+    pub folder: &'a str,
+}
+/// The parts of a key; a key from 0.6.52 (four fields) has no folder.
+pub fn parts(key: &str) -> Option<Parts<'_>> {
+    let f: Vec<&str> = key.split('\t').collect();
+    match f.as_slice() {
+        [day, account, pool, client] => Some(Parts {
+            day,
+            account,
+            pool,
+            client,
+            folder: "",
+        }),
+        [day, account, pool, client, folder] => Some(Parts {
+            day,
+            account,
+            pool,
+            client,
+            folder,
+        }),
+        _ => None,
+    }
+}
+
+/// The folder a request names (SB-147): the newest `<cwd>` of a Codex environment context, or
+/// Claude Code's `Working directory:` line in its first mebibyte. A byte scan, never a parse of
+/// the whole body; only an absolute path is taken.
+pub fn folder_hint(body: &[u8]) -> Option<String> {
+    let cwd = rfind(body, b"<cwd>").and_then(|at| {
+        let rest = &body[at + 5..];
+        find(rest, b"</cwd>").map(|end| &rest[..end])
+    });
+    let raw = cwd.or_else(|| {
+        let head = &body[..body.len().min(1024 * 1024)];
+        find(head, b"Working directory: ").map(|at| {
+            let rest = &head[at + 19..];
+            let end = rest
+                .iter()
+                .position(|b| matches!(b, b'\\' | b'"' | b'\n' | b'\r' | b'<'))
+                .unwrap_or(rest.len().min(4096));
+            &rest[..end]
+        })
+    })?;
+    let text = std::str::from_utf8(raw).ok()?.trim().replace("\\/", "/");
+    let absolute = text.starts_with('/') || text.as_bytes().get(1) == Some(&b':');
+    (absolute && text.len() <= 4096).then_some(text)
+}
+/// The deepest of `folders` that holds `path` (by path segments), if any.
+pub fn deepest<'a>(folders: &'a [String], path: &str) -> Option<&'a str> {
+    let p = std::path::Path::new(path);
+    folders
+        .iter()
+        .filter(|f| p.starts_with(f.as_str()))
+        .max_by_key(|f| f.len())
+        .map(String::as_str)
+}
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+fn rfind(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).rposition(|w| w == needle)
 }
 
 /// The UTC date of a Unix time.
@@ -236,8 +300,41 @@ mod tests {
             "codex"
         );
         assert_eq!(client_of(None), "other");
-        let k = key("2026-10-19", "acc", "pool", "codex");
-        assert_eq!(parts(&k), Some(("2026-10-19", "acc", "pool", "codex")));
+        let k = key("2026-10-19", "acc", "pool", "codex", "/w/app");
+        let p = parts(&k).unwrap();
+        assert_eq!(
+            (p.day, p.account, p.pool, p.client, p.folder),
+            ("2026-10-19", "acc", "pool", "codex", "/w/app")
+        );
+        assert_eq!(
+            parts("2026-10-19\tacc\tpool\tcodex").unwrap().folder,
+            "",
+            "a 0.6.52 key"
+        );
         assert_eq!(parts("a\tb"), None);
+    }
+
+    #[test]
+    fn a_request_names_its_folder_without_its_body_being_kept() {
+        let claude = br#"{"system":[{"type":"text","text":"...<env>\nWorking directory: /Users/me/DATA/app/src\nIs directory a git repo: Yes"}],"messages":[]}"#;
+        assert_eq!(
+            folder_hint(claude).as_deref(),
+            Some("/Users/me/DATA/app/src")
+        );
+        let codex = br#"{"input":[{"content":"<environment_context><cwd>/w/old</cwd></environment_context>"},{"content":"<environment_context><cwd>/w/new</cwd>"}]}"#;
+        assert_eq!(
+            folder_hint(codex).as_deref(),
+            Some("/w/new"),
+            "the newest context"
+        );
+        assert_eq!(folder_hint(br#"{"messages":[]}"#), None);
+        assert_eq!(folder_hint(br#"Working directory: relative/path\n"#), None);
+        let folders = vec![
+            "/w/app".to_string(),
+            "/w/app/sub".to_string(),
+            "/w/other".to_string(),
+        ];
+        assert_eq!(deepest(&folders, "/w/app/sub/x"), Some("/w/app/sub"));
+        assert_eq!(deepest(&folders, "/w/apple"), None, "by path segments");
     }
 }

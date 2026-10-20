@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.53, projects inside groups and Statistics by project (SB-147)
+
+- **Decision (recorded here and in SB-147).** A project is a repository with all its checkouts
+  (one `origin` identity), or a folder outside Git: DEC-0089's AT-6, AT-7 and AT-15, and what
+  Fabric's Projects are. Its key is Switchboard's own (the identity or the path) until SB-141
+  records Fabric's Project id against it: DEC-0089 is merged (fabric-agent-contract `ebfddce`),
+  but the wire of Fabric's session-start capability (D4) is not decided.
+- **Done.** Group cards list projects; the proxy places each request in its group folder;
+  `Statistics` answers by group and by project; the page has a daily chart, cache share and tokens
+  per request; Statistics and Activity share one width. Contract: [CONTRACTS.md](CONTRACTS.md) →
+  Statistics.
+- **Next task.** SB-141 against DEC-0089: run the contract's vectors in `./scripts/check.sh`, then
+  replace the suggestion rules with `attributeFolder`'s answers.
+
 ## 2026-10-19: 0.6.52, project groups (SB-146), Statistics (SB-145), MCP parity (SB-134 part 3)
 
 - **Published** 2026-10-19 22:30 UTC (release run 39325461704, 25 assets; nightly on the tag green

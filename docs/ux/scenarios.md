@@ -1393,9 +1393,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** sessions or agents sent requests through Switchboard (managed launches, project folders, the agent capability).
 **Entry point:** sidebar → *Statistics* · `switchboard stats --days 30` · MCP `switchboard_statistics`.
 **Steps:**
-1. Open *Statistics* → the 30-day range is chosen; four tiles read requests (and how many were answered), tokens (sent and received), read from cache, and limits and errors with their share.
-2. Read *By project*, *By account*, *By agent*: each row has requests, tokens sent, from cache, received, and limits and errors; the busiest is first.
-3. Read *Who works where* → one row per project, account and agent that worked together.
+1. Open *Statistics* → the 30-day range is chosen; five tiles read requests (and how many were answered), tokens (sent and received), the share of input read from the cache, tokens per request, and limits and errors with their share.
+2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By project*, *By account* and *By agent* side by side when the window is wide enough: requests, tokens, and limits and errors; the busiest first.
+3. Read *Who works where* → one row per project, group, account and agent that worked together; *By project* names each project's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “Folder not known” holds requests that named no group folder.
 4. Choose *7 days* or *90 days* → every table and tile shows that range; *By day* lists one row per day with traffic, newest first.
 **Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “No project”; the read fails → “Statistics are unavailable. Refresh to retry.”; a few failures among many requests read “<1%”, never “0%”.
 **Expected result:** where requests and tokens went over the chosen range is visible without reading a transcript.
@@ -1404,9 +1404,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** a failed read keeps the page and says to refresh.
 **Status:** draft
 **Meaning:** operator request 2026-10-19 (SB-145). Counts only, from the provider's own `usage`; a session that bypasses Switchboard is not counted, and the page says so.
-**Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only`, `stats::tests::*`; runtime `statistics::tests::*`; MCP handshake; ui-logic SB-145 case; WebKit demo (ru and en, 1280 and 760 wide, 7-day range, no overflow).
+**Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only` (folder by the request's `Working directory`), `stats::tests::*` (`a_request_names_its_folder_without_its_body_being_kept`); runtime `statistics::tests::*` (two checkouts are one project; a 0.6.52 key reads); MCP handshake; ui-logic SB-145 and SB-147 cases (chart days and series, axis, cache share); WebKit demo (ru, 1180 and 960 wide, no overflow, no table scrolling).
 **Product:** unobserved
-**Traces:** SB-145
+**Traces:** SB-145, SB-147
 
 ## SCN-068 — Groups of projects: one repository in several groups, and the projects a group holds on hover
 **Persona:** P-01
@@ -1415,6 +1415,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** sidebar → *Groups*; a group's name anywhere (its card, a pool heading on Accounts, the move dialogs).
 **Steps:**
 1. Hover or focus a group's name → a tooltip lists “{n} projects” and their names: one per repository, never a worktree, a clone or a subfolder.
+1a. A group's card lists its projects, each with its folder count and its folders: the repository's folder, then its worktrees and clones under it (SB-147); past six projects *Show all projects (n)*.
 2. *Groups* → *Repositories on disk* → *All* → a repository in several groups reads “Groups «A», «B»”.
 3. *Also add…* on a repository → a dialog lists only the groups it is not in yet → *Add* → “{name} added to group «B».”; it stays in its other groups.
 4. *Move…* on a repository in several groups → it leaves the group shown and joins the chosen one.
@@ -1428,4 +1429,4 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Meaning:** operator request 2026-10-19 (SB-146).
 **Coverage:** runtime `a_repository_may_be_in_several_groups_and_sessions_take_the_one_with_accounts`, `an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made`; CLI `an_unassigned_repository_stays_in_the_default_group_through_the_session_hook`; ui-logic SB-146 case; WebKit demo (tooltip, *Also add…*, “Groups «Alpha Web», «Tools»”).
 **Product:** unobserved
-**Traces:** SB-146
+**Traces:** SB-146, SB-147

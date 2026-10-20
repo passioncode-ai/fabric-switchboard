@@ -28,6 +28,14 @@
   --danger-weak: var(--pc-negative-soft);
   --info: var(--pc-info);
   --info-weak: var(--pc-info-soft);
+  /* SB-147: chart series. The brand carries no data palette yet, so the series reuse its roles,
+     the accent first; a group's colour carries no meaning beyond telling series apart. */
+  --chart-1: var(--pc-accent);
+  --chart-2: var(--pc-info);
+  --chart-3: var(--pc-positive);
+  --chart-4: var(--pc-link);
+  --chart-5: var(--pc-warning);
+  --chart-6: var(--pc-text-muted);
   --r-control: var(--pc-radius-control);
   --r-card: var(--pc-radius-panel);
   --r-pill: var(--pc-radius-pill);

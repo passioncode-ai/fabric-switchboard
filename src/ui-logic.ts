@@ -602,11 +602,13 @@ export function modelMeta(m: Pick<RecommendedModel, 'maker' | 'context' | 'input
 /** SB-145: one row of the proxy's counts. */
 export interface StatCounts { requests: number; ok: number; limited: number; failed: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
 export interface StatAccount extends StatCounts { account_id: string; label: string | null; provider: string | null; kind: string | null }
-export interface StatProject extends StatCounts { pool: string; name: string | null }
+export interface StatGroup extends StatCounts { pool: string; name: string | null }
+/** SB-147: a project (a repository with its checkouts, or a folder outside Git); `project` empty for requests whose folder is not known. */
+export interface StatProject extends StatCounts { project: string; name: string | null; groups: { pool: string; name: string | null }[] }
 export interface StatAgent extends StatCounts { agent: string }
-export interface StatRoute extends StatAccount { pool: string; name: string | null; agent: string }
-export interface StatDay extends StatCounts { day: string }
-export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
+export interface StatRoute extends StatAccount { pool: string; name: string | null; project: string; project_name: string | null; agent: string }
+export interface StatDay extends StatCounts { day: string; groups?: { pool: string; requests: number; tokens: number }[] }
+export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; groups: StatGroup[]; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
 /** A count as people read it in a table: 950, 12.4K, 3.21M. */
 export function compactCount(n: number): string {
   if (n < 1000) return String(n);
@@ -631,4 +633,66 @@ export function statTroubleText(c: StatCounts): string {
 export function statAgentName(agent: string): string {
   const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', pi: 'Pi', 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
   return names[agent] ?? t('Other client');
+}
+
+/** SB-147: the share of input tokens read from the cache, as a whole percent; null with no input. */
+export function statCacheShare(c: StatCounts): number | null {
+  const input = c.input_tokens + c.cache_read_tokens + c.cache_write_tokens;
+  return input ? Math.round((c.cache_read_tokens * 100) / input) : null;
+}
+/** SB-147: tokens per request; null with no requests. */
+export function statTokensPerRequest(c: StatCounts): number | null {
+  return c.requests ? Math.round(statTokens(c) / c.requests) : null;
+}
+export type ChartMetric = 'tokens' | 'requests';
+export interface ChartSeries { key: string; name: string; values: number[] }
+/**
+ * SB-147: the daily chart: every day from `from` to `to` (a day without traffic is 0), one series
+ * per group, the `top` busiest by name and the rest summed as "Other groups".
+ */
+export function chartSeries(stats: Pick<Statistics, 'from' | 'to' | 'by_day'>, metric: ChartMetric, names: (pool: string) => string, top = 5): { days: string[]; series: ChartSeries[] } {
+  const days: string[] = [];
+  const start = Date.parse(`${stats.from}T00:00:00Z`); const end = Date.parse(`${stats.to}T00:00:00Z`);
+  if (Number.isFinite(start) && Number.isFinite(end)) for (let t = start; t <= end && days.length < 400; t += 86_400_000) days.push(new Date(t).toISOString().slice(0, 10));
+  const index = new Map(days.map((d, i) => [d, i]));
+  const totals = new Map<string, number>(); const perPool = new Map<string, number[]>();
+  for (const row of stats.by_day) {
+    const i = index.get(row.day); if (i === undefined) continue;
+    for (const g of row.groups ?? []) {
+      const v = metric === 'tokens' ? g.tokens : g.requests;
+      totals.set(g.pool, (totals.get(g.pool) ?? 0) + v);
+      const values = perPool.get(g.pool) ?? new Array(days.length).fill(0); values[i] += v; perPool.set(g.pool, values);
+    }
+  }
+  const ranked = [...totals.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([pool]) => pool);
+  const series: ChartSeries[] = ranked.slice(0, top).map((pool) => ({ key: pool, name: names(pool), values: perPool.get(pool)! }));
+  const rest = ranked.slice(top);
+  if (rest.length) series.push({ key: '', name: t('Other groups'), values: days.map((_, i) => rest.reduce((sum, pool) => sum + perPool.get(pool)![i], 0)) });
+  return { days, series };
+}
+/** A round axis maximum at or above `n`: 1, 2 or 5 times a power of ten. */
+export function niceMax(n: number): number {
+  if (n <= 0) return 1;
+  const p = 10 ** Math.floor(Math.log10(n));
+  for (const m of [1, 2, 5, 10]) if (m * p >= n) return m * p;
+  return 10 * p;
+}
+/**
+ * SB-147: a group's folders by project: one entry per repository (its folders, worktrees and
+ * clones of one `origin`) or per folder outside Git, in the order the folders are listed.
+ */
+export function groupProjectRows(folders: string[], roots: ProjectRoot[] | null): { key: string; name: string; rows: FolderRow[] }[] {
+  const byRoot = new Map((roots ?? []).map((r) => [r.folder, r]));
+  const out: { key: string; name: string; rows: FolderRow[] }[] = [];
+  let current: { key: string; name: string; rows: FolderRow[] } | null = null;
+  for (const row of folderRows(folders, roots, true)) {
+    if (row.depth === 1 && current) { current.rows.push(row); continue; }
+    const remote = byRoot.get(row.folder)?.remote ?? null;
+    const key = remote ?? row.folder;
+    const found = out.find((p) => p.key === key);
+    if (found) { found.rows.push(row); current = found; continue; }
+    current = { key, name: remote ? folderName(remote) : folderName(row.folder), rows: [row] };
+    out.push(current);
+  }
+  return out;
 }

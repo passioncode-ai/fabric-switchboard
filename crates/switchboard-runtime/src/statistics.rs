@@ -79,7 +79,7 @@ impl Statistics {
         }
         let oldest = stats::day_of(now - (KEEP_DAYS - 1) * 86_400);
         s.tallies
-            .retain(|k, _| stats::parts(k).is_some_and(|p| p.0 >= oldest.as_str()));
+            .retain(|k, _| stats::parts(k).is_some_and(|p| p.day >= oldest.as_str()));
         while s.tallies.len() > MAX_ROWS {
             // Oldest day first: keys start with the day.
             let Some(first) = s.tallies.keys().next().cloned() else {
@@ -111,8 +111,15 @@ impl Statistics {
             s.saved_at = now;
         }
     }
-    /// The last `days` days (1–90) as tables, names resolved from the snapshot.
-    pub(crate) fn report(&self, snapshot: &Snapshot, days: i64, now: i64) -> Value {
+    /// The last `days` days (1–90) as tables, names resolved from the snapshot and folders
+    /// resolved to their projects by `index` (SB-147).
+    pub(crate) fn report(
+        &self,
+        snapshot: &Snapshot,
+        index: &ProjectIndex,
+        days: i64,
+        now: i64,
+    ) -> Value {
         let days = days.clamp(1, KEEP_DAYS);
         let from = stats::day_of(now - (days - 1) * 86_400);
         let to = stats::day_of(now);
@@ -123,33 +130,40 @@ impl Statistics {
             .unwrap_or_default();
         let since = tallies
             .keys()
-            .next()
-            .and_then(|k| stats::parts(k))
-            .map(|p| p.0.to_owned());
+            .filter_map(|k| stats::parts(k).map(|p| p.day.to_owned()))
+            .min();
         let mut total = Tally::default();
-        let mut by_project: BTreeMap<String, Tally> = BTreeMap::new();
+        let mut by_group: BTreeMap<String, Tally> = BTreeMap::new();
+        let mut by_project: BTreeMap<String, (Tally, std::collections::BTreeSet<String>)> =
+            BTreeMap::new();
         let mut by_account: BTreeMap<String, Tally> = BTreeMap::new();
         let mut by_agent: BTreeMap<String, Tally> = BTreeMap::new();
-        let mut by_day: BTreeMap<String, Tally> = BTreeMap::new();
-        let mut by_route: BTreeMap<(String, String, String), Tally> = BTreeMap::new();
+        let mut by_day: BTreeMap<String, (Tally, BTreeMap<String, Tally>)> = BTreeMap::new();
+        let mut by_route: BTreeMap<(String, String, String, String), Tally> = BTreeMap::new();
         for (key, t) in &tallies {
-            let Some((day, account, pool, client)) = stats::parts(key) else {
+            let Some(p) = stats::parts(key) else {
                 continue;
             };
-            if day < from.as_str() || day > to.as_str() {
+            if p.day < from.as_str() || p.day > to.as_str() {
                 continue;
             }
+            let project = index.project_of(p.folder);
             total.add(t);
-            by_project.entry(pool.into()).or_default().add(t);
-            by_account.entry(account.into()).or_default().add(t);
-            by_agent.entry(client.into()).or_default().add(t);
-            by_day.entry(day.into()).or_default().add(t);
+            by_group.entry(p.pool.into()).or_default().add(t);
+            let entry = by_project.entry(project.clone()).or_default();
+            entry.0.add(t);
+            entry.1.insert(p.pool.into());
+            by_account.entry(p.account.into()).or_default().add(t);
+            by_agent.entry(p.client.into()).or_default().add(t);
+            let day = by_day.entry(p.day.into()).or_default();
+            day.0.add(t);
+            day.1.entry(p.pool.into()).or_default().add(t);
             by_route
-                .entry((pool.into(), account.into(), client.into()))
+                .entry((p.pool.into(), project, p.account.into(), p.client.into()))
                 .or_default()
                 .add(t);
         }
-        let project_name = |pool: &str| {
+        let group_name = |pool: &str| {
             snapshot
                 .projects
                 .iter()
@@ -178,13 +192,31 @@ impl Statistics {
             m.insert("kind".into(), json!(a.map(|a| a.kind)));
             m
         };
-        let projects = busiest(
-            by_project
+        let groups = busiest(
+            by_group
                 .iter()
                 .map(|(pool, t)| {
                     let mut m = serde_json::Map::new();
                     m.insert("pool".into(), json!(pool));
-                    m.insert("name".into(), json!(project_name(pool)));
+                    m.insert("name".into(), json!(group_name(pool)));
+                    (row(m, t), weight(t))
+                })
+                .collect(),
+        );
+        let projects = busiest(
+            by_project
+                .iter()
+                .map(|(key, (t, pools))| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("project".into(), json!(key));
+                    m.insert("name".into(), json!(index.name_of(key)));
+                    m.insert(
+                        "groups".into(),
+                        json!(pools
+                            .iter()
+                            .map(|p| json!({"pool": p, "name": group_name(p)}))
+                            .collect::<Vec<_>>()),
+                    );
                     (row(m, t), weight(t))
                 })
                 .collect(),
@@ -208,21 +240,33 @@ impl Statistics {
         let routes = busiest(
             by_route
                 .iter()
-                .map(|((pool, id, client), t)| {
+                .map(|((pool, project, id, client), t)| {
                     let mut m = account_fields(id);
                     m.insert("pool".into(), json!(pool));
-                    m.insert("name".into(), json!(project_name(pool)));
+                    m.insert("name".into(), json!(group_name(pool)));
+                    m.insert("project".into(), json!(project));
+                    m.insert("project_name".into(), json!(index.name_of(project)));
                     m.insert("agent".into(), json!(client));
                     (row(m, t), weight(t))
                 })
                 .collect(),
         );
+        let tokens = |t: &Tally| {
+            t.input_tokens + t.output_tokens + t.cache_read_tokens + t.cache_write_tokens
+        };
         let days_rows: Vec<Value> = by_day
             .iter()
             .rev()
-            .map(|(day, t)| {
+            .map(|(day, (t, pools))| {
                 let mut m = serde_json::Map::new();
                 m.insert("day".into(), json!(day));
+                m.insert(
+                    "groups".into(),
+                    json!(pools
+                        .iter()
+                        .map(|(pool, t)| json!({"pool": pool, "requests": t.requests, "tokens": tokens(t)}))
+                        .collect::<Vec<_>>()),
+                );
                 row(m, t)
             })
             .collect();
@@ -232,11 +276,58 @@ impl Statistics {
             "to": to,
             "since": since,
             "total": total,
+            "groups": groups,
             "projects": projects,
             "accounts": accounts,
             "agents": agents,
             "routes": routes,
             "by_day": days_rows,
+        })
+    }
+}
+
+/// SB-147: which project a group folder belongs to. A project is a repository with all its
+/// checkouts (the main one, its worktrees, its clones of one `origin`), or a folder outside Git
+/// on its own (DEC-0089's AT-6, AT-7 and AT-15); its name is the repository's or the folder's.
+#[derive(Default)]
+pub(crate) struct ProjectIndex {
+    by_folder: std::collections::HashMap<String, String>,
+}
+impl ProjectIndex {
+    /// From the groups' folders as Git sees them (`roots::tree` per group).
+    pub(crate) fn build(snapshot: &Snapshot) -> Self {
+        let mut index = Self::default();
+        for group in &snapshot.projects {
+            for root in crate::roots::tree(&group.folders) {
+                let key = root.remote.clone().unwrap_or_else(|| root.folder.clone());
+                for folder in std::iter::once(root.folder.clone())
+                    .chain(root.derived.iter().map(|d| d.folder.clone()))
+                {
+                    index.by_folder.insert(folder, key.clone());
+                }
+            }
+        }
+        index
+    }
+    /// The project key of a group folder: its repository's identity, or the folder itself;
+    /// empty for requests whose folder is not known.
+    pub(crate) fn project_of(&self, folder: &str) -> String {
+        if folder.is_empty() {
+            return String::new();
+        }
+        self.by_folder
+            .get(folder)
+            .cloned()
+            .unwrap_or_else(|| folder.to_owned())
+    }
+    /// A project's name: its key's last segment; none for requests whose folder is not known.
+    pub(crate) fn name_of(&self, key: &str) -> Option<String> {
+        (!key.is_empty()).then(|| {
+            key.trim_end_matches(['/', '\\'])
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(key)
+                .to_owned()
         })
     }
 }
@@ -262,11 +353,11 @@ mod tests {
         let old = stats::day_of(now - 100 * 86_400);
         let s = Statistics::load(root.path());
         s.absorb(Tallies::from([
-            (stats::key(&today, "acc", "pool", "codex"), tally(2, 10)),
-            (stats::key(&old, "acc", "pool", "codex"), tally(9, 99)),
+            (stats::key(&today, "acc", "pool", "codex", ""), tally(2, 10)),
+            (stats::key(&old, "acc", "pool", "codex", ""), tally(9, 99)),
         ]));
         s.absorb(Tallies::from([(
-            stats::key(&today, "acc", "pool", "codex"),
+            stats::key(&today, "acc", "pool", "codex", ""),
             tally(1, 5),
         )]));
         // Not yet: nothing written before a quarter of an hour, unless forced.
@@ -297,30 +388,52 @@ mod tests {
     }
 
     #[test]
-    fn the_report_groups_by_project_account_agent_and_day_inside_the_range() {
+    fn the_report_groups_by_group_project_account_agent_and_day_inside_the_range() {
         let now = 1_792_400_000;
         let today = stats::day_of(now);
         let week_ago = stats::day_of(now - 8 * 86_400);
         let s = Statistics::default();
         s.absorb(Tallies::from([
-            (stats::key(&today, "a1", "proj", "codex"), tally(3, 300)),
             (
-                stats::key(&today, "a1", "proj", "claude-code"),
+                stats::key(&today, "a1", "proj", "codex", "/w/app"),
+                tally(3, 300),
+            ),
+            (
+                stats::key(&today, "a1", "proj", "claude-code", "/w/app-clone"),
                 tally(1, 10),
             ),
             (
-                stats::key(&today, "gone", "default", "claude-code"),
+                stats::key(&today, "gone", "default", "claude-code", ""),
                 tally(2, 20),
             ),
-            (stats::key(&week_ago, "a1", "proj", "codex"), tally(5, 500)),
+            (
+                stats::key(&week_ago, "a1", "proj", "codex", "/w/app"),
+                tally(5, 500),
+            ),
         ]));
+        // Two checkouts of one repository are one project (DEC-0089 AT-7).
+        let index = ProjectIndex {
+            by_folder: [
+                ("/w/app".to_string(), "github.com/o/app".to_string()),
+                ("/w/app-clone".to_string(), "github.com/o/app".to_string()),
+            ]
+            .into(),
+        };
         let snapshot = Snapshot::default();
-        let week = s.report(&snapshot, 7, now);
+        let week = s.report(&snapshot, &index, 7, now);
         assert_eq!(week["total"]["requests"], 6);
-        assert_eq!(week["projects"][0]["pool"], "proj");
-        assert_eq!(week["projects"][0]["input_tokens"], 310);
+        assert_eq!(week["groups"][0]["pool"], "proj");
+        assert_eq!(week["groups"][0]["input_tokens"], 310);
+        assert_eq!(week["projects"][0]["name"], "app");
+        assert_eq!(week["projects"][0]["requests"], 4);
+        assert_eq!(week["projects"][0]["groups"][0]["pool"], "proj");
+        // Requests whose folder is not known are one row without a name.
+        assert!(week["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["project"] == "" && p["name"].is_null() && p["requests"] == 2));
         assert_eq!(week["agents"][0]["agent"], "codex");
-        // An account that is gone keeps its counts, without a label.
         assert!(week["accounts"]
             .as_array()
             .unwrap()
@@ -328,9 +441,20 @@ mod tests {
             .any(|a| a["account_id"] == "gone" && a["label"].is_null()));
         assert_eq!(week["routes"].as_array().unwrap().len(), 3);
         assert_eq!(week["by_day"].as_array().unwrap().len(), 1);
-        let month = s.report(&snapshot, 30, now);
+        assert_eq!(week["by_day"][0]["groups"].as_array().unwrap().len(), 2);
+        let month = s.report(&snapshot, &index, 30, now);
         assert_eq!(month["total"]["requests"], 11);
         assert_eq!(month["by_day"][0]["day"], today);
         assert_eq!(month["since"], week_ago);
+        // A 0.6.52 key (no folder) still reads.
+        let old = Statistics::default();
+        old.absorb(Tallies::from([(
+            format!("{today}\ta1\tproj\tcodex"),
+            tally(1, 1),
+        )]));
+        assert_eq!(
+            old.report(&snapshot, &index, 7, now)["total"]["requests"],
+            1
+        );
     }
 }

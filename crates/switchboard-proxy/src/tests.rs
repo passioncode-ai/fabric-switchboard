@@ -2072,20 +2072,25 @@ async fn statistics_count_each_request_and_the_providers_own_token_usage_only() 
     ))
     .await;
     let p = start(s.clone(), url).await;
+    // SB-147: the request names its folder; the deepest group folder holding it is counted.
+    p.set_stat_folders(vec![
+        ("/w/app".into(), "default".into()),
+        ("/w/other".into(), "default".into()),
+    ]);
     let response = reqwest::Client::new()
         .post(format!("http://{}/claude/default/v1/messages", p.address()))
         .bearer_auth(p.token())
         .header("user-agent", "claude-cli/2.1.300 (external, cli)")
-        .body("{\"messages\":[{\"content\":\"SECRET_PROMPT_TEXT\"}]}")
+        .body("{\"system\":\"<env>\\nWorking directory: /w/app/src\\n\",\"messages\":[{\"content\":\"SECRET_PROMPT_TEXT\"}]}")
         .send()
         .await
         .unwrap();
     assert!(response.text().await.unwrap().contains("message_delta"));
     let tallies = p.take_statistics();
     let day = stats::day_of(now());
-    let on_a = &tallies[&stats::key(&day, &a.id, "default", "claude-code")];
+    let on_a = &tallies[&stats::key(&day, &a.id, "default", "claude-code", "/w/app")];
     assert_eq!((on_a.requests, on_a.limited, on_a.ok), (1, 1, 0));
-    let on_b = &tallies[&stats::key(&day, &b.id, "default", "claude-code")];
+    let on_b = &tallies[&stats::key(&day, &b.id, "default", "claude-code", "/w/app")];
     assert_eq!((on_b.requests, on_b.ok), (1, 1));
     assert_eq!(
         (

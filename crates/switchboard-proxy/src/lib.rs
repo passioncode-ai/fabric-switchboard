@@ -87,7 +87,16 @@ struct Gateway {
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
     stats: stats::Stats,
+    stat_folders: StatFolders,
 }
+/// SB-147: every group folder, and each folder's own capability → that folder, so a request's
+/// statistics name the folder it came from.
+#[derive(Default)]
+pub struct FolderMap {
+    folders: Vec<String>,
+    by_capability: std::collections::HashMap<String, String>,
+}
+pub type StatFolders = Arc<std::sync::RwLock<FolderMap>>;
 /// SB-133: each pool's folder capabilities (`folder_token`), one per folder that is part of the
 /// pool's project now. `None` until the owner sets them at start.
 pub type FolderTokens =
@@ -113,6 +122,7 @@ pub struct ProxyHandle {
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
     stats: stats::Stats,
+    stat_folders: StatFolders,
 }
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
@@ -237,6 +247,7 @@ impl ProxyHandle {
         let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stats: stats::Stats = Arc::default();
+        let stat_folders: StatFolders = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -253,6 +264,7 @@ impl ProxyHandle {
             legacy_until: legacy_until.clone(),
             draining: draining.clone(),
             stats: stats.clone(),
+            stat_folders: stat_folders.clone(),
         };
         let slots = state.slots.clone();
         let router = Router::new()
@@ -280,6 +292,7 @@ impl ProxyHandle {
             task: std::sync::Mutex::new(Some(task)),
             slots,
             stats,
+            stat_folders,
         })
     }
     /// Managed requests in flight, streams included: zero means no managed session is waiting
@@ -289,6 +302,24 @@ impl ProxyHandle {
     }
     pub fn address(&self) -> SocketAddr {
         self.address
+    }
+    /// SB-147: the group folders as `(folder, pool)`, so statistics can name a request's folder:
+    /// by the folder's own capability when it sent one, else by the folder the request names.
+    pub fn set_stat_folders(&self, folders: Vec<(String, String)>) {
+        let salts = self.salts.read().map(|s| s.clone()).unwrap_or_default();
+        let mut map = FolderMap::default();
+        for (folder, pool) in folders {
+            let capability =
+                pool_token_salted(&self.token, &pool, salts.get(&pool).map(String::as_str));
+            map.by_capability
+                .insert(folder_token(&capability, &folder), folder.clone());
+            map.folders.push(folder);
+        }
+        map.folders.sort();
+        map.folders.dedup();
+        if let Ok(mut current) = self.stat_folders.write() {
+            *current = map;
+        }
     }
     /// SB-145: the counts gathered since the last call, handed over and cleared; the owner adds
     /// them to what it keeps on disk.
@@ -638,7 +669,6 @@ async fn relay(
             .get("user-agent")
             .and_then(|v| v.to_str().ok()),
     );
-    let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client);
     let bytes =
         match tokio::time::timeout(Duration::from_secs(30), to_bytes(body, BODY_LIMIT)).await {
             Ok(Ok(b)) => b,
@@ -650,6 +680,27 @@ async fn relay(
             }
             Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "Request body timed out."),
         };
+    // SB-147: the folder the request came from: its own capability, else the folder it names.
+    let folder = g
+        .stat_folders
+        .read()
+        .ok()
+        .and_then(|map| {
+            let presented = |v: &[u8]| {
+                std::str::from_utf8(v)
+                    .ok()
+                    .and_then(|t| map.by_capability.get(t))
+                    .cloned()
+            };
+            presented(&header)
+                .or_else(|| presented(&bearer))
+                .or_else(|| {
+                    stats::folder_hint(&bytes)
+                        .and_then(|hint| stats::deepest(&map.folders, &hint).map(str::to_owned))
+                })
+        })
+        .unwrap_or_default();
+    let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client, &folder);
     let mut moved = false;
     let mut account = account;
     let mut credential = credential;

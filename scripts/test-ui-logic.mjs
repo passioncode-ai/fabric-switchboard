@@ -614,4 +614,29 @@ check(() => {
   assert.deepEqual(logic.groupProjects(folders, roots), ['api', 'app', 'loose']);
   assert.deepEqual(logic.groupProjects(['/d/x', '/d/x/sub'], null), ['x'], 'before Git is read: folder names, subfolders left out');
 });
+// SB-147: the daily chart fills days without traffic with 0 and sums groups past the top into one series.
+check(() => {
+  const stats = { from: '2026-10-18', to: '2026-10-20', by_day: [
+    { day: '2026-10-20', groups: [{ pool: 'a', requests: 2, tokens: 50 }, { pool: 'b', requests: 1, tokens: 5 }, { pool: 'c', requests: 1, tokens: 1 }] },
+    { day: '2026-10-18', groups: [{ pool: 'a', requests: 1, tokens: 10 }] },
+  ] };
+  const { days, series } = logic.chartSeries(stats, 'tokens', (p) => p.toUpperCase(), 2);
+  assert.deepEqual(days, ['2026-10-18', '2026-10-19', '2026-10-20']);
+  assert.deepEqual(series.map((x) => [x.name, x.values]), [['A', [10, 0, 50]], ['B', [0, 0, 5]], ['Other groups', [0, 0, 1]]]);
+  assert.deepEqual(logic.chartSeries(stats, 'requests', (p) => p, 5).series[0].values, [1, 0, 2]);
+  assert.equal(logic.niceMax(0), 1); assert.equal(logic.niceMax(7), 10); assert.equal(logic.niceMax(130), 200); assert.equal(logic.niceMax(4_100_000), 5_000_000);
+  assert.equal(logic.statCacheShare({ input_tokens: 10, cache_read_tokens: 80, cache_write_tokens: 10, output_tokens: 5, requests: 1 }), 80);
+  assert.equal(logic.statCacheShare({ input_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 }), null);
+  assert.equal(logic.statTokensPerRequest({ input_tokens: 10, cache_read_tokens: 80, cache_write_tokens: 10, output_tokens: 100, requests: 4 }), 50);
+});
+// SB-147: a group's folders by project: a repository with its worktree and a clone of one origin is one project; a plain folder is its own.
+check(() => {
+  const folders = ['/d/app', '/w/app-wt', '/d/app-copy', '/d/notes'];
+  const roots = [
+    { folder: '/d/app', branch: 'main', remote: 'github.com/o/app', derived: [{ folder: '/w/app-wt', kind: 'worktree', branch: 'x' }] },
+    { folder: '/d/app-copy', branch: 'main', remote: 'github.com/o/app', derived: [] },
+  ];
+  const projects = logic.groupProjectRows(folders, roots);
+  assert.deepEqual(projects.map((p) => [p.name, p.rows.map((r) => r.folder)]), [['app', ['/d/app', '/w/app-wt', '/d/app-copy']], ['notes', ['/d/notes']]]);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
