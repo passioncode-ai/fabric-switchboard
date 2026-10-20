@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.56 published; iteration closed for Switchboard
+
+- **Published** 2026-10-20 12:06 UTC (release run 39413879646, 25 assets; nightly on the tag
+  39414127875 green). App, CLI and plugin at 0.6.56 on this machine.
+- **Board, read 2026-10-20.** DEC-0092 is merged (fabric-agent-contract `0de7640`):
+  `fabric.project.resolve` (read-only, `{path}` in, `resolveAnswer` out, `pending` while Git cannot
+  be read). Who records a non-null answer and how `new` becomes a Project are still open (CT-64,
+  CT-66), so SB-141 can now ask Fabric for the Project but not yet record its id. DEC-0093 (the
+  coding-agent catalogue, `catalogue/coding-agents.json`, contract `bab2578`) is merged: SB-154.
+  Contract pin for DEC-0089 to DEC-0095: `c55f2d5`.
+- **Next task.** Verification phase (fabric-workspace thread `0abdfd6f`): test the installed app
+  as a user would and record every problem as a backlog row; then SB-151 (an idle update restart
+  left no app running), SB-141 against `fabric.project.resolve`, SB-154.
+
 ## 2026-10-20: 0.6.56, Statistics tables stacked and sortable (SB-153) with SB-152
 
 - **Done.** Statistics tables run one under another at full width and sort by a click on a
