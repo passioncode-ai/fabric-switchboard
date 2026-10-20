@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.55 (2026-10-20)
+
+- **Removed worktrees no longer stay in a group as projects (SB-152).** Removing a worktree or a clone left its folder behind with only `.claude/` in it (Switchboard's own settings for that folder), so the folder never counted as deleted and its group showed it as a project of its own. Such a leftover folder now leaves its group like a deleted one. A Git repository right in the home folder (an accidental `git init` in `~/DATA`, for example) is no longer taken as the repository every folder below it belongs to.
+
 ## 0.6.54 (2026-10-20)
 
 - **Claude Code sessions start without waiting for Switchboard (SB-149).** The plugin's start-of-session check, which adds a new worktree or clone to its group, waited for Switchboard as long as Switchboard was busy. On a loaded machine that was the whole 10 seconds Claude Code allows, at almost every session start, and the check then said nothing anyway. It now gives up after 1.5 seconds and says nothing, and Claude Code stops it after 3 seconds at most. The folder is still added: Switchboard's own background pass adds it within 30 seconds. Update the plugin (`claude plugin update switchboard@switchboard`) for the shorter limit.

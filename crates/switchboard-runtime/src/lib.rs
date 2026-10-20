@@ -1359,12 +1359,16 @@ impl Runtime {
             for project in &snapshot.projects {
                 for folder in &project.folders {
                     let path = Path::new(folder);
-                    if let Some(dev) = projects::device(path) {
-                        devices.insert(folder.clone(), dev);
-                        continue;
+                    // SB-152: a removed checkout's leftover folder counts as deleted too.
+                    let husk = projects::husk(path);
+                    if !husk {
+                        if let Some(dev) = projects::device(path) {
+                            devices.insert(folder.clone(), dev);
+                            continue;
+                        }
                     }
                     let known = vanish.devices.get(folder).copied();
-                    if !projects::deleted(path, known) {
+                    if !husk && !projects::deleted(path, known) {
                         continue;
                     }
                     if let Some(dev) = known {
@@ -5743,6 +5747,41 @@ mod owner_tests {
                 .await
                 .unwrap_err(),
             "Account not found."
+        );
+    }
+
+    #[tokio::test]
+    async fn a_removed_worktree_whose_folder_kept_only_its_claude_settings_leaves_the_group() {
+        // SB-152 (operator 2026-10-20): «отдельные проекты это какие-то work trees».
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (main, worktree) = (work.join("app"), work.join("app-wt"));
+        for dir in [&main, &worktree] {
+            std::fs::create_dir_all(dir.join(".git")).unwrap();
+        }
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![main.clone(), worktree.clone()],
+                account_ids: vec![],
+                base_folders: None,
+            })
+            .await
+            .unwrap();
+        // `git worktree remove` takes the checkout; the binding Switchboard wrote stays.
+        std::fs::remove_dir_all(&worktree).unwrap();
+        std::fs::create_dir_all(worktree.join(".claude")).unwrap();
+        std::fs::write(worktree.join(".claude/settings.local.json"), "{}").unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let t = monitor::now();
+        runtime.vanish_pass(&snapshot, t).await;
+        runtime.vanish_pass(&snapshot, t + VANISH_CONFIRM).await;
+        assert_eq!(
+            runtime.store.snapshot().unwrap().projects[0].folders,
+            [main.to_string_lossy().into_owned()]
         );
     }
 

@@ -456,6 +456,14 @@ pub(crate) fn repo_root(path: &Path) -> Option<PathBuf> {
         if dir.parent().is_none() || home.iter().any(|h| h == dir) {
             return None;
         }
+        // SB-152: a repository right under home (a stray `git init` in `~/DATA`, a dotfiles
+        // repository) is broad, never the root folders below it belong to (DEC-0089 AT-5).
+        if dir.join(".git").symlink_metadata().is_ok()
+            && dir.parent().is_some_and(|p| home.iter().any(|h| h == p))
+            && at != Some(path)
+        {
+            return None;
+        }
         if dir.join(".git").symlink_metadata().is_ok() {
             return Some(dir.to_owned());
         }
