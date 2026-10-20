@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Russian messages for refusals about groups now say «группа», like the rest of the window (SB-146).
+
 ## 0.6.52 — 2026-10-19
 
 - **Every CLI command now has an MCP tool or a stated reason (SB-134, part 3).** Eight more tools for agents: `switchboard_kimi_login` and `switchboard_kimi_rename` (Kimi Code sign-in and naming), `switchboard_handovers_set`, `switchboard_openrouter_models`, `switchboard_project_suggestions`, `switchboard_project_bindings`, `switchboard_project_suggestion` (accept or keep out a waiting folder) and `switchboard_project_sources` (a group's repository owners, by delta). The parity check has no command left for later.
