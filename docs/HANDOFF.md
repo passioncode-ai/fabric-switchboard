@@ -22,8 +22,17 @@
   owner that accepts and never answers; 33.45 s before the fix), `the_session_start_hook_waits_for_no_input_it_was_not_given`
   (an open stdin; endless before the fix), `the_plugin_bounds_its_session_start_hook`.
 - **Filed.** SB-150: the `StopFailure` hook has the same unbounded call.
-- **Exact next task.** After the 0.6.54 release: confirm the app updated itself to 0.6.54, update
-  the plugin (`claude plugin update switchboard@switchboard`), time the installed hook; then SB-141.
+- **Published** 2026-10-20 05:32 UTC: PR #257, squash `7bb97e1`, tag `v0.6.54`, release run
+  39370706549 (guard with nightly on the tag, all builds, updater, publish: success), 25 assets.
+  Installed here: plugin 0.6.54 (`claude plugin update switchboard@switchboard`, SessionStart
+  `timeout` 3), app and CLI 0.6.54 by the app's own update (05:53:57 UTC). The installed hook
+  command (`switchboard project suggest --from-hook 2>/dev/null || true`) took 0.07 to 0.17 s over
+  five runs; the fixed build against the live owner took 0.13 to 1.02 s at load average about 490.
+- **Found on the way (SB-151).** The 0.6.53 app's update restart at 05:31:28 UTC drained, logged
+  `hard_exit` at 05:31:39 and its relaunch never came up: no owner until the lifecycle broker's
+  `ensure_running` at 05:52. The same log shows `transaction_held` 18597 ms at `suggest_found`.
+- **Exact next task.** SB-151 (why the background relaunch after an update restart did not start),
+  then SB-141.
 
 ## 2026-10-20: 0.6.53, projects inside groups and Statistics by project (SB-147)
 
