@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.54, the SessionStart hook no longer holds a session's start (SB-149)
+
+- **Cause.** An audit of 44 session starts found the plugin's `SessionStart` hook at about
+  10045 ms in 42 of them, with nothing injected. `ProjectSuggest` is not one of the metadata reads
+  `Runtime::execute` answers outside the owner transaction (`crates/switchboard-runtime/src/lib.rs`,
+  the `matches!` list), so the hook waited for the transaction, which a background pass on a loaded
+  machine held for up to 57 s (load average 440 to 640 measured during this build). The CLI's
+  control client allows 30 s (`control::request`), so Claude Code's 10 s hook timeout always won.
+  Reproduced here: one run of the installed 0.6.52 hook took 29.8 s, the next 0.25 s.
+- **Done.** `SESSION_HOOK_DEADLINE` (1.5 s) bounds the stdin read and the owner call together in
+  `project_suggest_hook_and_exit` (`crates/switchboard-cli/src/main.rs`); on the deadline it prints
+  nothing and exits 0. The plugin's hook `timeout` is 3 s. The add is not lost: the owner may finish
+  it, and the background pass adds the folder within 30 s.
+- **Decision.** Not moving `ProjectSuggest` out of the owner transaction: it writes
+  `project-suggestions.json` and `accounts.json`, which the transaction serialises. The deadline
+  is the session's guarantee; the add stays eventual.
+- **Tests.** CLI `the_session_start_hook_gives_up_quickly_when_the_owner_does_not_answer` (a fake
+  owner that accepts and never answers; 33.45 s before the fix), `the_session_start_hook_waits_for_no_input_it_was_not_given`
+  (an open stdin; endless before the fix), `the_plugin_bounds_its_session_start_hook`.
+- **Filed.** SB-150: the `StopFailure` hook has the same unbounded call.
+- **Exact next task.** After the 0.6.54 release: confirm the app updated itself to 0.6.54, update
+  the plugin (`claude plugin update switchboard@switchboard`), time the installed hook; then SB-141.
+
 ## 2026-10-20: 0.6.53, projects inside groups and Statistics by project (SB-147)
 
 - **Published** 2026-10-20 03:49 UTC (release run 39361759501, 25 assets; nightly on the tag

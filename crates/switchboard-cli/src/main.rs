@@ -1643,11 +1643,21 @@ pub(crate) async fn onboard_status(
     probe.folder = Some(folder);
     Ok(onboarding::steps(&probe))
 }
+/// How long the `SessionStart` hook may hold a session's start (SB-149), reading its input
+/// included. The owner runs `ProjectSuggest` under its transaction, which a background pass on a
+/// loaded machine held for up to 57 s; behind it the hook used to run into Claude Code's own
+/// 10 s timeout at almost every start. The plugin's hook timeout (3 s) stays above this.
+const SESSION_HOOK_DEADLINE: std::time::Duration = std::time::Duration::from_millis(1500);
 /// `switchboard project suggest --from-hook` (SB-117, SB-146): Claude Code's `SessionStart` hook
 /// names the session's folder as `cwd`. Its output joins the session's context, so it prints one
-/// line only when a folder was added to its group, or when an add waits; it exits 0.
+/// line only when a folder was added to its group, or when an add waits; it exits 0. Past
+/// `SESSION_HOOK_DEADLINE` it prints nothing: the owner may still finish the add, and its
+/// background pass makes it within 30 s otherwise. Every private write is a rename, so leaving
+/// an offline add unfinished leaves no torn file.
 async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
-    let value = project_suggest_hook(root).await;
+    let value = tokio::time::timeout(SESSION_HOOK_DEADLINE, project_suggest_hook(root))
+        .await
+        .unwrap_or_else(|_| json!({"suggested": false, "reason": "timed_out"}));
     let project = value["suggestion"]["project"]
         .as_str()
         .or_else(|| value["project"]["name"].as_str())
@@ -1665,12 +1675,19 @@ async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
     std::process::exit(0)
 }
 async fn project_suggest_hook(root: &std::path::Path) -> Value {
-    use std::io::Read;
-    let mut input = Vec::new();
-    let read = std::io::stdin()
-        .take(HOOK_INPUT_LIMIT)
-        .read_to_end(&mut input);
-    let parsed: Option<Value> = read.ok().and_then(|_| serde_json::from_slice(&input).ok());
+    // Read on a blocking thread, so a host that never closes stdin meets the deadline too.
+    let input = tokio::task::spawn_blocking(|| {
+        let mut input = Vec::new();
+        std::io::stdin()
+            .take(HOOK_INPUT_LIMIT)
+            .read_to_end(&mut input)
+            .map(|_| input)
+    })
+    .await;
+    let parsed: Option<Value> = input
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|input| serde_json::from_slice(&input).ok());
     let Some(cwd) = parsed
         .as_ref()
         .and_then(|h| h["cwd"].as_str())

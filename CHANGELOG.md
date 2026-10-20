@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.54 (2026-10-20)
+
+- **Claude Code sessions start without waiting for Switchboard (SB-149).** The plugin's start-of-session check, which adds a new worktree or clone to its group, waited for Switchboard as long as Switchboard was busy. On a loaded machine that was the whole 10 seconds Claude Code allows, at almost every session start, and the check then said nothing anyway. It now gives up after 1.5 seconds and says nothing, and Claude Code stops it after 3 seconds at most. The folder is still added: Switchboard's own background pass adds it within 30 seconds. Update the plugin (`claude plugin update switchboard@switchboard`) for the shorter limit.
+
 ## 0.6.53 — 2026-10-20
 
 - **A group lists its projects (SB-147).** Inside a group, folders are now shown by project: a project is a repository with its worktrees and clones (one `origin`), or a folder outside Git, the same way Fabric and Observatory count projects. Each project shows its folders under its name.
