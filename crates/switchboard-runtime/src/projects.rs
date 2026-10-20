@@ -153,6 +153,48 @@ pub(crate) fn device(path: &Path) -> Option<u64> {
 /// saw present (deleted while Switchboard was not running), an ancestor that is not a mount point
 /// itself. A share or FUSE mount that went away leaves an empty mount point on another device than
 /// the folder was on, so it is not a deletion. Anything Switchboard cannot read is not deleted.
+/// SB-152: what is left of a removed worktree or clone. Removing a checkout leaves its folder
+/// behind when local tool files sit in it, `.claude/` above all (Switchboard's own binding writes
+/// one, SB-118), so the folder never "vanishes". A folder with no `.git` whose only entries are
+/// `.claude` (holding files only, nothing a person keeps), `.DS_Store` or `.codex` is such a husk:
+/// it counts as deleted. A folder with anything else in it, or a `.git`, is never a husk.
+pub(crate) fn husk(path: &Path) -> bool {
+    const LEFTOVERS: &[&str] = &[".claude", ".codex", ".DS_Store"];
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    let mut any = false;
+    for entry in entries.take(64) {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            return false;
+        };
+        if !LEFTOVERS.contains(&name) {
+            return false;
+        }
+        any = true;
+    }
+    // An empty folder may be a mount point or a new folder: not a husk.
+    if !any {
+        return false;
+    }
+    let claude = path.join(".claude");
+    match std::fs::read_dir(&claude) {
+        Ok(items) => items.take(64).all(|e| {
+            e.ok().is_some_and(|e| {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                (n == "settings.local.json" || n == "settings.json" || n == ".DS_Store")
+                    && e.file_type().is_ok_and(|t| t.is_file())
+            })
+        }),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 pub(crate) fn deleted(path: &Path, known_device: Option<u64>) -> bool {
     match path.symlink_metadata() {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -453,6 +495,30 @@ pub(crate) fn account_for_folder(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_removed_worktree_left_with_only_tool_files_is_a_husk() {
+        // SB-152 (operator 2026-10-20): such folders stayed in their groups as projects.
+        let root = tempfile::tempdir().unwrap();
+        let wt = root.path().join("wt");
+        std::fs::create_dir_all(wt.join(".claude")).unwrap();
+        std::fs::write(wt.join(".claude/settings.local.json"), "{}").unwrap();
+        assert!(husk(&wt));
+        // A checkout, a folder with work in it, an empty folder or one holding the person's
+        // own Claude files is never one.
+        std::fs::write(wt.join(".git"), "gitdir: /x").unwrap();
+        assert!(!husk(&wt));
+        std::fs::remove_file(wt.join(".git")).unwrap();
+        std::fs::write(wt.join("notes.md"), "x").unwrap();
+        assert!(!husk(&wt));
+        std::fs::remove_file(wt.join("notes.md")).unwrap();
+        std::fs::create_dir_all(wt.join(".claude/commands")).unwrap();
+        assert!(!husk(&wt));
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(!husk(&empty));
+        assert!(!husk(&root.path().join("missing")));
+    }
+
     use super::*;
     use std::sync::Arc;
     use switchboard_core::{AuthKind, Credential, MemoryVault};

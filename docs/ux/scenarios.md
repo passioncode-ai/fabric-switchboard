@@ -1171,16 +1171,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Delete one of the project's folders (`git worktree remove`, `rm -rf`, Finder) → the next look (every five minutes) sees it missing.
 2. Still missing five minutes later → it leaves the project; its accounts no longer serve it.
 3. One system notification: “Folder removed from a project — {folder} was deleted and is no longer part of {project}.” (several: “{n} deleted folders are no longer part of their projects.”).
-**Alt paths:** A folder renamed or moved counts as deleted: add the new place with *Add folder…* (its old route stays in the moved folder's `.claude/settings.local.json` until SB-133). The folder is back before the second look (a checkout being recreated) → it stays. A folder deleted while Switchboard was not running leaves at the first two looks after it starts. A folder whose nearest remaining folder is now another device than it was on (a share or FUSE mount that went away) is not taken as deleted. A folder on a drive that may only be unmounted (`/Volumes/…`, `/media/…`, `/mnt/…`) or whose whole tree is gone up to the filesystem root is not taken as deleted and stays. A project keeps its last folder (log `project_folder_gone kept_last`). A deleted folder that comes back is found again like a new one (SCN-055) — unlike a folder the person removed, which never returns.
+**Alt paths:** A folder renamed or moved counts as deleted: add the new place with *Add folder…* (its old route stays in the moved folder's `.claude/settings.local.json` until SB-133). The folder is back before the second look (a checkout being recreated) → it stays. A folder deleted while Switchboard was not running leaves at the first two looks after it starts. A folder whose nearest remaining folder is now another device than it was on (a share or FUSE mount that went away) is not taken as deleted. A folder on a drive that may only be unmounted (`/Volumes/…`, `/media/…`, `/mnt/…`) or whose whole tree is gone up to the filesystem root is not taken as deleted and stays. A project keeps its last folder (log `project_folder_gone kept_last`). A deleted folder that comes back is found again like a new one (SCN-055) — unlike a folder the person removed, which never returns. A removed worktree or clone whose folder kept only tool files (no `.git`; only `.claude/` with its settings files, `.codex` or `.DS_Store`) counts as deleted the same way (SB-152), so it no longer stays in its group as a project.
 **Expected result:** project folder lists follow the disk; nothing the person removed comes back, and nothing merely unmounted is lost.
 **UI elements:** system notification; the project card shows the shorter list.
 **States covered:** deleted and confirmed, back before confirmation, unmounted drive, last folder, deleted then back.
 **Errors & recovery:** a refused save leaves the folder and logs `project_folder_gone refused`; the next look tries again.
 **Status:** draft
 **Meaning:** operator request 2026-10-15 (SB-131).
-**Coverage:** owner `a_deleted_project_folder_leaves_its_project_once_it_stays_gone`; `projects::tests::only_a_folder_really_deleted_counts_as_deleted`; `suggestions::tests::one_folder_is_named_and_several_are_counted` (the notification's words).
+**Coverage:** owner `a_deleted_project_folder_leaves_its_project_once_it_stays_gone`, `a_removed_worktree_whose_folder_kept_only_its_claude_settings_leaves_the_group`; `projects::tests::a_removed_worktree_left_with_only_tool_files_is_a_husk`; `projects::tests::only_a_folder_really_deleted_counts_as_deleted`; `suggestions::tests::one_folder_is_named_and_several_are_counted` (the notification's words).
 **Product:** unobserved
-**Traces:** CONTRACTS → Projects (0.6), SB-131
+**Traces:** CONTRACTS → Projects (0.6), SB-131, SB-152
 
 ## SCN-056 — Work in a project's folder on the project's accounts
 **Persona:** P-01

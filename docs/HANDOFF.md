@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-20: 0.6.55, removed worktrees leave their groups (SB-152); call to every agent
+
+- **Found.** 26 folders shown as projects in Agents and PassionCode were removed worktrees under
+  `~/DATA/_worktrees` and `~/DATA/_wt`: no `.git`, only `.claude/settings.local.json` left, which
+  Switchboard's own binding writes, so the vanish pass never saw them go. Separately `~/DATA/.git`
+  was an empty repository (0 objects, no refs, `git init` of 2026-09-29); removed.
+- **Done.** `projects::husk` counts such a folder as deleted; `repo_root` refuses a repository
+  right under home. The installed app takes the husks out within two vanish looks (10 minutes).
+- **Board.** The operator's call to finish every task went to all 34 projects on threads
+  `a0e418bb`, `98f4505a`, `04fdb04f`, `8947dbb5`.
+- **Next task.** SB-151 (an idle update restart left no app running for 20 minutes), then SB-141.
+
 ## 2026-10-20: 0.6.54, the SessionStart hook no longer holds a session's start (SB-149)
 
 - **Cause.** An audit of 44 session starts found the plugin's `SessionStart` hook at about
