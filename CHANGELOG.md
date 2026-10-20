@@ -6,9 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.55 (2026-10-20)
+## 0.6.56 (2026-10-20)
 
+- **Statistics tables one under another, and sortable (SB-153).** *By group*, *By project*, *By account* and *By agent* now run at full width, one after another, so long names fit; click a column title to sort by it, click again to reverse. Large counts read as billions (3.05B, not 3045.86M).
 - **Removed worktrees no longer stay in a group as projects (SB-152).** Removing a worktree or a clone left its folder behind with only `.claude/` in it (Switchboard's own settings for that folder), so the folder never counted as deleted and its group showed it as a project of its own. Such a leftover folder now leaves its group like a deleted one. A Git repository right in the home folder (an accidental `git init` in `~/DATA`, for example) is no longer taken as the repository every folder below it belongs to.
+- 0.6.55 was tagged and not published; its change ships here.
 
 ## 0.6.54 (2026-10-20)
 
