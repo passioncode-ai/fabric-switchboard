@@ -6,7 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.60 (2026-10-21)
+## 0.6.61 (2026-10-22)
+
+- **Windows: the agents' connection works again.** 0.6.60 never reached anyone: on Windows the `switchboard mcp` server that coding agents talk to stopped on its first request, because the CLI ran on the platform's 1 MiB main-thread stack. The CLI now runs on a 16 MiB stack on every platform, and the checks run the agents' tests under a 1 MiB stack on macOS and Linux too, so this cannot come back unnoticed. 0.6.61 carries everything listed under 0.6.60.
+
+## 0.6.60 (2026-10-21, not published: see 0.6.61)
 
 - **Organizations (SB-158).** Switchboard now shows which accounts belong to which company. Add an organization with its e-mail domains, and every account with an address on them gets its badge; placing one seat of a Claude Team or ChatGPT workspace brings the team's other seats along, and any account can be kept personal from its ⋯ menu. A filter above the accounts shows all of them, one organization's, or the personal ones. The same is in the CLI (`switchboard org list|add|edit|remove|assign`) and for agents (`switchboard_organizations`, `switchboard_organization_set`, and the organization on each `switchboard_accounts` row). Without an organization nothing changes, and nothing about organizations leaves the computer.
 

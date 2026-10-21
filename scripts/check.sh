@@ -9,6 +9,10 @@ node scripts/check-locale.mjs
 node scripts/check-error-vocabulary.mjs
 cargo fmt --all -- --check
 cargo test --workspace --locked
+# Windows gives a process's main thread 1 MiB of stack; macOS and Linux give 8. The MCP tests run
+# under that limit, so a debug frame that outgrows it fails here and not only in the nightly
+# Windows run (0.6.60, nightly 39676565992).
+(ulimit -s 1024 && cargo test -p switchboard-cli --test mcp --locked)
 cargo clippy --workspace --all-targets --locked -- -D warnings
 python3 scripts/check_docs.py
 python3 scripts/check_plugin.py

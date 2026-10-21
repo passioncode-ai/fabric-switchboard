@@ -2380,8 +2380,31 @@ fn print_value(value: &Value, json_output: bool) {
         );
     }
 }
-#[tokio::main]
-async fn main() -> ExitCode {
+/// The stack every thread of the CLI runs on. The owner's `execute` is one large match whose
+/// debug-build poll frame outgrew Windows' 1 MiB main-thread stack at 0.6.60 (the MCP server
+/// died on its first offline call, nightly `39676565992`); a fixed size makes the limit the same
+/// on every platform instead of the platform's default.
+const STACK_BYTES: usize = 16 * 1024 * 1024;
+fn main() -> ExitCode {
+    let runtime = std::thread::Builder::new()
+        .name("switchboard-main".into())
+        .stack_size(STACK_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(STACK_BYTES)
+                .build()
+                .map(|runtime| runtime.block_on(start()))
+        });
+    match runtime.map(|thread| thread.join()) {
+        Ok(Ok(Ok(code))) => code,
+        _ => {
+            eprintln!("Switchboard could not start its runtime.");
+            ExitCode::FAILURE
+        }
+    }
+}
+async fn start() -> ExitCode {
     // Parse before resolving app data or creating any files. Even parsing failures
     // are generic: never reflect a user accidentally typing a secret as an argument.
     let cli = match Cli::try_parse() {

@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.61, Windows stack fix (SB-161); 0.6.60 not published
+
+- **What happened.** Tag v0.6.60 (`884d906`): the release guard ran the nightly on it, which
+  failed on Windows only: `switchboard mcp` died on its first request (main-thread stack 1 MiB,
+  the owner's `execute` debug frame grew with SB-158). Nothing of 0.6.60 was published; the
+  plugin marketplace already showed 0.6.60 because it reads `main`.
+- **Fix.** The CLI runs its tokio runtime on a 16 MiB thread with 16 MiB workers; the gate runs
+  the MCP tests under `ulimit -s 1024`. Reproduced and verified on macOS under 1 MiB.
+- **Next task.** SB-109, as in the 0.6.60 entry below.
+
 ## 2026-10-21: 0.6.60, organizations phase 1 (SB-158)
 
 - **Done.** Organizations as designed in [organizations-2026-10-21](research/organizations-2026-10-21.md)
