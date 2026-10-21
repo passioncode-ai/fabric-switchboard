@@ -23,6 +23,30 @@ pub struct Root {
     /// project.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote: Option<String>,
+    /// SB-155: the project's name as the person sees it in their folders: the main checkout's
+    /// folder name (a worktree's own folder never names the project), else the folder's own.
+    pub name: String,
+}
+
+/// SB-155: the name of the project a folder belongs to: its own folder name for a main checkout
+/// or a folder outside Git; for a worktree, the folder of its main checkout (the parent of the
+/// common `.git`), or a bare repository's folder without its `.git`.
+pub(crate) fn project_name(folder: &str, checkout: Option<&Checkout>) -> String {
+    let leaf = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
+    let own = || leaf(Path::new(folder)).unwrap_or_else(|| folder.to_owned());
+    match checkout {
+        Some(c) if !c.main => {
+            if c.common.file_name().is_some_and(|n| n == ".git") {
+                c.common.parent().and_then(leaf).unwrap_or_else(own)
+            } else {
+                leaf(&c.common)
+                    .map(|n| n.trim_end_matches(".git").to_owned())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(own)
+            }
+        }
+        _ => own(),
+    }
 }
 
 /// What Git says about one folder.
@@ -116,6 +140,7 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
             branch: folders[g.root].1.as_ref().and_then(|c| c.branch.clone()),
             derived: g.members.iter().map(|&m| derived(m, "worktree")).collect(),
             remote: g.remote.clone(),
+            name: project_name(&folders[g.root].0, folders[g.root].1.as_ref()),
         };
         if let Some(remote) = &g.remote {
             // Clones of the same repository: only under a main checkout, and only once.
@@ -145,6 +170,7 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
             branch: None,
             derived: Vec::new(),
             remote: None,
+            name: project_name(&folders[i].0, None),
         };
         (i, root)
     }));
@@ -322,6 +348,37 @@ mod tests {
             main,
             branch: Some(branch.to_owned()),
         })
+    }
+
+    #[test]
+    fn a_project_is_named_by_its_main_checkouts_folder_not_its_remote_or_a_worktree() {
+        // SB-155 (operator 2026-10-20): projects read as the folders in ~/DATA.
+        let main = co(
+            "/d/project-observatory-open-source/.git",
+            Some("github.com/o/project-observatory-dashboard"),
+            true,
+            "main",
+        );
+        assert_eq!(
+            project_name("/d/project-observatory-open-source", main.as_ref()),
+            "project-observatory-open-source"
+        );
+        let wt = co(
+            "/d/asset-foundry/.git",
+            Some("github.com/o/asset-foundry"),
+            false,
+            "w3",
+        );
+        assert_eq!(
+            project_name("/d/_worktrees/asset-foundry-w3-fix", wt.as_ref()),
+            "asset-foundry"
+        );
+        let bare = co("/srv/repos/tool.git", None, false, "x");
+        assert_eq!(project_name("/d/_wt/tool-x", bare.as_ref()), "tool");
+        assert_eq!(project_name("/d/notes", None), "notes");
+        // A group holding only a worktree names it by its main checkout.
+        let roots = group(&[("/d/_worktrees/asset-foundry-w3-fix".into(), wt)]);
+        assert_eq!(roots[0].name, "asset-foundry");
     }
 
     #[test]

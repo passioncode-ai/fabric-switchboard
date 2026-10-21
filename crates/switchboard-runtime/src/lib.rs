@@ -895,18 +895,26 @@ impl Runtime {
             Ok(report) => {
                 self.proxy.set_folder_tokens(report.tokens.clone());
                 self.proxy.set_stat_folders(stat_folders(&snapshot));
-                oplog::event(
-                    "claude_binding",
-                    &[
-                        ("bound", oplog::Field::Number(report.bound as i64)),
-                        ("removed", oplog::Field::Number(report.removed as i64)),
-                        ("skipped", oplog::Field::Number(report.skipped.len() as i64)),
-                        (
-                            "user_values",
-                            oplog::Field::Number(report.user_values_present.len() as i64),
-                        ),
-                    ],
-                );
+                // SB-155: a sync that changed nothing is not an event (178 a day on 2026-10-20).
+                let changed = report.bound
+                    + report.removed
+                    + report.skipped.len()
+                    + report.user_values_present.len()
+                    > 0;
+                if changed {
+                    oplog::event(
+                        "claude_binding",
+                        &[
+                            ("bound", oplog::Field::Number(report.bound as i64)),
+                            ("removed", oplog::Field::Number(report.removed as i64)),
+                            ("skipped", oplog::Field::Number(report.skipped.len() as i64)),
+                            (
+                                "user_values",
+                                oplog::Field::Number(report.user_values_present.len() as i64),
+                            ),
+                        ],
+                    );
+                }
                 if let Ok(mut k) = self.bindings_key.lock() {
                     *k = Some(key);
                 }
