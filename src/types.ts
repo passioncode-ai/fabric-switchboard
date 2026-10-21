@@ -93,6 +93,8 @@ export interface Adapter {
   launchAgent(agent: string, pool: string, workingDirectory: string): Promise<unknown>;
   /** The OpenRouter key agents run on (SB-79): metadata and what it may still spend, never the key. */
   openrouterStatus(): Promise<OpenrouterStatus>;
+  /** SB-156: one saved key's status with its spend: the machine's (`null`) or a group's. */
+  openrouterKeyStatus(pool: string | null): Promise<OpenrouterStatus>;
   /** Saves the key; the answer is metadata only. */
   openrouterSave(key: string, model: string | null, pool?: string | null): Promise<unknown>;
   openrouterModel(model: string, pool?: string | null): Promise<unknown>;

@@ -1455,6 +1455,7 @@ let statsError = false;
 let statsDays = 30;
 let chartMetric: ChartMetric = 'tokens';
 async function loadStats() {
+  keySpend = null;
   try { stats = await adapter.statistics(statsDays); statsError = false; } catch { statsError = true; }
   backgroundRender();
 }
@@ -1546,6 +1547,43 @@ function statTable(id: string, title: string, names: string[], rows: StatRow[], 
   table.append(body); wrap.append(table); section.append(wrap);
   return section;
 }
+/** SB-156: what each saved OpenRouter key has spent (the machine's and each group's), as OpenRouter reports it. */
+let keySpend: { name: string; status: OpenrouterStatus | null; error: boolean }[] | null = null; let keySpendLoading = false;
+function loadKeySpend() {
+  if (keySpendLoading) return;
+  keySpendLoading = true;
+  void (async () => {
+    try {
+      const keys = await adapter.openrouterKeys();
+      keySpend = await Promise.all(keys.keys.map(async (k) => {
+        const name = k.pool === null ? t('Every folder (the machine’s key)') : t('Group “{name}”', { name: k.project ?? k.pool });
+        try { return { name, status: await adapter.openrouterKeyStatus(k.pool), error: false }; } catch { return { name, status: null, error: true }; }
+      }));
+    } catch { keySpend = []; }
+    keySpendLoading = false; backgroundRender();
+  })();
+}
+function statKeysPanel() {
+  const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', 'stat-keys');
+  const heading = el('h2', '', t('API keys')); heading.id = 'stat-keys';
+  section.append(heading, el('p', 'form-note', t('Agents on OpenRouter spend the key of the group whose folder they start in, else the machine’s. OpenRouter reports the spend per key.')));
+  if (!keySpend) { loadKeySpend(); section.append(el('p', 'form-note', t('Reading the keys…'))); return section; }
+  if (!keySpend.length) { section.append(el('p', 'form-note', t('No OpenRouter key is saved. Add one under Tokens.'))); return section; }
+  const table = el('table', 'stat-table'); const head = el('tr');
+  for (const [name, cls] of [[t('Key'), ''], [t('Model'), ''], [t('Today'), 'num'], [t('In all'), 'num'], [t('Limit'), 'num']]) { const th = el('th', cls, name); th.setAttribute('scope', 'col'); head.append(th); }
+  const thead = el('thead'); thead.append(head); table.append(thead);
+  const body = el('tbody'); const money = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v)) ? '–' : `$${v.toFixed(2)}`;
+  for (const k of keySpend) {
+    const tr = el('tr'); const th = el('th', '', k.name); th.setAttribute('scope', 'row'); tr.append(th);
+    const c = k.status?.credit ?? null;
+    tr.append(el('td', '', k.status?.model ?? '–'));
+    if (k.error || (!c && k.status?.credit_error)) { const td = el('td', 'usage-error', k.error ? t('Not read') : t(k.status!.credit_error!)); td.colSpan = 3; tr.append(td); }
+    else tr.append(el('td', 'num', money(c?.usage_daily)), el('td', 'num', money(c?.usage)), el('td', 'num', money(c?.limit)));
+    body.append(tr);
+  }
+  table.append(body); const wrap = el('div', 'stat-scroll'); wrap.append(table); section.append(wrap);
+  return section;
+}
 function renderStats(main: HTMLElement) {
   if (!stats && !statsError) void loadStats();
   const range = el('div', 'segmented'); range.setAttribute('role', 'group'); range.setAttribute('aria-label', t('Period'));
@@ -1560,6 +1598,7 @@ function renderStats(main: HTMLElement) {
   const s = stats;
   if (!s.total.requests) {
     page.append(emptyState(t('Nothing counted yet'), t('Requests that Claude Code, Codex and other agents send through Switchboard appear here: by group, account and agent, with the tokens the provider reports.')));
+    page.append(statKeysPanel());
   } else {
     const cache = statCacheShare(s.total); const perRequest = statTokensPerRequest(s.total);
     const tiles = el('div', 'stat-tiles');
@@ -1572,7 +1611,7 @@ function renderStats(main: HTMLElement) {
     );
     page.append(tiles, statChart(s));
     const groupName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No group') : pool);
-    const projectName = (name: string | null) => name ?? t('Folder not known');
+    const projectName = (name: string | null) => name ?? t('No folder recorded');
     const accountName = (label: string | null) => label ?? t('Removed account');
     const grid = el('div', 'stat-grid');
     grid.append(
@@ -1581,12 +1620,12 @@ function renderStats(main: HTMLElement) {
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
     );
-    page.append(grid,
+    page.append(grid, statKeysPanel(),
       statTable('stat-routes', t('Who works where'), [t('Project'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
     );
   }
-  page.append(el('p', 'surface-note', t('Only requests that go through Switchboard are counted: a session on its own sign-in outside Switchboard is not. Token counts are the ones the provider reports in its answer. A request is placed in a project by its group folder; “Folder not known” is a request that named none. Counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
+  page.append(el('p', 'surface-note', t('What is counted where: Claude Code and Codex sessions that go through Switchboard (managed launches, group folders, the Codex switch) and agents on an API-key account through its proxy are counted above, each request placed in the project of the group folder it came from; “No folder recorded” holds requests counted before 0.6.53, when the folder was not kept, and requests that named no group folder. Agents on OpenRouter (Hermes, OpenCode, Pi and others) go to OpenRouter directly: their spend is under API keys, per key. Kimi Code runs on its own subscription: its usage is on its card under Accounts. A session on its own sign-in outside Switchboard is not counted. Token counts are the ones the provider reports; counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;
