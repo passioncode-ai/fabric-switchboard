@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.58 (2026-10-21)
+
+- **Projects are named by their folders (SB-155).** A group's projects and the Statistics now show each project under its folder's name on your disk (the main checkout's folder, also for a worktree), not under the repository's name on the server: a renamed repository keeps the name of its folder. Two different projects with the same name are told apart by their owner, for example `research-agent (ssheleg)` and `research-agent (prowl-ai)`, and a subfolder of a project's folder is part of that project.
+- The log no longer records a folder-settings sync that changed nothing.
+
 ## 0.6.57 (2026-10-20)
 
 - **An update restart always brings the app back (SB-151).** When Switchboard restarted itself into an update and its shutdown took longer than its 10-second limit, the forced exit came before the relaunch and nothing came back (on 2026-10-20 it stayed down for 20 minutes, with managed sessions left without their route). On macOS and Linux the new copy is now started by a small helper that waits for the old one to end, however it ends, and then launches it.

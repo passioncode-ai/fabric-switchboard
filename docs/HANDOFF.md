@@ -2,6 +2,26 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-21: verification pass, 0.6.58 (SB-155)
+
+- **Measured on the installed 0.6.57 (2026-10-21).** Statistics by project works: since 0.6.53
+  every request but 3 carries its group folder (2026-10-21: 1867 of 1867); 9048 earlier requests
+  sit under "Folder not known" (0.6.52 keys). Only `claude-code` traffic is counted (the Codex
+  switch is off, by design). Groups hold no husk roots. The log over a day: no errors besides two
+  `owner_stopped abandoned`; `transaction_held` up to 975 s (`source_sync`, 2026-10-20 05:20)
+  while every wait inside that step is bounded (Claude Code's lock 9 s, `security` 5 s), so the
+  process itself stood still (swap at 27 GB then); the 0.6.57 relaunch helper keeps an update
+  restart safe against it. Not fixed further: not reproducible on a machine with free memory.
+- **Fixed in 0.6.58 (SB-155).** Projects are named by the main checkout's folder, not the remote
+  (`project-observatory-open-source`, not `project-observatory-dashboard`); equal names get their
+  owner (`research-agent (ssheleg)` / `(prowl-ai)`); the window puts a subfolder under its
+  holder's project; no `claude_binding` event for a sync that changed nothing (178 a day).
+- **Checks run.** `./scripts/check.sh` exit 0 (full Cargo gate, 32 GB free).
+- **Verified live later:** the next update restart is the first one run by 0.6.57's code; its log
+  must show `update_relaunch_helper started` followed by `owner_started`.
+- **Next task.** SB-154 (DEC-0093 catalogue); SB-141 when CT-64/CT-66 decide how Fabric's
+  Project id is recorded.
+
 ## 2026-10-20: 0.6.57, an update restart always brings the app back (SB-151)
 
 - **Published** 2026-10-20 15:52 UTC (release run 39445035684, 25 assets). Plugin at 0.6.57; the

@@ -656,4 +656,16 @@ check(() => {
   assert.deepEqual(logic.nextStatSort({ column: 1, descending: true }, 1, true), { column: 1, descending: false });
   assert.deepEqual(logic.nextStatSort({ column: 1, descending: true }, 0, false), { column: 0, descending: false });
 });
+// SB-155: a project is named by its folder (from Git), not its remote; equal names get their owner.
+check(() => {
+  const folders = ['/d/project-observatory-open-source', '/d/research-agent', '/d/0xDEV/research-agent', '/d/_worktrees/asset-foundry-w3'];
+  const roots = [
+    { folder: '/d/project-observatory-open-source', branch: 'main', remote: 'github.com/passioncode-ai/project-observatory-dashboard', name: 'project-observatory-open-source', derived: [] },
+    { folder: '/d/research-agent', branch: 'main', remote: 'github.com/ssheleg/research-agent', name: 'research-agent', derived: [] },
+    { folder: '/d/0xDEV/research-agent', branch: 'main', remote: 'github.com/prowl-ai/research-agent', name: 'research-agent', derived: [] },
+    { folder: '/d/_worktrees/asset-foundry-w3', branch: 'w3', remote: 'github.com/ssheleg/asset-foundry', name: 'asset-foundry', derived: [] },
+  ];
+  assert.deepEqual(logic.groupProjectRows(folders, roots).map((p) => p.name), ['project-observatory-open-source', 'research-agent (ssheleg)', 'research-agent (prowl-ai)', 'asset-foundry']);
+  assert.deepEqual(logic.groupProjects(folders, roots), ['asset-foundry', 'project-observatory-open-source', 'research-agent (prowl-ai)', 'research-agent (ssheleg)']);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

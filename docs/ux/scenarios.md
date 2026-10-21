@@ -1416,7 +1416,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** sidebar → *Groups*; a group's name anywhere (its card, a pool heading on Accounts, the move dialogs).
 **Steps:**
 1. Hover or focus a group's name → a tooltip lists “{n} projects” and their names: one per repository, never a worktree, a clone or a subfolder.
-1a. A group's card lists its projects, each with its folder count and its folders: the repository's folder, then its worktrees and clones under it (SB-147); past six projects *Show all projects (n)*.
+1a. A group's card lists its projects, each with its folder count and its folders: the repository's folder, then its worktrees and clones under it (SB-147); past six projects *Show all projects (n)*. A project is named by its folder in the person's disk (the main checkout's folder), never by a renamed remote; two projects with one name read as `research-agent (ssheleg)` and `research-agent (prowl-ai)`; a subfolder of a listed folder is part of that folder's project (SB-155).
 2. *Groups* → *Repositories on disk* → *All* → a repository in several groups reads “Groups «A», «B»”.
 3. *Also add…* on a repository → a dialog lists only the groups it is not in yet → *Add* → “{name} added to group «B».”; it stays in its other groups.
 4. *Move…* on a repository in several groups → it leaves the group shown and joins the chosen one.

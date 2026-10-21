@@ -453,7 +453,7 @@ export function moveTargets(currentPool: string, projects: { pool: string; name:
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
 export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone'; branch: string | null }
-export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[]; remote?: string | null }
+export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[]; remote?: string | null; name?: string }
 export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | null; branch: string | null; derived: number }
 /** The rows of a folder list: each root, then (when `open`) its derived folders under it; a folder the tree does not know (just added, or the tree not read yet) is a root of its own, in its place. */
 export function folderRows(folders: string[], roots: ProjectRoot[] | null, open = true): FolderRow[] {
@@ -479,16 +479,21 @@ export function folderName(path: string): string {
  * worktree, a clone or a subfolder of a listed folder), two roots of one `origin` read once.
  */
 export function groupProjects(folders: string[], roots: ProjectRoot[] | null): string[] {
-  const byRoot = new Map((roots ?? []).map((r) => [r.folder, r]));
-  const inside = (f: string) => folders.some((g) => g !== f && (f.startsWith(`${g}/`) || f.startsWith(`${g}\\`)));
-  const seen = new Map<string, string>();
-  for (const row of folderRows(folders, roots, false)) {
-    if (inside(row.folder)) continue;
-    const remote = byRoot.get(row.folder)?.remote ?? null;
-    const key = remote ?? row.folder;
-    if (!seen.has(key)) seen.set(key, remote ? folderName(remote) : folderName(row.folder));
-  }
-  return [...new Set(seen.values())].sort((a, b) => a.localeCompare(b));
+  return groupProjectRows(folders, roots).map((p) => p.name).sort((a, b) => a.localeCompare(b));
+}
+/** SB-155: a project's name as in the person's folders (the main checkout's folder, from Git), else the folder's own. */
+function projectNameOf(row: FolderRow, root: ProjectRoot | undefined): string {
+  return root?.name || folderName(row.folder);
+}
+/** SB-155: two projects with one name read with their owner in brackets: `research-agent (prowl-ai)`. */
+function uniqueNames<T extends { key: string; name: string }>(projects: T[]): T[] {
+  const count = new Map<string, number>();
+  for (const p of projects) count.set(p.name, (count.get(p.name) ?? 0) + 1);
+  return projects.map((p) => {
+    if ((count.get(p.name) ?? 0) < 2) return p;
+    const owner = p.key.replace(/[\\/]+$/, '').split(/[\\/]/).slice(-2, -1)[0];
+    return owner ? { ...p, name: `${p.name} (${owner})` } : p;
+  });
 }
 /** SB-135: taking a root out of the list takes its worktrees and clones with it. */
 export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, folder: string): string[] {
@@ -688,14 +693,17 @@ export function groupProjectRows(folders: string[], roots: ProjectRoot[] | null)
   let current: { key: string; name: string; rows: FolderRow[] } | null = null;
   for (const row of folderRows(folders, roots, true)) {
     if (row.depth === 1 && current) { current.rows.push(row); continue; }
-    const remote = byRoot.get(row.folder)?.remote ?? null;
-    const key = remote ?? row.folder;
+    const root = byRoot.get(row.folder);
+    // A subfolder of a listed folder belongs to that folder's project, never a project of its own.
+    const holder = out.find((p) => p.rows.some((r) => r.depth === 0 && (row.folder.startsWith(`${r.folder}/`) || row.folder.startsWith(`${r.folder}\\`))));
+    if (holder) { holder.rows.push({ ...row, depth: 1 }); current = holder; continue; }
+    const key = root?.remote ?? row.folder;
     const found = out.find((p) => p.key === key);
     if (found) { found.rows.push(row); current = found; continue; }
-    current = { key, name: remote ? folderName(remote) : folderName(row.folder), rows: [row] };
+    current = { key, name: projectNameOf(row, root), rows: [row] };
     out.push(current);
   }
-  return out;
+  return uniqueNames(out);
 }
 
 /** SB-153: a statistics table's row: its name cells (text, or text with a note) and its counts. */

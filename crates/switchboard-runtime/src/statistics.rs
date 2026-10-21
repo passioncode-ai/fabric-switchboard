@@ -292,6 +292,9 @@ impl Statistics {
 #[derive(Default)]
 pub(crate) struct ProjectIndex {
     by_folder: std::collections::HashMap<String, String>,
+    /// SB-155: each project's name as in the person's folders (`roots::Root::name`), made
+    /// unique: two projects that share one get their owner in brackets.
+    names: std::collections::HashMap<String, String>,
 }
 impl ProjectIndex {
     /// From the groups' folders as Git sees them (`roots::tree` per group).
@@ -300,6 +303,7 @@ impl ProjectIndex {
         for group in &snapshot.projects {
             for root in crate::roots::tree(&group.folders) {
                 let key = root.remote.clone().unwrap_or_else(|| root.folder.clone());
+                index.names.entry(key.clone()).or_insert(root.name.clone());
                 for folder in std::iter::once(root.folder.clone())
                     .chain(root.derived.iter().map(|d| d.folder.clone()))
                 {
@@ -307,7 +311,29 @@ impl ProjectIndex {
                 }
             }
         }
+        index.disambiguate();
         index
+    }
+    /// SB-155: two projects with one name (`ssheleg/research-agent` and `prowl-ai/research-agent`)
+    /// read as `research-agent (ssheleg)` and `research-agent (prowl-ai)`; a folder outside Git
+    /// takes its parent folder's name.
+    fn disambiguate(&mut self) {
+        let mut count: std::collections::HashMap<String, usize> = Default::default();
+        for name in self.names.values() {
+            *count.entry(name.clone()).or_default() += 1;
+        }
+        for (key, name) in self.names.iter_mut() {
+            if count.get(name).copied().unwrap_or(0) > 1 {
+                let owner = key
+                    .trim_end_matches(['/', '\\'])
+                    .rsplit(['/', '\\'])
+                    .nth(1)
+                    .unwrap_or_default();
+                if !owner.is_empty() {
+                    *name = format!("{name} ({owner})");
+                }
+            }
+        }
     }
     /// The project key of a group folder: its repository's identity, or the folder itself;
     /// empty for requests whose folder is not known.
@@ -320,8 +346,12 @@ impl ProjectIndex {
             .cloned()
             .unwrap_or_else(|| folder.to_owned())
     }
-    /// A project's name: its key's last segment; none for requests whose folder is not known.
+    /// A project's name (SB-155: as in the person's folders); its key's last segment for a key
+    /// no group holds now; none for requests whose folder is not known.
     pub(crate) fn name_of(&self, key: &str) -> Option<String> {
+        if let Some(name) = self.names.get(key) {
+            return Some(name.clone());
+        }
         (!key.is_empty()).then(|| {
             key.trim_end_matches(['/', '\\'])
                 .rsplit(['/', '\\'])
@@ -418,6 +448,7 @@ mod tests {
                 ("/w/app-clone".to_string(), "github.com/o/app".to_string()),
             ]
             .into(),
+            names: Default::default(),
         };
         let snapshot = Snapshot::default();
         let week = s.report(&snapshot, &index, 7, now);
@@ -447,6 +478,44 @@ mod tests {
         assert_eq!(month["by_day"][0]["day"], today);
         assert_eq!(month["since"], week_ago);
         // A 0.6.52 key (no folder) still reads.
+        // SB-155: names come from the folders, and two projects with one name are told apart.
+        let mut named = ProjectIndex {
+            by_folder: Default::default(),
+            names: [
+                (
+                    "github.com/ssheleg/research-agent".to_string(),
+                    "research-agent".to_string(),
+                ),
+                (
+                    "github.com/prowl-ai/research-agent".to_string(),
+                    "research-agent".to_string(),
+                ),
+                (
+                    "github.com/o/dashboard".to_string(),
+                    "observatory-open-source".to_string(),
+                ),
+            ]
+            .into(),
+        };
+        named.disambiguate();
+        assert_eq!(
+            named
+                .name_of("github.com/ssheleg/research-agent")
+                .as_deref(),
+            Some("research-agent (ssheleg)")
+        );
+        assert_eq!(
+            named
+                .name_of("github.com/prowl-ai/research-agent")
+                .as_deref(),
+            Some("research-agent (prowl-ai)")
+        );
+        assert_eq!(
+            named.name_of("github.com/o/dashboard").as_deref(),
+            Some("observatory-open-source"),
+            "the folder's name, not the remote's"
+        );
+        assert_eq!(named.name_of("github.com/x/gone").as_deref(), Some("gone"));
         let old = Statistics::default();
         old.absorb(Tallies::from([(
             format!("{today}\ta1\tproj\tcodex"),
