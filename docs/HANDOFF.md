@@ -12,6 +12,7 @@
   the proxy; OpenRouter agents per key; Kimi Code on its account card). Attribution uses only the
   local groups and Git: Switchboard works without Fabric or Observatory. SB-157 filed (launched
   API-key agents carry no folder).
+- **Published.** v0.6.59 release run 39606498675 green (preflight, guard, five platform builds, updater, publish), 25 assets, `latest.json` 0.6.59 (2026-10-21T14:01Z); plugin `switchboard@switchboard` updated 0.6.58 → 0.6.59 locally; announced on the board (thread c764dc65, message 193c1f32).
 - **Next task.** SB-154; SB-141 when CT-64/CT-66 decide.
 
 ## 2026-10-21: verification pass, 0.6.58 (SB-155)
