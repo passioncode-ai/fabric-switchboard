@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-21: organizations designed (SB-158, SB-159, SB-160)
+
+- **Objective.** Mark which accounts belong to which organization, keep an organization's work
+  on its accounts, onboard employees through a Fabric Inbox address forwarded to their own mail;
+  without organizations Switchboard stays as it is.
+- **Done.** Design [organizations-2026-10-21](research/organizations-2026-10-21.md): two meanings
+  of organization (provider vs Fabric), attribution order (person, provider organization, domain
+  on a team plan, personal plan only suggested), data, UI, onboarding table with its human gates,
+  standalone and privacy rules, four phases. Rows SB-158…SB-160 filed; SB-109/SB-111 become
+  phase 2. Vesta and Fabric Inbox asked on the board for their parts.
+- **Next task.** SB-158: scenarios first (`docs/ux/scenarios.md`), then the local organization
+  list and attribution.
+
 ## 2026-10-21: 0.6.59, attribution kept with the project; OpenRouter keys in Statistics (SB-156)
 
 - **Measured.** The folderless row was 9030 requests from before 0.6.53 plus 3 on 2026-10-20;
