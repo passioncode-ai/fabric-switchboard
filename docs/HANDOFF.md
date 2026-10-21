@@ -17,8 +17,10 @@
   owner (`research-agent (ssheleg)` / `(prowl-ai)`); the window puts a subfolder under its
   holder's project; no `claude_binding` event for a sync that changed nothing (178 a day).
 - **Checks run.** `./scripts/check.sh` exit 0 (full Cargo gate, 32 GB free).
-- **Verified live later:** the next update restart is the first one run by 0.6.57's code; its log
-  must show `update_relaunch_helper started` followed by `owner_started`.
+- **Published** 2026-10-21 02:18 UTC (release run 39528364422, 25 assets). Plugin, CLI and app at
+  0.6.58. **SB-151 verified live:** the restart into 0.6.58 at 02:52:07 UTC logged
+  `update_relaunch_helper started`, `owner_stopped drained` (74 ms) and `owner_started` one second
+  later; one app process (`--background`). Wiki page updated (`obsidian-memory-vault` `93652bb0`).
 - **Next task.** SB-154 (DEC-0093 catalogue); SB-141 when CT-64/CT-66 decide how Fabric's
   Project id is recorded.
 
