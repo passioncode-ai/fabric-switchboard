@@ -57,6 +57,7 @@ export const nativeAdapter: Adapter = {
   launchAgent: (agent, pool, workingDirectory) => invoke('launch_agent', { agent, pool, workingDirectory }),
   // Not under the read deadline: the status asks OpenRouter itself (10 s timeout in the backend).
   openrouterStatus: () => invoke('openrouter_status'),
+  openrouterKeyStatus: (pool) => readWithDeadline(invoke('openrouter_status', { pool })),
   openrouterSave: (key, model, pool) => invoke('openrouter_save', { key, model, pool: pool ?? null }),
   openrouterModel: (model, pool) => invoke('openrouter_model', { model, pool: pool ?? null }),
   openrouterRemove: (pool) => invoke('openrouter_remove', { pool: pool ?? null }),

@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.59 (2026-10-21)
+
+- **Statistics keep each request with its project (SB-156).** A request is now stored under its project the moment it is counted, so when an agent removes the worktree it worked in, its requests stay with the project instead of turning into a project of their own, and the project keeps its name. The row without a folder is called *No folder recorded*: requests counted before 0.6.53, when the folder was not kept yet.
+- **Agents on OpenRouter in Statistics.** A new *API keys* section shows each saved OpenRouter key (the one every folder uses and each group's own) with its model and what OpenRouter reports as spent today, in all and its limit, so Hermes, OpenCode, Pi and other agents on a key are accounted for per group. A note says what is counted where; Kimi Code's usage stays on its card under Accounts.
+
 ## 0.6.58 (2026-10-21)
 
 - **Projects are named by their folders (SB-155).** A group's projects and the Statistics now show each project under its folder's name on your disk (the main checkout's folder, also for a worktree), not under the repository's name on the server: a renamed repository keeps the name of its folder. Two different projects with the same name are told apart by their owner, for example `research-agent (ssheleg)` and `research-agent (prowl-ai)`, and a subfolder of a project's folder is part of that project.

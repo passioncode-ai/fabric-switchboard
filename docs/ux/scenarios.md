@@ -1396,7 +1396,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Open *Statistics* → the 30-day range is chosen; five tiles read requests (and how many were answered), tokens (sent and received), the share of input read from the cache, tokens per request, and limits and errors with their share.
 2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By project*, *By account* and *By agent*, one under another at full width so long names fit: requests, tokens, and limits and errors; the busiest first.
 2a. A click on a column title sorts that table by it (a count largest first, a name A to Z); a second click reverses it; the title shows ↑ or ↓ and the table keeps its order until the window closes (SB-153).
-3. Read *Who works where* → one row per project, group, account and agent that worked together; *By project* names each project's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “Folder not known” holds requests that named no group folder.
+3. Read *Who works where* → one row per project, group, account and agent that worked together; *By project* names each project's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “No folder recorded” holds requests counted before 0.6.53 and requests that named no group folder; a project keeps its counts and its name after the checkout they came from is removed (SB-156).
+3a. *API keys* lists each saved OpenRouter key (every folder's, and each group's own) with its model and OpenRouter's spend today, in all and its limit: agents on OpenRouter (Hermes, OpenCode, Pi) are counted there; none saved → “No OpenRouter key is saved. Add one under Tokens.” A note at the end says what is counted where, Kimi Code's usage being on its account card (SB-156).
 4. Choose *7 days* or *90 days* → every table and tile shows that range; *By day* lists one row per day with traffic, newest first.
 **Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “No project”; the read fails → “Statistics are unavailable. Refresh to retry.”; a few failures among many requests read “<1%”, never “0%”.
 **Expected result:** where requests and tokens went over the chosen range is visible without reading a transcript.
@@ -1407,7 +1408,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Meaning:** operator request 2026-10-19 (SB-145). Counts only, from the provider's own `usage`; a session that bypasses Switchboard is not counted, and the page says so.
 **Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only` (folder by the request's `Working directory`), `stats::tests::*` (`a_request_names_its_folder_without_its_body_being_kept`); runtime `statistics::tests::*` (two checkouts are one project; a 0.6.52 key reads); MCP handshake; ui-logic SB-145 and SB-147 cases (chart days and series, axis, cache share); WebKit demo (ru, 1180 and 960 wide, no overflow, no table scrolling). ui-logic SB-153 case (sort by name and count, second click reverses, B for billions); WebKit demo (tables stacked, sort clicks).
 **Product:** unobserved
-**Traces:** SB-145, SB-147, SB-153
+**Traces:** SB-145, SB-147, SB-153, SB-156
 
 ## SCN-068 — Groups of projects: one repository in several groups, and the projects a group holds on hover
 **Persona:** P-01

@@ -233,7 +233,7 @@ impl Pass {
         // after a quarter of an hour.
         let _ = runtime.store.flush_if_older(time, FLUSH_SECONDS);
         // SB-145: the proxy's counts, written at most every quarter of an hour.
-        runtime.statistics.absorb(runtime.proxy.take_statistics());
+        runtime.absorb_statistics();
         runtime.statistics.save(&runtime.root, time, false);
     }
 

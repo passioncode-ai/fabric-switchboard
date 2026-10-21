@@ -23,6 +23,10 @@ const FLUSH_SECONDS: i64 = 15 * 60;
 struct Saved {
     version: u32,
     tallies: Tallies,
+    /// SB-156: each project key's name when it was counted, so a project that left every group
+    /// (or whose checkout was deleted) keeps the name it had.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    names: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
@@ -32,6 +36,7 @@ pub(crate) struct Statistics {
 #[derive(Default)]
 struct State {
     tallies: Tallies,
+    names: BTreeMap<String, String>,
     dirty: bool,
     saved_at: i64,
 }
@@ -40,17 +45,19 @@ impl Statistics {
     /// What a previous run kept; an unreadable file starts empty and is replaced at the next
     /// save (the counts are a convenience, not a ledger).
     pub(crate) fn load(root: &Path) -> Self {
-        let tallies = switchboard_core::private_fs::read_private(&root.join(FILE), MAX_FILE)
+        let saved = switchboard_core::private_fs::read_private(&root.join(FILE), MAX_FILE)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
-            .map(|s| s.tallies)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let tallies = saved
+            .tallies
             .into_iter()
             .filter(|(k, _)| stats::parts(k).is_some())
             .collect();
         Self {
             inner: Mutex::new(State {
                 tallies,
+                names: saved.names,
                 dirty: false,
                 saved_at: 0,
             }),
@@ -67,6 +74,34 @@ impl Statistics {
             }
             s.dirty = true;
         }
+    }
+    /// SB-156: adds the proxy's new counts with each folder replaced by its project's key (the
+    /// repository's identity, or the folder outside Git) as `index` sees it now, and remembers
+    /// the project's name. A count then stays with its project after the checkout it came from
+    /// is removed (an agent's worktree), instead of becoming a project of its own.
+    pub(crate) fn absorb_resolved(&self, new: Tallies, index: &ProjectIndex) {
+        if new.is_empty() {
+            return;
+        }
+        let mut resolved = Tallies::new();
+        let mut names = BTreeMap::new();
+        for (key, t) in new {
+            let Some(p) = stats::parts(&key) else {
+                continue;
+            };
+            let project = index.project_of(p.folder);
+            if let Some(name) = index.named(&project) {
+                names.insert(project.clone(), name);
+            }
+            resolved
+                .entry(stats::key(p.day, p.account, p.pool, p.client, &project))
+                .or_default()
+                .add(&t);
+        }
+        if let Ok(mut s) = self.inner.lock() {
+            s.names.extend(names);
+        }
+        self.absorb(resolved);
     }
     /// Writes when something changed and the last write is older than a quarter of an hour, or
     /// at once with `force` (the stop).
@@ -87,9 +122,16 @@ impl Statistics {
             };
             s.tallies.remove(&first);
         }
+        let keys: std::collections::BTreeSet<String> = s
+            .tallies
+            .keys()
+            .filter_map(|k| stats::parts(k).map(|p| p.folder.to_owned()))
+            .collect();
+        s.names.retain(|k, _| keys.contains(k));
         let saved = Saved {
             version: 1,
             tallies: s.tallies.clone(),
+            names: s.names.clone(),
         };
         let written = serde_json::to_vec(&saved)
             .map_err(|_| String::new())
@@ -123,11 +165,17 @@ impl Statistics {
         let days = days.clamp(1, KEEP_DAYS);
         let from = stats::day_of(now - (days - 1) * 86_400);
         let to = stats::day_of(now);
-        let tallies = self
+        let (tallies, saved_names) = self
             .inner
             .lock()
-            .map(|s| s.tallies.clone())
+            .map(|s| (s.tallies.clone(), s.names.clone()))
             .unwrap_or_default();
+        let name_of = |key: &str| {
+            index
+                .named(key)
+                .or_else(|| saved_names.get(key).cloned())
+                .or_else(|| index.name_of(key))
+        };
         let since = tallies
             .keys()
             .filter_map(|k| stats::parts(k).map(|p| p.day.to_owned()))
@@ -209,7 +257,7 @@ impl Statistics {
                 .map(|(key, (t, pools))| {
                     let mut m = serde_json::Map::new();
                     m.insert("project".into(), json!(key));
-                    m.insert("name".into(), json!(index.name_of(key)));
+                    m.insert("name".into(), json!(name_of(key)));
                     m.insert(
                         "groups".into(),
                         json!(pools
@@ -245,7 +293,7 @@ impl Statistics {
                     m.insert("pool".into(), json!(pool));
                     m.insert("name".into(), json!(group_name(pool)));
                     m.insert("project".into(), json!(project));
-                    m.insert("project_name".into(), json!(index.name_of(project)));
+                    m.insert("project_name".into(), json!(name_of(project)));
                     m.insert("agent".into(), json!(client));
                     (row(m, t), weight(t))
                 })
@@ -289,7 +337,7 @@ impl Statistics {
 /// SB-147: which project a group folder belongs to. A project is a repository with all its
 /// checkouts (the main one, its worktrees, its clones of one `origin`), or a folder outside Git
 /// on its own (DEC-0089's AT-6, AT-7 and AT-15); its name is the repository's or the folder's.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ProjectIndex {
     by_folder: std::collections::HashMap<String, String>,
     /// SB-155: each project's name as in the person's folders (`roots::Root::name`), made
@@ -345,6 +393,10 @@ impl ProjectIndex {
             .get(folder)
             .cloned()
             .unwrap_or_else(|| folder.to_owned())
+    }
+    /// SB-156: the name of a project a group holds now, if any.
+    pub(crate) fn named(&self, key: &str) -> Option<String> {
+        self.names.get(key).cloned()
     }
     /// A project's name (SB-155: as in the person's folders); its key's last segment for a key
     /// no group holds now; none for requests whose folder is not known.
@@ -477,6 +529,28 @@ mod tests {
         assert_eq!(month["total"]["requests"], 11);
         assert_eq!(month["by_day"][0]["day"], today);
         assert_eq!(month["since"], week_ago);
+        // SB-156: counts are kept under their project, so a checkout removed later (an agent's
+        // worktree) never becomes a project of its own, and the project keeps its name.
+        let kept = Statistics::default();
+        let mut live = ProjectIndex {
+            by_folder: [(
+                "/w/_worktrees/app-x".to_string(),
+                "github.com/o/app".to_string(),
+            )]
+            .into(),
+            names: [("github.com/o/app".to_string(), "app".to_string())].into(),
+        };
+        kept.absorb_resolved(
+            Tallies::from([(
+                stats::key(&today, "a1", "proj", "codex", "/w/_worktrees/app-x"),
+                tally(2, 2),
+            )]),
+            &live,
+        );
+        live = ProjectIndex::default(); // the worktree and the group are gone
+        let after = kept.report(&snapshot, &live, 7, now);
+        assert_eq!(after["projects"][0]["project"], "github.com/o/app");
+        assert_eq!(after["projects"][0]["name"], "app");
         // A 0.6.52 key (no folder) still reads.
         // SB-155: names come from the folders, and two projects with one name are told apart.
         let mut named = ProjectIndex {

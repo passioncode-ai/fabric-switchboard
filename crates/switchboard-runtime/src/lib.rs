@@ -599,6 +599,9 @@ pub struct Runtime {
     suggestions_seq: std::sync::atomic::AtomicU64,
     /// SB-145: the proxy's counts, kept for 90 days in `statistics.json`.
     statistics: statistics::Statistics,
+    /// SB-156: the groups' folders resolved to projects, rebuilt only when the groups' folders
+    /// change: `(digest of every group's folders, index)`.
+    stat_index: Mutex<(u64, Arc<statistics::ProjectIndex>)>,
     /// SB-121/SB-131: when the folders that could not be added are tried again (never asked).
     suggest_retry_at: std::sync::atomic::AtomicI64,
     /// SB-131: how far recent Claude Code transcripts were read for agents' work.
@@ -715,6 +718,7 @@ impl Runtime {
             suggest: Mutex::new(suggest::Scanner::default()),
             suggestions_seq: std::sync::atomic::AtomicU64::new(0),
             statistics,
+            stat_index: Mutex::new((0, Arc::default())),
             suggest_retry_at: std::sync::atomic::AtomicI64::new(0),
             activity: Mutex::new(activity::Activity::default()),
             worked: Mutex::new((0, HashSet::new())),
@@ -1349,6 +1353,44 @@ impl Runtime {
     /// VANISH_CONFIRM later. A folder whose drive is not mounted, or whose whole tree up to the
     /// filesystem root is gone, is not deleted as far as Switchboard can tell, and stays; a
     /// project keeps its last folder.
+    /// SB-156: hands the proxy's counts to the statistics with each folder already resolved to
+    /// its project, so a count outlives the checkout it came from.
+    pub(crate) fn absorb_statistics(&self) {
+        let new = self.proxy.take_statistics();
+        if new.is_empty() {
+            return;
+        }
+        let Ok(snapshot) = self.store.snapshot() else {
+            self.statistics.absorb(new);
+            return;
+        };
+        let digest = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for p in &snapshot.projects {
+                p.pool.hash(&mut h);
+                p.folders.hash(&mut h);
+            }
+            h.finish()
+        };
+        let cached = self
+            .stat_index
+            .lock()
+            .ok()
+            .filter(|c| c.0 == digest && digest != 0)
+            .map(|c| c.1.clone());
+        let index = match cached {
+            Some(index) => index,
+            None => {
+                let built = Arc::new(blocking::run(|| statistics::ProjectIndex::build(&snapshot)));
+                if let Ok(mut c) = self.stat_index.lock() {
+                    *c = (digest, built.clone());
+                }
+                built
+            }
+        };
+        self.statistics.absorb_resolved(new, &index);
+    }
     async fn vanish_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
         let at = self.vanish_at.load(std::sync::atomic::Ordering::Relaxed);
         if time < at && time >= at - 2 * VANISH_LOOK {
@@ -2175,7 +2217,7 @@ impl Owner {
             .await;
         // SB-143: no Codex should be pointed at a proxy that is gone.
         runtime.codex_route_sync(false);
-        runtime.statistics.absorb(runtime.proxy.take_statistics());
+        runtime.absorb_statistics();
         runtime.statistics.save(&runtime.root, monitor::now(), true);
         let _ = runtime.store.flush();
         drop(transaction);
@@ -3846,7 +3888,7 @@ async fn execute(
             let index = blocking::run(|| statistics::ProjectIndex::build(&snapshot));
             Ok(match runtime {
                 Some(rt) => {
-                    rt.statistics.absorb(rt.proxy.take_statistics());
+                    rt.absorb_statistics();
                     rt.statistics
                         .report(&snapshot, &index, days, monitor::now())
                 }

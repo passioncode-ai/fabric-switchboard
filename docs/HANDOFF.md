@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-21: 0.6.59, attribution kept with the project; OpenRouter keys in Statistics (SB-156)
+
+- **Measured.** The folderless row was 9030 requests from before 0.6.53 plus 3 on 2026-10-20;
+  since 0.6.53 every request has its folder; all 40 recorded folders exist and belong to groups.
+- **Done.** Counts resolve to their project at count time (cached index, names kept), so removed
+  worktrees no longer become projects; *No folder recorded* label; *API keys* section with
+  OpenRouter's spend per saved key; a note on what is counted where (Claude Code and Codex through
+  the proxy; OpenRouter agents per key; Kimi Code on its account card). Attribution uses only the
+  local groups and Git: Switchboard works without Fabric or Observatory. SB-157 filed (launched
+  API-key agents carry no folder).
+- **Next task.** SB-154; SB-141 when CT-64/CT-66 decide.
+
 ## 2026-10-21: verification pass, 0.6.58 (SB-155)
 
 - **Measured on the installed 0.6.57 (2026-10-21).** Statistics by project works: since 0.6.53
