@@ -1,5 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
+import { providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
 
@@ -229,6 +230,46 @@ export function createDemoAdapter(): Adapter {
       projects.sort((a, b) => a.name.localeCompare(b.name));
       log('project', '', existing ? 'updated' : 'created');
       return structuredClone(project);
+    },
+    async organizationAdd(name, domains) {
+      await pause();
+      const list = (state.organizations ??= []);
+      const clean = [...new Set(domains.map((d) => d.trim().replace(/^@/, '').replace(/\.$/, '').toLowerCase()).filter(Boolean))];
+      if (!name.trim()) throw new Error('Name the organization in 1 to 80 characters.');
+      if (list.some((o) => o.name.toLowerCase() === name.trim().toLowerCase())) throw new Error('Another organization already has this name.');
+      if (list.some((o) => (o.domains ?? []).some((d) => clean.includes(d)))) throw new Error('Another organization already has this domain.');
+      const organization = { id: crypto.randomUUID(), name: name.trim(), domains: clean, provider_organizations: [], created_at: now() };
+      list.push(organization); log('organization', '', 'added');
+      return { organization };
+    },
+    async organizationEdit(id, name, domains) {
+      await pause();
+      const o = state.organizations?.find((x) => x.id === id); if (!o) throw new Error('Organization not found.');
+      if (name !== null) o.name = name.trim();
+      if (domains !== null) o.domains = [...new Set(domains.map((d) => d.trim().toLowerCase()).filter(Boolean))];
+      log('organization', '', 'updated'); return { organization: o };
+    },
+    async organizationRemove(id) {
+      await pause();
+      state.organizations = (state.organizations ?? []).filter((o) => o.id !== id);
+      for (const [account, choice] of Object.entries(state.memberships ?? {})) if (choice === id) delete state.memberships![account];
+      log('organization', '', 'removed');
+    },
+    async organizationAssign(accountId, choice) {
+      await pause();
+      const account = state.accounts.find((a) => a.id === accountId); if (!account) throw new Error('Account not found');
+      const memberships = (state.memberships ??= {});
+      const key = providerOrganization(account);
+      if (choice === null) delete memberships[accountId];
+      else {
+        if (choice !== 'personal' && !state.organizations?.some((o) => o.id === choice)) throw new Error('Organization not found.');
+        memberships[accountId] = choice;
+        for (const o of state.organizations ?? []) {
+          o.provider_organizations = (o.provider_organizations ?? []).filter((k) => k !== key);
+          if (key && o.id === choice) o.provider_organizations.push(key);
+        }
+      }
+      log('organization', accountId, 'assigned');
     },
     async moveAccount(id, pool) {
       await pause();

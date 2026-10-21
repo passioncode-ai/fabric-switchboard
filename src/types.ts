@@ -35,7 +35,9 @@ export interface Project { pool: string; name: string; folders: string[]; create
 /** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
 export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem' | 'worked'; repository: string; first_seen: number }
 export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[] }
+/** SB-158: an organization accounts may belong to; `provider_organizations` are `claude:<uuid>` or `codex:<workspace>`. */
+export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string> }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -78,6 +80,11 @@ export interface Adapter {
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
   moveAccount(id: string, pool: string): Promise<unknown>;
+  /** SB-158: organizations. `choice` is an organization's id, `personal`, or null to let the rules decide. */
+  organizationAdd(name: string, domains: string[]): Promise<unknown>;
+  organizationEdit(id: string, name: string | null, domains: string[] | null): Promise<unknown>;
+  organizationRemove(id: string): Promise<unknown>;
+  organizationAssign(account: string, choice: string | null): Promise<unknown>;
   /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
   /** SB-143: Codex in project folders. */

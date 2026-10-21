@@ -52,7 +52,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed pool, isolated, or native), the signed-in CLI accounts, selected accounts per pool, active project rules and automatic rotation. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, and the lowest remaining quota.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, pool, whether selected or signed in now, the lowest remaining quota, and the organization each belongs to (null: personal) with what decided it (person, provider or domain).","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own pool for any managed session; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched (Claude Code, Codex): account_id, label, provider, pool, mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state — starting, running, ended or unknown. Without all, only starting and running ones. Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."}},"additionalProperties":false}})),
@@ -67,6 +67,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, projects, rotation, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, or enable or disable it (a disabled account is never selected or switched to). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another pool","description":"Move an account into a project's pool, or back to the default pool (pool: default). Only when the operator asks. Joining or leaving a project is that project's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a project, and a second copy of a login already in that pool is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A project's pool from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to (SB-158): each with its e-mail domains and account count, then every account with its organization (null: personal) and what decided it: person (the operator's word), provider (its Claude Team or ChatGPT workspace is the organization's) or domain (its address). Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide). Assigning one Claude Team or ChatGPT workspace seat brings that team's other seats along.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."}},"required":["action"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_rotation","title":"Automatic rotation","description":"The automatic rotation policy per provider, pool and target (enabled, threshold, hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic rotation","description":"Change one rotation policy (provider, pool, target): switch it on or off, or change its threshold, hysteresis, cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, projects, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -241,6 +243,16 @@ impl Server {
         let provider = args.get("provider").and_then(Value::as_str);
         let snapshot = self.call(Operation::Snapshot).await?;
         let current = self.call(Operation::CurrentAccounts).await.ok();
+        let organizations = self.call(Operation::Organizations).await.ok();
+        let organization_of = |id: &Value| {
+            organizations
+                .as_ref()
+                .and_then(|o| o["accounts"].as_array())
+                .and_then(|list| list.iter().find(|a| &a["id"] == id))
+                .filter(|a| !a["organization"].is_null())
+                .map(|a| json!({"id": a["organization"], "name": a["organization_name"], "by": a["by"]}))
+                .unwrap_or(Value::Null)
+        };
         let routes = snapshot["routes"].as_object().cloned().unwrap_or_default();
         let time = now();
         let accounts: Vec<Value> = snapshot["accounts"]
@@ -259,7 +271,8 @@ impl Server {
                 let usage = usage_view(&a, &snapshot, time);
                 json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
-                    "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"]})
+                    "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
+                    "organization": organization_of(&a["id"])})
             })
             .collect();
         Ok(json!({"accounts": accounts}))
@@ -451,6 +464,39 @@ impl Server {
             Some(_) => return Err("under lists absolute folders.".into()),
         };
         self.call(Operation::RepositoryMap { under }).await
+    }
+    async fn organization_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+        let domains = || -> Option<Vec<String>> {
+            args.get("domains").and_then(Value::as_array).map(|d| {
+                d.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+        };
+        let operation = match required(args, "action")? {
+            "add" => Operation::OrganizationAdd {
+                name: required(args, "name")?.into(),
+                domains: domains().unwrap_or_default(),
+            },
+            "edit" => Operation::OrganizationEdit {
+                id: required(args, "id")?.into(),
+                name: text("name"),
+                domains: domains(),
+            },
+            "remove" => Operation::OrganizationRemove {
+                id: required(args, "id")?.into(),
+            },
+            "assign" => Operation::OrganizationAssign {
+                account: required(args, "account_id")?.into(),
+                choice: Some(required(args, "organization")?)
+                    .filter(|c| *c != "auto")
+                    .map(str::to_owned),
+            },
+            _ => return Err("action is add, edit, remove or assign.".into()),
+        };
+        self.call(operation).await
     }
     async fn account_move(&self, args: &Map<String, Value>) -> Result<Value, String> {
         self.call(Operation::MoveAccount {
@@ -777,6 +823,8 @@ impl Server {
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
+            "switchboard_organizations" => self.call(Operation::Organizations).await,
+            "switchboard_organization_set" => self.organization_set(args).await,
             "switchboard_project_move_root" => self.project_move_root(args).await,
             "switchboard_codex_route" => {
                 self.call(Operation::CodexRoute {

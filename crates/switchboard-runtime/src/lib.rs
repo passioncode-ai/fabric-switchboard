@@ -225,6 +225,30 @@ pub enum Operation {
         #[serde(default)]
         enabled: Option<bool>,
     },
+    /// SB-158: the organizations and where each account belongs, with the rule that decided.
+    Organizations,
+    OrganizationAdd {
+        name: String,
+        #[serde(default)]
+        domains: Vec<String>,
+    },
+    /// What is left out stays; `domains` replaces the list.
+    OrganizationEdit {
+        id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        domains: Option<Vec<String>>,
+    },
+    OrganizationRemove {
+        id: String,
+    },
+    /// `choice`: an organization's id, `personal`, or none to let the rules decide again.
+    OrganizationAssign {
+        account: String,
+        #[serde(default)]
+        choice: Option<String>,
+    },
     /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
     /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
     /// deleted project's pool goes back to `default` by itself.
@@ -809,6 +833,7 @@ impl Runtime {
                 | Operation::ProjectBindings
                 | Operation::RepositoryMap { .. }
                 | Operation::Statistics { .. }
+                | Operation::Organizations
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
@@ -2550,6 +2575,37 @@ impl Reported {
         })
     }
 }
+/// SB-158: organizations with their account counts, and each account's attribution.
+pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
+    let accounts: Vec<Value> = snapshot
+        .accounts
+        .iter()
+        .map(|a| {
+            let at = snapshot.attribution(a);
+            let name = at
+                .organization
+                .as_deref()
+                .and_then(|id| snapshot.organization(id))
+                .map(|o| o.name.clone());
+            json!({"id": a.id, "label": a.label, "provider": a.provider, "pool": a.pool,
+                "organization": at.organization, "organization_name": name, "by": at.by})
+        })
+        .collect();
+    let organizations: Vec<Value> = snapshot
+        .organizations
+        .iter()
+        .map(|o| {
+            let count = accounts
+                .iter()
+                .filter(|a| a["organization"].as_str() == Some(o.id.as_str()))
+                .count();
+            json!({"id": o.id, "name": o.name, "domains": o.domains,
+                "provider_organizations": o.provider_organizations.len(), "accounts": count,
+                "created_at": o.created_at})
+        })
+        .collect();
+    json!({"schema": 1, "organizations": organizations, "accounts": accounts})
+}
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
     execute(store, &root, None, operation).await
@@ -3662,6 +3718,25 @@ async fn execute(
             )?;
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
+        }
+        Operation::Organizations => Ok(organizations_view(&store.snapshot()?)),
+        Operation::OrganizationAdd { name, domains } => {
+            let organization = store.add_organization(&name, &domains)?;
+            Ok(json!({"organization": organization}))
+        }
+        Operation::OrganizationEdit { id, name, domains } => {
+            let organization = store.edit_organization(&id, name.as_deref(), domains.as_deref())?;
+            Ok(json!({"organization": organization}))
+        }
+        Operation::OrganizationRemove { id } => {
+            let organization = store.remove_organization(&id)?;
+            Ok(json!({"removed": organization.id, "name": organization.name}))
+        }
+        Operation::OrganizationAssign { account, choice } => {
+            let attribution = store.assign_organization(&account, choice.as_deref())?;
+            Ok(
+                json!({"account": account, "organization": attribution.organization, "by": attribution.by}),
+            )
         }
         Operation::MoveAccount { id, pool } => {
             let snapshot = store.snapshot()?;

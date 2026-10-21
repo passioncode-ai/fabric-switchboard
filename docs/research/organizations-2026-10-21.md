@@ -26,20 +26,20 @@ Team and a ChatGPT workspace).
 
 ## 3. How an account is attributed
 
-Deterministic, in this order; the first that answers wins, and the account card names which one:
+Deterministic, in this order; the first that answers wins, and the account's badge says which:
 
-1. **Assigned by the person** (Accounts → card menu → Organization). Always wins, also "none".
-2. **Provider organization known**: the account's provider organization is already mapped to an
-   organization, so the account follows it. Assigning one Claude Team account maps the whole
-   team; every later seat of it is attributed without asking.
-3. **Domain**: the account's e-mail domain is one of an organization's domains **and** the
-   provider plan is a team plan (Claude `organization_type` team or enterprise; Codex
-   `chatgpt_plan_type` business/team or enterprise). Then the provider organization is mapped
-   too (rule 2 from now on).
-4. A personal plan on a company address (Pro or Max on `name@company`) is **suggested**, never
-   assigned: the seat is paid by the person, so it stays personal until the person says
-   otherwise (RM-28: the more private wins).
-5. Otherwise: no organization. With no organization defined at all, nothing of this is shown.
+1. **Placed by the person** (Accounts → card menu → *Organization…*). Always wins, *Personal*
+   included.
+2. **Provider organization known**: the account's provider organization (`claude:<uuid>`,
+   `codex:<ChatGPT workspace id>`) is recorded on an organization. Placing one Claude Team seat
+   records the team there, so every other seat of it follows without asking.
+3. **Domain**: the account's address is on one of an organization's domains.
+4. Otherwise: personal. With no organization defined at all, nothing of this is shown.
+
+Built 2026-10-21 (0.6.60): an earlier draft let a personal plan on a company address stay only
+"suggested". It was dropped: an address on the organization's domain is a mailbox the organization
+holds, so the sign-in is the organization's whatever the plan, and *Personal* in the card menu
+covers the exception in one step (section 10).
 
 Inputs are local: the identity Switchboard already reads at sign-in and at its 30 s source pass,
 plus the organization list. No Fabric, Vesta or Observatory call is needed to attribute
@@ -47,25 +47,24 @@ plus the organization list. No Fabric, Vesta or Observatory call is needed to at
 
 ## 4. Data
 
-- `organizations.json` (0600): `[{ id, name, domains[], providerOrganizations[{provider, id}],
-  source: "local" | "vesta", vestaOrg? }]`. `id` is a local UUID, or the Vesta organization id
-  when linked. In encrypted backups like `accounts.json`.
-- Account: `organization: { id, by: "person" | "provider" | "domain" } | null`, plus the
-  provider's own organization name and plan type next to the id already stored (read from the
-  same profile and token claims; nothing new is fetched).
-- Group (today's "project"): `organization: id | null` (RM-28 `context`: null = personal).
+- `Snapshot.organizations[{id, name, domains[], provider_organizations[], created_at}]` and
+  `Snapshot.memberships{account id → organization id | "personal"}` in `accounts.json`
+  (omitted while empty) and therefore in encrypted backups.
+- Nothing is added to the account itself: attribution is computed from these two and the
+  identity already stored (`Snapshot::attribution`).
+- Group (today's "project"): `organization: id | null` comes with SB-109 (phase 2).
 
 ## 5. What changes for the person
 
 - **No organization defined:** nothing; the Organization menu item is the only trace.
-- **Accounts:** a badge with the organization's name on each attributed card and a filter
-  (All, Personal, each organization). A suggestion (rule 4) shows as a quiet line with
-  *Assign* and *Keep personal*.
+- **Accounts:** a badge with the organization's name on each attributed card (its tooltip says
+  why) and a filter (All, each organization, Personal) with *Organizations…* to add, edit or
+  remove one.
 - **Groups:** a group gets an organization; its folders then use only that organization's
   accounts (SB-109). A group without one takes personal accounts only, never an organization's
   seat; a folder in groups of different contexts uses the more private one, fixed for the
   session (RM-28 CX-26).
-- **Statistics:** a By organization table above By group (counts only).
+- **Statistics:** a By organization table above By group (counts only), with phase 2.
 - **CLI and MCP:** `switchboard org list|add|domain|assign`, `switchboard_accounts` and
   `switchboard_projects` carry the organization id and name (schema bump, additive).
 
@@ -78,7 +77,7 @@ plus the organization list. No Fabric, Vesta or Observatory call is needed to at
 | 3. Forward it to the employee's own mail | agent | Inbox `add_forward_destination` and the address's forward copy | **the employee clicks Cloudflare's verification link once** in their own mail (Email Routing verifies every destination); the mailbox keeps its own copy, so the organization keeps the identity |
 | 4. Invite the address to the provider team | org admin | Claude Team: Settings → Members → Invite (no API on Team); ChatGPT Business: Workspace settings → Members (no API on Business). Enterprise plans: SCIM (Claude), Admin API invitations or SCIM (ChatGPT, since 2026-08-20) can do it from an agent | on Team/Business the invite is a click in the provider's console |
 | 5. Accept and sign in | employee | invitation and sign-in codes reach their own mail through the forward; `switchboard login claude` (or *Add account*) on their machine | the employee signs in (sign-in code) |
-| 6. Attribution | Switchboard on the employee's machine | rule 3: organization domain and a team plan | none |
+| 6. Attribution | Switchboard on the employee's machine | rule 3: the organization's domain | none |
 | Leaving | org admin | remove the seat at the provider; Inbox `pause_address` (forward stops, mail stays with the organization); Vesta removes the member | Switchboard shows the account as signed out or removed by the provider, keeps its history |
 
 Why a forwarded company address rather than the employee's own: the sign-in identity belongs to
@@ -103,22 +102,22 @@ the last copy in force and says so.
 
 An organization learns nothing of the person's other organizations from Switchboard: no list of
 memberships leaves the machine, statistics stay local, analytics sends only the count of
-organizations and attributed accounts (ANALYTICS.md change in the same release, planted-identifier
-test extended).
+organizations and attributed accounts if it ever sends anything about them; 0.6.60 sends nothing
+new (ANALYTICS.md unchanged).
 
 ## 9. Phases
 
 | Phase | Row | Content | Needs |
 |---|---|---|---|
-| 1 | SB-158 | local organizations, attribution rules 1 to 5, badge and filter, CLI and MCP fields, provider organization name and plan type | nothing outside Switchboard |
+| 1 | SB-158 | local organizations, attribution rules 1 to 4, badge and filter, CLI and MCP fields (done in 0.6.60) | nothing outside Switchboard |
 | 2 | SB-109, SB-111 | group organization, refusal of other contexts' seats, badge on groups and sessions, Statistics by organization | phase 1 |
 | 3 | SB-159 | link an organization to Vesta (domains, members) | Vesta read API for the member's own organizations |
 | 4 | SB-160 | onboarding playbook (section 6) run by an agent: Vesta member, Inbox address and forward, provider invite checklist; Enterprise automation where the provider has an API | Vesta and Fabric Inbox owners; provider console clicks on Team/Business |
 
 ## 10. Decisions taken here
 
-- A personal plan on a company address stays personal until the person assigns it (rule 4):
-  the seat's payer decides the context.
+- An address on an organization's domain belongs to it whatever the plan (section 3); the
+  person keeps an exception personal from the card menu.
 - Switchboard never reads a sign-in code from a mailbox (section 6).
 - Organization ids follow RM-28 (`org:<id>`), local ids until a Vesta link replaces them; the
   replacement keeps every attribution.

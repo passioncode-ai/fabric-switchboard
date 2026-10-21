@@ -668,4 +668,22 @@ check(() => {
   assert.deepEqual(logic.groupProjectRows(folders, roots).map((p) => p.name), ['project-observatory-open-source', 'research-agent (ssheleg)', 'research-agent (prowl-ai)', 'asset-foundry']);
   assert.deepEqual(logic.groupProjects(folders, roots), ['asset-foundry', 'project-observatory-open-source', 'research-agent (prowl-ai)', 'research-agent (ssheleg)']);
 });
+// SB-158: the same attribution order as Snapshot::attribution: the person's word, the team, the domain.
+check(() => {
+  const account = (id, provider, email, org) => ({ id, label: email, provider, external_identity: { account_id: org, organization_id: org, email } });
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }, { id: 'o2', name: 'Beta', domains: [], provider_organizations: ['claude:team-b'] }], memberships: {} };
+  assert.deepEqual(logic.attribution({}, account('a', 'claude', 'me@acme.example', 'x')), { organization: null, by: null });
+  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o1', by: 'domain' });
+  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: 'o2', by: 'provider' });
+  snap.memberships.b = 'personal';
+  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: null, by: 'person' });
+  snap.memberships.a = 'o2';
+  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o2', by: 'person' });
+  assert.equal(logic.providerOrganization(account('c', 'codex', 'x@gmail.com', 'ws-1')), 'codex:ws-1');
+  assert.equal(logic.accountDomain({ label: 'Work', external_identity: null }), null);
+  assert.equal(logic.accountDomain({ label: 'x@Acme.Example.', external_identity: null }), 'acme.example');
+  assert.equal(logic.inOrganizationFilter(snap, account('a', 'claude', 'dev@acme.example', 'team-x'), 'o2'), true);
+  assert.equal(logic.inOrganizationFilter(snap, account('b', 'claude', 'dev@acme.example', 'team-b'), 'personal'), true);
+  assert.deepEqual(logic.domainList(' @Acme.example, beta.example\nacme.example '), ['acme.example', 'beta.example']);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

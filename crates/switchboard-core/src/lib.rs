@@ -16,6 +16,7 @@ pub mod external_keychain {
 }
 mod chains;
 pub mod language;
+pub mod organizations;
 mod persistence;
 pub mod private_fs;
 mod projects;
@@ -30,6 +31,7 @@ pub mod windows;
 
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
+pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution};
 pub use rotation::{Fits, RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
@@ -270,6 +272,12 @@ pub struct Snapshot {
     /// `KIMI_CODE_HOME`, never in the vault or a backup.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kimi_accounts: Vec<kimi_accounts::KimiAccount>,
+    /// Organizations accounts may belong to (SB-158). Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub organizations: Vec<organizations::Organization>,
+    /// The person's word per account: an organization's id or `personal` (SB-158).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub memberships: BTreeMap<String, String>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -317,7 +325,7 @@ pub(crate) fn pool_valid(s: &str) -> bool {
         && s.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
 }
-fn uuid_valid(s: &str) -> bool {
+pub(crate) fn uuid_valid(s: &str) -> bool {
     uuid::Uuid::parse_str(s).is_ok_and(|u| u.to_string() == s)
 }
 fn usage_valid(u: &Usage) -> bool {
@@ -406,6 +414,7 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "fallback" => matches!(detail, "offered" | "failed"),
         "agent_key" => matches!(detail, "saved" | "removed"),
         "kimi_account" => matches!(detail, "added" | "removed"),
+        "organization" => matches!(detail, "added" | "updated" | "removed" | "assigned"),
         "activation" => matches!(detail, "completed" | "failed"),
         "rotation" => matches!(detail, "switched" | "failed"),
         "launch" | "login" => matches!(
@@ -482,6 +491,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
         }
     }
     projects::validate_rules(s)?;
+    organizations::validate(s)?;
     projects::validate_projects(s)?;
     chains::validate_chains(s)?;
     agent_keys::validate_agent_keys(s)?;
@@ -1408,6 +1418,7 @@ impl Store {
         let mut candidate = state.clone();
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
+        candidate.memberships.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;

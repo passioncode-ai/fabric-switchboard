@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.6.59"
+  version: "0.6.60"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -55,6 +55,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_events` | no | recent activity as fixed codes |
 | `switchboard_account_update` | yes | rename, enable or disable an account, only when the operator asks |
 | `switchboard_account_move` | yes | move an account into a project's pool or back to `default`, only when the operator asks |
+| `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team, domain) |
+| `switchboard_organization_set` | yes | add, edit or remove an organization, or place an account (an organization, personal, auto), only when the operator asks |
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic rotation, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |
 | `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |

@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, attribution, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -913,6 +913,8 @@ const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includ
 const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
 // #region quota-countdown — docs: docs/runs/2026-10-04-quota-review/README.md
 let countdownPaused = false;
+/** SB-158: the Accounts filter: `all`, `personal` or an organization's id. */
+let orgFilter = 'all';
 const pausedCountdowns = new Map<string, string>();
 /** A countdown node's text: the compact card form ("2h 5m") or the long disclosure form. */
 const countdownText = (node: HTMLElement, now: number) => node.dataset.format === 'compact' ? compactCountdown(Number(node.dataset.countdown), now) : resetCountdown(Number(node.dataset.countdown), now);
@@ -1091,13 +1093,16 @@ function renderAccounts(main: HTMLElement) {
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
     empty.append(addMenu()); main.append(empty, kimiSection()); return;
   }
+  main.append(organizationsBar(accounts));
+  const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each pool: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'button quiet', 'countdown-toggle'));
   main.append(sorting);
-  for (const group of groupAccounts(accounts, quotaContext())) {
+  if (!shown.length) main.append(el('p', 'form-note', t('No account here yet.')));
+  for (const group of groupAccounts(shown, quotaContext())) {
     const section = el('section', 'account-group'); section.setAttribute('aria-label', t('{provider} accounts', { provider: providerName(group.provider) }));
     const heading = el('div', 'group-heading');
     heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${plural(group.count, { one: '{n} account', other: '{n} accounts' })}`));
@@ -1260,6 +1265,8 @@ function accountRow(account: Account) {
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
+  const org = organizationOf(account);
+  if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
   const email = account.external_identity?.email;
   name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? t('OAuth') : '')));
   const project = !!projectOf(account.pool);
@@ -1287,6 +1294,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
   items.push([t('Move to another pool…'), () => moveDialog(account, state.current)]);
+  if (snapshot?.organizations?.length) items.push([t('Organization…'), () => assignDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }
@@ -1982,6 +1990,94 @@ function moveDialog(account: Account, inCli: boolean) {
     void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
   });
   (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();
+}
+/** SB-158: the organization an account belongs to, with why, for its badge. */
+function organizationOf(account: Account): { name: string; why: string } | null {
+  const at = attribution(snapshot!, account);
+  const org = at.organization ? snapshot!.organizations?.find((o) => o.id === at.organization) : undefined;
+  if (!org) return null;
+  return { name: org.name, why: byText(at.by, org.name) };
+}
+function byText(by: AttributedBy | null, name: string) {
+  if (by === 'person') return t('You placed it in {name}.', { name });
+  if (by === 'provider') return t('Its team at the provider belongs to {name}.', { name });
+  if (by === 'domain') return t('Its address is on a domain of {name}.', { name });
+  return t('Personal');
+}
+/** SB-158: the filter and the way to organizations, above the accounts; one quiet line while there are none. */
+function organizationsBar(accounts: Account[]) {
+  const organizations = snapshot!.organizations ?? [];
+  const bar = el('div', 'org-bar');
+  if (!organizations.length) {
+    orgFilter = 'all';
+    bar.append(el('span', 'form-note', t('Work for a company? Add it as an organization to see which accounts are its.')), button(t('Add organization…'), () => organizationDialog(null), 'button quiet', 'org-add'));
+    return bar;
+  }
+  if (orgFilter !== 'all' && orgFilter !== 'personal' && !organizations.some((o) => o.id === orgFilter)) orgFilter = 'all';
+  const count = (filter: string) => accounts.filter((a) => inOrganizationFilter(snapshot!, a, filter)).length;
+  const choices: [string, string][] = [['all', t('All')], ...organizations.map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal')]];
+  const group = el('div', 'segmented org-filter'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', t('Show accounts of'));
+  for (const [value, text] of choices) {
+    const chip = button(`${text} · ${count(value)}`, () => { orgFilter = value; render(); restoreFocus(`org-filter-${value}`); }, `segment ${orgFilter === value ? 'is-on' : ''}`, `org-filter-${value}`);
+    chip.setAttribute('aria-pressed', String(orgFilter === value)); group.append(chip);
+  }
+  bar.append(group, button(t('Organizations…'), () => organizationsDialog(), 'button quiet', 'org-manage'));
+  return bar;
+}
+/** SB-158: every organization with its domains and accounts; add, edit or remove one. */
+function organizationsDialog() {
+  const context = openDialog(t('Organizations'), t('An account belongs to an organization when you place it there, when its team at the provider is the organization’s, or when its address is on one of the organization’s domains. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.'));
+  const list = el('div', 'org-list');
+  for (const o of snapshot!.organizations ?? []) {
+    const n = snapshot!.accounts.filter((a) => attribution(snapshot!, a).organization === o.id).length;
+    const row = el('div', 'org-row');
+    const text = el('div', 'org-row-text'); text.append(el('strong', '', o.name), el('span', 'row-sub', [(o.domains ?? []).join(', ') || t('No domain'), plural(n, { one: '{n} account', other: '{n} accounts' })].join(' · ')));
+    row.append(text, button(t('Edit…'), () => { context.close(); organizationDialog(o.id); }, 'button row-button quiet', `org-edit-${o.id}`), button(t('Remove…'), () => { context.close(); organizationRemoveDialog(o.id); }, 'button row-button quiet danger-text', `org-remove-${o.id}`));
+    list.append(row);
+  }
+  context.body.append(list);
+  const add = button(t('Add organization…'), () => { context.close(); organizationDialog(null); }, 'button primary', 'org-dialog-add'); add.type = 'button';
+  context.actions.append(add);
+  add.focus();
+}
+/** SB-158: add an organization (`id` null) or change one: its name and the domains it owns. */
+function organizationDialog(id: string | null) {
+  const current = id ? snapshot!.organizations?.find((o) => o.id === id) : undefined;
+  const context = openDialog(current ? t('Edit {name}', { name: current.name }) : t('Add organization'), t('Accounts with an address on these domains belong to it. You can always place an account yourself.'));
+  const name = input(current?.name ?? ''); name.maxLength = 80; name.placeholder = t('Company name');
+  const domains = input((current?.domains ?? []).join(', ')); domains.required = false; domains.placeholder = 'example.com';
+  const grid = el('div', 'form-grid'); grid.append(field(t('Name'), name), field(t('Domains'), domains, t('Optional. Separate several with commas.')));
+  context.body.append(grid);
+  context.actions.append(submit(current ? t('Save') : t('Add')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const list = domainList(domains.value);
+    void dialogSave(context, () => current ? adapter.organizationEdit(current.id, name.value.trim(), list) : adapter.organizationAdd(name.value.trim(), list), current ? t('{name} saved.', { name: name.value.trim() }) : t('{name} added.', { name: name.value.trim() }));
+  });
+  name.focus();
+}
+function organizationRemoveDialog(id: string) {
+  const o = snapshot!.organizations?.find((x) => x.id === id); if (!o) return;
+  const context = openDialog(t('Remove {name}?', { name: o.name }), t('Its accounts stay where they are; they are placed again by their team or domain, or become personal. Nothing at the provider changes.'));
+  const confirm = submit(t('Remove')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.organizationRemove(id), t('{name} removed.', { name: o.name })); });
+  confirm.focus();
+}
+/** SB-158: the account card's ⋯ → *Organization…*: automatic, personal, or one organization. */
+function assignDialog(account: Account) {
+  const choice = snapshot!.memberships?.[account.id] ?? 'auto';
+  const automatic = attribution({ organizations: snapshot!.organizations }, account);
+  const autoName = automatic.organization ? snapshot!.organizations?.find((o) => o.id === automatic.organization)?.name : null;
+  const context = openDialog(t('Organization of {label}', { label: account.label }), t('Automatic follows its team at the provider, then its address’s domain.'));
+  const picker = select([['auto', autoName ? t('Automatic: {name}', { name: autoName }) : t('Automatic: personal')], ...(snapshot!.organizations ?? []).map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal')]]);
+  picker.value = choice;
+  context.body.append(field(t('Belongs to'), picker));
+  context.actions.append(submit(t('Save')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void dialogSave(context, () => adapter.organizationAssign(account.id, picker.value === 'auto' ? null : picker.value), t('Saved for {label}.', { label: account.label }));
+  });
+  picker.focus();
 }
 function removeDialog(account: Account) {
   const active = selected(account);

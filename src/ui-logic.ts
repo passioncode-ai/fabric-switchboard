@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, Organization, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -98,6 +98,7 @@ export function eventAction(action: string): string {
     case 'fallback_chain': return t('Fallback chain');
     case 'agent_key': return t('Agent key');
     case 'kimi_account': return t('Kimi Code account');
+    case 'organization': return t('Organization');
     case 'fallback': return t('Hand-over');
     case 'activation': return t('Switch');
     case 'rotation': return t('Automatic switching');
@@ -127,6 +128,7 @@ export function eventDetail(detail: string): string {
     case 'paused': return t('paused');
     case 'removed': return t('removed');
     case 'added': return t('added');
+    case 'assigned': return t('assigned');
     case 'applied': return t('applied');
     case 'created': return t('created');
     case 'updated': return t('updated');
@@ -261,6 +263,49 @@ export function cardState(account: Account, context: QuotaOrderContext): CardSta
 type Groupable = Pick<Account, 'provider' | 'pool' | 'enabled' | 'created_at'>;
 export interface AccountGroup<T> { provider: Account['provider']; count: number; pools: { pool: string; accounts: T[] }[] }
 /** Provider and pool boundaries survive quota ordering; old callers retain structural order. */
+/**
+ * SB-158: where an account belongs. Mirrors `Snapshot::attribution` in switchboard-core: the
+ * person's word (`memberships`), then the account's provider organization (a Claude Team or a
+ * ChatGPT workspace recorded on an organization), then its address's domain. Same cases in
+ * `organizations::tests` and `scripts/test-ui-logic.mjs`.
+ */
+export type AttributedBy = 'person' | 'provider' | 'domain';
+export interface OrgSnapshot { organizations?: Organization[]; memberships?: Record<string, string> }
+export function providerOrganization(account: Pick<Account, 'provider' | 'external_identity'>): string | null {
+  const identity = account.external_identity;
+  const id = account.provider === 'claude' ? identity?.organization_id : identity?.account_id;
+  return id ? `${account.provider}:${id}` : null;
+}
+export function accountDomain(account: Pick<Account, 'label' | 'external_identity'>): string | null {
+  const email = account.external_identity?.email ?? account.label;
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || /\s/.test(email.slice(0, at))) return null;
+  const domain = email.slice(at + 1).trim().replace(/\.$/, '').toLowerCase();
+  return /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(domain) ? domain : null;
+}
+export function attribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): { organization: string | null; by: AttributedBy | null } {
+  const organizations = snapshot.organizations ?? [];
+  const choice = snapshot.memberships?.[account.id];
+  if (choice === 'personal') return { organization: null, by: 'person' };
+  if (choice && organizations.some((o) => o.id === choice)) return { organization: choice, by: 'person' };
+  const key = providerOrganization(account);
+  const team = key ? organizations.find((o) => (o.provider_organizations ?? []).includes(key)) : undefined;
+  if (team) return { organization: team.id, by: 'provider' };
+  const domain = accountDomain(account);
+  const owner = domain ? organizations.find((o) => (o.domains ?? []).includes(domain)) : undefined;
+  if (owner) return { organization: owner.id, by: 'domain' };
+  return { organization: null, by: null };
+}
+/** The Accounts filter (SB-158): every account, the personal ones, or one organization's. */
+export function inOrganizationFilter(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, filter: string): boolean {
+  if (filter === 'all') return true;
+  const at = attribution(snapshot, account).organization;
+  return filter === 'personal' ? at === null : at === filter;
+}
+/** "a.example, b.example" from what a person typed: commas, spaces or new lines. */
+export function domainList(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/).map((d) => d.trim().replace(/^@/, '').replace(/\.$/, '').toLowerCase()).filter(Boolean))];
+}
 export function groupAccounts<T extends Groupable>(accounts: T[], context?: QuotaOrderContext): AccountGroup<T>[] {
   const groups: AccountGroup<T>[] = [];
   const ranks = { available: 0, blocked: 1, unknown: 2, sign_in: 3, disabled: 4 };

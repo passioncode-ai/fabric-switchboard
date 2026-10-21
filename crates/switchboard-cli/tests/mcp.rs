@@ -182,6 +182,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_events",
             "switchboard_account_update",
             "switchboard_account_move",
+            "switchboard_organizations",
+            "switchboard_organization_set",
             "switchboard_rotation",
             "switchboard_rotation_set",
             "switchboard_backups",
@@ -863,6 +865,45 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "pool": "nowhere"}),
     );
     assert!(error, "a pool no project uses is refused: {refused}");
+    // SB-158: organizations over MCP; an account on the organization's domain belongs to it,
+    // the operator's word overrides, and a read-only server has no write tool.
+    let (error, none) = agent.tool("switchboard_organizations", json!({}));
+    assert!(!error, "{none}");
+    assert_eq!(none["organizations"], json!([]));
+    let (error, added) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "add", "name": "Acme", "domains": ["Acme.example"]}),
+    );
+    assert!(!error, "{added}");
+    let org = added["organization"]["id"].as_str().unwrap().to_owned();
+    let (error, assigned) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "organization": org}),
+    );
+    assert!(!error, "{assigned}");
+    assert_eq!(assigned["by"], "person");
+    let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
+    let mine = accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == ids[2])
+        .unwrap()
+        .clone();
+    assert_eq!(mine["organization"]["name"], "Acme", "{accounts}");
+    let (error, refused) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "add", "name": "acme"}),
+    );
+    assert!(
+        error,
+        "a second organization of the same name is refused: {refused}"
+    );
+    let (error, personal) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "organization": "personal"}),
+    );
+    assert!(!error && personal["organization"].is_null(), "{personal}");
     let (error, set) = agent.tool(
         "switchboard_rotation_set",
         json!({"provider": "claude", "pool": "work", "threshold_percent": 80}),
