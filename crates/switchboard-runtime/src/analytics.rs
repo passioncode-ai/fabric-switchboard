@@ -629,6 +629,7 @@ mod tests {
             chains: vec![],
             agent_keys: vec![],
             kimi_accounts: vec![],
+            ..Default::default()
         }
     }
     fn events(server: &Server) -> Vec<Value> {

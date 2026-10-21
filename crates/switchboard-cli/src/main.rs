@@ -38,6 +38,14 @@ enum Command {
         #[command(subcommand)]
         command: Accounts,
     },
+    /// Organizations accounts belong to (SB-158): by your word, by the provider organization (a
+    /// Claude Team, a ChatGPT workspace) or by the address's domain. Nothing changes until one
+    /// exists.
+    #[command(alias = "organizations")]
+    Org {
+        #[command(subcommand)]
+        command: Org,
+    },
     /// Cached usage for all accounts, or refresh a specific account from its provider.
     Usage {
         /// An account id (`switchboard accounts list`): ask its provider now. Without it, the
@@ -413,6 +421,44 @@ fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
         }
     }
 }
+#[derive(Subcommand)]
+enum Org {
+    /// The organizations, then every account with the organization it belongs to and why.
+    List,
+    /// Add an organization with the e-mail domains it owns.
+    Add {
+        /// Its name, unique on this machine.
+        name: String,
+        /// A domain it owns (`example.com`); repeat for several.
+        #[arg(long = "domain")]
+        domains: Vec<String>,
+    },
+    /// Rename it, replace its domains, or both.
+    Edit {
+        /// Its id (`switchboard org list`).
+        id: String,
+        /// Its new name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Replaces its domains; repeat for several. `--domain ''` alone clears them.
+        #[arg(long = "domain")]
+        domains: Option<Vec<String>>,
+    },
+    /// Remove it; its accounts are attributed again by the other rules.
+    Remove {
+        /// Its id (`switchboard org list`).
+        id: String,
+    },
+    /// Say where one account belongs: an organization's id, `personal`, or `auto` to let the
+    /// rules decide again.
+    Assign {
+        /// The account id (`switchboard accounts list`).
+        account: String,
+        /// An organization's id, `personal`, or `auto`.
+        organization: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum Accounts {
     /// Saved accounts with their provider, kind, pool, state and usage. No credentials.
@@ -1035,6 +1081,28 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
+        Command::Org { command } => match command {
+            Org::List => Operation::Organizations,
+            Org::Add { name, domains } => Operation::OrganizationAdd {
+                name: name.clone(),
+                domains: domains.clone(),
+            },
+            Org::Edit { id, name, domains } => Operation::OrganizationEdit {
+                id: id.clone(),
+                name: name.clone(),
+                domains: domains
+                    .as_ref()
+                    .map(|d| d.iter().filter(|d| !d.is_empty()).cloned().collect()),
+            },
+            Org::Remove { id } => Operation::OrganizationRemove { id: id.clone() },
+            Org::Assign {
+                account,
+                organization,
+            } => Operation::OrganizationAssign {
+                account: account.clone(),
+                choice: (organization != "auto").then(|| organization.clone()),
+            },
+        },
         Command::Sessions { all } => Operation::Sessions { all: *all },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
@@ -1787,6 +1855,49 @@ fn print_result(value: &Value, cli: &Cli) {
     }
     let text = |v: &Value| v.as_str().unwrap_or("—").to_string();
     match &cli.command {
+        Command::Org { command: Org::List } => {
+            let organizations = value["organizations"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if organizations.is_empty() {
+                println!("No organization. Add one: switchboard org add NAME --domain example.com");
+                return;
+            }
+            for o in &organizations {
+                let domains: Vec<String> = o["domains"]
+                    .as_array()
+                    .map(|d| d.iter().map(text).collect())
+                    .unwrap_or_default();
+                println!(
+                    "{}  {}  {} account(s)  {}",
+                    text(&o["id"]),
+                    text(&o["name"]),
+                    o["accounts"].as_u64().unwrap_or(0),
+                    domains.join(", ")
+                );
+            }
+            println!();
+            for a in value["accounts"].as_array().cloned().unwrap_or_default() {
+                let by = match a["by"].as_str() {
+                    Some("person") => "set by you",
+                    Some("provider") => "its team",
+                    Some("domain") => "its domain",
+                    _ => "",
+                };
+                println!(
+                    "{}  {:7}  {:24}  {}",
+                    text(&a["id"]),
+                    text(&a["provider"]),
+                    a["organization_name"].as_str().unwrap_or("personal"),
+                    if by.is_empty() {
+                        text(&a["label"])
+                    } else {
+                        format!("{} ({by})", text(&a["label"]))
+                    }
+                );
+            }
+        }
         Command::Sessions { .. } => {
             let sessions = value["sessions"].as_array().cloned().unwrap_or_default();
             if sessions.is_empty() {
@@ -2386,6 +2497,11 @@ mod mcp_parity {
         ("accounts add", Not(PERSON)),
         ("accounts update", Tool("switchboard_account_update")),
         ("accounts move", Tool("switchboard_account_move")),
+        ("org list", Tool("switchboard_organizations")),
+        ("org add", Tool("switchboard_organization_set")),
+        ("org edit", Tool("switchboard_organization_set")),
+        ("org remove", Tool("switchboard_organization_set")),
+        ("org assign", Tool("switchboard_organization_set")),
         ("accounts remove", Not(PERSON)),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),

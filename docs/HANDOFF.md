@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-21: 0.6.60, organizations phase 1 (SB-158)
+
+- **Done.** Organizations as designed in [organizations-2026-10-21](research/organizations-2026-10-21.md)
+  phase 1, standalone: core model and attribution, runtime operations, CLI, MCP, Accounts filter,
+  badge, card menu and dialogs (SCN-069), docs (CONTRACTS, CLI, SKILL, CHANGELOG). Design
+  amended: no plan type; an address on an organization's domain is its own.
+- **Checks.** `./scripts/check.sh` (see the release entry), WebKit demo in Russian: add an
+  organization, nine badges by domain, filter counts, *Personal* from the card menu, the
+  Organizations dialog.
+- **Same day.** 21 coding-agent sessions stopped on limits or idle in Orca were resumed with
+  `orca terminal send` (each answered `turn_started`).
+- **Next task.** SB-109 (phase 2): a group's organization, refusing other contexts' seats, and
+  Statistics by organization; then SB-159 when Vesta answers thread `63af7559`.
+
 ## 2026-10-21: organizations designed (SB-158, SB-159, SB-160)
 
 - **Objective.** Mark which accounts belong to which organization, keep an organization's work

@@ -447,6 +447,52 @@ async fn move_account(id: String, pool: String, state: State<'_, Slot>) -> Resul
         .execute(Operation::MoveAccount { id, pool })
         .await
 }
+/// SB-158: organizations accounts belong to.
+#[tauri::command]
+async fn organization_add(
+    name: String,
+    domains: Vec<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OrganizationAdd { name, domains })
+        .await
+}
+#[tauri::command]
+async fn organization_edit(
+    id: String,
+    name: Option<String>,
+    domains: Option<Vec<String>>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OrganizationEdit { id, name, domains })
+        .await
+}
+#[tauri::command]
+async fn organization_remove(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OrganizationRemove { id })
+        .await
+}
+#[tauri::command]
+async fn organization_assign(
+    account: String,
+    choice: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OrganizationAssign { account, choice })
+        .await
+}
 /// SB-143: Codex in project folders: the state, or `enabled` to switch it.
 #[tauri::command]
 async fn codex_route(enabled: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
@@ -1069,6 +1115,10 @@ fn main() {
             repository_map,
             statistics,
             move_account,
+            organization_add,
+            organization_edit,
+            organization_remove,
+            organization_assign,
             agents_overview,
             agent_enable,
             agent_default,

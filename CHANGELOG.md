@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.60 (2026-10-21)
+
+- **Organizations (SB-158).** Switchboard now shows which accounts belong to which company. Add an organization with its e-mail domains, and every account with an address on them gets its badge; placing one seat of a Claude Team or ChatGPT workspace brings the team's other seats along, and any account can be kept personal from its ⋯ menu. A filter above the accounts shows all of them, one organization's, or the personal ones. The same is in the CLI (`switchboard org list|add|edit|remove|assign`) and for agents (`switchboard_organizations`, `switchboard_organization_set`, and the organization on each `switchboard_accounts` row). Without an organization nothing changes, and nothing about organizations leaves the computer.
+
 ## 0.6.59 (2026-10-21)
 
 - **Statistics keep each request with its project (SB-156).** A request is now stored under its project the moment it is counted, so when an agent removes the worktree it worked in, its requests stay with the project instead of turning into a project of their own, and the project keeps its name. The row without a folder is called *No folder recorded*: requests counted before 0.6.53, when the folder was not kept yet.

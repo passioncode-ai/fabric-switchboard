@@ -26,6 +26,21 @@ switchboard accounts remove ACCOUNT_UUID
 switchboard --json events
 ```
 
+### Organizations (SB-158)
+
+```sh
+switchboard org add "Acme" --domain acme.example --domain acme.dev
+switchboard org list                                   # organizations, then each account and why
+switchboard org assign ACCOUNT_UUID ORGANIZATION_ID     # or personal, or auto
+switchboard org edit ORGANIZATION_ID --name "Acme Inc." --domain acme.example
+switchboard org remove ORGANIZATION_ID
+```
+
+An account belongs to an organization by your word (`assign`), by its team at the provider
+(assigning one seat of a Claude Team or ChatGPT workspace records the team, so its other seats
+follow), or by its address's domain; otherwise it is personal. Nothing changes until an
+organization exists. `--json` gives `{schema: 1, organizations, accounts}`.
+
 `--secret-stdin` is mandatory for add; a secret value is never accepted as an argument. Redirect from a private credential file or a trusted secret manager. Do not put tokens in shell history. Provider/kind are explicit; supported kind spellings are `api-key`, `setup-token` and `oauth`. OAuth input is provider credential JSON. UUID identifies an account; labels are display text. Removal has the same selected-account/active-home guards as the GUI.
 
 Without a running owner, metadata operations acquire the Store’s exclusive lock and release it after the command. With GUI or `serve` running, they use the owner’s authenticated loopback control server. Both paths run core validation. The CLI must not convert an authentication failure into a local-write fallback.

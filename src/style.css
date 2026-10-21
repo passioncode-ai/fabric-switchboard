@@ -451,3 +451,13 @@ g:hover > .chart-bar { opacity: .82; }
 .stat-table thead th.num .sort-button { text-align: right; }
 .sort-button:hover, .sort-button.is-on { color: var(--ink); }
 .sort-button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: -2px; }
+
+/* SB-158: organizations. The filter sits above the accounts; the badge names the organization. */
+.org-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
+.org-bar .form-note { margin: 0; }
+.org-filter { flex-wrap: wrap; }
+.org-badge { color: var(--ink); border-color: var(--accent); background: var(--accent-weak); }
+.org-list { display: grid; gap: var(--space-2); }
+.org-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.org-row-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.org-row-text .row-sub { overflow-wrap: anywhere; }

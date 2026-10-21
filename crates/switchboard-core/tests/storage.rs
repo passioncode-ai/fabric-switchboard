@@ -1266,3 +1266,70 @@ fn an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_m
         .is_none());
     assert_eq!(value(&a), "sk-or-v1-machine");
 }
+
+#[test]
+fn assigning_one_seat_brings_its_team_and_removals_clean_up_assignments() {
+    // SB-158: the person's word on one Claude Team seat records the team on the organization,
+    // so another seat of that team follows; removing the organization or the account leaves no
+    // dangling assignment.
+    use switchboard_core::{By, ExternalIdentity};
+    let (root, vault, store) = setup();
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let seat = |label: &str, refresh: &str| {
+        store
+            .upsert(
+                label.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth(refresh),
+                Some(ExternalIdentity {
+                    account_id: Some(format!("synthetic-{refresh}")),
+                    organization_id: Some("synthetic-team".into()),
+                    email: Some(format!("{refresh}@gmail.invalid")),
+                }),
+            )
+            .unwrap()
+    };
+    let a = seat("A", "a");
+    let b = seat("B", "b");
+    let acme = store
+        .add_organization(" Acme ", &["Acme.example".into()])
+        .unwrap();
+    assert_eq!(acme.name, "Acme");
+    assert_eq!(acme.domains, vec!["acme.example".to_string()]);
+    assert!(
+        store.add_organization("acme", &[]).is_err(),
+        "names are unique"
+    );
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.attribution(&b).organization, None);
+
+    let by_person = store.assign_organization(&a.id, Some(&acme.id)).unwrap();
+    assert_eq!(by_person.by, Some(By::Person));
+    let snapshot = store.snapshot().unwrap();
+    let follows = snapshot.attribution(&b);
+    assert_eq!(follows.organization.as_deref(), Some(acme.id.as_str()));
+    assert_eq!(follows.by, Some(By::Provider));
+
+    // The organization survives a reopen.
+    drop(store);
+    let store = reopen(root.path(), vault);
+    assert_eq!(store.snapshot().unwrap().organizations.len(), 1);
+
+    store.remove(&b.id).unwrap();
+    assert!(!store.snapshot().unwrap().memberships.contains_key(&b.id));
+    store.remove_organization(&acme.id).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.memberships.is_empty());
+    assert_eq!(snapshot.attribution(&a).organization, None);
+}
