@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.66, organizations from PassionCode.ai (SB-159)
+
+- **Done (task-pipeline).** Organizations phase 3: scenario SCN-071 first; `vesta.rs` (browser
+  sign-in with a loopback redirect and PKCE, exchange, refresh rotated and kept only in the OS
+  vault, read of `GET /v1/me/organizations`), `Store::apply_vesta`, monitor read every 6 hours,
+  CLI `org connect|read|passioncode|disconnect`, Tauri `passioncode`, the Organizations panel.
+  Schema 7 while an organization is linked; backups carry no link.
+- **Release 0.6.65.** Tagged on `6255363` (guard green, run `39816032184`); its five platform
+  builds sat queued behind the organization's runner limit for over an hour at 18:30 UTC.
+- **Checks run.** See the PR for `./scripts/check.sh`; `vesta::tests` 3 passed against a
+  synthetic Vesta; WebKit walk-through of the panel (not connected, waiting, connected) clean.
+- **Not verified.** A live connection to `org.passioncode.ai` with the operator's account
+  (the operator's acceptance: sign in once in the browser).
+- **Next task.** Publish 0.6.65, then 0.6.66; then SB-141's vectors part; SB-168's design note
+  by 2026-10-29.
+
 ## 2026-10-22: 0.6.65, a group's organization (SB-109)
 
 - **Done (task-pipeline, full flow; brief and REQ spine in the run ledger).** Organizations

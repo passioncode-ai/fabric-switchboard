@@ -6,9 +6,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, attribution, groupAdmits, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, attribution, groupAdmits, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -180,6 +180,7 @@ async function reload() {
   void restorePendingLogin();
   void loadBackups();
   if (page === 'agents') void loadAgents();
+  if (page === 'orgs') void loadPassioncode();
   void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
   void loadUpdate();
@@ -236,7 +237,7 @@ function render(options: { background?: boolean } = {}): boolean {
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
   for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Groups'), '◫'], ['orgs', t('Organizations'), '◇'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); if (target === 'orgs') void loadPassioncode(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
@@ -2048,9 +2049,45 @@ function organizationsBar(accounts: Account[]): HTMLElement | null {
   bar.append(group);
   return bar;
 }
+/** SB-159 (SCN-071): the PassionCode.ai connection, read when the page opens. */
+let passioncodeView: PassioncodeStatus | null = null; let passioncodeWaiting = false; let passioncodeError = '';
+async function loadPassioncode() {
+  try { passioncodeView = await adapter.passioncode('status'); passioncodeError = ''; } catch (error) { passioncodeError = safeError(error); }
+  backgroundRender();
+}
+async function passioncodeAct(action: 'connect' | 'read' | 'disconnect') {
+  if (action === 'connect') { passioncodeWaiting = true; render(); }
+  try {
+    passioncodeView = await adapter.passioncode(action); passioncodeError = '';
+    snapshot = await adapter.snapshot();
+    if (action === 'connect') showNotice(t('Connected to PassionCode.ai: {organizations}.', { organizations: plural(passioncodeView.organizations ?? 0, { one: '{n} organization', other: '{n} organizations' }) }));
+    else if (action === 'disconnect') showNotice(t('PassionCode.ai disconnected. The organizations stay here.'));
+  } catch (error) { showNotice(safeError(error), true); }
+  finally { passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
+}
+function passioncodePanel() {
+  const panel = el('section', 'org-card passioncode-panel'); panel.setAttribute('aria-label', 'PassionCode.ai');
+  const head = el('div', 'org-card-head'); const titles = el('div', 'org-card-title');
+  const status = passioncodeView;
+  const line = passioncodeLine(status);
+  const values: Record<string, string> = Object.fromEntries(Object.entries(line.values ?? {}).map(([k, v]) => [k, k === 'date' ? date(Number(v)) : String(v)]));
+  if (line.values?.count !== undefined) values.organizations = plural(Number(line.values.count), { one: '{n} organization', other: '{n} organizations' });
+  titles.append(el('h2', '', 'PassionCode.ai'), el('span', 'row-sub', passioncodeWaiting ? t('Waiting for PassionCode.ai in your browser…') : passioncodeError ? t(passioncodeError) : t(line.key, values)));
+  const actions = el('div', 'org-card-actions');
+  if (passioncodeWaiting) actions.append(button(t('Cancel'), () => { void adapter.passioncode('cancel'); }, 'button row-button quiet', 'passioncode-cancel'));
+  else if (!status?.connected || status.state === 'sign_in_again') actions.append(button(t('Connect PassionCode.ai…'), () => void passioncodeAct('connect'), 'button row-button', 'passioncode-connect'));
+  else {
+    actions.append(button(t('Read now'), () => void passioncodeAct('read'), 'button row-button quiet', 'passioncode-read'));
+    actions.append(menu('passioncode', t('More actions for {name}', { name: 'PassionCode.ai' }), [[t('Disconnect'), () => void passioncodeAct('disconnect'), 'danger-text']]));
+  }
+  if (passioncodeWaiting) actions.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+  head.append(titles, actions); panel.append(head);
+  return panel;
+}
 /** SB-158: the Organizations page: what makes an account a company's, then each organization with its domains and the accounts it holds. */
 function renderOrganizations(main: HTMLElement) {
   const organizations = snapshot!.organizations ?? [];
+  main.append(passioncodePanel());
   if (!organizations.length) {
     const empty = emptyState(t('No organizations yet'), t('Add the companies you work for with their e-mail domains. Accounts on those domains get the company’s badge on Accounts, and you can place any account yourself. Without organizations nothing changes.'));
     empty.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-empty-add'));
@@ -2063,7 +2100,9 @@ function renderOrganizations(main: HTMLElement) {
     const members = snapshot!.accounts.filter((a) => attribution(snapshot!, a).organization === o.id);
     const card = el('section', 'org-card'); card.setAttribute('aria-label', o.name);
     const head = el('div', 'org-card-head');
-    const titles = el('div', 'org-card-title'); titles.append(el('h2', '', o.name), el('span', 'row-sub', (o.domains ?? []).join(', ') || t('No domain')));
+    const titles = el('div', 'org-card-title'); const heading = el('h2', '', o.name);
+    if (o.vesta_id) { const mark = el('span', 'badge org-badge', 'PassionCode.ai'); mark.title = t('Its name and domains come from PassionCode.ai.'); heading.append(' ', mark); }
+    titles.append(heading, el('span', 'row-sub', (o.domains ?? []).join(', ') || t('No domain')));
     const actions = el('div', 'org-card-actions');
     actions.append(button(t('Edit…'), () => organizationDialog(o.id), 'button row-button quiet', `org-edit-${o.id}`));
     actions.append(menu(`org-${o.id}`, t('More actions for {name}', { name: o.name }), [[t('Remove…'), () => organizationRemoveDialog(o.id), 'danger-text']]));

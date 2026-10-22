@@ -308,6 +308,7 @@ mod tests {
             domains: vec![],
             provider_organizations: vec![],
             created_at: 1,
+            vesta_id: None,
         });
         shared.projects[0].organization = Some("00000000-0000-4000-8000-000000000001".into());
         assert_eq!(folders(&shared), [("/w/s".to_owned(), "own".to_owned())]);

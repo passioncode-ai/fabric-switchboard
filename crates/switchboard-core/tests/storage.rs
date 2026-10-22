@@ -1495,3 +1495,104 @@ fn a_folder_in_groups_of_two_contexts_runs_in_the_personal_one() {
     let snapshot = store.snapshot().unwrap();
     assert_eq!(snapshot.project_for(&shared).unwrap().pool, second.pool);
 }
+
+#[test]
+fn organizations_from_passioncode_are_linked_kept_current_and_released() {
+    // SB-159 (SCN-071): a typed organization of the same name or a shared domain is linked, not
+    // duplicated; a new one is added; a rename and a new domain arrive; one the person left
+    // stays local, unmarked; a secret lives only in the vault.
+    use switchboard_core::organizations::VestaOrganization;
+    let (_root, vault, store) = setup();
+    let typed = store
+        .add_organization("acme", &["acme.example".into()])
+        .unwrap();
+    let vesta = |id: &str, name: &str, domains: &[&str]| VestaOrganization {
+        id: id.into(),
+        name: name.into(),
+        domains: domains.iter().map(|d| (*d).into()).collect(),
+    };
+    let applied = store
+        .apply_vesta(&[
+            vesta("v-acme", "Acme Inc", &["acme.example", "acme.dev"]),
+            vesta("v-beta", "Beta", &[]),
+        ])
+        .unwrap();
+    assert_eq!((applied.linked, applied.added), (1, 1));
+    let snap = store.snapshot().unwrap();
+    let acme = snap.organization(&typed.id).unwrap();
+    assert_eq!(acme.vesta_id.as_deref(), Some("v-acme"));
+    assert_eq!(acme.name, "Acme Inc");
+    assert_eq!(
+        acme.domains,
+        vec!["acme.example".to_string(), "acme.dev".to_string()]
+    );
+    assert!(snap
+        .organizations
+        .iter()
+        .any(|o| o.name == "Beta" && o.vesta_id.as_deref() == Some("v-beta")));
+    // The person left Beta: it stays, no longer linked.
+    let applied = store
+        .apply_vesta(&[vesta("v-acme", "Acme", &["acme.example"])])
+        .unwrap();
+    assert_eq!(applied.released, 1);
+    let snap = store.snapshot().unwrap();
+    assert_eq!(snap.organization(&typed.id).unwrap().name, "Acme");
+    assert!(snap
+        .organizations
+        .iter()
+        .any(|o| o.name == "Beta" && o.vesta_id.is_none()));
+    // Domains add up: one Vesta no longer lists stays until the person edits it.
+    assert_eq!(
+        snap.organization(&typed.id).unwrap().domains,
+        vec!["acme.example".to_string(), "acme.dev".to_string()]
+    );
+    // What `validate` would refuse never gets in: a long name differing only in non-ASCII case
+    // links to the one typed here; another Vesta organization of a linked one's name gets a
+    // suffixed name that still fits 80 characters; the same domain twice is kept once.
+    let long: String = "Ж".repeat(80);
+    let typed_long = store.add_organization(&long, &[]).unwrap();
+    let applied = store
+        .apply_vesta(&[
+            vesta("v-acme", "Acme", &["acme.example"]),
+            vesta(
+                "v-long",
+                &long.to_lowercase(),
+                &["dup.example", "DUP.example"],
+            ),
+            vesta("v-long-2", &long, &[]),
+        ])
+        .unwrap();
+    assert_eq!((applied.linked, applied.added), (1, 1));
+    let snap = store.snapshot().unwrap();
+    let linked = snap.organization(&typed_long.id).unwrap();
+    assert_eq!(linked.vesta_id.as_deref(), Some("v-long"));
+    assert_eq!(linked.domains, vec!["dup.example".to_string()]);
+    let added = snap
+        .organizations
+        .iter()
+        .find(|o| o.vesta_id.as_deref() == Some("v-long-2"))
+        .unwrap();
+    assert!(
+        added.name.chars().count() <= 80 && added.name.ends_with("(v-long-2)"),
+        "{}",
+        added.name
+    );
+    store.release_vesta().unwrap();
+    assert!(store
+        .snapshot()
+        .unwrap()
+        .organizations
+        .iter()
+        .all(|o| o.vesta_id.is_none()));
+    // A secret: in the vault under its item, never in the metadata.
+    let item = store.put_secret(None, "vapr_synthetic_refresh").unwrap();
+    assert_eq!(store.secret(&item).unwrap(), "vapr_synthetic_refresh");
+    let item2 = store
+        .put_secret(Some(&item), "vapr_synthetic_next")
+        .unwrap();
+    assert_eq!(item, item2);
+    assert_eq!(store.secret(&item).unwrap(), "vapr_synthetic_next");
+    store.delete_secret(&item).unwrap();
+    assert!(store.secret(&item).is_err());
+    let _ = vault;
+}

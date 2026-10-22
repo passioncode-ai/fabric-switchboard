@@ -39,7 +39,21 @@ switchboard org remove ORGANIZATION_ID
 An account belongs to an organization by your word (`assign`), by its team at the provider
 (assigning one seat of a Claude Team or ChatGPT workspace records the team, so its other seats
 follow), or by its address's domain; otherwise it is personal. Nothing changes until an
-organization exists. `--json` gives `{schema: 1, organizations, accounts}`.
+organization exists. `--json` gives `{schema: 1, organizations, accounts, passioncode}`.
+
+```sh
+switchboard org connect        # SB-159: sign in to PassionCode.ai in the browser (waits up to 5 minutes)
+switchboard org read           # read your PassionCode.ai organizations again now
+switchboard org passioncode    # where the connection stands; no token is shown
+switchboard org disconnect     # delete the token; the organizations stay as local ones
+```
+
+`connect` opens the PassionCode.ai consent page in the default browser and listens on
+`127.0.0.1` for its answer (RFC 8252 loopback, PKCE S256). The organizations you are a member of
+arrive with their names and domains; one you typed with the same name or a shared domain is linked,
+not duplicated. They are read again at start and every 6 hours while the app or `serve` runs.
+The refresh token is kept in the OS vault, never in a file; revoke the grant itself in My data on
+PassionCode.ai. Without a connection nothing here runs.
 
 `--secret-stdin` is mandatory for add; a secret value is never accepted as an argument. Redirect from a private credential file or a trusted secret manager. Do not put tokens in shell history. Provider/kind are explicit; supported kind spellings are `api-key`, `setup-token` and `oauth`. OAuth input is provider credential JSON. UUID identifies an account; labels are display text. Removal has the same selected-account/active-home guards as the GUI.
 

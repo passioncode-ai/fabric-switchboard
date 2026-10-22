@@ -2711,6 +2711,7 @@ mod tests {
             domains: vec![],
             provider_organizations: vec![],
             created_at: 1,
+            vesta_id: None,
         });
         with_org
             .memberships

@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.66 (2026-10-22)
+
+- **Your PassionCode.ai organizations, kept current (SB-159).** *Organizations* has a PassionCode.ai panel: *Connect PassionCode.ai…* opens the sign-in in your browser, and after *Allow* the organizations you belong to there arrive with their names and domains. One you had typed yourself with the same name or a shared domain is linked rather than added twice, and keeps its accounts. Switchboard reads them again at start and every 6 hours, so a renamed organization or a new domain shows up by itself; *Read now* reads at once and *Disconnect* deletes the token while the organizations stay. If PassionCode.ai cannot be reached, the last organizations stay and the panel says when they were read. Only a read-only token for your own memberships is kept, in the system keychain; nothing about your accounts leaves the computer. In the CLI: `switchboard org connect`, `org read`, `org passioncode`, `org disconnect`.
+
 ## 0.6.65 (2026-10-22)
 
 - **A group can belong to a company (SB-109).** Once you have an organization, a group's dialog has *Organization*: choose the company, and sessions in the group's folders run only on that company's accounts; choose *Personal*, and only on personal ones. Accounts that do not fit are shown greyed with the reason, and a group card carries its company's badge. If an account later stops belonging to the group's company (you moved it, or its domain changed), Switchboard stops using it there and says why. A folder that is in a personal group and a company's group runs in the personal one. Without organizations nothing changes. The same is in the CLI (`switchboard project edit --organization`) and for agents (`switchboard_project_edit`, and the organization on each `switchboard_projects` row).

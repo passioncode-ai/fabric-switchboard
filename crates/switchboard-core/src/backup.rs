@@ -269,7 +269,16 @@ pub fn write(
         routes: snapshot.routes,
         settings,
         agent_keys,
-        organizations: snapshot.organizations,
+        // A link to PassionCode.ai is this install's, made again by connecting; a 0.6.65 reader
+        // also refuses the field (SB-159).
+        organizations: snapshot
+            .organizations
+            .into_iter()
+            .map(|o| crate::Organization {
+                vesta_id: None,
+                ..o
+            })
+            .collect(),
         memberships: snapshot.memberships.into_iter().collect(),
     })
     .map_err(|_| UNAVAILABLE)?;

@@ -301,8 +301,16 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => return Ok(None),
         _ => return Err("Control connection did not complete. No operation was attempted.".into()),
     };
+    // SB-159: connecting PassionCode.ai waits up to 5 minutes for the person's browser.
+    // 300 s for the browser, a read that may hold the turn, the exchange and the read (15 s
+    // each), and a margin.
+    let limit = if matches!(operation, Operation::VestaConnect) {
+        420
+    } else {
+        30
+    };
     match tokio::time::timeout(
-        Duration::from_secs(30),
+        Duration::from_secs(limit),
         request_on_connection(stream, descriptor, operation),
     )
     .await

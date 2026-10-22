@@ -31,6 +31,7 @@ mod statistics;
 pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
+pub mod vesta;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -256,6 +257,17 @@ pub enum Operation {
         #[serde(default)]
         choice: Option<String>,
     },
+    /// SB-159: the PassionCode.ai connection (no token in the answer).
+    VestaStatus,
+    /// Opens the browser sign-in and waits for it (at most 5 minutes), then reads the
+    /// organizations.
+    VestaConnect,
+    /// Stops a connection still waiting for the browser.
+    VestaCancel,
+    /// Reads the organizations again now.
+    VestaSync,
+    /// Deletes the token; the organizations stay as local ones.
+    VestaDisconnect,
     /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
     /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
     /// deleted project's pool goes back to `default` by itself.
@@ -651,6 +663,8 @@ pub struct Runtime {
     transcript_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
     /// The recent subagent transcripts, listed at most every SUBAGENTS_EVERY (SB-131).
     subagent_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
+    /// SB-159: stops the PassionCode.ai sign-in waiting for the browser.
+    vesta_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     vanish_at: std::sync::atomic::AtomicI64,
     /// OpenRouter's model list, kept six hours (SB-119).
     openrouter_models: Mutex<agent_settings::ModelCache>,
@@ -757,6 +771,7 @@ impl Runtime {
             told: Mutex::new(HashSet::new()),
             transcript_list: Mutex::new(None),
             subagent_list: Mutex::new(None),
+            vesta_cancel: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
             bindings_lock: tokio::sync::Mutex::new(()),
@@ -841,6 +856,13 @@ impl Runtime {
                 | Operation::RepositoryMap { .. }
                 | Operation::Statistics { .. }
                 | Operation::Organizations
+                // SB-159: each takes the store's lock only to write what it read; a connection
+                // waits minutes for the browser and must not hold the owner.
+                | Operation::VestaStatus
+                | Operation::VestaConnect
+                | Operation::VestaCancel
+                | Operation::VestaSync
+                | Operation::VestaDisconnect
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
@@ -2652,7 +2674,7 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
                 .count();
             json!({"id": o.id, "name": o.name, "domains": o.domains,
                 "provider_organizations": o.provider_organizations.len(), "accounts": count,
-                "created_at": o.created_at})
+                "created_at": o.created_at, "passioncode": o.vesta_id.is_some()})
         })
         .collect();
     json!({"schema": 1, "organizations": organizations, "accounts": accounts})
@@ -3786,7 +3808,54 @@ async fn execute(
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
         }
-        Operation::Organizations => Ok(organizations_view(&store.snapshot()?)),
+        Operation::Organizations => {
+            let mut view = organizations_view(&store.snapshot()?);
+            view["passioncode"] = vesta::status(root).unwrap_or(Value::Null);
+            Ok(view)
+        }
+        Operation::VestaStatus => vesta::status(root),
+        Operation::VestaConnect => {
+            let (stop, cancel) = tokio::sync::oneshot::channel();
+            if let Some(rt) = runtime {
+                let mut slot = rt.vesta_cancel.lock().map_err(|_| vesta::VESTA_FAILED)?;
+                if slot.as_ref().is_some_and(|s| !s.is_closed()) {
+                    return Err(vesta::VESTA_BUSY.into());
+                }
+                *slot = Some(stop);
+            } else {
+                // The CLI waits in its own process; Ctrl-C ends it.
+                std::mem::forget(stop);
+            }
+            let result =
+                vesta::connect(root, &store, vesta::BASE, vesta::open_browser, cancel).await;
+            if let Some(rt) = runtime {
+                if let Ok(mut slot) = rt.vesta_cancel.lock() {
+                    *slot = None;
+                }
+            }
+            crate::oplog::event(
+                "vesta_connect",
+                &[(
+                    "outcome",
+                    crate::oplog::Field::Code(match &result {
+                        Ok(v) if v["state"] == "ok" => "connected",
+                        Ok(_) => "connected_unread",
+                        Err(e) if e == vesta::VESTA_DENIED => "denied",
+                        Err(e) if e == vesta::VESTA_TIMEOUT => "timeout",
+                        Err(e) if e == vesta::VESTA_CANCELLED => "cancelled",
+                        Err(_) => "failed",
+                    }),
+                )],
+            );
+            result
+        }
+        Operation::VestaCancel => {
+            let stop = runtime.and_then(|rt| rt.vesta_cancel.lock().ok()?.take());
+            let cancelled = stop.is_some_and(|s| s.send(()).is_ok());
+            Ok(json!({"cancelled": cancelled}))
+        }
+        Operation::VestaSync => vesta::sync(root, &store).await,
+        Operation::VestaDisconnect => vesta::disconnect(root, &store).await,
         Operation::OrganizationAdd { name, domains } => {
             let organization = store.add_organization(&name, &domains)?;
             Ok(json!({"organization": organization}))

@@ -699,4 +699,14 @@ check(() => {
   snap.memberships.w = 'personal';
   assert.equal(logic.groupAdmits(snap, null, work), true);
 });
+// SB-159: the PassionCode.ai panel's sentence for each state.
+check(() => {
+  assert.match(logic.passioncodeLine(null).key, /^Not connected/);
+  assert.match(logic.passioncodeLine({ connected: false }).key, /^Not connected/);
+  assert.deepEqual(logic.passioncodeLine({ connected: true, state: 'ok', organizations: 2, read_at: 100 }), { key: 'Connected: {organizations}, read {date}.', values: { count: 2, date: 100 } });
+  assert.match(logic.passioncodeLine({ connected: true, state: 'sign_in_again' }).key, /again/);
+  assert.match(logic.passioncodeLine({ connected: true, state: 'provider_sign_in' }).key, /in your browser/);
+  assert.deepEqual(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: 5 }).values, { date: 5 });
+  assert.match(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: null }).key, /yet/);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

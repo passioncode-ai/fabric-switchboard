@@ -302,6 +302,16 @@ export function groupAdmits(snapshot: OrgSnapshot, organization: string | null, 
   if (!(snapshot.organizations ?? []).length) return true;
   return attribution(snapshot, account).organization === organization;
 }
+/** SB-159: the PassionCode.ai panel's line as a translation key and its values. */
+export function passioncodeLine(status: { connected: boolean; state?: string; read_at?: number | null; organizations?: number } | null): { key: string; values?: Record<string, string | number> } {
+  if (!status || !status.connected) return { key: 'Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.' };
+  switch (status.state) {
+    case 'sign_in_again': return { key: 'Sign in to PassionCode.ai again: the connection ended or was revoked.' };
+    case 'provider_sign_in': return { key: 'Sign in to PassionCode.ai in your browser, then read again.' };
+    case 'unreachable': return status.read_at ? { key: 'PassionCode.ai could not be reached. The organizations read {date} stay.', values: { date: status.read_at } } : { key: 'PassionCode.ai could not be reached yet.' };
+    default: return { key: 'Connected: {organizations}, read {date}.', values: { count: status.organizations ?? 0, date: status.read_at ?? 0 } };
+  }
+}
 /** The Accounts filter (SB-158): every account, the personal ones, or one organization's. */
 export function inOrganizationFilter(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, filter: string): boolean {
   if (filter === 'all') return true;

@@ -1,7 +1,8 @@
 # Organizations in Switchboard: accounts, groups and employee onboarding
 
-Design, 2026-10-21. Status: phases 1 (0.6.60, SB-158) and 2 (0.6.65, SB-109; the badge on
-groups of SB-111) built; phases 3 and 4 open (operator request of 2026-10-21; builds on the RM-28
+Design, 2026-10-21. Status: phases 1 (0.6.60, SB-158), 2 (0.6.65, SB-109; the badge on
+groups of SB-111) and 3 (0.6.66, SB-159: Vesta's read carries name and domains, no member list)
+built; phase 4 open (operator request of 2026-10-21; builds on the RM-28
 decisions of 2026-10-12). Rows: SB-158, SB-159, SB-160, with
 SB-109 and SB-111 (backlog).
 

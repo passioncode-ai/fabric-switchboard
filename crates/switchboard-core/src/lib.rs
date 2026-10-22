@@ -1171,6 +1171,38 @@ impl Store {
         Ok(found)
     }
     /// Backend synchronization only: validates format but permits disabled/expired snapshots.
+    /// SB-159: a secret of Switchboard's own (the PassionCode.ai refresh token) in the vault,
+    /// under `item` or a new one; returns the item. Never in the metadata or a file.
+    pub fn put_secret(&self, item: Option<&str>, value: &str) -> Result<String, String> {
+        let item = item.map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_owned);
+        if !uuid_valid(&item) || value.is_empty() || value.len() > 4096 {
+            return Err("Invalid secret".into());
+        }
+        let credential = Credential {
+            access_token: value.to_owned(),
+            refresh_token: None,
+            id_token: None,
+            native_context: None,
+            expires_at: None,
+            account_id: None,
+        };
+        self.vault
+            .put(&item, &credential)
+            .map_err(vault::surface("Credential storage unavailable"))?;
+        Ok(item)
+    }
+    pub fn secret(&self, item: &str) -> Result<String, String> {
+        Ok(self
+            .vault
+            .get(item)
+            .map_err(vault::surface("Credential storage unavailable"))?
+            .access_token)
+    }
+    pub fn delete_secret(&self, item: &str) -> Result<(), String> {
+        self.vault
+            .delete(item)
+            .map_err(vault::surface("Credential storage unavailable"))
+    }
     pub fn stored_credential(&self, id: &str) -> Result<Credential, String> {
         let state = self.lock()?;
         let a = state

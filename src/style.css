@@ -458,6 +458,7 @@ g:hover > .chart-bar { opacity: .82; }
 .org-filter { flex-wrap: wrap; }
 .org-badge { color: var(--ink); border-color: var(--accent); background: var(--accent-weak); }
 .org-rules { margin: 0 0 var(--space-4); max-width: 72ch; }
+.passioncode-panel { margin-bottom: var(--space-4); }
 .org-cards { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .org-card { display: grid; gap: var(--space-2); align-content: start; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--r-card, var(--r-control)); background: var(--panel); }
 .org-card-head { display: flex; align-items: flex-start; gap: var(--space-2); }

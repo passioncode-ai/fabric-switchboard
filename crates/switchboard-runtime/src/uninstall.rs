@@ -30,6 +30,8 @@ const OWNED: &[&str] = &[
     "capability-migration.json",
     "agents-settings.json",
     "statistics.json",
+    // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
+    "vesta.json",
     // A `serve --data-dir` over this folder logs here (SB-112).
     "logs",
     "fabric-handovers",
@@ -238,6 +240,11 @@ pub fn uninstall_with(
     for id in &accounts {
         if let Err(error) = vault.delete(id) {
             failures.push(json!({"account_id": id, "error": error}));
+        }
+    }
+    if let Some(item) = crate::vesta::vault_item(root) {
+        if let Err(error) = vault.delete(&item) {
+            failures.push(json!({"item": "passioncode_token", "error": error}));
         }
     }
     if let Err(error) = (places.remove_orphan_key)() {

@@ -39,6 +39,35 @@ pub struct Organization {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_organizations: Vec<String>,
     pub created_at: i64,
+    /// SB-159: its organization on PassionCode.ai (Vesta's `orgId`), when it was read from there;
+    /// its name and domains then follow Vesta's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vesta_id: Option<String>,
+}
+
+/// One of the person's organizations as PassionCode.ai answers it (`GET /v1/me/organizations`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VestaOrganization {
+    pub id: String,
+    pub name: String,
+    pub domains: Vec<String>,
+}
+
+/// What one read from PassionCode.ai changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct VestaApplied {
+    /// Organizations added from PassionCode.ai.
+    pub added: usize,
+    /// Local organizations linked to one of PassionCode.ai's (same name, or a shared domain).
+    pub linked: usize,
+    /// Linked organizations whose name or domains changed.
+    pub updated: usize,
+    /// Organizations the person no longer belongs to on PassionCode.ai: kept, unlinked.
+    pub released: usize,
+}
+
+fn vesta_id_valid(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_graphic())
 }
 
 /// Why an account belongs where it does.
@@ -183,6 +212,7 @@ pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
             || o.domains.len() > MAX_DOMAINS
             || o.provider_organizations.len() > MAX_PROVIDER_ORGANIZATIONS
             || o.created_at <= 0
+            || o.vesta_id.as_deref().is_some_and(|v| !vesta_id_valid(v))
             || o.domains
                 .iter()
                 .any(|d| domain_normal(d).as_deref() != Some(d.as_str()) || !domains.insert(d))
@@ -264,6 +294,7 @@ impl Store {
             domains,
             provider_organizations: Vec::new(),
             created_at: now(),
+            vesta_id: None,
         };
         candidate.organizations.push(organization.clone());
         append_event(&mut candidate, "organization", None, "added");
@@ -329,9 +360,135 @@ impl Store {
         self.changed();
         Ok(organization)
     }
+    /// SB-159: brings the person's PassionCode.ai organizations in. A linked one takes Vesta's
+    /// name and domains (a name or domain another organization here holds is left as it was);
+    /// an unlinked one of the same name or with a shared domain is linked rather than duplicated,
+    /// keeping its accounts; the rest are added. One linked here that Vesta no longer lists is
+    /// kept as a local organization.
+    pub fn apply_vesta(&self, read: &[VestaOrganization]) -> Result<VestaApplied, String> {
+        // Names compare as `validate` compares them: trimmed, lowercased.
+        let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let mut applied = VestaApplied::default();
+        let mut seen: Vec<String> = Vec::new();
+        for v in read.iter().take(MAX_ORGANIZATIONS) {
+            if !vesta_id_valid(&v.id) || !name_valid(&v.name) || seen.contains(&v.id) {
+                continue;
+            }
+            seen.push(v.id.clone());
+            let mut domains: Vec<String> = Vec::new();
+            for d in v.domains.iter().filter_map(|d| domain_normal(d)) {
+                if !domains.contains(&d) {
+                    domains.push(d);
+                }
+            }
+            let at = candidate
+                .organizations
+                .iter()
+                .position(|o| o.vesta_id.as_deref() == Some(v.id.as_str()))
+                .or_else(|| {
+                    candidate.organizations.iter().position(|o| {
+                        o.vesta_id.is_none()
+                            && (same(&o.name, &v.name)
+                                || o.domains.iter().any(|d| domains.contains(d)))
+                    })
+                });
+            let name_free = |list: &[Organization], own: Option<&str>, name: &str| {
+                !list
+                    .iter()
+                    .any(|o| Some(o.id.as_str()) != own && same(&o.name, name))
+            };
+            let i = match at {
+                Some(i) => i,
+                None => {
+                    // A new one needs a name nobody here holds: Vesta's, else Vesta's with the
+                    // start of its id, cut to fit.
+                    let base: String = v.name.trim().chars().take(68).collect();
+                    let name = if name_free(&candidate.organizations, None, &v.name) {
+                        v.name.trim().to_owned()
+                    } else {
+                        format!("{} ({})", base.trim_end(), &v.id[..v.id.len().min(8)])
+                    };
+                    if candidate.organizations.len() >= MAX_ORGANIZATIONS
+                        || !name_valid(&name)
+                        || !name_free(&candidate.organizations, None, &name)
+                    {
+                        continue;
+                    }
+                    candidate.organizations.push(Organization {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        name,
+                        domains: Vec::new(),
+                        provider_organizations: Vec::new(),
+                        created_at: now(),
+                        vesta_id: Some(v.id.clone()),
+                    });
+                    applied.added += 1;
+                    candidate.organizations.len() - 1
+                }
+            };
+            let own = candidate.organizations[i].id.clone();
+            let rename = at.is_some() && name_free(&candidate.organizations, Some(&own), &v.name);
+            // Domains add up: one typed here stays (its accounts with it), Vesta's join it, and a
+            // domain another organization here holds is left out.
+            let held: Vec<String> = candidate
+                .organizations
+                .iter()
+                .filter(|o| o.id != own)
+                .flat_map(|o| o.domains.clone())
+                .collect();
+            let o = &mut candidate.organizations[i];
+            let before = (o.name.clone(), o.domains.clone(), o.vesta_id.clone());
+            if rename {
+                o.name = v.name.trim().to_owned();
+            }
+            for d in domains {
+                if !held.contains(&d) && !o.domains.contains(&d) && o.domains.len() < MAX_DOMAINS {
+                    o.domains.push(d);
+                }
+            }
+            if at.is_some() {
+                if o.vesta_id.is_none() {
+                    o.vesta_id = Some(v.id.clone());
+                    applied.linked += 1;
+                } else if (o.name.clone(), o.domains.clone(), o.vesta_id.clone()) != before {
+                    applied.updated += 1;
+                }
+            }
+        }
+        for o in &mut candidate.organizations {
+            if o.vesta_id.as_ref().is_some_and(|v| !seen.contains(v)) {
+                o.vesta_id = None;
+                applied.released += 1;
+            }
+        }
+        if applied != VestaApplied::default() {
+            append_event(&mut candidate, "organization", None, "updated");
+            self.publish(&mut state, candidate)?;
+            self.changed();
+        }
+        Ok(applied)
+    }
+    /// SB-159: forgets every link to PassionCode.ai; the organizations stay as local ones.
+    pub fn release_vesta(&self) -> Result<(), String> {
+        let mut state = self.lock()?;
+        if state.organizations.iter().all(|o| o.vesta_id.is_none()) {
+            return Ok(());
+        }
+        let mut candidate = state.clone();
+        for o in &mut candidate.organizations {
+            o.vesta_id = None;
+        }
+        append_event(&mut candidate, "organization", None, "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
     /// Puts an organization back from a backup, unless this install holds one of the same id,
     /// name or domain. Provider organizations another one already holds are left out.
     pub fn restore_organization(&self, mut organization: Organization) -> Result<(), String> {
+        organization.vesta_id = None;
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         if candidate.organization(&organization.id).is_some()
@@ -456,6 +613,7 @@ mod tests {
             domains: domains.iter().map(|d| (*d).into()).collect(),
             provider_organizations: Vec::new(),
             created_at: 1,
+            vesta_id: None,
         }
     }
     const A: &str = "00000000-0000-4000-8000-00000000000a";
