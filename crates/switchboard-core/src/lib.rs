@@ -32,7 +32,7 @@ pub mod windows;
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
 pub use organizations::{Attribution, By, Organization};
-pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution};
+pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED};
 pub use rotation::{Fits, RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 

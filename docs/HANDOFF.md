@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.62, errors fixed from the log; organizations moved to their own page
+
+- **Read.** switchboard.log since 2026-10-21: `transaction_held` 24 (SB-163, design first),
+  `update_check download_failed`/`check_failed` (slow GitHub link; SB-162 fixed), one
+  `control_refused unknown_operation` (a 0.6.61 CLI against the 0.6.59 app before its restart,
+  expected), `project_suggestion add refused` without a reason (SB-165 fixed).
+- **Done.** Resumable update download (SB-162); refusal reason in the log (SB-165); the
+  Organizations page in the sidebar and nothing about organizations on Accounts until one exists
+  (operator 2026-10-22, SCN-069); 14 unused locale entries removed; merged branches deleted.
+- **Next task.** SB-164, the detailed design pass over every screen; then SB-109.
+
 ## 2026-10-22: 0.6.61, Windows stack fix (SB-161); 0.6.60 not published
 
 - **What happened.** Tag v0.6.60 (`884d906`): the release guard ran the nightly on it, which
