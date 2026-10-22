@@ -950,7 +950,10 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
 
 [Recovery packet](packets/sb-114-capacity-recovery.md) owns the host protocol;
 [CLI](CLI.md#capacity-recovery-sb-114) names the commands. `Operation::Recovery*`
-is owner-only and runs under the owner mutation lock. A host-reported stop freezes
+is owner-only. Its writes (register, claim, finish, the hook) run under the owner mutation
+lock; the status read `Recovery` does not, so a background step holding the lock never
+delays a host (SB-166: the file is replaced by rename, the limits are read from memory;
+`recovery_answers_while_a_background_step_holds_the_transaction`). A host-reported stop freezes
 provider, pool, folder and event/session binding in `<data>/recovery.json` (0600).
 Candidates use post-stop successful observations at most 300 seconds old; a passed
 reset invalidates the observation. Hidden holds, sign-in requirements, disabled
