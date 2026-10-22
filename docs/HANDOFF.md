@@ -10,6 +10,7 @@
   plugin marketplace already showed 0.6.60 because it reads `main`.
 - **Fix.** The CLI runs its tokio runtime on a 16 MiB thread with 16 MiB workers; the gate runs
   the MCP tests under `ulimit -s 1024`. Reproduced and verified on macOS under 1 MiB.
+- **Published.** Release run `39687403198` green (guard ran the tag's nightly, Windows included), 25 assets, `latest.json` 0.6.61; plugin `switchboard@switchboard` 0.6.61 installed. The desktop app on this Mac was still downloading at 23:50 UTC over a 16 KB/s link (SB-162 filed); it retries every 5 minutes.
 - **Next task.** SB-109, as in the 0.6.60 entry below.
 
 ## 2026-10-21: 0.6.60, organizations phase 1 (SB-158)
