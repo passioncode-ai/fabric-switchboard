@@ -6,6 +6,12 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.62 (2026-10-22)
+
+- **Organizations have their own page.** *Organizations* in the sidebar lists each company with its domains and the accounts it holds, and why each belongs to it (placed by you, its team, its domain); *+ New organization* adds one. *Accounts* no longer shows a line about organizations until you have one; then a filter appears above the accounts.
+- **Updates finish on a slow connection (SB-162).** A download the connection cut used to start again from the beginning on the next try, so on a slow link a new version could never arrive. It now continues where it stopped, and the update is still checked against its signature as a whole before it is installed.
+- **A folder that could not join its group now says why** in the log (`nested`, `gone`, `group_removed` and others), so such a refusal can be traced.
+
 ## 0.6.61 (2026-10-22)
 
 - **Windows: the agents' connection works again.** 0.6.60 never reached anyone: on Windows the `switchboard mcp` server that coding agents talk to stopped on its first request, because the CLI ran on the platform's 1 MiB main-thread stack. The CLI now runs on a 16 MiB stack on every platform, and the checks run the agents' tests under a 1 MiB stack on macOS and Linux too, so this cannot come back unnoticed. 0.6.61 carries everything listed under 0.6.60.

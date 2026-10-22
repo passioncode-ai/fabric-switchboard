@@ -34,7 +34,7 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-type Page = 'accounts' | 'tokens' | 'projects' | 'agents' | 'activity' | 'stats' | 'about';
+type Page = 'accounts' | 'tokens' | 'projects' | 'orgs' | 'agents' | 'activity' | 'stats' | 'about';
 let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
@@ -235,7 +235,7 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Groups'), '◫'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
+  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Groups'), '◫'], ['orgs', t('Organizations'), '◇'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
     const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
     control.append(symbol, el('span', '', label));
@@ -249,14 +249,15 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Groups'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of projects with accounts of their own; other groups never switch to them.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of projects with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word, their team at the provider or their address.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
     if (page === 'accounts') actions.append(addMenu());
     if (page === 'projects') actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
+    if (page === 'orgs') actions.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-add'));
     header.append(actions);
   }
   main.append(header);
@@ -278,6 +279,7 @@ function render(options: { background?: boolean } = {}): boolean {
   } else if (snapshot) {
     if (page === 'accounts') renderAccounts(main);
     else if (page === 'projects') renderProjects(main);
+    else if (page === 'orgs') renderOrganizations(main);
     else renderActivity(main);
   }
   shell.append(main); return commit();
@@ -1093,7 +1095,7 @@ function renderAccounts(main: HTMLElement) {
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
     empty.append(addMenu()); main.append(empty, kimiSection()); return;
   }
-  main.append(organizationsBar(accounts));
+  const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
   const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each pool: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
@@ -1998,6 +2000,9 @@ function organizationOf(account: Account): { name: string; why: string } | null 
   if (!org) return null;
   return { name: org.name, why: byText(at.by, org.name) };
 }
+function byShort(by: AttributedBy | null) {
+  return by === 'person' ? t('placed by you') : by === 'provider' ? t('by its team') : t('by its domain');
+}
 function byText(by: AttributedBy | null, name: string) {
   if (by === 'person') return t('You placed it in {name}.', { name });
   if (by === 'provider') return t('Its team at the provider belongs to {name}.', { name });
@@ -2005,14 +2010,10 @@ function byText(by: AttributedBy | null, name: string) {
   return t('Personal');
 }
 /** SB-158: the filter and the way to organizations, above the accounts; one quiet line while there are none. */
-function organizationsBar(accounts: Account[]) {
+function organizationsBar(accounts: Account[]): HTMLElement | null {
   const organizations = snapshot!.organizations ?? [];
   const bar = el('div', 'org-bar');
-  if (!organizations.length) {
-    orgFilter = 'all';
-    bar.append(el('span', 'form-note', t('Work for a company? Add it as an organization to see which accounts are its.')), button(t('Add organization…'), () => organizationDialog(null), 'button quiet', 'org-add'));
-    return bar;
-  }
+  if (!organizations.length) { orgFilter = 'all'; return null; }
   if (orgFilter !== 'all' && orgFilter !== 'personal' && !organizations.some((o) => o.id === orgFilter)) orgFilter = 'all';
   const count = (filter: string) => accounts.filter((a) => inOrganizationFilter(snapshot!, a, filter)).length;
   const choices: [string, string][] = [['all', t('All')], ...organizations.map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal')]];
@@ -2021,24 +2022,45 @@ function organizationsBar(accounts: Account[]) {
     const chip = button(`${text} · ${count(value)}`, () => { orgFilter = value; render(); restoreFocus(`org-filter-${value}`); }, `segment ${orgFilter === value ? 'is-on' : ''}`, `org-filter-${value}`);
     chip.setAttribute('aria-pressed', String(orgFilter === value)); group.append(chip);
   }
-  bar.append(group, button(t('Organizations…'), () => organizationsDialog(), 'button quiet', 'org-manage'));
+  bar.append(group);
   return bar;
 }
-/** SB-158: every organization with its domains and accounts; add, edit or remove one. */
-function organizationsDialog() {
-  const context = openDialog(t('Organizations'), t('An account belongs to an organization when you place it there, when its team at the provider is the organization’s, or when its address is on one of the organization’s domains. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.'));
-  const list = el('div', 'org-list');
-  for (const o of snapshot!.organizations ?? []) {
-    const n = snapshot!.accounts.filter((a) => attribution(snapshot!, a).organization === o.id).length;
-    const row = el('div', 'org-row');
-    const text = el('div', 'org-row-text'); text.append(el('strong', '', o.name), el('span', 'row-sub', [(o.domains ?? []).join(', ') || t('No domain'), plural(n, { one: '{n} account', other: '{n} accounts' })].join(' · ')));
-    row.append(text, button(t('Edit…'), () => { context.close(); organizationDialog(o.id); }, 'button row-button quiet', `org-edit-${o.id}`), button(t('Remove…'), () => { context.close(); organizationRemoveDialog(o.id); }, 'button row-button quiet danger-text', `org-remove-${o.id}`));
-    list.append(row);
+/** SB-158: the Organizations page: what makes an account a company's, then each organization with its domains and the accounts it holds. */
+function renderOrganizations(main: HTMLElement) {
+  const organizations = snapshot!.organizations ?? [];
+  if (!organizations.length) {
+    const empty = emptyState(t('No organizations yet'), t('Add the companies you work for with their e-mail domains. Accounts on those domains get the company’s badge on Accounts, and you can place any account yourself. Without organizations nothing changes.'));
+    empty.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-empty-add'));
+    main.append(empty);
+    return;
   }
-  context.body.append(list);
-  const add = button(t('Add organization…'), () => { context.close(); organizationDialog(null); }, 'button primary', 'org-dialog-add'); add.type = 'button';
-  context.actions.append(add);
-  add.focus();
+  main.append(el('p', 'surface-note org-rules', t('An account belongs to an organization when you place it there, when its team at the provider is the organization’s, or when its address is on one of the organization’s domains. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.')));
+  const list = el('div', 'org-cards');
+  for (const o of organizations) {
+    const members = snapshot!.accounts.filter((a) => attribution(snapshot!, a).organization === o.id);
+    const card = el('section', 'org-card'); card.setAttribute('aria-label', o.name);
+    const head = el('div', 'org-card-head');
+    const titles = el('div', 'org-card-title'); titles.append(el('h2', '', o.name), el('span', 'row-sub', (o.domains ?? []).join(', ') || t('No domain')));
+    const actions = el('div', 'org-card-actions');
+    actions.append(button(t('Edit…'), () => organizationDialog(o.id), 'button row-button quiet', `org-edit-${o.id}`));
+    actions.append(menu(`org-${o.id}`, t('More actions for {name}', { name: o.name }), [[t('Remove…'), () => organizationRemoveDialog(o.id), 'danger-text']]));
+    head.append(titles, actions);
+    card.append(head);
+    if (!members.length) card.append(el('p', 'form-note', t('No account belongs to it yet. Place one from its ⋯ menu on Accounts.')));
+    else {
+      const rows = el('ul', 'org-members');
+      for (const a of members) {
+        const at = attribution(snapshot!, a);
+        const row = el('li', 'org-member');
+        const why = el('span', 'row-sub', `${providerName(a.provider)} · ${byShort(at.by)}`); why.title = byText(at.by, o.name);
+        row.append(el('span', `provider-dot ${a.provider}`), el('span', 'org-member-name', a.label), why);
+        rows.append(row);
+      }
+      card.append(el('span', 'eyebrow', plural(members.length, { one: '{n} account', other: '{n} accounts' })), rows);
+    }
+    list.append(card);
+  }
+  main.append(list);
 }
 /** SB-158: add an organization (`id` null) or change one: its name and the domains it owns. */
 function organizationDialog(id: string | null) {

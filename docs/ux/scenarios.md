@@ -1434,23 +1434,22 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Traces:** SB-146, SB-147
 ## SCN-069: See which accounts belong to which organization
 **Persona:** P-01
-**Goal:** A person who works for one or more companies sees which saved accounts are a company's and which are personal, and keeps a company's seats apart; without organizations nothing changes (operator 2026-10-21: «помечали в свитчборде, какие аккаунты к какой организации относятся … если нет, будет просто стандартный switchboard»).
+**Goal:** A person who works for one or more companies sees which saved accounts are a company's and which are personal, and keeps a company's seats apart; without organizations nothing changes (operator 2026-10-21: «помечали в свитчборде, какие аккаунты к какой организации относятся … если нет, будет просто стандартный switchboard»; 2026-10-22: «это вообще убери в меню куда-то организацию»).
 **Preconditions:** at least one saved Claude or Codex account.
-**Entry point:** sidebar → *Accounts*.
+**Entry point:** sidebar → *Organizations*.
 **Steps:**
-1. No organization yet → one quiet line above the accounts: “Work for a company? Add it as an organization to see which accounts are its.” with *Add organization…*.
-2. *Add organization…* → name and domains (optional, separated by commas) → *Add* → “{name} added.”; every account with an address on those domains gets the organization's badge.
-3. The line becomes a filter: *All · n*, each organization *· n*, *Personal · n*, and *Organizations…*.
-4. Hover a badge → why: “You placed it in {name}.”, “Its team at the provider belongs to {name}.” or “Its address is on a domain of {name}.”.
+1. No organization yet → *Accounts* shows nothing about organizations; *Organizations* shows “No organizations yet” with *+ New organization*.
+2. *+ New organization* (page header or empty state) → name and domains (optional, separated by commas) → *Add* → “{name}: added.”; every account with an address on those domains gets the organization's badge on *Accounts*.
+3. The *Organizations* page lists each organization as a card: its domains, *Edit…*, ⋯ → *Remove…*, and the accounts it holds, each with its provider and why (“You placed it in {name}.”, “Its team at the provider belongs to {name}.”, “Its address is on a domain of {name}.”).
+4. With at least one organization, *Accounts* shows a filter above the accounts: *All · n*, each organization *· n*, *Personal · n*; hovering a badge says why.
 5. An account's ⋯ → *Organization…* → *Automatic: {name}* (or *Automatic: personal*), each organization, *Personal* → *Save*. Placing one seat of a Claude Team or ChatGPT workspace brings the team's other seats along.
-6. *Organizations…* → each organization with its domains and account count, *Edit…*, *Remove…*, and *Add organization…*.
 **Alt paths:** a name or domain another organization has → refused with its reason, the dialog stays open; removing an organization leaves its accounts where they are and places them again by team or domain, else personal.
 **Expected result:** the person reads at a glance which accounts are a company's; nothing at the provider changes and nothing leaves the computer.
-**UI elements:** the organizations line or filter, the badge, *Organization…*, the Organizations dialog, the add/edit dialog, the remove dialog.
-**States covered:** no organization, one, several; attributed by person, team, domain; personal; filter with no account (“No account here yet.”).
+**UI elements:** the *Organizations* page and its cards, the Accounts filter, the badge, *Organization…*, the add/edit dialog, the remove dialog.
+**States covered:** no organization, one, several; attributed by person, team, domain; personal; an organization with no account; filter with no account (“No account here yet.”).
 **Errors & recovery:** a refusal keeps the dialog open with its reason.
 **Status:** draft
 **Meaning:** operator request 2026-10-21 (SB-158); design `docs/research/organizations-2026-10-21.md`.
-**Coverage:** core `organizations::tests::*`, storage `assigning_one_seat_brings_its_team_and_removals_clean_up_assignments`, ui-logic SB-158 case, WebKit demo (add, nine badges, filter counts, *Personal* through the menu, the Organizations dialog).
+**Coverage:** core `organizations::tests::*`, storage `assigning_one_seat_brings_its_team_and_removals_clean_up_assignments`, ui-logic SB-158 case, WebKit demo (empty page, add, badges by domain, filter counts, *Personal* through the menu, cards with members).
 **Product:** unobserved
 **Traces:** SB-158

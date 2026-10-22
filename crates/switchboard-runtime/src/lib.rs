@@ -1014,11 +1014,14 @@ impl Runtime {
         for s in &found {
             match add_suggested_folder(&self.store, &self.root, s, time) {
                 Ok(_) => added += 1,
-                Err(_) => {
+                Err(error) => {
                     if self.first_time(&format!("add:{}", s.folder)) {
                         oplog::event(
                             "project_suggestion",
-                            &[("add", oplog::Field::Code("refused"))],
+                            &[
+                                ("add", oplog::Field::Code("refused")),
+                                ("reason", oplog::Field::Code(add_refusal(&error))),
+                            ],
                         );
                     }
                 }
@@ -2287,6 +2290,24 @@ fn suggestion_view(snapshot: &switchboard_core::Snapshot, s: &suggest::Suggestio
 }
 /// Adds a found folder to its project (SB-117 Add; SB-121 does it unasked) with the same admission
 /// as a folder added by hand, then remembers it as added. Answers the project's view.
+/// Why a found folder could not join its group, as a fixed code for the log (2026-10-22: the
+/// log said only "refused", so a refusal could not be traced).
+fn add_refusal(error: &str) -> &'static str {
+    if error == switchboard_core::FOLDER_NESTED {
+        "nested"
+    } else if error.starts_with("This folder is gone") || error.contains("existing project folder")
+    {
+        "gone"
+    } else if error.starts_with("Project not found") {
+        "group_removed"
+    } else if error.contains("at most 1024 folders") {
+        "too_many_folders"
+    } else if error == PROJECT_ACCOUNT_IN_CLI {
+        "account_in_cli"
+    } else {
+        "other"
+    }
+}
 fn add_suggested_folder(
     store: &Store,
     root: &Path,
@@ -4632,6 +4653,22 @@ mod owner_tests {
     use super::*;
     use fixtures::*;
     use switchboard_core::{private_fs, MemoryVault};
+    #[test]
+    fn a_refused_found_folder_logs_why() {
+        assert_eq!(add_refusal(switchboard_core::FOLDER_NESTED), "nested");
+        assert_eq!(
+            add_refusal("This folder is gone. Read the suggestions again."),
+            "gone"
+        );
+        assert_eq!(add_refusal("Choose an existing project folder."), "gone");
+        assert_eq!(add_refusal("Project not found."), "group_removed");
+        assert_eq!(
+            add_refusal("Projects hold at most 1024 folders in all."),
+            "too_many_folders"
+        );
+        assert_eq!(add_refusal(PROJECT_ACCOUNT_IN_CLI), "account_in_cli");
+        assert_eq!(add_refusal("Something else"), "other");
+    }
     #[test]
     fn rfc3339_formats_utc_seconds() {
         assert_eq!(

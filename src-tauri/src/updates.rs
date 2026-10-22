@@ -784,6 +784,226 @@ fn classify(error: tauri_plugin_updater::Error) -> &'static str {
     }
 }
 
+/// SB-162: where a package being downloaded is kept between attempts, under the data folder.
+pub const UPDATES_DIR: &str = "updates";
+
+/// SB-162: the package is fetched into `<data>/updates/<version>-<url hash>.part`, resumed with an
+/// HTTP `Range` request on the next check when a slow or dropping link cut it, then handed to the
+/// updater plugin over a one-shot loopback server, so the plugin's own signature check runs on
+/// the whole file exactly as before. A package that fails that check is deleted.
+async fn resumable_download(update: &Update, dir: &Path) -> Result<Vec<u8>, &'static str> {
+    let part = dir.join(part_name(&update.version, update.download_url.as_str()));
+    prune_parts(dir, &part);
+    let have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+    event(
+        "update_download",
+        &[
+            (
+                "outcome",
+                Field::Code(if have > 0 { "resumed" } else { "started" }),
+            ),
+            ("from", Field::Number(have as i64)),
+        ],
+    );
+    let complete = resume_into(update.download_url.as_str(), &part, DOWNLOAD_TIMEOUT).await;
+    let size = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0) as i64;
+    if !complete {
+        event(
+            "update_download",
+            &[
+                ("outcome", Field::Code("partial")),
+                ("bytes", Field::Number(size)),
+            ],
+        );
+        return Err(DOWNLOAD_FAILED);
+    }
+    let body = std::fs::read(&part).map_err(|_| DOWNLOAD_FAILED)?;
+    let (url, server) = serve_once(body).await.map_err(|_| DOWNLOAD_FAILED)?;
+    let mut local = update.clone();
+    local.download_url = url;
+    local.no_proxy = true;
+    local.proxy = None;
+    let checked = local.download(|_, _| {}, || {}).await;
+    server.abort();
+    match checked {
+        Ok(bytes) => {
+            let _ = std::fs::remove_file(&part);
+            event(
+                "update_download",
+                &[
+                    ("outcome", Field::Code("done")),
+                    ("bytes", Field::Number(size)),
+                ],
+            );
+            Ok(bytes)
+        }
+        Err(error) => {
+            let error = classify(error);
+            if error == SIGNATURE_FAILED {
+                // A file that is not what was signed is never resumed again.
+                let _ = std::fs::remove_file(&part);
+            }
+            Err(error)
+        }
+    }
+}
+
+/// `0.6.61-<16 hex digits of the URL's FNV-1a>.part`: a new release or a moved file never
+/// continues another's bytes.
+fn part_name(version: &str, url: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in url.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    let version: String = version
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{version}-{hash:016x}.part")
+}
+
+/// Leaves only `keep` among the partial downloads (an older release's are dropped).
+fn prune_parts(dir: &Path, keep: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path != keep && path.extension().is_some_and(|e| e == "part") {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Appends what is missing of `url` to `part`, asking for the rest with `Range` when part of it is
+/// there. True once the file holds the whole package: the stream ended, with the length the
+/// server gave (if it gave one). A server that ignores `Range` answers 200 and the file starts
+/// over; 416 means it is already whole. Whatever arrived before a failure stays for the next try.
+async fn resume_into(url: &str, part: &Path, timeout: Duration) -> bool {
+    use std::io::Write;
+    if let Some(dir) = part.parent() {
+        if switchboard_core::private_fs::private_dir(dir).is_err() {
+            return false;
+        }
+    }
+    let have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent("fabric-switchboard-updater")
+        .build()
+    else {
+        return false;
+    };
+    let mut request = client.get(url).header("Accept", "application/octet-stream");
+    if have > 0 {
+        request = request.header("Range", format!("bytes={have}-"));
+    }
+    let Ok(mut response) = request.send().await else {
+        return false;
+    };
+    let status = response.status().as_u16();
+    if status == 416 && have > 0 {
+        return true;
+    }
+    let append = status == 206 && have > 0;
+    if !(status == 200 || append) {
+        return false;
+    }
+    // The whole package's length: from Content-Range on a 206, Content-Length on a 200.
+    let total = if append {
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.rsplit('/').next())
+            .and_then(|v| v.parse::<u64>().ok())
+    } else {
+        response.content_length()
+    };
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(append)
+        .truncate(!append)
+        .open(part);
+    let Ok(mut file) = file else {
+        return false;
+    };
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if file.write_all(&chunk).is_err() {
+                    return false;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                let _ = file.flush();
+                return false;
+            }
+        }
+    }
+    if file.flush().is_err() {
+        return false;
+    }
+    let size = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    total.is_none_or(|total| size == total)
+}
+
+/// Serves `body` once over `127.0.0.1` at a random path, for the plugin's own download and
+/// signature check; any other path is refused. The task ends after the right request or a minute.
+async fn serve_once(body: Vec<u8>) -> std::io::Result<(tauri::Url, tokio::task::JoinHandle<()>)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+    let address = listener.local_addr()?;
+    // A random path, so another local process cannot take the one answer meant for the plugin.
+    let path = uuid::Uuid::new_v4().simple().to_string();
+    let url = tauri::Url::parse(&format!("http://{address}/{path}"))
+        .map_err(|_| std::io::Error::other("url"))?;
+    let task = tokio::spawn(async move {
+        let serve = async {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut head = Vec::new();
+                let mut buffer = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") && head.len() < 16 * 1024 {
+                    match socket.read(&mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&buffer[..n]),
+                    }
+                }
+                let wanted = format!("GET /{path} ");
+                if head.starts_with(wanted.as_bytes()) {
+                    let header = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = socket.write_all(header.as_bytes()).await;
+                    let _ = socket.write_all(&body).await;
+                    let _ = socket.shutdown().await;
+                    return;
+                }
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(60), serve).await;
+    });
+    Ok((url, task))
+}
+
 async fn fetch(
     app: &AppHandle,
     state: &Updates,
@@ -814,9 +1034,15 @@ async fn fetch(
         }
     }
     update.timeout = Some(DOWNLOAD_TIMEOUT);
-    event("update_download", &[("outcome", Field::Code("started"))]);
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(classify)?;
-    event("update_download", &[("outcome", Field::Code("done"))]);
+    let bytes = match state.root.as_ref() {
+        Some(root) => resumable_download(&update, &root.join(UPDATES_DIR)).await?,
+        None => {
+            event("update_download", &[("outcome", Field::Code("started"))]);
+            let bytes = update.download(|_, _| {}, || {}).await.map_err(classify)?;
+            event("update_download", &[("outcome", Field::Code("done"))]);
+            bytes
+        }
+    };
     #[cfg(target_os = "macos")]
     {
         let bundle = std::env::current_exe()
@@ -1150,6 +1376,135 @@ pub fn finish(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    /// SB-162: a test server that serves `body`, honours `Range`, and cuts the first `cut` answers
+    /// after `after` bytes, as a dropping link does.
+    async fn flaky_server(body: Vec<u8>, cut: usize, after: usize) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut served = 0;
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut head = Vec::new();
+                let mut buffer = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match socket.read(&mut buffer).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&buffer[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&head).to_lowercase();
+                let from = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("range: bytes="))
+                    .and_then(|r| {
+                        r.trim_end_matches('-')
+                            .trim()
+                            .trim_end_matches('-')
+                            .parse::<usize>()
+                            .ok()
+                    })
+                    .unwrap_or(0);
+                let rest = &body[from.min(body.len())..];
+                let status = if from > 0 {
+                    "206 Partial Content"
+                } else {
+                    "200 OK"
+                };
+                let range = if from > 0 {
+                    format!(
+                        "Content-Range: bytes {from}-{}/{}\r\n",
+                        body.len() - 1,
+                        body.len()
+                    )
+                } else {
+                    String::new()
+                };
+                let header = format!(
+                    "HTTP/1.1 {status}\r\n{range}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    rest.len()
+                );
+                let _ = socket.write_all(header.as_bytes()).await;
+                if served < cut {
+                    let _ = socket.write_all(&rest[..after.min(rest.len())]).await;
+                    served += 1;
+                    drop(socket);
+                    continue;
+                }
+                let _ = socket.write_all(rest).await;
+            }
+        });
+        format!("http://{address}/package.tar.gz")
+    }
+
+    #[tokio::test]
+    async fn a_cut_download_resumes_where_it_stopped_and_completes() {
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let url = flaky_server(body.clone(), 2, 50_000).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("updates").join(part_name("1.2.3", &url));
+        let timeout = Duration::from_secs(10);
+        assert!(
+            !resume_into(&url, &part, timeout).await,
+            "the first answer is cut"
+        );
+        assert_eq!(std::fs::metadata(&part).unwrap().len(), 50_000);
+        assert!(
+            !resume_into(&url, &part, timeout).await,
+            "the second is cut too"
+        );
+        assert_eq!(std::fs::metadata(&part).unwrap().len(), 100_000);
+        assert!(
+            resume_into(&url, &part, timeout).await,
+            "the third finishes the file"
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body);
+    }
+
+    #[tokio::test]
+    async fn the_loopback_answers_only_its_own_path_and_parts_are_kept_per_release() {
+        let (url, task) = serve_once(b"package".to_vec()).await.unwrap();
+        let wrong = format!(
+            "http://{}/other",
+            url.host_str().unwrap().to_owned() + ":" + &url.port().unwrap().to_string()
+        );
+        let client = reqwest::Client::new();
+        assert_eq!(
+            client.get(&wrong).send().await.unwrap().status().as_u16(),
+            404
+        );
+        let body = client
+            .get(url.as_str())
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"package");
+        task.abort();
+        assert_ne!(
+            part_name("1.0.0", "https://a/x"),
+            part_name("1.0.1", "https://a/x")
+        );
+        assert_ne!(
+            part_name("1.0.0", "https://a/x"),
+            part_name("1.0.0", "https://a/y")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let keep = dir.path().join(part_name("2.0.0", "u"));
+        let old = dir.path().join(part_name("1.0.0", "u"));
+        std::fs::write(&keep, b"k").unwrap();
+        std::fs::write(&old, b"o").unwrap();
+        prune_parts(dir.path(), &keep);
+        assert!(keep.exists() && !old.exists());
+    }
+
     use super::*;
 
     #[cfg(unix)]

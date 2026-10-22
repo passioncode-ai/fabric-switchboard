@@ -37,6 +37,8 @@ const OWNED: &[&str] = &[
     "backup-id",
     "login-item",
     "auto-update",
+    // A release being downloaded, kept between attempts (SB-162).
+    "updates",
     "logins",
     "vault",
     // Kimi Code homes (SB-81): each holds the only copy of an account's login.

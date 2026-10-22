@@ -58,8 +58,9 @@ plus the organization list. No Fabric, Vesta or Observatory call is needed to at
 
 - **No organization defined:** nothing; the Organization menu item is the only trace.
 - **Accounts:** a badge with the organization's name on each attributed card (its tooltip says
-  why) and a filter (All, each organization, Personal) with *Organizations…* to add, edit or
-  remove one.
+  why) and a filter (All, each organization, Personal) once one exists; organizations are added,
+  edited and removed on their own page in the sidebar (*Organizations*), and nothing about them
+  shows on *Accounts* until one exists (operator 2026-10-22).
 - **Groups:** a group gets an organization; its folders then use only that organization's
   accounts (SB-109). A group without one takes personal accounts only, never an organization's
   seat; a folder in groups of different contexts uses the more private one, fixed for the
