@@ -9,6 +9,11 @@
   "Unable to find repository 'PSGallery'" (v0.6.67 signed on the same runner label a day earlier).
 - **Done.** `release.yml` registers PSGallery when it is missing, before both signing steps;
   `scripts/test_windows_bundle.py` keeps that order. 0.6.70 carries 0.6.69 (CHANGELOG says so).
+- **Also in 0.6.70 (SB-173, operator screenshot).** Statistics listed `nicegram-business` twice:
+  older counts keep the folder path, the report resolved paths only through the groups, and
+  SB-171 took that folder out of Agents. Folders no group holds now resolve through Git
+  (`ProjectIndex::with_strays`); on this Mac the two rows (12 folder-keyed, 15 repository-keyed
+  tallies) read as one once 0.6.70 runs.
 - **Next task.** Watch the v0.6.70 run to success, check `latest.json` and the 25 assets, update
   the plugin, announce on the board; then SB-141 part 2.
 

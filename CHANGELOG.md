@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## 0.6.70 (2026-10-23)
 
 - **The Windows build on ARM signs again.** 0.6.69 never reached anyone: GitHub's Windows on ARM build machines came without the PowerShell module gallery that the code-signing step installs its tool from, so that build stopped before signing. The release now registers the gallery when it is missing, and a check keeps that step ahead of signing. 0.6.70 carries everything listed under 0.6.69.
+- **Statistics no longer shows one project twice (SB-173).** Counts recorded in a folder that has since left its group (for example after yesterday's clean-up) were listed as a project of their own, next to the same repository. Such a folder is now matched to its repository through Git, so its counts join the one row.
 
 ## 0.6.69 (2026-10-22, not published: see 0.6.70)
 
