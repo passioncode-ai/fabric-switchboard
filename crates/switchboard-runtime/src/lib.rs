@@ -1,5 +1,4 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
-mod activity;
 pub mod agent_catalog;
 pub mod agent_keys;
 pub mod agent_settings;
@@ -549,8 +548,6 @@ pub(crate) struct NativeSources {
     pub(crate) swap_signature: fn() -> Option<(u64, u64, u128)>,
     /// Claude Code's recent session transcripts, for its limit markers.
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
-    /// Codex's recent rollouts, for the repositories its sessions change (SB-132).
-    pub(crate) rollouts: fn(i64) -> Vec<PathBuf>,
     /// SB-143: Codex's own `config.toml`; None for a synthetic owner, which never writes it.
     pub(crate) codex_config: fn() -> Option<PathBuf>,
 }
@@ -572,7 +569,6 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_activity: external::SwapActivity::none,
     swap_signature: || None,
     transcripts: |_| Vec::new(),
-    rollouts: |_| Vec::new(),
     codex_config: || None,
 };
 /// Claude Swap as a synthetic owner sees it: absent.
@@ -592,7 +588,6 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_activity: external::claude_swap_activity,
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
-    rollouts: limits::codex_rollout_files,
     codex_config: codex_route::config_path,
 };
 impl NativeSources {
@@ -647,22 +642,14 @@ pub struct Runtime {
     stat_index: Mutex<(u64, Arc<statistics::ProjectIndex>)>,
     /// SB-121/SB-131: when the folders that could not be added are tried again (never asked).
     suggest_retry_at: std::sync::atomic::AtomicI64,
-    /// SB-131: how far recent Claude Code transcripts were read for agents' work.
-    activity: Mutex<activity::Activity>,
-    /// SB-131: repositories already settled this run (added, refused or claimed by two
-    /// projects), forgotten when the projects change.
-    worked: Mutex<(u64, HashSet<PathBuf>)>,
     /// SB-131: project folders seen missing, and since when; one still missing a while later
     /// leaves its project.
     vanished: Mutex<Vanish>,
     /// SB-131: refusals already logged this run (a folder that cannot be added, a project's
     /// last folder gone), so a retry every few minutes logs each once.
     told: Mutex<HashSet<String>>,
-    /// The recent transcript list, walked once per pass and shared by the limit scan and the
-    /// work scan (SB-131): `(when, files)`.
+    /// The recent transcript list the limit scan reads, walked once per pass: `(when, files)`.
     transcript_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
-    /// The recent subagent transcripts, listed at most every SUBAGENTS_EVERY (SB-131).
-    subagent_list: Mutex<Option<(i64, Vec<PathBuf>)>>,
     /// SB-159: stops the PassionCode.ai sign-in waiting for the browser.
     vesta_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     vanish_at: std::sync::atomic::AtomicI64,
@@ -765,12 +752,9 @@ impl Runtime {
             statistics,
             stat_index: Mutex::new((0, Arc::default())),
             suggest_retry_at: std::sync::atomic::AtomicI64::new(0),
-            activity: Mutex::new(activity::Activity::default()),
-            worked: Mutex::new((0, HashSet::new())),
             vanished: Mutex::new(Vanish::default()),
             told: Mutex::new(HashSet::new()),
             transcript_list: Mutex::new(None),
-            subagent_list: Mutex::new(None),
             vesta_cancel: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
@@ -1121,10 +1105,9 @@ impl Runtime {
                 }
             }
         }
-        self.worked_pass_with_stop(&snapshot, time, stop).await;
-        if stopped() {
-            return;
-        }
+        // SB-171 (operator 2026-10-22): a repository never joins a group because a group's agent
+        // worked in it; a folder joins only as a worktree or clone of a repository already in the
+        // group, through a source the person set, or by the person's own act.
         self.vanish_pass(&snapshot, time).await;
         if stopped() {
             return;
@@ -1162,49 +1145,8 @@ impl Runtime {
             self.add_found(found, time);
         });
     }
-    /// SB-131: the repositories agents of a project changed since the last pass join it. The
-    /// project is the one the session works in (its `cwd`); a repository changed by agents of two
-    /// projects in one pass joins neither.
-    async fn worked_pass_with_stop(
-        &self,
-        snapshot: &switchboard_core::Snapshot,
-        time: i64,
-        stop: Option<&tokio::sync::watch::Receiver<bool>>,
-    ) {
-        if stop.as_ref().is_some_and(|s| *s.borrow()) {
-            return;
-        }
-        // A synthetic owner reads no transcript of the machine it runs on. Listing and reading
-        // transcripts is file work: it runs as a blocking section, so the control listener and the
-        // proxy never wait behind it (a pass that read ~6,700 subagent entries on a worker held a
-        // control request for 12 s, 2026-10-17).
-        let files = blocking::run(|| self.work_files(time));
-        self.worked_from_with_stop(snapshot, &files, time, stop)
-            .await;
-    }
-    /// The transcripts the work scan reads: the sessions' and their subagents', the subagent
-    /// directories listed again at most every SUBAGENTS_EVERY.
-    fn work_files(&self, time: i64) -> Vec<PathBuf> {
-        let sessions = self.transcripts(time);
-        let Ok(mut cached) = self.subagent_list.lock() else {
-            return sessions;
-        };
-        let fresh = cached
-            .as_ref()
-            .is_some_and(|(at, _)| time >= *at && time - at < SUBAGENTS_EVERY);
-        if !fresh {
-            let all = with_subagents(&sessions, time);
-            *cached = Some((time, all[sessions.len()..].to_vec()));
-        }
-        let mut files = sessions;
-        if let Some((_, subagents)) = cached.as_ref() {
-            files.extend(subagents.iter().cloned());
-        }
-        // SB-132: Codex sessions' rollouts, read by the same scan.
-        files.extend((self.native.rollouts)(time));
-        files
-    }
-    /// The recent Claude Code transcripts, walked at most once per background pass (SB-131).
+    /// The recent Claude Code transcripts the limit scan reads, walked at most once per
+    /// background pass.
     pub(crate) fn transcripts(&self, time: i64) -> Vec<PathBuf> {
         if let Ok(list) = self.transcript_list.lock() {
             if let Some((at, files)) = list.as_ref() {
@@ -1218,196 +1160,6 @@ impl Runtime {
             *list = Some((time, files.clone()));
         }
         files
-    }
-    #[cfg(test)]
-    pub(crate) async fn worked_from(
-        &self,
-        snapshot: &switchboard_core::Snapshot,
-        files: &[PathBuf],
-        time: i64,
-    ) {
-        self.worked_from_with_stop(snapshot, files, time, None)
-            .await;
-    }
-    async fn worked_from_with_stop(
-        &self,
-        snapshot: &switchboard_core::Snapshot,
-        files: &[PathBuf],
-        time: i64,
-        stop: Option<&tokio::sync::watch::Receiver<bool>>,
-    ) {
-        let evidence = match self.activity.lock() {
-            Ok(mut activity) => blocking::run(|| {
-                activity.collect_while(files, || stop.as_ref().is_some_and(|s| *s.borrow()))
-            }),
-            Err(_) => return,
-        };
-        let Some(evidence) = evidence else {
-            return;
-        };
-        if evidence.is_empty() {
-            return;
-        }
-        let key = suggest::projects_key(snapshot);
-        let mut claims: HashMap<PathBuf, HashSet<String>> = HashMap::new();
-        // Folders of one project another project's agent works in: (folder, its project).
-        let mut contested: HashMap<String, String> = HashMap::new();
-        {
-            let Ok(mut worked) = self.worked.lock() else {
-                return;
-            };
-            if worked.0 != key {
-                *worked = (key, HashSet::new());
-            }
-            for w in &evidence {
-                // One spelling per folder: `/tmp/x` and `/private/tmp/x`, a symlinked checkout.
-                let w = activity::Worked {
-                    cwd: canonical_near(&w.cwd),
-                    target: canonical_near(&w.target),
-                };
-                // SB-146: an agent's repository in no group stays in the default group; it is
-                // listed under the repositories on disk, never made a group of its own.
-                let Some(project) = snapshot.project_for(&w.cwd) else {
-                    continue;
-                };
-                // Work inside a project folder is that project's already — unless another
-                // project's agent did it: a folder that joined by work is then shared (below).
-                if let Some(owner) = snapshot.project_for(&w.target) {
-                    if owner.pool != project.pool {
-                        if let Some(folder) = owner
-                            .folders
-                            .iter()
-                            .filter(|f| w.target.starts_with(f))
-                            .max_by_key(|f| f.len())
-                        {
-                            contested.insert(folder.clone(), owner.pool.clone());
-                        }
-                    }
-                    continue;
-                }
-                let Some(root) = suggest::repo_root(&w.target) else {
-                    continue;
-                };
-                if worked.1.contains(&root) {
-                    continue;
-                }
-                claims.entry(root).or_default().insert(project.pool.clone());
-            }
-        }
-        if claims.is_empty() && contested.is_empty() {
-            return;
-        }
-        let _transaction = self.hold("worked").await;
-        // Recording reads Git files and writes the list: a blocking section (2026-10-19: up to
-        // 10 s on a swapping machine).
-        blocking::run(|| {
-            let Ok(snapshot) = self.store.snapshot() else {
-                return;
-            };
-            let mut found = Vec::new();
-            let mut settled = Vec::new();
-            let mut changed = self.unshare(&snapshot, &contested, time);
-            for (root, pools) in claims {
-                if pools.len() != 1 {
-                    // Two projects' work: it joins neither, now or later.
-                    oplog::event(
-                        "project_suggestion",
-                        &[("worked", oplog::Field::Code("two_projects"))],
-                    );
-                    if let Ok(text) = root
-                        .canonicalize()
-                        .map(|r| r.to_string_lossy().into_owned())
-                    {
-                        if suggest::mark_shared(&self.root, &text, time).is_ok() {
-                            changed = true;
-                        }
-                    }
-                    settled.push(root);
-                    continue;
-                }
-                let pool = pools.into_iter().next().unwrap_or_default();
-                match suggest::record_worked(&self.root, &snapshot, &root, &pool, time) {
-                    Ok(suggest::Outcome::New(s)) => {
-                        found.push(s);
-                        settled.push(root);
-                    }
-                    // A failed recording is tried again with the next evidence.
-                    Err(_) => oplog::event(
-                        "project_suggestion",
-                        &[("worked", oplog::Field::Code("unrecorded"))],
-                    ),
-                    Ok(_) => settled.push(root),
-                }
-            }
-            if let Ok(mut worked) = self.worked.lock() {
-                worked.1.extend(settled);
-            }
-            if found.is_empty() && changed {
-                self.suggestions_changed();
-            }
-            self.add_found(found, time);
-        });
-    }
-    /// SB-131: a folder that joined its project because that project's agents worked in it, and
-    /// that another project's agents now work in too, is a shared repository (an organisation
-    /// wiki, a common docs repository): it leaves the project and is never added by work again.
-    /// A folder the person added, or one found as a worktree or clone, is never touched. Under
-    /// the owner transaction. Answers whether anything changed.
-    fn unshare(
-        &self,
-        snapshot: &switchboard_core::Snapshot,
-        contested: &HashMap<String, String>,
-        time: i64,
-    ) -> bool {
-        if contested.is_empty() {
-            return false;
-        }
-        let Ok(rows) = suggest::read(&self.root) else {
-            return false;
-        };
-        let mut changed = false;
-        for (folder, pool) in contested {
-            let joined_by_work = rows.iter().any(|r| {
-                &r.folder == folder
-                    && &r.pool == pool
-                    && r.state == suggest::State::Added
-                    && r.reason == suggest::Reason::Worked
-            });
-            if !joined_by_work {
-                continue;
-            }
-            let Some(project) = snapshot.projects.iter().find(|p| &p.pool == pool) else {
-                continue;
-            };
-            let kept: Vec<PathBuf> = project
-                .folders
-                .iter()
-                .filter(|f| *f != folder)
-                .map(PathBuf::from)
-                .collect();
-            if kept.is_empty() || kept.len() == project.folders.len() {
-                continue;
-            }
-            let accounts: Vec<String> = snapshot
-                .accounts
-                .iter()
-                .filter(|a| &a.pool == pool)
-                .map(|a| a.id.clone())
-                .collect();
-            if self
-                .store
-                .save_project(Some(pool), &project.name, &kept, &accounts)
-                .is_ok()
-                && suggest::mark_shared(&self.root, folder, time).is_ok()
-            {
-                oplog::event(
-                    "project_suggestion",
-                    &[("worked", oplog::Field::Code("shared"))],
-                );
-                changed = true;
-            }
-        }
-        changed
     }
     /// SB-131: a project folder deleted from disk leaves its project once it is still missing
     /// VANISH_CONFIRM later. A folder whose drive is not mounted, or whose whole tree up to the
@@ -2397,35 +2149,6 @@ fn stat_folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, String)> 
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
-/// How often the subagent transcript directories are listed again: a long session keeps
-/// hundreds of finished subagents there, and each listing stats every one.
-const SUBAGENTS_EVERY: i64 = 120;
-/// SB-131: the recent sessions' transcripts and their subagents' (`<session>/subagents/*.jsonl`,
-/// where implementer subagents record their edits), each written within the limit scan's window.
-fn with_subagents(files: &[PathBuf], time: i64) -> Vec<PathBuf> {
-    let mut all = files.to_vec();
-    for file in files {
-        let Ok(entries) = std::fs::read_dir(file.with_extension("").join("subagents")) else {
-            continue;
-        };
-        // Only recent ones count; a long session has hundreds of finished subagents.
-        let recent = entries
-            .flatten()
-            .filter(|entry| {
-                entry.path().extension().is_some_and(|e| e == "jsonl")
-                    && entry
-                        .metadata()
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                        .is_some_and(|m| time - (m.as_secs() as i64) <= limits::WINDOW_SECONDS)
-            })
-            .map(|entry| entry.path())
-            .take(64);
-        all.extend(recent);
-    }
-    all
-}
 /// SB-134: the whole save a project delta amounts to. A folder or account named to be taken out
 /// that the project does not hold is refused (a typo never passes as done); one named to be added
 /// that it already holds is no change. The current folders are the save's base, so only the
@@ -5132,17 +4855,6 @@ mod owner_tests {
             "Choose an existing project folder."
         );
     }
-    /// A path as a shell command on this system names it: Claude Code's shell on Windows is Git
-    /// Bash, where `\` escapes and paths are written with `/`.
-    fn shell_path(path: &Path) -> String {
-        let text = path.to_string_lossy();
-        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-        if cfg!(windows) {
-            text.replace('\\', "/")
-        } else {
-            text.to_owned()
-        }
-    }
 
     #[tokio::test]
     async fn an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made() {
@@ -5277,185 +4989,6 @@ mod owner_tests {
         assert_eq!(wrong.unwrap_err(), MOVE_ROOT_NOT_IN_GROUP);
     }
 
-    #[tokio::test]
-    async fn a_repository_a_projects_agent_changes_joins_it_and_a_shared_one_joins_neither() {
-        // SB-131: «автодобавление всех репозиториев … когда там агент работает».
-        let root = tempfile::tempdir().unwrap();
-        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
-        let work = tempfile::tempdir().unwrap();
-        let work = work.path().canonicalize().unwrap();
-        let git = |dir: &Path, origin: &str| {
-            std::fs::create_dir_all(dir.join(".git")).unwrap();
-            std::fs::create_dir_all(dir.join("src")).unwrap();
-            std::fs::write(
-                dir.join(".git/config"),
-                format!("[remote \"origin\"]\n\turl = git@github.com:{origin}.git\n"),
-            )
-            .unwrap();
-        };
-        let (app, other, lib, shared, read_only) = (
-            work.join("app"),
-            work.join("other"),
-            work.join("lib"),
-            work.join("shared"),
-            work.join("docs"),
-        );
-        git(&app, "a/app");
-        git(&other, "b/other");
-        git(&lib, "c/lib");
-        git(&shared, "d/shared");
-        git(&read_only, "e/docs");
-        for (name, folder) in [("App", &app), ("Other", &other)] {
-            runtime
-                .execute(Operation::SaveProject {
-                    pool: None,
-                    name: name.into(),
-                    folders: vec![folder.clone()],
-                    account_ids: vec![],
-                    base_folders: None,
-                    organization: None,
-                })
-                .await
-                .unwrap();
-        }
-        let entry = |cwd: &Path, name: &str, input: Value| -> String {
-            json!({"type": "assistant", "cwd": cwd, "message": {"content": [
-                {"type": "tool_use", "name": name, "input": input}]}})
-            .to_string()
-        };
-        let transcript = work.join("session.jsonl");
-        let lines = [
-            entry(&app, "Edit", json!({"file_path": lib.join("src/a.rs")})),
-            entry(
-                &app,
-                "Read",
-                json!({"file_path": read_only.join("README.md")}),
-            ),
-            entry(
-                &app,
-                "Bash",
-                json!({"command": format!("cd {} && git commit -m x", shell_path(&shared))}),
-            ),
-            entry(
-                &other,
-                "Write",
-                json!({"file_path": shared.join("src/b.rs")}),
-            ),
-        ];
-        std::fs::write(&transcript, lines.join("\n") + "\n").unwrap();
-        let seq = runtime.suggestions_seq();
-        let snapshot = runtime.store.snapshot().unwrap();
-        runtime
-            .worked_from(&snapshot, std::slice::from_ref(&transcript), monitor::now())
-            .await;
-        let folders = |pool: &str| -> Vec<String> {
-            runtime
-                .store
-                .snapshot()
-                .unwrap()
-                .projects
-                .iter()
-                .find(|p| p.pool == pool)
-                .unwrap()
-                .folders
-                .clone()
-        };
-        let lib_text = lib.to_string_lossy().into_owned();
-        assert!(folders("app").contains(&lib_text), "{:?}", folders("app"));
-        assert_eq!(folders("app").len(), 2, "a repository only read stays out");
-        assert_eq!(
-            folders("other").len(),
-            1,
-            "two projects' work joins neither"
-        );
-        assert!(runtime.suggestions_seq() > seq, "the app is told");
-        let listed = runtime
-            .execute(Operation::ProjectSuggestions)
-            .await
-            .unwrap();
-        assert_eq!(listed["suggestions"], json!([]), "nothing is asked");
-        assert_eq!(listed["added"][0]["reason"], "worked");
-        assert_eq!(listed["added"][0]["project"], "App");
-        // The person's Edit dialog was opened before `lib` joined: saving it keeps `lib`, and
-        // `lib` is not taken for a folder the person removed.
-        runtime
-            .execute(Operation::SaveProject {
-                pool: Some("app".into()),
-                name: "App".into(),
-                folders: vec![app.clone()],
-                account_ids: vec![],
-                base_folders: Some(vec![app.clone()]),
-                organization: None,
-            })
-            .await
-            .unwrap();
-        assert!(folders("app").contains(&lib_text), "{:?}", folders("app"));
-        let append = |line: String| {
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&transcript)
-                .unwrap();
-            std::io::Write::write_all(&mut file, (line + "\n").as_bytes()).unwrap();
-        };
-        // Another project's agent works in `lib` too: it is shared, leaves App, and work never
-        // brings it back.
-        append(entry(
-            &other,
-            "Edit",
-            json!({"file_path": lib.join("src/d.rs")}),
-        ));
-        let snapshot = runtime.store.snapshot().unwrap();
-        runtime
-            .worked_from(
-                &snapshot,
-                std::slice::from_ref(&transcript),
-                monitor::now() + 1,
-            )
-            .await;
-        assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
-        assert_eq!(folders("other").len(), 1);
-        append(entry(
-            &app,
-            "Edit",
-            json!({"file_path": lib.join("src/e.rs")}),
-        ));
-        let snapshot = runtime.store.snapshot().unwrap();
-        runtime
-            .worked_from(
-                &snapshot,
-                std::slice::from_ref(&transcript),
-                monitor::now() + 2,
-            )
-            .await;
-        assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
-        let rows = suggest::read(root.path()).unwrap();
-        assert!(rows
-            .iter()
-            .any(|r| r.folder == lib_text && r.state == suggest::State::Shared));
-        // `shared`, claimed by both projects in one pass, is remembered the same way.
-        let shared_text = shared
-            .canonicalize()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        assert!(rows
-            .iter()
-            .any(|r| r.folder == shared_text && r.state == suggest::State::Shared));
-        // A dialog opened while `lib` was still in App does not bring it back on Save.
-        runtime
-            .execute(Operation::SaveProject {
-                pool: Some("app".into()),
-                name: "App".into(),
-                folders: vec![app.clone(), lib.clone()],
-                account_ids: vec![],
-                base_folders: Some(vec![app.clone(), lib.clone()]),
-                organization: None,
-            })
-            .await
-            .unwrap();
-        assert_eq!(folders("app"), [app.to_string_lossy().into_owned()]);
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn hand_overs_answer_while_a_background_step_holds_the_transaction() {
         // Fabric Dashboards FD-71: `switchboard handovers` waited up to 366 s behind renewals and
@@ -5500,69 +5033,6 @@ mod owner_tests {
         .unwrap();
         assert_eq!(status["sessions"], json!([]));
         drop(held);
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn subagent_directories_are_listed_again_only_every_two_minutes() {
-        // 2026-10-17: listing ~6,700 subagent transcripts on every 30 s pass held the owner's
-        // workers for seconds; the list is kept for SUBAGENTS_EVERY.
-        let root = tempfile::tempdir().unwrap();
-        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
-        let now = monitor::now();
-        let first = runtime.work_files(now);
-        assert!(first.is_empty(), "a synthetic owner lists no transcript");
-        let listed_at = runtime
-            .subagent_list
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|(at, _)| *at);
-        assert_eq!(listed_at, Some(now));
-        runtime.work_files(now + SUBAGENTS_EVERY - 1);
-        let kept = runtime
-            .subagent_list
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|(at, _)| *at);
-        assert_eq!(kept, Some(now), "not listed again within the interval");
-        runtime.work_files(now + SUBAGENTS_EVERY);
-        let again = runtime
-            .subagent_list
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|(at, _)| *at);
-        assert_eq!(again, Some(now + SUBAGENTS_EVERY));
-        // A clock set back lists again rather than keeping a list from the future.
-        runtime.work_files(now - 10);
-        let back = runtime
-            .subagent_list
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|(at, _)| *at);
-        assert_eq!(back, Some(now - 10));
-    }
-
-    #[test]
-    fn a_sessions_subagents_count_as_its_work() {
-        // SB-131: implementer subagents record their edits under `<session>/subagents/`.
-        let dir = tempfile::tempdir().unwrap();
-        let session = dir.path().join("s1.jsonl");
-        std::fs::write(&session, b"").unwrap();
-        std::fs::create_dir_all(dir.path().join("s1/subagents")).unwrap();
-        let agent = dir.path().join("s1/subagents/agent-a.jsonl");
-        std::fs::write(&agent, b"").unwrap();
-        std::fs::write(dir.path().join("s1/subagents/notes.txt"), b"").unwrap();
-        let files = with_subagents(std::slice::from_ref(&session), monitor::now());
-        assert_eq!(files, [session.clone(), agent]);
-        // Written long ago: not part of the recent work.
-        let later = monitor::now() + 2 * limits::WINDOW_SECONDS;
-        assert_eq!(
-            with_subagents(std::slice::from_ref(&session), later),
-            [session]
-        );
     }
 
     #[tokio::test]

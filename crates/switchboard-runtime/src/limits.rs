@@ -648,68 +648,6 @@ pub(crate) fn transcript_files(now: i64) -> Vec<PathBuf> {
     };
     recent_files(&root.join("projects"), now)
 }
-/// SB-132: Codex rollouts changed within the window, newest first: `<CODEX_HOME or ~/.codex>/
-/// sessions/YYYY/MM/DD/rollout-*.jsonl`, in the day folders of the last 31 days (a rollout stays
-/// in the folder of the day its session started).
-pub(crate) fn codex_rollout_files(now: i64) -> Vec<PathBuf> {
-    let root = std::env::var_os("CODEX_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")));
-    let Some(root) = root else {
-        return vec![];
-    };
-    recent_rollouts(&root.join("sessions"), now)
-}
-fn recent_rollouts(sessions: &Path, now: i64) -> Vec<PathBuf> {
-    let sorted = |dir: &Path| -> Vec<PathBuf> {
-        let mut entries: Vec<PathBuf> = fs::read_dir(dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_dir())
-            .collect();
-        entries.sort();
-        entries.reverse();
-        entries
-    };
-    let mut days: Vec<PathBuf> = Vec::new();
-    'years: for year in sorted(sessions) {
-        for month in sorted(&year) {
-            for day in sorted(&month) {
-                days.push(day);
-                if days.len() >= 31 {
-                    break 'years;
-                }
-            }
-        }
-    }
-    let mut found: Vec<(i64, PathBuf)> = Vec::new();
-    for day in days {
-        for file in fs::read_dir(&day).into_iter().flatten().flatten() {
-            let path = file.path();
-            let named = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"));
-            let Ok(meta) = fs::symlink_metadata(&path) else {
-                continue;
-            };
-            let modified = meta
-                .modified()
-                .ok()
-                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            if named && meta.is_file() && now - modified <= WINDOW_SECONDS {
-                found.push((modified, path));
-            }
-        }
-    }
-    found.sort_by_key(|a| std::cmp::Reverse(a.0));
-    found.into_iter().take(MAX_FILES).map(|(_, p)| p).collect()
-}
 fn recent_files(projects: &Path, now: i64) -> Vec<PathBuf> {
     let mut found: Vec<(i64, PathBuf)> = Vec::new();
     let Ok(dirs) = fs::read_dir(projects) else {
@@ -1021,35 +959,6 @@ fn quota_window(limit_type: &str) -> bool {
 }
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
-}
-
-#[cfg(test)]
-mod rollout_tests {
-    use super::*;
-
-    #[test]
-    fn codex_rollouts_are_found_in_recent_day_folders_only_by_their_name() {
-        let root = tempfile::tempdir().unwrap();
-        let day = root.path().join("2026/10/19");
-        std::fs::create_dir_all(&day).unwrap();
-        let rollout = day.join("rollout-2026-10-19T01-00-00-a.jsonl");
-        std::fs::write(&rollout, "{}\n").unwrap();
-        std::fs::write(day.join("notes.jsonl"), "{}\n").unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        assert_eq!(recent_rollouts(root.path(), now), [rollout]);
-        assert!(
-            recent_rollouts(root.path(), now + WINDOW_SECONDS + 60).is_empty(),
-            "an old rollout is not read"
-        );
-        // Only the latest 31 day folders are listed.
-        for d in 1..=31 {
-            std::fs::create_dir_all(root.path().join(format!("2026/11/{d:02}"))).unwrap();
-        }
-        assert!(recent_rollouts(root.path(), now).is_empty());
-    }
 }
 
 #[cfg(test)]
