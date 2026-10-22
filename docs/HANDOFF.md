@@ -25,7 +25,12 @@
      `ba63565c`); provider limits are per account, so seat pools answer that too.
   3. Thread `1cf4538e`, reply to `5f8da8f3`: item 1 was SB-166, fixed in 0.6.64; item 2 is in
      SB-115's packet, *Notes for hosts*.
-- **Next task.** Post the board replies; then SB-109 by 2026-10-24.
+- **Published.** v0.6.64 (release run `39769986207`: preflight, guard with the tag's nightly,
+  five platform builds, updater and publish green; 25 assets; `latest.json` 0.6.64; published
+  2026-10-22 12:11 UTC); plugin `switchboard@switchboard` updated 0.6.63 to 0.6.64 locally
+  (`claude plugin list`). The desktop app on this Mac takes it by its own 5-minute update check.
+- **Next task.** Post the board replies (and the 0.6.64 announcement on `c764dc65`); then SB-109
+  by 2026-10-24.
 
 ## 2026-10-22: plan reconciled with the facts; status for fabric-workspace
 
