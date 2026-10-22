@@ -32,6 +32,8 @@ const OWNED: &[&str] = &[
     "statistics.json",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
+    // Folders taken out of their group lately (SB-172).
+    "released-folders.json",
     // A `serve --data-dir` over this folder logs here (SB-112).
     "logs",
     "fabric-handovers",

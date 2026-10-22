@@ -1610,7 +1610,7 @@ async fn a_folder_capability_works_only_while_its_folder_is_in_the_project() {
         .text()
         .await
         .unwrap()
-        .contains("not part of a Switchboard project"));
+        .contains("not in a Switchboard group now"));
     // The window closes: the pool's own value no longer stands for every folder.
     assert_eq!(send(pool.clone()).await.status(), 200);
     p.set_legacy_until(1);
@@ -1633,6 +1633,54 @@ async fn a_folder_capability_works_only_while_its_folder_is_in_the_project() {
         .await
         .unwrap();
     assert_eq!(session.status(), 200);
+}
+
+// SB-172: a folder taken out of its group lately keeps its running sessions, served on the
+// default pool and never on the group's accounts; once forgotten it is refused again.
+#[tokio::test]
+async fn a_folder_taken_out_lately_is_served_on_the_default_pool() {
+    let (_root, s) = store();
+    let mine = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "mine",
+        "synthetic-default",
+    );
+    s.select(Provider::Claude, "default", &mine.id).unwrap();
+    let router = Router::new().route("/v1/messages", post(|| async { "{}" }));
+    let (url, _up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    p.set_legacy_until(1);
+    // The group "team" has no account here: a request routed to it could not be answered.
+    let left = crate::folder_token(&p.pool_capability("team"), "/work/left");
+    let client = reqwest::Client::new();
+    let send = || {
+        client
+            .post(format!("http://{}/claude/team/v1/messages", p.address()))
+            .header(crate::CAPABILITY_HEADER, &left)
+            .body("{}")
+            .send()
+    };
+    p.set_folder_tokens(Default::default());
+    assert_eq!(send().await.unwrap().status(), 401, "not released");
+    p.set_released_tokens([("team".to_owned(), vec![left.clone()])].into());
+    assert_eq!(
+        send().await.unwrap().status(),
+        200,
+        "served on the default pool"
+    );
+    // Released for its old pool only.
+    let elsewhere = client
+        .post(format!("http://{}/claude/other/v1/messages", p.address()))
+        .header(crate::CAPABILITY_HEADER, &left)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(elsewhere.status(), 401);
+    p.set_released_tokens(Default::default());
+    assert_eq!(send().await.unwrap().status(), 401, "forgotten");
 }
 
 // 2026-10-18: an update waited three hours for a moment with no request in flight. Draining

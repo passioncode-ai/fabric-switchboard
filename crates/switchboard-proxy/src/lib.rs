@@ -83,6 +83,8 @@ struct Gateway {
     chatgpt: String,
     salts: PoolSalts,
     folders: FolderTokens,
+    /// SB-172: capabilities of folders taken out of their group lately, by the pool they left.
+    released: FolderTokens,
     codex_folders: CodexFolders,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
@@ -115,6 +117,8 @@ pub struct ProxyHandle {
     agent_token: String,
     salts: PoolSalts,
     folders: FolderTokens,
+    /// SB-172: capabilities of folders taken out of their group lately, by the pool they left.
+    released: FolderTokens,
     codex_folders: CodexFolders,
     legacy_until: Arc<std::sync::atomic::AtomicI64>,
     draining: Arc<std::sync::atomic::AtomicBool>,
@@ -168,7 +172,7 @@ pub fn folder_token(pool_capability: &str, folder: &str) -> String {
 pub const RESTARTING: &str =
     "Switchboard is restarting to finish an update. Retry in a few seconds.";
 /// SB-133: refused to a folder capability the proxy does not know (any longer).
-pub const FOLDER_NOT_IN_PROJECT: &str = "This folder is not part of a Switchboard project now. Remove Switchboard's lines from .claude/settings.local.json, or add the folder to a project in Switchboard.";
+pub const FOLDER_NOT_IN_PROJECT: &str = "This folder is not in a Switchboard group now. Restart this session: it then uses your own sign-in. To keep it on the group's accounts, add the folder to the group in Switchboard.";
 /// Third-party agents may use only accounts the provider sells for any client: API keys.
 /// Subscription sign-ins (Claude.ai OAuth, a Claude setup token, ChatGPT) belong to the
 /// provider's own client (docs/AGENTS.md → Terms).
@@ -243,6 +247,7 @@ impl ProxyHandle {
         let agent = agent_token(&token);
         let salts: PoolSalts = Arc::default();
         let folders: FolderTokens = Arc::default();
+        let released: FolderTokens = Arc::default();
         let codex_folders: CodexFolders = Arc::default();
         let legacy_until = Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -260,6 +265,7 @@ impl ProxyHandle {
             chatgpt,
             salts: salts.clone(),
             folders: folders.clone(),
+            released: released.clone(),
             codex_folders: codex_folders.clone(),
             legacy_until: legacy_until.clone(),
             draining: draining.clone(),
@@ -285,6 +291,7 @@ impl ProxyHandle {
             agent_token: agent,
             salts,
             folders,
+            released,
             codex_folders,
             legacy_until,
             draining,
@@ -358,6 +365,13 @@ impl ProxyHandle {
     /// folders change.
     pub fn set_folder_tokens(&self, tokens: std::collections::HashMap<String, Vec<String>>) {
         if let Ok(mut current) = self.folders.write() {
+            *current = Some(tokens);
+        }
+    }
+    /// SB-172: the capabilities of folders taken out of their group lately, by the pool they
+    /// left; a session started there before is served on the default pool until it restarts.
+    pub fn set_released_tokens(&self, tokens: std::collections::HashMap<String, Vec<String>>) {
+        if let Ok(mut current) = self.released.write() {
             *current = Some(tokens);
         }
     }
@@ -587,8 +601,23 @@ async fn relay(
     }
     let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
     let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
+    // SB-172: a folder taken out of its group lately: its session goes on, on the default pool,
+    // never on the group's accounts.
+    let mut released = subtle::Choice::from(0u8);
+    if let Some(tokens) = g
+        .released
+        .read()
+        .ok()
+        .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
+    {
+        for token in &tokens {
+            released |= header.ct_eq(token.as_bytes());
+        }
+    }
+    let released = bool::from(!official & !as_agent & released);
     let agent = bool::from(!official & as_agent);
-    let official = bool::from(official);
+    let official = bool::from(official) || released;
+    let pool = if released { "default".to_owned() } else { pool };
     if !official && !agent {
         // A folder that left its project still sends its old header: say what to do there.
         if !header.is_empty() {
