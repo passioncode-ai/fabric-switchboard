@@ -1202,6 +1202,19 @@ impl Runtime {
                 built
             }
         };
+        // SB-173: a folder no group holds (a session in a folder taken out of its group) still
+        // counts under its repository.
+        let strays: Vec<String> = new
+            .keys()
+            .filter_map(|k| switchboard_proxy::stats::parts(k).map(|p| p.folder.to_owned()))
+            .filter(|f| !f.is_empty() && index.project_of(f) == *f)
+            .collect();
+        let index = if strays.is_empty() {
+            index
+        } else {
+            let base = (*index).clone();
+            Arc::new(blocking::run(move || base.with_strays(&strays)))
+        };
         self.statistics.absorb_resolved(new, &index);
     }
     async fn vanish_pass(&self, snapshot: &switchboard_core::Snapshot, time: i64) {
@@ -3828,21 +3841,23 @@ async fn execute(
         Operation::Statistics { days } => {
             let snapshot = store.snapshot()?;
             let days = days.unwrap_or(30);
-            // SB-147: folders resolve to projects through Git, off the async thread.
-            let index = blocking::run(|| statistics::ProjectIndex::build(&snapshot));
-            Ok(match runtime {
+            // SB-147: folders resolve to projects through Git, off the async thread; SB-173: so
+            // do the folders the counts carry that no group holds now.
+            let loaded;
+            let stats = match runtime {
                 Some(rt) => {
                     rt.absorb_statistics();
-                    rt.statistics
-                        .report(&snapshot, &index, days, monitor::now())
+                    &rt.statistics
                 }
-                None => statistics::Statistics::load(root).report(
-                    &snapshot,
-                    &index,
-                    days,
-                    monitor::now(),
-                ),
-            })
+                None => {
+                    loaded = statistics::Statistics::load(root);
+                    &loaded
+                }
+            };
+            let folders = stats.folders();
+            let index =
+                blocking::run(|| statistics::ProjectIndex::build(&snapshot).with_strays(&folders));
+            Ok(stats.report(&snapshot, &index, days, monitor::now()))
         }
         Operation::RepositoryMap { under } => {
             let snapshot = store.snapshot()?;

@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.70, Windows on ARM signs again
+
+- **Found.** v0.6.68 and v0.6.69 stopped at "Sign the desktop executable and the CLI" on
+  `windows-11-arm`: the Azure signing action's `Install-Module -Repository PSGallery` answered
+  "Unable to find repository 'PSGallery'" (v0.6.67 signed on the same runner label a day earlier).
+- **Done.** `release.yml` registers PSGallery when it is missing, before both signing steps;
+  `scripts/test_windows_bundle.py` keeps that order. 0.6.70 carries 0.6.69 (CHANGELOG says so).
+- **Also in 0.6.70 (SB-173, operator screenshot).** Statistics listed `nicegram-business` twice:
+  older counts keep the folder path, the report resolved paths only through the groups, and
+  SB-171 took that folder out of Agents. Folders no group holds now resolve through Git
+  (`ProjectIndex::with_strays`); on this Mac the two rows (12 folder-keyed, 15 repository-keyed
+  tallies) read as one once 0.6.70 runs.
+- **Next task.** Watch the v0.6.70 run to success, check `latest.json` and the 25 assets, update
+  the plugin, announce on the board; then SB-141 part 2.
+
 ## 2026-10-22: 0.6.69, running sessions survive a folder leaving its group (SB-172)
 
 - **Reported.** After SB-171's clean-up, sessions running in the removed folders got 401 and

@@ -28,6 +28,14 @@ class WindowsBundleTest(unittest.TestCase):
         self.assertIn("'fabric-switchboard.exe', 'switchboard.exe'", check)
         self.assertIn('/S', check)
 
+    def test_the_powershell_gallery_is_registered_before_signing(self):
+        # The signing action installs its module from PSGallery; the windows-11-arm image of
+        # 2026-10-22 came without that repository and v0.6.68 and v0.6.69 failed to sign.
+        workflow = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        registered = workflow.index('Register-PSRepository -Default')
+        self.assertLess(registered, workflow.index('- name: Sign the desktop executable and the CLI'))
+        self.assertLess(registered, workflow.index('- name: Sign the installer'))
+
     def test_the_arm64_overlay_swaps_the_bundled_cli_for_the_arm64_build(self):
         overlay = json.loads((ROOT / 'src-tauri/tauri.windows-arm64.conf.json').read_text(encoding='utf-8'))
         self.assertEqual(overlay['bundle']['resources'], {

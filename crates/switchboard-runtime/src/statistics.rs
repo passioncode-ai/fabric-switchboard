@@ -153,6 +153,20 @@ impl Statistics {
             s.saved_at = now;
         }
     }
+    /// SB-173: the folders the counts carry. Counts kept before SB-156, or from a folder taken out
+    /// of its group (SB-172), name a folder no group holds; `ProjectIndex::with_strays` still
+    /// finds its repository, so it is not a second row of the same project.
+    pub(crate) fn folders(&self) -> Vec<String> {
+        let Ok(s) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let folders: std::collections::BTreeSet<String> = s
+            .tallies
+            .keys()
+            .filter_map(|k| stats::parts(k).map(|p| p.folder.to_owned()))
+            .collect();
+        folders.into_iter().collect()
+    }
     /// The last `days` days (1–90) as tables, names resolved from the snapshot and folders
     /// resolved to their projects by `index` (SB-147).
     pub(crate) fn report(
@@ -391,6 +405,32 @@ impl ProjectIndex {
         }
         index.disambiguate();
         index
+    }
+    /// SB-173: adds the folders among `folders` that no group holds, resolved through Git: a
+    /// checkout with an `origin` joins its repository's project (the same key a group gives it),
+    /// so a folder taken out of its group keeps its counts with its project. A folder outside Git,
+    /// or one that is gone, stays a key of its own, as before; a repository key is no folder.
+    pub(crate) fn with_strays(mut self, folders: &[String]) -> Self {
+        let strays: Vec<String> = folders
+            .iter()
+            .filter(|f| Path::new(f.as_str()).is_absolute() && !self.by_folder.contains_key(*f))
+            .cloned()
+            .collect();
+        if strays.is_empty() {
+            return self;
+        }
+        for root in crate::roots::tree(&strays) {
+            let Some(key) = root.remote.clone() else {
+                continue;
+            };
+            self.names.entry(key.clone()).or_insert(root.name.clone());
+            for folder in std::iter::once(root.folder.clone())
+                .chain(root.derived.iter().map(|d| d.folder.clone()))
+            {
+                self.by_folder.entry(folder).or_insert(key.clone());
+            }
+        }
+        self
     }
     /// SB-155: two projects with one name (`ssheleg/research-agent` and `prowl-ai/research-agent`)
     /// read as `research-agent (ssheleg)` and `research-agent (prowl-ai)`; a folder outside Git
@@ -691,6 +731,62 @@ mod tests {
             "the folder's name, not the remote's"
         );
         assert_eq!(named.name_of("github.com/x/gone").as_deref(), Some("gone"));
+        // SB-173: a folder taken out of its group still counts under its repository, not as a
+        // second row with the same name.
+        let disk = tempfile::tempdir().unwrap();
+        let out = disk
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("nicegram-business");
+        std::fs::create_dir_all(out.join(".git")).unwrap();
+        std::fs::write(out.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(
+            out.join(".git/config"),
+            "[remote \"origin\"]\n\turl = git@github.com:o/nicegram-business.git\n",
+        )
+        .unwrap();
+        let out = out.to_string_lossy().into_owned();
+        let split = Statistics::default();
+        split.absorb(Tallies::from([
+            (
+                stats::key(&today, "a1", "agents", "codex", &out),
+                tally(3, 3),
+            ),
+            (
+                stats::key(
+                    &today,
+                    "a1",
+                    "agents",
+                    "codex",
+                    "github.com/o/nicegram-business",
+                ),
+                tally(4, 4),
+            ),
+            (
+                stats::key(&today, "a1", "agents", "codex", "/gone/folder"),
+                tally(1, 1),
+            ),
+        ]));
+        assert_eq!(
+            split.report(&snapshot, &ProjectIndex::default(), 7, now)["projects"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3,
+            "without Git the two keys read as two rows"
+        );
+        let resolved = ProjectIndex::default().with_strays(&split.folders());
+        let rows = split.report(&snapshot, &resolved, 7, now)["projects"].clone();
+        let rows = rows.as_array().unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0]["project"], "github.com/o/nicegram-business");
+        assert_eq!(rows[0]["name"], "nicegram-business");
+        assert_eq!(rows[0]["requests"], 7);
+        assert_eq!(
+            rows[1]["project"], "/gone/folder",
+            "a folder that is gone stays its own"
+        );
         let old = Statistics::default();
         old.absorb(Tallies::from([(
             format!("{today}\ta1\tproj\tcodex"),
