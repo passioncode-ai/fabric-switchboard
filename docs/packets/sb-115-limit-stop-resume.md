@@ -105,3 +105,16 @@ Two background subagents of the fabric-switchboard session (the skill releases) 
 "You've hit your session limit · resets 8:10am" (`rate_limit`, HTTP 429). They were sent
 «resume» at once and both went on to finish their releases (agent-stack 0.28.1). The rule
 held before Switchboard shipped anything.
+
+## Notes for hosts
+
+- **Continue in the stop's own folder with the runtime's own CLI, never with `launch --mode
+  managed`.** A managed launch sets `CLAUDE_CONFIG_DIR` to `runtimes/claude-<pool>`, where the
+  stopped session's transcript is not (it lives under the person's `~/.claude/projects`), and it
+  holds one session per provider and pool. Fabric Dashboards 0.7.20 did that: of three claimed
+  stops two exited at once and one ran without its conversation. 0.7.21 continues with the
+  runtime's CLI in the stop's folder (a bound folder still routes through the proxy by its
+  `.claude/settings.local.json`) and finishes a row `resumed` only once the transcript is
+  written. Source: board thread `1cf4538e`, message `5f8da8f3` (2026-10-22).
+- **Read `recovery` with a deadline above a background step until SB-166 ships.** Until then
+  the read waits for the owner transaction (SB-163).
