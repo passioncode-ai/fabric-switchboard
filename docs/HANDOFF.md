@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.68, folders never move into groups by themselves (SB-171)
+
+- **Operator, 2026-10-22.** Projects showed up in groups nobody put them in (nicegram repositories
+  in Agents). Folders on disk are the entity; groups group them; a folder may be in several groups,
+  but never moves by itself.
+- **Found.** `project-suggestions.json` names why each folder joined: 33 by `worked` (SB-131: an
+  agent of the group edited or committed in the repository), the rest their worktrees and clones,
+  plus six account-less groups an agent merged into Agents during SB-146 on 2026-10-19. Fabric and
+  Observatory write no groups (`fabric.project.resolve` is read-only).
+- **Data fixed** through the running owner (`switchboard project edit --remove-folder`, an
+  encrypted backup first): Agents 126 to 64 folders, Apps & Soft 20 to 14, PassionCode 63 to 44.
+  Removed folders are remembered and never added back by themselves; adding one again is the
+  person's act (*Also add…* or `project edit --add-folder`). Sessions running in a removed folder
+  get 401 from the proxy until restarted (their folder capability belongs to the group).
+- **Code.** The worked scan is gone (`activity.rs`); a pending `worked` row is never added. What
+  still joins by itself: a worktree or clone of a repository already in the group, and a new
+  repository of a source the person set.
+- **Next task.** Release 0.6.68; then SB-141 part 2.
+
 ## 2026-10-22: 0.6.67, repository identity by the contract's vectors (SB-141 part 1)
 
 - **Done.** The contract's 28 origin vectors (fabric-agent-contract `c7376eaa`, DEC-0089 item 2)

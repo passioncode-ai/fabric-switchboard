@@ -633,41 +633,6 @@ pub(crate) fn assess(snapshot: &Snapshot, repos: &[(String, Repo)], folder: &Pat
     }
 }
 
-/// Records a repository an agent of the project `pool` changed (SB-131), with the same rules as
-/// a found folder: never a temporary folder, a folder in a project or one around a project's.
-pub(crate) fn record_worked(
-    root: &Path,
-    snapshot: &Snapshot,
-    folder: &Path,
-    pool: &str,
-    now: i64,
-) -> Result<Outcome, String> {
-    let Ok(folder) = folder.canonicalize() else {
-        return Ok(Outcome::NotOurs { settled: true });
-    };
-    let Some(text) = folder
-        .to_str()
-        .filter(|t| t.len() <= MAX_FOLDER)
-        .map(str::to_owned)
-    else {
-        return Ok(Outcome::NotOurs { settled: true });
-    };
-    if snapshot.project_for(&folder).is_some() {
-        return Ok(Outcome::InProject);
-    }
-    if transient(&folder)
-        || tool_folder(&folder)
-        || contains_project(snapshot, &folder)
-        || !snapshot.projects.iter().any(|p| p.pool == pool)
-    {
-        return Ok(Outcome::NotOurs { settled: true });
-    }
-    let repository = repo(&folder)
-        .and_then(|r| r.remote)
-        .unwrap_or_else(|| text.clone());
-    record_row(root, text, pool.to_owned(), Reason::Worked, repository, now)
-}
-
 fn record_row(
     root: &Path,
     text: String,
@@ -724,6 +689,9 @@ pub(crate) fn pending(root: &Path, snapshot: &Snapshot) -> Result<Vec<Suggestion
         .into_iter()
         .filter(|r| {
             r.state == State::Pending
+                // SB-171: a row an older version recorded because a group's agent worked there
+                // is never added: a folder does not move into a group by itself.
+                && r.reason != Reason::Worked
                 // A row an older version recorded for a scratch folder is never offered or added.
                 && !transient(Path::new(&r.folder))
                 && snapshot.projects.iter().any(|p| p.pool == r.pool)
@@ -844,41 +812,6 @@ pub(crate) fn mark_gone(
             break;
         };
         rows.remove(i);
-    }
-    write(root, &rows)
-}
-
-/// Remembers a repository two projects' agents work in (SB-131): it is never added by itself
-/// again. A folder the person declined stays declined.
-pub(crate) fn mark_shared(root: &Path, folder: &str, now: i64) -> Result<(), String> {
-    let mut rows = read(root)?;
-    match rows.iter_mut().find(|r| r.folder == folder) {
-        Some(row) if row.state == State::Dismissed => return Ok(()),
-        Some(row) => {
-            row.state = State::Shared;
-            row.first_seen = now;
-        }
-        None => {
-            if rows.len() >= MAX_ROWS {
-                if let Some(i) = rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, r)| r.state != State::Pending)
-                    .min_by_key(|(_, r)| r.first_seen)
-                    .map(|(i, _)| i)
-                {
-                    rows.remove(i);
-                }
-            }
-            rows.push(Suggestion {
-                folder: folder.to_owned(),
-                pool: String::new(),
-                reason: Reason::Worked,
-                repository: String::new(),
-                first_seen: now,
-                state: State::Shared,
-            });
-        }
     }
     write(root, &rows)
 }
@@ -1217,6 +1150,39 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_never_joins_a_group_because_its_agent_worked_there() {
+        // SB-171 (operator 2026-10-22): a row an older version recorded as `worked` is not added
+        // on a retry; a worktree of a repository already in the group still joins it.
+        let data = tempfile::tempdir().unwrap();
+        let disk = tempfile::tempdir().unwrap();
+        let app = disk.path().join("app");
+        let other = disk.path().join("other");
+        git(&app, Some("git@github.com:o/app.git"));
+        git(&other, Some("git@github.com:o/other.git"));
+        let wt = disk.path().join("app-wt");
+        worktree(&app, &wt, "app-wt");
+        let s = snapshot(&[("group", &[&app.canonicalize().unwrap()], &[])]);
+        let other_text = other.canonicalize().unwrap().to_string_lossy().into_owned();
+        record_row(
+            data.path(),
+            other_text.clone(),
+            "group".into(),
+            Reason::Worked,
+            "github.com/o/other".into(),
+            1,
+        )
+        .unwrap();
+        assert!(pending(data.path(), &s)
+            .unwrap()
+            .iter()
+            .all(|r| r.folder != other_text));
+        let repos = project_repos(&s);
+        let found = classify(&s, &repos, &wt.canonicalize().unwrap());
+        assert_eq!(found.map(|f| f.1), Some(Reason::Worktree));
+        assert_eq!(classify(&s, &repos, &other.canonicalize().unwrap()), None);
+    }
+
+    #[test]
     fn remotes_normalize_as_the_contracts_vectors_say() {
         // SB-141 (DEC-0089 item 2): the contract's origin vectors, copied at the pinned commit.
         let file: serde_json::Value = serde_json::from_str(include_str!(
@@ -1509,50 +1475,6 @@ mod tests {
             unassigned(root.path(), &s, &repos, &fresh).unwrap(),
             Outcome::Unassigned { .. }
         ));
-    }
-
-    #[test]
-    fn a_worked_repository_is_recorded_once_and_a_deleted_one_is_found_again() {
-        // SB-131: work recorded for the session's project; a folder taken out because it was
-        // deleted is a new folder when it comes back, unlike one the person took out.
-        let data = tempfile::tempdir().unwrap();
-        let work = tempfile::tempdir().unwrap();
-        let (app, lib) = (work.path().join("app"), work.path().join("lib"));
-        git(&app, Some("git@github.com:org/app.git"));
-        git(&lib, None);
-        let app_folder = app.canonicalize().unwrap();
-        let s = snapshot(&[("app", &[&app_folder], &[])]);
-        let first = record_worked(data.path(), &s, &lib, "app", 1).unwrap();
-        let Outcome::New(row) = first else {
-            panic!("{first:?}")
-        };
-        assert_eq!((row.reason, row.state), (Reason::Worked, State::Pending));
-        assert_eq!(row.repository, row.folder, "no origin: the folder names it");
-        assert_eq!(
-            record_worked(data.path(), &s, &lib, "app", 2).unwrap(),
-            Outcome::Waiting
-        );
-        assert_eq!(
-            record_worked(data.path(), &s, &app, "app", 2).unwrap(),
-            Outcome::InProject
-        );
-        assert!(matches!(
-            record_worked(data.path(), &s, &lib, "nobody", 2).unwrap(),
-            Outcome::Waiting | Outcome::NotOurs { .. }
-        ));
-        mark_gone(data.path(), "app", std::slice::from_ref(&row.folder), 3).unwrap();
-        assert_eq!(gone_since(data.path(), 3).unwrap().len(), 1);
-        assert!(matches!(
-            record_worked(data.path(), &s, &lib, "app", 4).unwrap(),
-            Outcome::New(_)
-        ));
-        remember_removed(data.path(), "app", std::slice::from_ref(&row.folder), 5).unwrap();
-        mark_gone(data.path(), "app", std::slice::from_ref(&row.folder), 6).unwrap();
-        assert_eq!(
-            record_worked(data.path(), &s, &lib, "app", 7).unwrap(),
-            Outcome::Declined,
-            "declined by the person stays declined"
-        );
     }
 
     #[test]

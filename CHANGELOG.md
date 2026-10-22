@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.68 (2026-10-22)
+
+- **A folder no longer moves into a group by itself (SB-171).** Until now, when an agent working in one group's folder edited files in another repository, that repository joined the group on its own; that is how unrelated projects ended up in Agents. That is gone. A folder joins a group by itself only when it is a worktree or a clone of a repository already in that group, or a new repository from a source you set for the group; anything else only when you add it. The folders that had moved in this way were taken out of their groups on this Mac.
+
 ## 0.6.67 (2026-10-22)
 
 - **Repositories are recognized the way the rest of PassionCode recognizes them (SB-141).** Switchboard now reads a repository's address exactly as the shared rule does, checked against its published examples. GitLab repositories in subgroups (`gitlab.example.com/group/sub/app`) are now recognized as repositories, so their worktrees and clones join their group by themselves, and a group can watch a GitLab subgroup as a source. Addresses that only look like a host (an underscore, look-alike letters) or use another protocol no longer count as one.
