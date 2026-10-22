@@ -2,6 +2,30 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: plan reconciled with the facts; status for fabric-workspace
+
+- **Objective (operator, 2026-10-22).** Read what the previous sessions did and left, check the
+  live state, put what is unfinished on the board and carry the current state into
+  fabric-workspace, where every PassionCode product now reports (board thread `e204b5b5`,
+  `docs/reports/2026-10-22-passioncode-status/`).
+- **Live state, measured 2026-10-22 11:00 UTC.** App, CLI and plugin 0.6.63
+  (`switchboard --version`; bundle `CFBundleShortVersionString`); release v0.6.63 Latest
+  (`gh release list`); nightly on the v0.6.63 tag green (run `39710668084`); `main` clean at
+  `e28abbc`, no open PRs, only `main` on origin. Log since 00:00 UTC: no error or warning
+  events, 17 `transaction_held` up to 20.7 s (SB-163).
+- **Board read (220 unread, all read).** New for Switchboard: SB-159 is unblocked (Vesta's
+  sign-in for apps is live, `63af7559`/`9f7c7618`); the contract's vectors for SB-141 are
+  merged and only the Project id waits; `recovery` reads wait behind the owner transaction
+  (Dashboards, `1cf4538e`/`5f8da8f3`); org-issued OpenRouter keys (`b2511678`/`888b0361`) and
+  two machines with one estate (`b2511678`/`c938af7d`) need Switchboard rows.
+- **Done.** Backlog: SB-159, SB-141, SB-163, SB-115 updated with the facts; SB-166 (recovery on
+  the fast path), SB-167 (org-issued keys), SB-168 (two machines), SB-169 (design leftovers)
+  filed. Packet SB-115 gained *Notes for hosts*. Status file for fabric-workspace written from
+  this entry.
+- **Checks run.** `python3 scripts/check_docs.py` (exit code in the PR). No code changed.
+- **Next task.** SB-166 today (small, unblocks every host reading `recovery`); then SB-109 by
+  2026-10-24; then SB-159 by 2026-10-27; SB-141's vectors part beside them.
+
 ## 2026-10-22: 0.6.63, design pass over every screen (SB-164)
 
 - **Done.** Through `sheleg-design` (product surface, PassionCode system kept, dials 2/1/6 as
