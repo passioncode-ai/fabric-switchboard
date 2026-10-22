@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.63 (2026-10-22)
+
+- **A detailed pass over every screen (SB-164).** Nothing overlaps at the narrowest window any more: a Kimi Code account's usage moves to its own line instead of running under its buttons, and the long "Ordinary kimi" line wraps. Statistics tables keep every column readable on a narrow window and scroll sideways when they must. Cards on Tokens, Agents and About line up with the page header, every introduction has room before the first card, group keys read as text rather than code, Groups no longer repeats its own title, and a selected account or active rule is shown by a tinted background instead of a bar down its side. Text that used to be cut off with "…" now takes a second line, and the countdown pause is a quiet link.
+- **Interface text without em dashes.** 35 strings were rewritten, and the build now refuses an em dash in any interface string.
+
 ## 0.6.62 (2026-10-22)
 
 - **Organizations have their own page.** *Organizations* in the sidebar lists each company with its domains and the accounts it holds, and why each belongs to it (placed by you, its team, its domain); *+ New organization* adds one. *Accounts* no longer shows a line about organizations until you have one; then a filter appears above the accounts.

@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.63, design pass over every screen (SB-164)
+
+- **Done.** Through `sheleg-design` (product surface, PassionCode system kept, dials 2/1/6 as
+  recorded in `docs/ux/screens.md`): 12 findings fixed, see
+  [director record](design/switchboard/director-record.md); lint 0 S1; em dashes out of every
+  interface string with a check in `check-locale.mjs`.
+- **Open (person's call).** Two Refresh buttons on Agents; header action order at 740 px;
+  contrast of the tinted selected row not measured.
+- **Next task.** SB-109 (a group's organization); SB-163 design note.
+
 ## 2026-10-22: 0.6.62, errors fixed from the log; organizations moved to their own page
 
 - **Read.** switchboard.log since 2026-10-21: `transaction_held` 24 (SB-163, design first),
