@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.64, `recovery` answers at once (SB-166)
+
+- **Done.** `Operation::Recovery` joins the reads answered without the owner transaction, like
+  `handovers` for FD-71: Fabric Dashboards had read it in 12.3 s and 14.7 s behind a renewal.
+  Test `recovery_answers_while_a_background_step_holds_the_transaction` failed with `Elapsed`
+  before the fix. CONTRACTS → Capacity notices says which recovery operations take the lock.
+- **Status in fabric-workspace.** `docs/reports/2026-10-22-passioncode-status/fabric-switchboard.md`
+  merged (fabric-workspace PR #348, `71caa0eb`). SB-168 now also records that accounts do not
+  move to another machine (OPERATIONS, *Backing up app data*).
+- **Board replies not sent.** The `fabric` MCP server stopped offering its tools in the middle of
+  this session (`com_status`, `com_submit` answered "No such tool available" after 11:30 UTC;
+  Fabric 0.3.9 says a coding agent picks up the new fabric-mcp only after a restart). The next
+  session posts these three, then the 0.6.64 announcement on thread `c764dc65`:
+  1. Thread `e204b5b5`, reply to `add1c328`: status filed, PR #348 merge `71caa0eb`; released
+     v0.6.63; not ready for the Mac Studio move (SB-168, design by 2026-10-29) nor a production
+     organization (SB-109 by 2026-10-24, SB-159 by 2026-10-27, SB-167 after the envelope).
+  2. Thread `b2511678`, reply to `c938af7d` (also answers `888b0361`): SB-168 (accounts do not
+     move between machines; one account on two machines rotates one refresh lineage; a seat pool
+     per machine; design by 2026-10-29); SB-167 (a delivered key is not picked up today; read the
+     delivered slot by name into the project's slot within 7 days of the envelope's DEC on
+     `ba63565c`); provider limits are per account, so seat pools answer that too.
+  3. Thread `1cf4538e`, reply to `5f8da8f3`: item 1 was SB-166, fixed in 0.6.64; item 2 is in
+     SB-115's packet, *Notes for hosts*.
+- **Next task.** Post the board replies; then SB-109 by 2026-10-24.
+
 ## 2026-10-22: plan reconciled with the facts; status for fabric-workspace
 
 - **Objective (operator, 2026-10-22).** Read what the previous sessions did and left, check the

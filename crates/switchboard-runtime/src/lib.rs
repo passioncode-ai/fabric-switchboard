@@ -841,6 +841,9 @@ impl Runtime {
                 // read waited out renewals and syncs for up to 366 s (Fabric Dashboards FD-71).
                 | Operation::Handovers
                 | Operation::HandoverTake { .. }
+                // The recovery file is written by rename and the limits live in memory; behind
+                // the transaction a host's read waited 12 to 15 s for a renewal (SB-166).
+                | Operation::Recovery
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -5354,6 +5357,25 @@ mod owner_tests {
         .await
         .expect("a take is answered too");
         assert!(taken.is_err(), "no such hand-over");
+        drop(held);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn recovery_answers_while_a_background_step_holds_the_transaction() {
+        // SB-166: Fabric Dashboards read `switchboard recovery` in 12.3 s and 14.7 s while a
+        // renewal or a sync held the owner transaction (SB-163). It reads the recovery file,
+        // written by rename, and the owner's in-memory limits.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let held = runtime.hold("test").await;
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.execute(Operation::Recovery),
+        )
+        .await
+        .expect("answered while the transaction is held")
+        .unwrap();
+        assert_eq!(status["sessions"], json!([]));
         drop(held);
     }
 
