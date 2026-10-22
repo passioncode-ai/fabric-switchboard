@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.69 (2026-10-22)
+
+- **Taking a folder out of a group no longer breaks the sessions already open there (SB-172).** A coding session reads Switchboard's address when it starts, so a session open in a folder you took out of its group kept asking for the group's accounts and got "not part of a Switchboard project" on every request. For a week after a folder leaves its group, those sessions now go on, on your default accounts (never the group's). A new session there uses your own sign-in as before. When the error does show, it now says what to do: restart the session.
+
 ## 0.6.68 (2026-10-22)
 
 - **A folder no longer moves into a group by itself (SB-171).** Until now, when an agent working in one group's folder edited files in another repository, that repository joined the group on its own; that is how unrelated projects ended up in Agents. That is gone. A folder joins a group by itself only when it is a worktree or a clone of a repository already in that group, or a new repository from a source you set for the group; anything else only when you add it. The folders that had moved in this way were taken out of their groups on this Mac.

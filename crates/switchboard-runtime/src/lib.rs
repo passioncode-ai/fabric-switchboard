@@ -939,6 +939,7 @@ impl Runtime {
         match synced {
             Ok(report) => {
                 self.proxy.set_folder_tokens(report.tokens.clone());
+                self.proxy.set_released_tokens(report.released.clone());
                 self.proxy.set_stat_folders(stat_folders(&snapshot));
                 // SB-155: a sync that changed nothing is not an event (178 a day on 2026-10-20).
                 let changed = report.bound
@@ -1799,10 +1800,16 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
     // pool's capability (what 0.6.39 and earlier wrote) still stands for its folders.
     proxy.set_legacy_until(legacy_until(root, monitor::now()));
     if let Ok(snapshot) = proxy_store.snapshot() {
-        proxy.set_folder_tokens(bindings::folder_tokens(
-            &bindings::desired(&snapshot),
+        let want = bindings::desired(&snapshot);
+        proxy.set_folder_tokens(bindings::folder_tokens(&want, proxy.token(), &salts));
+        // SB-172: folders taken out lately keep their sessions, on the default pool.
+        proxy.set_released_tokens(bindings::released_tokens(
+            root,
+            &[],
+            &want,
             proxy.token(),
             &salts,
+            monitor::now(),
         ));
         proxy.set_stat_folders(stat_folders(&snapshot));
         proxy.set_codex_folders(codex_route::folders(&snapshot));
@@ -3469,6 +3476,7 @@ async fn execute(
             let report =
                 bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
             rt.proxy.set_folder_tokens(report.tokens.clone());
+            rt.proxy.set_released_tokens(report.released.clone());
             rt.proxy.set_stat_folders(stat_folders(&snapshot));
             if let Ok(mut key) = rt.bindings_key.lock() {
                 *key = None;
@@ -5099,6 +5107,13 @@ mod owner_tests {
             "the moved folder still carries the old value"
         );
         runtime.bindings_pass().await;
+        // SB-172: its old capability is released for a week, served on the default pool and
+        // never on the project's accounts (`a_folder_taken_out_lately_is_served_on_the_default_pool`).
+        let released = std::fs::read_to_string(root.path().join("released-folders.json")).unwrap();
+        assert!(released.contains("\"pool\":\"app\""), "{released}");
+        assert!(!released.contains(&header), "no capability in the file");
+        // Forgotten (a week later), the proxy no longer takes it.
+        runtime.proxy.set_released_tokens(Default::default());
         assert_eq!(ask(header).await, 401, "and the proxy no longer takes it");
     }
 

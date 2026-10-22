@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.69, running sessions survive a folder leaving its group (SB-172)
+
+- **Reported.** After SB-171's clean-up, sessions running in the removed folders got 401 and
+  retried: Claude Code reads the proxy address and the folder capability once, at start.
+- **Done.** Bindings record a folder taken out (`released-folders.json`, 7 days, no
+  capability); the proxy serves its old capability on the default pool; the 401 says to restart.
+  The 84 folders removed today were back-filled on this Mac (0600), so their sessions work again
+  once 0.6.69 is installed. Restarting a session clears it at once in any version.
+- **Next task.** Release 0.6.68 (building), then 0.6.69; then SB-141 part 2.
+
 ## 2026-10-22: 0.6.68, folders never move into groups by themselves (SB-171)
 
 - **Operator, 2026-10-22.** Projects showed up in groups nobody put them in (nicegram repositories

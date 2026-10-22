@@ -68,6 +68,77 @@ pub(crate) struct Report {
     pub user_values_present: Vec<String>,
     /// SB-133: each pool's folder capabilities, for the proxy (`folder_tokens`).
     pub tokens: std::collections::HashMap<String, Vec<String>>,
+    /// SB-172: the capabilities of folders taken out of their group in the last `RELEASED_FOR`,
+    /// by the pool they left: a session started there before goes on, on the default pool.
+    pub released: std::collections::HashMap<String, Vec<String>>,
+}
+
+/// SB-172: how long a folder taken out of its group keeps its old capability, served on the
+/// default pool: a Claude Code session reads its settings once, at start.
+pub(crate) const RELEASED_FOR: i64 = 7 * 24 * 3600;
+const RELEASED_FILE: &str = "released-folders.json";
+const MAX_RELEASED: usize = 4096;
+
+/// A folder taken out of its group: the pool it left and when (no capability is kept).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Released {
+    pub folder: String,
+    pub pool: String,
+    pub at: i64,
+}
+
+fn read_released(root: &Path) -> Vec<Released> {
+    switchboard_core::private_fs::read_private(&root.join(RELEASED_FILE), 2 * 1024 * 1024)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// Records `left` as taken out now, forgets entries older than `RELEASED_FOR` and folders that
+/// are in a group again, and answers the capabilities still honoured, by pool.
+pub(crate) fn released_tokens(
+    root: &Path,
+    left: &[(String, String)],
+    want: &[(PathBuf, String)],
+    session_token: &str,
+    salts: &std::collections::HashMap<String, String>,
+    now: i64,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let before = read_released(root);
+    let mut rows: Vec<Released> = before
+        .iter()
+        .filter(|r| now - r.at < RELEASED_FOR && r.at <= now + 60)
+        .filter(|r| {
+            !want
+                .iter()
+                .any(|(f, _)| f.to_str() == Some(r.folder.as_str()))
+        })
+        .cloned()
+        .collect();
+    for (folder, pool) in left {
+        rows.retain(|r| !(r.folder == *folder && r.pool == *pool));
+        rows.push(Released {
+            folder: folder.clone(),
+            pool: pool.clone(),
+            at: now,
+        });
+    }
+    if rows.len() > MAX_RELEASED {
+        rows.drain(..rows.len() - MAX_RELEASED);
+    }
+    if rows != before {
+        if let Ok(bytes) = serde_json::to_vec(&rows) {
+            let _ = switchboard_core::private_fs::private_write(&root.join(RELEASED_FILE), &bytes);
+        }
+    }
+    let mut out: std::collections::HashMap<String, Vec<String>> = Default::default();
+    for r in &rows {
+        out.entry(r.pool.clone())
+            .or_default()
+            .push(folder_capability(session_token, &r.pool, salts, &r.folder));
+    }
+    out
 }
 
 fn sha256(text: &str) -> String {
@@ -455,6 +526,7 @@ pub(crate) fn sync_salted(
     };
     let rows = read(root)?;
     let mut kept: Vec<Binding> = Vec::new();
+    let mut left: Vec<(String, String)> = Vec::new();
     for (folder, pool) in &want {
         let Some(text) = folder.to_str() else {
             continue;
@@ -511,6 +583,8 @@ pub(crate) fn sync_salted(
         .iter()
         .filter(|r| !want.iter().any(|(f, _)| f.to_str() == Some(&r.folder)))
     {
+        // Its sessions keep their old capability until they restart (SB-172).
+        left.push((row.folder.clone(), row.pool.clone()));
         match unapply(row) {
             Ok(true) => report.removed += 1,
             Ok(false) => {}
@@ -523,6 +597,14 @@ pub(crate) fn sync_salted(
     }
     kept.truncate(MAX_ROWS);
     write(root, &kept)?;
+    report.released = released_tokens(
+        root,
+        &left,
+        &want,
+        session_token,
+        salts,
+        crate::monitor::now(),
+    );
     Ok(report)
 }
 
@@ -1031,5 +1113,20 @@ mod tests {
         let gone = sync(&root, &Snapshot::default(), "127.0.0.1:4000", "session").unwrap();
         assert_eq!(gone.removed, 1);
         assert!(!settings_path(&app).exists());
+        // SB-172: its sessions keep the capability they started with, for the pool it left.
+        assert_eq!(gone.released.get("pc"), Some(&vec![mine.clone()]));
+        let again = sync(&root, &Snapshot::default(), "127.0.0.1:4000", "session").unwrap();
+        assert_eq!(
+            again.released.get("pc"),
+            Some(&vec![mine.clone()]),
+            "kept, not renewed"
+        );
+        let file = std::fs::read_to_string(root.join(RELEASED_FILE)).unwrap();
+        assert!(!file.contains(&mine), "no capability in the file");
+        // Forgotten after RELEASED_FOR, and at once when the folder is in a group again.
+        let later = crate::monitor::now() + RELEASED_FOR;
+        assert!(released_tokens(&root, &[], &[], "session", &none, later).is_empty());
+        let back = sync(&root, &snapshot, "127.0.0.1:4000", "session").unwrap();
+        assert!(back.released.is_empty());
     }
 }
