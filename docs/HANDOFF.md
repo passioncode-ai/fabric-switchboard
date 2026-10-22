@@ -10,6 +10,7 @@
   interface string with a check in `check-locale.mjs`.
 - **Open (person's call).** Two Refresh buttons on Agents; header action order at 740 px;
   contrast of the tinted selected row not measured.
+- **Published.** v0.6.62 (run `39706840817`) and v0.6.63 (run `39710469964`): guard, five platform builds, updater and publish green, 25 assets each, `latest.json` 0.6.63; plugin `switchboard@switchboard` 0.6.63 installed; the desktop app on this Mac installed 0.6.62 and restarted itself (02:50 UTC). Branches: only `main` on origin.
 - **Next task.** SB-109 (a group's organization); SB-163 design note.
 
 ## 2026-10-22: 0.6.62, errors fixed from the log; organizations moved to their own page
