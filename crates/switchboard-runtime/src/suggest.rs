@@ -167,37 +167,83 @@ fn origin_url(config: &str) -> Option<String> {
     None
 }
 
-/// `git@github.com:Owner/Repo.git`, `https://user@github.com/owner/repo` and
-/// `ssh://git@github.com:22/owner/repo.git` all become `github.com/owner/repo`. A local path,
-/// or a path that is not owner/repo, is not a remote this matches on.
+/// A remote's repository identity, as fabric-agent-contract DEC-0089 item 2 defines it (SB-141):
+/// `host/path`, ASCII-lowercased, from a URL with one of `SCHEMES` or the scp form
+/// `[user@]host:path`; the user, a password, the port, a query, a fragment, slashes at either end
+/// and one trailing `.git` dropped. The host has a dot and only `a-z0-9.-`; the path has at least
+/// two segments (`owner/name`, or a group path `group/sub/name`). None for a local path, `file:`,
+/// another scheme or anything else. Checked against the contract's vectors
+/// (`remotes_normalize_as_the_contracts_vectors_say`).
 pub(crate) fn normalize(url: &str) -> Option<String> {
-    let url = url.trim();
-    let (host, path) = if let Some((_, rest)) = url.split_once("://") {
-        let (authority, path) = rest.split_once('/')?;
-        (authority, path)
-    } else {
-        let (left, path) = url.split_once(':')?;
-        if left.contains('/') || left.len() < 2 {
-            return None;
-        }
-        (left, path)
-    };
-    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let host = host.split(':').next()?.to_ascii_lowercase();
-    let path = path.trim_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let mut parts = path.split('/');
-    let (Some(owner), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
-        return None;
-    };
-    if host.is_empty() || !host.contains('.') || owner.is_empty() || name.is_empty() {
+    const SCHEMES: &[&str] = &["http", "https", "ssh", "git", "git+ssh", "git+https"];
+    const MAX: usize = 4096;
+    let value = url.trim();
+    if value.len() > MAX {
         return None;
     }
-    Some(format!(
-        "{host}/{}/{}",
-        owner.to_ascii_lowercase(),
-        name.to_ascii_lowercase()
-    ))
+    let cut = |text: &str| text.split(['?', '#']).next().unwrap_or("").to_owned();
+    let scheme_end = value.find("://").filter(|&i| {
+        let name = &value[..i];
+        name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+    });
+    let (host, path) = if let Some(i) = scheme_end {
+        if !SCHEMES.contains(&value[..i].to_ascii_lowercase().as_str()) {
+            return None;
+        }
+        let rest = cut(&value[i + 3..]);
+        let (host, path) = rest.split_once('/')?;
+        (host.to_owned(), path.to_owned())
+    } else {
+        let bytes = value.as_bytes();
+        let drive = bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\');
+        if value.starts_with('/') || value.starts_with('.') || drive {
+            return None;
+        }
+        // `[user@]host:path`: the user has no `@`, `/` or space; the host no `:`, `/` or space.
+        let (left, path) = value.split_once(':')?;
+        let host = match left.split_once('@') {
+            Some((user, host)) if !user.is_empty() && !user.contains('/') => host,
+            Some(_) => return None,
+            None => left,
+        };
+        if host.is_empty()
+            || host.contains(['/', '@'])
+            || host.chars().any(char::is_whitespace)
+            || path.is_empty()
+            || path.chars().any(char::is_whitespace)
+        {
+            return None;
+        }
+        (host.to_owned(), cut(path))
+    };
+    let host = host.rsplit_once('@').map_or(host.as_str(), |(_, h)| h);
+    let host = match host.rsplit_once(':') {
+        Some((h, port)) if port.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => host,
+    }
+    .to_ascii_lowercase();
+    let path = path.trim_matches('/').to_ascii_lowercase();
+    let path = path.strip_suffix(".git").unwrap_or(&path);
+    let segments: Vec<&str> = path.split('/').collect();
+    if host.is_empty()
+        || !host.contains('.')
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
+        || segments.len() < 2
+        || segments
+            .iter()
+            .any(|s| s.is_empty() || s.chars().any(char::is_whitespace))
+    {
+        return None;
+    }
+    Some(format!("{host}/{}", segments.join("/")))
 }
 
 fn owner_of(remote: &str) -> &str {
@@ -1168,6 +1214,24 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn remotes_normalize_as_the_contracts_vectors_say() {
+        // SB-141 (DEC-0089 item 2): the contract's origin vectors, copied at the pinned commit.
+        let file: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/folder-attribution-origin.json"
+        ))
+        .unwrap();
+        let mut wrong = Vec::new();
+        for v in file["origin"].as_array().unwrap() {
+            let got = v["origin"].as_str().and_then(normalize);
+            let want = v["expected"].as_str().map(str::to_owned);
+            if got != want {
+                wrong.push(format!("{} => {:?}, expected {:?}", v["origin"], got, want));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 
     #[test]

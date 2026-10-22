@@ -71,7 +71,7 @@ const ALLOWLIST = {
   // output; uninstall is never a desktop operation.
   'Could not update every bound folder.': 'uninstall CLI output only',
   // core projects.rs set_project_sources(): only `switchboard project source` sets sources.
-  'Name a source as host/owner, for example github.com/example.': 'CLI only (project source)',
+  'Name a source as host/owner or host/group/subgroup, for example github.com/example.': 'CLI only (project source)',
   'A project watches at most 16 sources.': 'CLI only (project source)',
   // runtime lib.rs RecoveryHook (SB-115): only `switchboard recovery hook` sends it, from Claude
   // Code's StopFailure hook; the CLI turns it into `registered: false`, the window never asks.
