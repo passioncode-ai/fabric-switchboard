@@ -318,7 +318,7 @@ function codexRouteSection() {
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
     else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
-    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on ? 'button' : 'button primary', 'codex-route-toggle');
+    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on || !r.projects.length ? 'button' : 'button primary', 'codex-route-toggle');
     act.disabled = !r.on && !!r.conflict;
     section.append(act);
   }
@@ -440,7 +440,7 @@ function groupHint(text: string, pool: string) {
 /** Projects (0.6): folders that reserve their own accounts (core `save_project`). */
 function projectsSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'projects-heading');
-  const heading = el('h2', 'section-heading', t('Groups')); heading.id = 'projects-heading';
+  const heading = el('h2', 'section-heading sr-only', t('Groups')); heading.id = 'projects-heading';
   section.append(heading, el('p', 'surface-note', t('A group holds one or more projects (repository folders) with accounts of its own, and a project may be in several groups. Sessions launched from its folders use only its accounts, rotation stays inside them, and no other group or the ordinary Claude Code switches to them.')));
   const projects = snapshot!.projects ?? [];
   if (!projects.length) {
@@ -456,7 +456,7 @@ function projectsSection() {
     const name = el('h2', ''); name.append(groupHint(project.name, project.pool));
     title.append(name, el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
     const folders = projectFolderList(project);
-    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet — sessions in these folders use your other accounts until you add one.'));
+    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
     const actions = el('div', 'management-actions');
     actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => deleteProjectDialog(project), 'text-button danger-text', `delete-project-${project.pool}`));
@@ -743,7 +743,7 @@ function projectKeysPanel() {
   const projects = openrouterKeys?.projects ?? [];
   if (!openrouterKeys) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
   if (!projects.length) { section.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then give it a key here.'))); return section; }
-  const list = el('ul', 'project-folders repository-map'); list.setAttribute('aria-label', t('Group keys'));
+  const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Group keys'));
   for (const project of projects) {
     const own = openrouterKeys.keys.find((k) => k.pool === project.pool);
     const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
@@ -1073,7 +1073,7 @@ async function importSwap() {
     try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'); }
     const parts = [plural(result.imported.length, { one: '{n} Claude Swap profile imported or updated in the default pool', other: '{n} Claude Swap profiles imported or updated in the default pool' })];
     if (result.skipped) parts.push(t('{n} skipped', { n: result.skipped }));
-    if (result.failed) parts.push(t('{n} could not be read — check them in Claude Swap and import again', { n: result.failed }));
+    if (result.failed) parts.push(t('{n} could not be read; check them in Claude Swap and import again', { n: result.failed }));
     if (result.claude_swap_running) parts.push(t('Claude Swap is still running, so it keeps renewing those accounts and Switchboard follows its newest sign-ins'));
     showNotice(`${parts.join(' · ')}.`, result.failed > 0);
   } catch (error) { showNotice(safeError(error), true); }
@@ -1101,7 +1101,7 @@ function renderAccounts(main: HTMLElement) {
   sorting.append(el('span', '', t('Within each pool: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
-  }, 'button quiet', 'countdown-toggle'));
+  }, 'text-button', 'countdown-toggle'));
   main.append(sorting);
   if (!shown.length) main.append(el('p', 'form-note', t('No account here yet.')));
   for (const group of groupAccounts(shown, quotaContext())) {

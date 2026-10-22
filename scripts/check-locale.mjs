@@ -113,6 +113,13 @@ for (const [key, { plural, where }] of keys) {
   if (plural && forms.length !== 3) problems.push(`plural needs three forms (${where}): ${JSON.stringify(key)}`);
   for (const form of forms) if (placeholders(form) !== placeholders(key)) problems.push(`placeholders differ (${where}): ${JSON.stringify(key)} → ${JSON.stringify(form)}`);
 }
+// Operator rule 2026-10-18: text a person reads carries no em dash (U+2014), in either language.
+for (const [key, value] of Object.entries(RU)) {
+  for (const text of [key, ...(Array.isArray(value) ? value : [value])]) {
+    if (String(text).includes('\u2014')) problems.push(`em dash in an interface string: ${JSON.stringify(key)}`);
+  }
+}
+for (const [key] of keys) if (key.includes('\u2014')) problems.push(`em dash in an interface string: ${JSON.stringify(key)}`);
 const unused = Object.keys(RU).filter((k) => !keys.has(k));
 if (LIST) for (const [key] of keys) console.log(key);
 if (MISSING) { console.log(JSON.stringify(missing, null, 1)); process.exit(0); }

@@ -2,6 +2,7 @@ Contract: ux-contract v4
 # Screens
 **Web surfaces:** no — local authenticated desktop workbench; browser demo contains only fixtures.
 Design system: PassionCode v1.0.0, vendored from the [immutable canonical source](../../brand/passioncode/manifest.json); native semantic HTML controls in Tauri. Product-specific states are our decisions, not claimed as kit validation. No cinematic motion. Variance 2 (consistent rows), motion 1 (focus/hover), density 6 (compact account rows and current identity visible before account actions; retained workbench hierarchy).
+Design pass 2026-10-22 (SB-164): one card width (980 px, prose 72ch), a spacing rule after every lead-in note, state on a tinted surface instead of a side stripe (marker V005), statistics tables that scroll sideways on a narrow window, and Kimi rows on the same narrow grid as other accounts. Decisions, the critique and what stays open: [director record](../design/switchboard/director-record.md).
 Falsifier: user cannot tell which account handles the next request, or cannot recover from a failed addition.
 ## SCR-01 — Accounts
 Status: designed
