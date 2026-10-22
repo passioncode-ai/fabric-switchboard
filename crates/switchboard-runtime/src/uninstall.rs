@@ -499,6 +499,7 @@ mod tests {
                     .into_owned()],
                 created_at: 1,
                 sources: vec![],
+                organization: None,
             }],
             accounts: vec![switchboard_core::Account {
                 id: "id-pc".into(),

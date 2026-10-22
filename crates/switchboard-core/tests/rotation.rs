@@ -1779,3 +1779,43 @@ fn a_project_has_no_folder_limit_and_all_projects_hold_1024() {
         .unwrap();
     assert_eq!(project.sources, vec!["github.com/example".to_string()]);
 }
+
+/// SB-109: a seat that left its group's organization is never a rotation candidate, not even as
+/// SB-98's guess on last known usage (the switch would be refused and spend an attempt).
+#[test]
+fn a_seat_outside_its_groups_organization_is_never_guessed() {
+    use std::collections::HashSet;
+    let (root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    for id in [&a, &b, &c] {
+        store.assign_organization(id, Some(&acme.id)).unwrap();
+    }
+    let dir = root.path().join("work");
+    std::fs::create_dir_all(&dir).unwrap();
+    let group = store
+        .save_project_in(
+            None,
+            "Work",
+            std::slice::from_ref(&dir),
+            &[a.clone(), b.clone(), c.clone()],
+            Some(Some(&acme.id)),
+        )
+        .unwrap();
+    observe(&store, &a, 40., now);
+    observe(&store, &b, 30., now - 1800);
+    observe(&store, &c, 10., now - 1800);
+    store.assign_organization(&c, Some("personal")).unwrap();
+    let p = RotationPolicy {
+        pool: group.pool.clone(),
+        ..policy()
+    };
+    let limited: HashSet<String> = [a.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
+}

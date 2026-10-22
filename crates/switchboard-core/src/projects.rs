@@ -215,6 +215,10 @@ pub struct Project {
     /// (`github.com/passioncode-ai`, SB-117). Set by a person, never guessed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<String>,
+    /// The organization whose accounts this group runs on (SB-109); none is personal. Only
+    /// read while at least one organization exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
 }
 const MAX_PROJECTS: usize = 64;
 const MAX_SOURCES: usize = 16;
@@ -286,8 +290,13 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
 impl Snapshot {
     /// The group a session in `path` works in (SB-146): of the groups holding the folder, the
     /// first (in creation order) with an enabled account, else the first.
+    /// With organizations defined, a personal group comes first: the more private wins (SB-109,
+    /// RM-28 CX-26).
     pub fn project_for(&self, path: &Path) -> Option<&Project> {
-        let all = self.projects_for(path);
+        let mut all = self.projects_for(path);
+        if !self.organizations.is_empty() {
+            all.sort_by_key(|p| p.organization.is_some());
+        }
         all.iter()
             .find(|p| self.accounts.iter().any(|a| a.pool == p.pool && a.enabled))
             .or(all.first())
@@ -317,6 +326,18 @@ impl Store {
         name: &str,
         folders: &[std::path::PathBuf],
         accounts: &[String],
+    ) -> Result<Project, String> {
+        self.save_project_in(pool, name, folders, accounts, None)
+    }
+    /// [`Store::save_project`], also setting the group's organization when `organization` is
+    /// given (`Some(None)` makes it personal); left out, a saved group keeps its own (SB-109).
+    pub fn save_project_in(
+        &self,
+        pool: Option<&str>,
+        name: &str,
+        folders: &[std::path::PathBuf],
+        accounts: &[String],
+        organization: Option<Option<&str>>,
     ) -> Result<Project, String> {
         let name = name.trim();
         if !crate::label_valid(name) {
@@ -428,6 +449,30 @@ impl Store {
                 );
             }
         }
+        let current = existing.and_then(|i| candidate.projects[i].organization.clone());
+        let organization = match organization {
+            Some(Some(id)) => {
+                if candidate.organization(id).is_none() {
+                    return Err(crate::organizations::ORGANIZATION_NOT_FOUND.into());
+                }
+                Some(id.to_owned())
+            }
+            Some(None) => None,
+            None => current.clone(),
+        };
+        // SB-109: an account joins a group of its own context only; a group whose organization
+        // changes takes only accounts of the new one.
+        if !candidate.organizations.is_empty() {
+            for a in candidate
+                .accounts
+                .iter()
+                .filter(|a| accounts.contains(&a.id) && (a.pool != pool || organization != current))
+            {
+                if candidate.attribution(a).organization != organization {
+                    return Err(crate::organizations::SEAT_CHOSEN.into());
+                }
+            }
+        }
         for (id, to) in &moves {
             let old = {
                 let a = candidate.accounts.iter_mut().find(|a| &a.id == id).unwrap();
@@ -455,6 +500,7 @@ impl Store {
             folders: folder_list,
             created_at,
             sources,
+            organization,
         };
         match existing {
             Some(i) => candidate.projects[i] = project.clone(),
@@ -471,6 +517,38 @@ impl Store {
                 "created"
             },
         );
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(project)
+    }
+    /// Binds a group to an organization, or to none (personal), SB-109. Refused while the group
+    /// still holds an account of another context.
+    pub fn set_project_organization(
+        &self,
+        pool: &str,
+        organization: Option<&str>,
+    ) -> Result<Project, String> {
+        let organization = organization.filter(|o| *o != crate::organizations::PERSONAL);
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if let Some(id) = organization {
+            if candidate.organization(id).is_none() {
+                return Err(crate::organizations::ORGANIZATION_NOT_FOUND.into());
+            }
+        }
+        if candidate.accounts.iter().any(|a| {
+            a.pool == pool && candidate.attribution(a).organization.as_deref() != organization
+        }) {
+            return Err(crate::organizations::SEATS_ELSEWHERE.into());
+        }
+        let project = candidate
+            .projects
+            .iter_mut()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        project.organization = organization.map(str::to_owned);
+        let project = project.clone();
+        append_event(&mut candidate, "project", None, "updated");
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(project)
@@ -520,9 +598,17 @@ impl Store {
     }
     /// Puts a project back from a backup as it was: its accounts are already in its pool. A
     /// project whose pool or folders this install already uses is left out.
-    pub fn restore_project(&self, project: Project) -> Result<(), String> {
+    pub fn restore_project(&self, mut project: Project) -> Result<(), String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
+        // An organization this install does not hold leaves the group personal.
+        if project
+            .organization
+            .as_deref()
+            .is_some_and(|o| candidate.organization(o).is_none())
+        {
+            project.organization = None;
+        }
         if candidate.projects.iter().any(|p| p.pool == project.pool) {
             return Err("Project already here.".into());
         }

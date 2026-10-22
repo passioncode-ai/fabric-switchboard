@@ -296,6 +296,12 @@ export function attribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' |
   if (owner) return { organization: owner.id, by: 'domain' };
   return { organization: null, by: null };
 }
+/** SB-109: whether `account` may serve a group bound to `organization` (null: personal), as
+ * `Snapshot::context_admits`: always while no organization exists. */
+export function groupAdmits(snapshot: OrgSnapshot, organization: string | null, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): boolean {
+  if (!(snapshot.organizations ?? []).length) return true;
+  return attribution(snapshot, account).organization === organization;
+}
 /** The Accounts filter (SB-158): every account, the personal ones, or one organization's. */
 export function inOrganizationFilter(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, filter: string): boolean {
   if (filter === 'all') return true;
@@ -656,9 +662,11 @@ export interface StatGroup extends StatCounts { pool: string; name: string | nul
 /** SB-147: a project (a repository with its checkouts, or a folder outside Git); `project` empty for requests whose folder is not known. */
 export interface StatProject extends StatCounts { project: string; name: string | null; groups: { pool: string; name: string | null }[] }
 export interface StatAgent extends StatCounts { agent: string }
+/** SB-109: by whose seat requests ran: an organization's id, `personal`, or `unknown` (a removed account). */
+export interface StatOrganization extends StatCounts { organization: string; name: string | null }
 export interface StatRoute extends StatAccount { pool: string; name: string | null; project: string; project_name: string | null; agent: string }
 export interface StatDay extends StatCounts { day: string; groups?: { pool: string; requests: number; tokens: number }[] }
-export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; groups: StatGroup[]; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
+export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; groups: StatGroup[]; organizations?: StatOrganization[]; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
 /** A count as people read it in a table: 950, 12.4K, 3.21M. */
 export function compactCount(n: number): string {
   if (n < 1000) return String(n);

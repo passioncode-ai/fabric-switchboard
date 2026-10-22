@@ -686,4 +686,17 @@ check(() => {
   assert.equal(logic.inOrganizationFilter(snap, account('b', 'claude', 'dev@acme.example', 'team-b'), 'personal'), true);
   assert.deepEqual(logic.domainList(' @Acme.example, beta.example\nacme.example '), ['acme.example', 'beta.example']);
 });
+// SB-109: a group takes accounts of its own organization, or personal ones; no organization, no rule.
+check(() => {
+  const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
+  const work = account('w', 'dev@acme.example'); const home = account('h', 'me@home.example');
+  assert.equal(logic.groupAdmits({}, null, work), true);
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  assert.equal(logic.groupAdmits(snap, 'o1', work), true);
+  assert.equal(logic.groupAdmits(snap, null, work), false);
+  assert.equal(logic.groupAdmits(snap, null, home), true);
+  assert.equal(logic.groupAdmits(snap, 'o1', home), false);
+  snap.memberships.w = 'personal';
+  assert.equal(logic.groupAdmits(snap, null, work), true);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

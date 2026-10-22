@@ -526,6 +526,7 @@ mod tests {
                 ],
                 created_at: 1,
                 sources: vec![],
+                organization: None,
             }],
             ..Default::default()
         };

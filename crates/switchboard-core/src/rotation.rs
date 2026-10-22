@@ -162,6 +162,7 @@ impl Store {
                     && a.provider == policy.provider
                     && a.pool == policy.pool
                     && !limited.contains(&a.id)
+                    && state.context_admits(&a.pool, a)
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
             .filter(|(a, used)| {
@@ -195,6 +196,7 @@ impl Store {
                         && a.provider == policy.provider
                         && a.pool == policy.pool
                         && !limited.contains(&a.id)
+                        && state.context_admits(&a.pool, a)
                         && self.rotation_credential_eligible(a, policy, now)
                 })
                 .filter_map(|a| {
@@ -290,6 +292,7 @@ impl Store {
                     && a.pool == policy.pool
                     && !held.contains(&a.id)
                     && fits.admits(a)
+                    && state.context_admits(&a.pool, a)
                     && self.rotation_credential_eligible(a, policy, now)
             })
             .filter_map(|a| match fresh_usage(a, policy, now) {

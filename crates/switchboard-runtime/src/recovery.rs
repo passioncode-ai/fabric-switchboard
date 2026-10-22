@@ -696,6 +696,7 @@ mod tests {
             folders: vec![wait.directory.to_string_lossy().into_owned()],
             created_at: 101,
             sources: vec![],
+            organization: None,
         });
         let mut reserved = account("reserved-account");
         reserved.pool = "reserved".into();
@@ -1114,6 +1115,7 @@ mod tests {
                 folders: vec![folder.clone()],
                 account_ids: vec![mine.id.clone()],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();

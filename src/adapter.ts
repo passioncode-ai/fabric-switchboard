@@ -42,7 +42,7 @@ export const nativeAdapter: Adapter = {
   backupNow: () => invoke('backup_now'),
   restoreBackup: (file) => invoke('restore_backup', { file }),
   linkCli: () => invoke('link_cli'),
-  saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null }),
+  saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null, organization: input.organization ?? null }),
   removeProject: (pool) => invoke('remove_project', { pool }),
   projectRoots: () => invoke('project_roots'),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
@@ -103,6 +103,10 @@ const safeErrors = new Set([
   'Name the organization in 1 to 80 characters.',
   'An organization has at most 16 domains.',
   'At most 32 organizations.',
+  // A group's organization (SB-109).
+  "This account belongs to another organization than this group. Move it, or change the group's organization.",
+  "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.",
+  'This group still holds accounts that belong elsewhere. Move them out first.',
   // Project suggestions (SB-117).
   'Project suggestions could not be read. Restore the private file before continuing.',
   'No such suggestion. Read the suggestions again.',

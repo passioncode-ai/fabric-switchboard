@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.6.64"
+  version: "0.6.65"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -47,7 +47,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_onboarding` | no | setup steps: what is done, what to run, what is the person's (`switchboard onboard` is the guide) |
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
 | `switchboard_projects` | no | every project: pool, folders, sources, reserved accounts, and the rules |
-| `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename), only when the operator asks |
+| `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename, its organization: an id, a name or `personal`), only when the operator asks; with an organization defined, a group runs only on its organization's accounts (personal ones when it has none) and refuses others |
 | `switchboard_codex_route` | yes | whether Codex sessions in project folders use the projects' Codex accounts; turn it on or off only when the operator asks |
 | `switchboard_project_move_root` | yes | move a repository with its worktrees and clones to another project, or put a loose one in a project, only when the operator asks |
 | `switchboard_repository_map` | no | the Git repositories under given folders (default `~/DATA`), each with its project or none |

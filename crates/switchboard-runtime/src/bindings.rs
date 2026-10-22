@@ -116,7 +116,15 @@ fn git_root_and_common(folder: &Path) -> Option<(PathBuf, PathBuf)> {
 /// its own settings there).
 pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     let mut out: Vec<(PathBuf, String)> = Vec::new();
-    for project in &snapshot.projects {
+    // SB-109: with organizations defined, personal groups first, so a folder in groups of two
+    // contexts is written for the personal one (the more private wins), as `project_for` says.
+    let mut projects: Vec<_> = snapshot.projects.iter().collect();
+    if !snapshot.organizations.is_empty() {
+        projects.sort_by_key(|p| p.organization.is_some());
+    }
+    for project in projects {
+        // A group whose seats left its organization keeps its folders: the proxy refuses the seat
+        // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
         let claude = snapshot
             .accounts
             .iter()
@@ -629,6 +637,7 @@ mod tests {
                 .collect(),
             created_at: 1,
             sources: vec![],
+            organization: None,
         }
     }
     fn env(folder: &Path) -> Option<Map<String, Value>> {

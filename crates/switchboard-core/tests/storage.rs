@@ -1333,3 +1333,165 @@ fn assigning_one_seat_brings_its_team_and_removals_clean_up_assignments() {
     assert!(snapshot.memberships.is_empty());
     assert_eq!(snapshot.attribution(&a).organization, None);
 }
+
+#[test]
+fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
+    // SB-109 (SCN-070): with an organization defined, a group takes only accounts of its own
+    // context (its organization, or personal), at placement and at run time; without one,
+    // nothing is refused.
+    use switchboard_core::ExternalIdentity;
+    let (root, _vault, store) = setup();
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let seat = |email: &str, refresh: &str| {
+        store
+            .upsert(
+                email.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth(refresh),
+                Some(ExternalIdentity {
+                    account_id: Some(format!("synthetic-{refresh}")),
+                    organization_id: None,
+                    email: Some(email.into()),
+                }),
+            )
+            .unwrap()
+    };
+    let work = seat("dev@acme.example", "w");
+    let home = seat("me@home.invalid", "h");
+    let alpha_dir = root.path().join("alpha");
+    let beta_dir = root.path().join("beta");
+    std::fs::create_dir_all(&alpha_dir).unwrap();
+    std::fs::create_dir_all(&beta_dir).unwrap();
+    // No organization: any account joins any group.
+    let alpha = store
+        .save_project(
+            None,
+            "Alpha",
+            std::slice::from_ref(&alpha_dir),
+            std::slice::from_ref(&work.id),
+        )
+        .unwrap();
+    assert_eq!(alpha.organization, None);
+    let acme = store
+        .add_organization("Acme", &["acme.example".into()])
+        .unwrap();
+    // The personal group now holds Acme's seat: run time refuses it, until the group is Acme's.
+    let snapshot = store.snapshot().unwrap();
+    assert!(!snapshot.context_admits(
+        &alpha.pool,
+        &snapshot
+            .accounts
+            .iter()
+            .find(|a| a.id == work.id)
+            .unwrap()
+            .clone()
+    ));
+    assert!(
+        snapshot.context_admits("default", &work),
+        "default is not a group"
+    );
+    // Making it Acme's is accepted; making a personal group take Acme's seat is refused.
+    let alpha = store
+        .set_project_organization(&alpha.pool, Some(&acme.id))
+        .unwrap();
+    assert_eq!(alpha.organization.as_deref(), Some(acme.id.as_str()));
+    let err = store
+        .save_project(
+            None,
+            "Beta",
+            std::slice::from_ref(&beta_dir),
+            &[work.id.clone(), home.id.clone()],
+        )
+        .unwrap_err();
+    assert!(err.contains("belongs to another organization"), "{err}");
+    // Acme's group refuses the personal seat; saving keeps the group's organization.
+    let err = store
+        .save_project(
+            Some(&alpha.pool),
+            "Alpha",
+            std::slice::from_ref(&alpha_dir),
+            &[work.id.clone(), home.id.clone()],
+        )
+        .unwrap_err();
+    assert!(err.contains("belongs to another organization"), "{err}");
+    let kept = store
+        .save_project(
+            Some(&alpha.pool),
+            "Alpha",
+            std::slice::from_ref(&alpha_dir),
+            std::slice::from_ref(&work.id),
+        )
+        .unwrap();
+    assert_eq!(kept.organization.as_deref(), Some(acme.id.as_str()));
+    // A personal group with a personal seat; turning it into Acme's is refused while it holds it.
+    let beta = store
+        .save_project(
+            None,
+            "Beta",
+            std::slice::from_ref(&beta_dir),
+            std::slice::from_ref(&home.id),
+        )
+        .unwrap();
+    let err = store
+        .set_project_organization(&beta.pool, Some(&acme.id))
+        .unwrap_err();
+    assert!(err.contains("elsewhere. Move"), "{err}");
+    assert!(store
+        .set_project_organization(&beta.pool, Some("no-such"))
+        .is_err());
+    // Selection and the route refuse a seat that moved to another context after placement.
+    store
+        .select(Provider::Claude, &alpha.pool, &work.id)
+        .unwrap();
+    store
+        .assign_organization(&work.id, Some("personal"))
+        .unwrap();
+    assert!(store
+        .route(Provider::Claude, &alpha.pool)
+        .err()
+        .unwrap()
+        .contains("belongs to another organization"));
+    assert!(store
+        .select(Provider::Claude, &alpha.pool, &work.id)
+        .is_err());
+    store.assign_organization(&work.id, None).unwrap();
+    assert!(store.route(Provider::Claude, &alpha.pool).is_ok());
+    // Removing the organization turns its groups personal.
+    store.remove_organization(&acme.id).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.project_of_pool(&alpha.pool).unwrap().organization,
+        None
+    );
+}
+
+#[test]
+fn a_folder_in_groups_of_two_contexts_runs_in_the_personal_one() {
+    // SB-109 (SCN-070, RM-28 CX-26): the more private group wins for a shared folder.
+    let (root, _vault, store) = setup();
+    let shared = root.path().join("shared");
+    std::fs::create_dir_all(&shared).unwrap();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let first = store
+        .save_project(None, "Acme work", std::slice::from_ref(&shared), &[])
+        .unwrap();
+    store
+        .set_project_organization(&first.pool, Some(&acme.id))
+        .unwrap();
+    let second = store
+        .save_project(None, "Zed personal", std::slice::from_ref(&shared), &[])
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.project_for(&shared).unwrap().pool, second.pool);
+}

@@ -320,7 +320,12 @@ pub(crate) fn project_view(
         .filter(|a| a.pool == project.pool)
         .map(account_view)
         .collect();
-    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts})
+    let organization_name = project
+        .organization
+        .as_deref()
+        .and_then(|id| snapshot.organization(id))
+        .map(|o| o.name.clone());
+    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts, "organization": project.organization, "organization_name": organization_name})
 }
 
 fn outcome(provider: Provider, action: &str, account: Option<&Account>, message: String) -> Value {

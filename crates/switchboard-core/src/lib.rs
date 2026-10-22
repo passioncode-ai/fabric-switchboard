@@ -1468,6 +1468,9 @@ impl Store {
             .iter()
             .find(|a| a.id == id && a.provider == provider && a.pool == pool && a.enabled)
             .ok_or("Account is unavailable in this provider and pool")?;
+        if !state.context_admits(pool, a) {
+            return Err(organizations::SEAT_OUTSIDE.into());
+        }
         self.checked_credential(a)?;
         let mut candidate = state.clone();
         candidate
@@ -1527,6 +1530,9 @@ impl Store {
             .iter()
             .find(|a| a.id == *id && a.provider == provider && a.pool == pool)
             .ok_or("Selected account unavailable")?;
+        if !state.context_admits(pool, a) {
+            return Err(organizations::SEAT_OUTSIDE.into());
+        }
         Ok((a.clone(), self.checked_credential(a)?))
     }
     pub fn credential(&self, id: &str) -> Result<Credential, String> {

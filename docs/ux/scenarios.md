@@ -76,6 +76,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-066 | Codex in a project's folders uses the project's Codex accounts | draft |
 | SCN-067 | See which accounts and agents work where, and where tokens go | draft |
 | SCN-068 | Groups of projects: one repository in several groups, and the projects a group holds on hover | draft |
+| SCN-069 | See which accounts belong to which organization | draft |
+| SCN-070 | Keep a group's work on its organization's accounts | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1453,3 +1455,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `organizations::tests::*`, storage `assigning_one_seat_brings_its_team_and_removals_clean_up_assignments`, ui-logic SB-158 case, WebKit demo (empty page, add, badges by domain, filter counts, *Personal* through the menu, cards with members).
 **Product:** unobserved
 **Traces:** SB-158
+## SCN-070: Keep a group's work on its organization's accounts
+**Persona:** P-01
+**Goal:** A person who works for several companies binds a group of projects to one company, so agents in those folders run only on that company's seats, and a group of personal work never spends a company's seat (operator 2026-10-12, RM-28 CX-26, CX-28: «моделируем сейчас, отрабатываем потом»; design `docs/research/organizations-2026-10-21.md` §5).
+**Preconditions:** at least one organization exists (SCN-069); at least one group. With no organization, nothing below is shown and nothing is refused.
+**Entry point:** *Groups* → a group's *Edit…* (or *+ New group*).
+**Steps:**
+1. The group dialog shows *Organization*: *Personal* and each organization by name; a new group starts on *Personal*.
+2. Choosing an organization lists, among *Accounts*, that organization's accounts as choosable; another context's accounts are shown disabled with why (“Belongs to {name}.” or “Personal account.”).
+3. *Save group* → “Group “{name}” saved.”; the group's card carries the organization's badge (no badge for *Personal*).
+4. Sessions in the group's folders run only on its accounts; a request on an account that no longer belongs to the group's organization (its domain or team moved) is refused with “This account belongs to another organization than this group. Move it, or change the group's organization.” and rotation skips it.
+5. A folder in two groups of different contexts runs in the personal one (the more private wins), fixed for the session.
+6. *Statistics* shows *By organization* above *By group* (each organization and *Personal*, by whose seat the request ran on).
+**Alt paths:** the window disables another context's accounts, so a save naming one (CLI, MCP) is refused with “An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.”; choosing an organization while the group still holds another context's account → refused with “This group still holds accounts that belong elsewhere. Move them out first.”, the dialog stays open; removing an organization turns its groups personal.
+**Expected result:** a company's work stays on its seats and personal work on personal seats, by the folder alone; nothing at the provider changes and nothing leaves the computer.
+**UI elements:** the *Organization* select in the group dialog, disabled account options with their reason, the badge on the group card, the *By organization* table.
+**States covered:** no organization (nothing shown); a personal group; an organization's group; a cross-context account in the pool (refused at save, skipped at run time); a folder in groups of two contexts; an organization removed.
+**Errors & recovery:** a refusal keeps the dialog open with its reason; a refused request names the account and the way out.
+**Status:** draft
+**Meaning:** operator decisions 2026-10-12 (RM-28 CX-26, CX-28) and 2026-10-21 (SB-158 design), SB-109.
+**Coverage:** core `organizations::tests` SB-109 cases, runtime statistics test, ui-logic SB-109 case, WebKit demo.
+**Product:** unobserved
+**Traces:** SB-109, SB-111

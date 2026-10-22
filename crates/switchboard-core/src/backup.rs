@@ -62,6 +62,9 @@ pub struct Restored {
     pub agent_keys: usize,
     #[serde(default)]
     pub settings: usize,
+    /// Organizations put back where this install had none of the same id, name or domain.
+    #[serde(default)]
+    pub organizations: usize,
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
 /// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
@@ -108,6 +111,15 @@ struct Payload {
     /// Keys agents run on (SB-79), with their values: sealed like every credential here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     agent_keys: Vec<AgentKeyCopy>,
+    /// SB-158/SB-109: organizations, the person's word on accounts (old account id → organization
+    /// id or `personal`) and each group's organization (pool → id), beside `projects` for the
+    /// same reason as `project_sources`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    organizations: Vec<crate::Organization>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    memberships: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    project_organizations: BTreeMap<String, String>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -240,17 +252,25 @@ pub fn write(
             .filter(|p| !p.sources.is_empty())
             .map(|p| (p.pool.clone(), p.sources.clone()))
             .collect(),
+        project_organizations: snapshot
+            .projects
+            .iter()
+            .filter_map(|p| Some((p.pool.clone(), p.organization.clone()?)))
+            .collect(),
         projects: snapshot
             .projects
             .into_iter()
             .map(|p| Project {
                 sources: Vec::new(),
+                organization: None,
                 ..p
             })
             .collect(),
         routes: snapshot.routes,
         settings,
         agent_keys,
+        organizations: snapshot.organizations,
+        memberships: snapshot.memberships.into_iter().collect(),
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -402,6 +422,7 @@ pub fn restore(
         routes: 0,
         settings: 0,
         agent_keys: 0,
+        organizations: 0,
     };
     let existing = store.snapshot()?;
     // Backup account id → the id it has here, for rules and selections.
@@ -523,13 +544,50 @@ pub fn restore(
             let _ = store.set_policy(policy);
         }
     }
+    // Organizations before projects, the person's word and the selections: each of these may
+    // name one (SB-109 refuses a selection outside a group's organization).
+    // Backup organization id → the one it is here: itself, or this install's organization of the
+    // same name (an install that made "Acme" again keeps its own, and the backup's groups follow it).
+    let mut org_ids: BTreeMap<String, String> = BTreeMap::new();
+    for organization in payload.organizations {
+        let old = organization.id.clone();
+        let name = organization.name.clone();
+        if store.restore_organization(organization).is_ok() {
+            result.organizations += 1;
+            org_ids.insert(old.clone(), old);
+            continue;
+        }
+        let here = store.snapshot()?;
+        if let Some(same) = here
+            .organizations
+            .iter()
+            .find(|o| o.id == old || o.name.trim().eq_ignore_ascii_case(name.trim()))
+        {
+            org_ids.insert(old, same.id.clone());
+        }
+    }
     // Projects first: their accounts are already in their pools; only the reservation returns.
     for mut project in payload.projects {
         if let Some(sources) = payload.project_sources.get(&project.pool) {
             project.sources = sources.clone();
         }
+        project.organization = payload
+            .project_organizations
+            .get(&project.pool)
+            .and_then(|o| org_ids.get(o))
+            .cloned();
         if store.restore_project(project).is_ok() {
             result.projects += 1;
+        }
+    }
+    for (old, choice) in &payload.memberships {
+        let choice = if choice == crate::organizations::PERSONAL {
+            Some(choice.clone())
+        } else {
+            org_ids.get(choice).cloned()
+        };
+        if let (Some(id), Some(choice)) = (ids.get(old), choice) {
+            let _ = store.restore_membership(id, &choice);
         }
     }
     let now = crate::now();
@@ -746,6 +804,7 @@ mod tests {
                 folders: vec!["/work/app".into()],
                 created_at: 1,
                 sources: vec!["github.com/example".into()],
+                organization: None,
             }],
             ..Default::default()
         };
@@ -765,12 +824,16 @@ mod tests {
                 .cloned()
                 .map(|p| Project {
                     sources: Vec::new(),
+                    organization: None,
                     ..p
                 })
                 .collect(),
             routes: BTreeMap::new(),
             settings: BTreeMap::new(),
             agent_keys: vec![],
+            organizations: vec![],
+            memberships: BTreeMap::new(),
+            project_organizations: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -830,6 +893,74 @@ mod tests {
             )
             .unwrap()
     }
+
+    #[test]
+    fn a_reinstall_gets_organizations_their_accounts_and_groups_back() {
+        // SB-158/SB-109: organizations, the person's word on an account and a group's
+        // organization travel in the backup; before 0.6.65 none of them did.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let b = save(&original, "synthetic-b", "token-b-secret");
+        let acme = original
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        // b is kept personal by the person's word; a belongs to Acme by its domain.
+        original
+            .assign_organization(&b.id, Some(PERSONAL_WORD))
+            .unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        original
+            .save_project_in(
+                None,
+                "Alpha",
+                std::slice::from_ref(&repo),
+                std::slice::from_ref(&a.id),
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        original.select(Provider::Claude, "alpha", &a.id).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(
+            (restored.organizations, restored.projects, restored.routes),
+            (1, 1, 1)
+        );
+        let snap = fresh.snapshot().unwrap();
+        assert_eq!(snap.organizations[0].id, acme.id);
+        assert_eq!(
+            snap.projects[0].organization.as_deref(),
+            Some(acme.id.as_str())
+        );
+        let b2 = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-b")
+            .unwrap();
+        assert_eq!(
+            snap.memberships.get(&b2.id).map(String::as_str),
+            Some(PERSONAL_WORD)
+        );
+        // A second restore adds nothing twice.
+        let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(again.organizations, 0);
+        // An install that made "acme" again keeps its own, and the group follows it.
+        let other = store(&temp.path().join("three"));
+        let own = other.add_organization("acme", &[]).unwrap();
+        let restored = restore(&other, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.organizations, 0);
+        let snap = other.snapshot().unwrap();
+        assert_eq!(snap.organizations.len(), 1);
+        assert_eq!(
+            snap.projects[0].organization.as_deref(),
+            Some(own.id.as_str())
+        );
+    }
+    const PERSONAL_WORD: &str = crate::organizations::PERSONAL;
 
     #[test]
     fn a_reinstall_gets_projects_rules_selections_and_settings_back() {

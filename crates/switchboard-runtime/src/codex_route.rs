@@ -24,9 +24,14 @@ pub const CODEX_ROUTE_UNREADABLE: &str =
 
 /// The folders of projects whose pool has an enabled Codex account, with their pools.
 pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, String)> {
-    snapshot
-        .projects
-        .iter()
+    // SB-109: with organizations, personal groups first, as `Snapshot::project_for` and the
+    // Claude bindings order them (the more private wins).
+    let mut projects: Vec<_> = snapshot.projects.iter().collect();
+    if !snapshot.organizations.is_empty() {
+        projects.sort_by_key(|p| p.organization.is_some());
+    }
+    projects
+        .into_iter()
         .filter(|p| {
             snapshot.accounts.iter().any(|a| {
                 a.pool == p.pool && a.enabled && a.provider == switchboard_core::Provider::Codex
@@ -277,6 +282,7 @@ mod tests {
             folders: vec![folder.into()],
             created_at: 1,
             sources: vec![],
+            organization: None,
         };
         let snapshot = Snapshot {
             projects: vec![project("a", "/w/a"), project("b", "/w/b")],
@@ -287,5 +293,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(folders(&snapshot), [("/w/a".to_owned(), "a".to_owned())]);
+        // SB-109: a folder in an organization's group and a personal one goes to the personal one.
+        let mut shared = Snapshot {
+            projects: vec![project("org", "/w/s"), project("own", "/w/s")],
+            accounts: vec![
+                account("org", Provider::Codex),
+                account("own", Provider::Codex),
+            ],
+            ..Default::default()
+        };
+        shared.organizations.push(switchboard_core::Organization {
+            id: "00000000-0000-4000-8000-000000000001".into(),
+            name: "Acme".into(),
+            domains: vec![],
+            provider_organizations: vec![],
+            created_at: 1,
+        });
+        shared.projects[0].organization = Some("00000000-0000-4000-8000-000000000001".into());
+        assert_eq!(folders(&shared), [("/w/s".to_owned(), "own".to_owned())]);
     }
 }

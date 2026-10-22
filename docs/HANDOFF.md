@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.65, a group's organization (SB-109)
+
+- **Done (task-pipeline, full flow; brief and REQ spine in the run ledger).** Organizations
+  phase 2 as designed in [organizations-2026-10-21](research/organizations-2026-10-21.md) §5:
+  scenario SCN-070 first, then core (`Project.organization`, `Snapshot::context_admits`,
+  `Store::set_project_organization`, `save_project_in`), refusals at placement, selection,
+  route, launch, skips in rotation and failover, personal-first folder order in `project_for`
+  and the bindings, Statistics by organization, CLI, MCP, window (dialog, badge, table).
+  Decision D1: the rule applies only while an organization exists and only to pools a group
+  reserves; the default pool serves the ordinary login's rotation and stays as it is.
+- **Adjacent defect fixed.** Backups carried no organizations, memberships or group
+  organizations, although CONTRACTS said they did; now they travel beside the projects (an
+  older reader still opens the backup).
+- **Board replies sent** (the fabric MCP came back): threads `e204b5b5`, `b2511678`,
+  `1cf4538e`, the 0.6.64 announcement on `c764dc65`, and *adapted* on `c97280b0`.
+- **Checks run.** `./scripts/check.sh` (exit code in the PR); WebKit walk-through on the demo
+  (add an organization, a group's dialog on Personal and on Acme, the badge, *By
+  organization*), no page errors.
+- **Next task.** Release 0.6.65; then SB-159 (link an organization to Vesta) by 2026-10-27,
+  SB-141's vectors part beside it, SB-168's design note by 2026-10-29.
+
 ## 2026-10-22: 0.6.64, `recovery` answers at once (SB-166)
 
 - **Done.** `Operation::Recovery` joins the reads answered without the owner transaction, like

@@ -1524,6 +1524,10 @@ pub(crate) fn project_allows(
     account: &switchboard_core::Account,
     folder: &Path,
 ) -> Result<(), String> {
+    // SB-109: a group runs only on accounts of its own organization (or personal ones).
+    if !snapshot.context_admits(&account.pool, account) {
+        return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
+    }
     if let Some(owner) = snapshot.project_of_pool(&account.pool) {
         if !owner
             .folders
@@ -2677,6 +2681,7 @@ mod tests {
                 folders: vec!["/work/web".into(), "/work/api".into()],
                 created_at: 1,
                 sources: vec![],
+                organization: None,
             }],
             ..Default::default()
         };
@@ -2698,6 +2703,24 @@ mod tests {
         assert!(project_allows(&snapshot, &a(1), Path::new("/elsewhere")).is_ok());
         // `/work/webapp` is not inside `/work/web`.
         assert!(project_allows(&snapshot, &a(1), Path::new("/work/webapp")).is_ok());
+        // SB-109: once an organization exists, the personal group refuses its seat of Acme's.
+        let mut with_org = snapshot.clone();
+        with_org.organizations.push(switchboard_core::Organization {
+            id: "00000000-0000-4000-8000-000000000001".into(),
+            name: "Acme".into(),
+            domains: vec![],
+            provider_organizations: vec![],
+            created_at: 1,
+        });
+        with_org
+            .memberships
+            .insert("own".into(), "00000000-0000-4000-8000-000000000001".into());
+        assert_eq!(
+            project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).unwrap_err(),
+            switchboard_core::organizations::SEAT_OUTSIDE
+        );
+        with_org.projects[0].organization = Some("00000000-0000-4000-8000-000000000001".into());
+        assert!(project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).is_ok());
     }
 
     use super::*;

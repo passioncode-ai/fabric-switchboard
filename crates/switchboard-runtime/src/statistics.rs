@@ -275,6 +275,35 @@ impl Statistics {
                 .map(|(id, t)| (row(account_fields(id), t), weight(t)))
                 .collect(),
         );
+        // SB-109: by whose seat the requests ran, once an organization exists: an organization's
+        // id, `personal`, or `unknown` for an account removed since.
+        let mut by_organization: BTreeMap<String, Tally> = BTreeMap::new();
+        if !snapshot.organizations.is_empty() {
+            for (id, t) in &by_account {
+                let key = match account(id) {
+                    Some(a) => snapshot
+                        .attribution(a)
+                        .organization
+                        .unwrap_or_else(|| switchboard_core::organizations::PERSONAL.into()),
+                    None => "unknown".into(),
+                };
+                by_organization.entry(key).or_default().add(t);
+            }
+        }
+        let organizations = busiest(
+            by_organization
+                .iter()
+                .map(|(key, t)| {
+                    let mut m = serde_json::Map::new();
+                    m.insert("organization".into(), json!(key));
+                    m.insert(
+                        "name".into(),
+                        json!(snapshot.organization(key).map(|o| o.name.clone())),
+                    );
+                    (row(m, t), weight(t))
+                })
+                .collect(),
+        );
         let agents = busiest(
             by_agent
                 .iter()
@@ -325,6 +354,7 @@ impl Statistics {
             "since": since,
             "total": total,
             "groups": groups,
+            "organizations": organizations,
             "projects": projects,
             "accounts": accounts,
             "agents": agents,
@@ -467,6 +497,76 @@ mod tests {
             .unwrap()
             .tallies
             .is_empty());
+    }
+
+    #[test]
+    fn requests_are_counted_by_whose_seat_they_ran_on_once_an_organization_exists() {
+        // SB-109: By organization, from each account's attribution; nothing without one.
+        use switchboard_core::{Account, AuthKind, ExternalIdentity, Organization, Provider};
+        let now = 1_792_400_000;
+        let today = stats::day_of(now);
+        let s = Statistics::default();
+        s.absorb(Tallies::from([
+            (
+                stats::key(&today, "work", "acme", "claude-code", ""),
+                tally(3, 30),
+            ),
+            (
+                stats::key(&today, "home", "default", "claude-code", ""),
+                tally(2, 20),
+            ),
+            (
+                stats::key(&today, "gone", "default", "codex", ""),
+                tally(1, 10),
+            ),
+        ]));
+        let seat = |id: &str, email: &str| Account {
+            id: id.into(),
+            label: email.into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: Some(ExternalIdentity {
+                account_id: None,
+                organization_id: None,
+                email: Some(email.into()),
+            }),
+            usage_health: None,
+        };
+        let mut snapshot = Snapshot {
+            accounts: vec![
+                seat("work", "dev@acme.example"),
+                seat("home", "me@home.invalid"),
+            ],
+            ..Snapshot::default()
+        };
+        let index = ProjectIndex::default();
+        assert_eq!(
+            s.report(&snapshot, &index, 7, now)["organizations"],
+            json!([])
+        );
+        snapshot.organizations.push(Organization {
+            id: "00000000-0000-4000-8000-000000000001".into(),
+            name: "Acme".into(),
+            domains: vec!["acme.example".into()],
+            provider_organizations: vec![],
+            created_at: 1,
+        });
+        let report = s.report(&snapshot, &index, 7, now);
+        let rows = report["organizations"].as_array().unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["name"], "Acme");
+        assert_eq!(rows[0]["requests"], 3);
+        assert!(rows
+            .iter()
+            .any(|r| r["organization"] == "personal" && r["requests"] == 2));
+        assert!(rows
+            .iter()
+            .any(|r| r["organization"] == "unknown" && r["requests"] == 1));
     }
 
     #[test]

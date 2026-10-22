@@ -775,6 +775,7 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
             folders: vec![a.clone()],
             account_ids: vec![],
             base_folders: None,
+            organization: None,
         })
         .await
         .unwrap();
@@ -802,6 +803,35 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         json!({"pool": pool, "add_folders": ["relative/x"]}),
     );
     assert!(error, "{refused}");
+    // SB-109: a group bound to an organization by name; it refuses while it holds a personal
+    // account, takes it once the account is out, and `switchboard_projects` names it.
+    let (error, added) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "add", "name": "Acme", "domains": ["acme.invalid"]}),
+    );
+    assert!(!error, "{added}");
+    let (error, refused) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "organization": "acme"}),
+    );
+    assert!(error, "{refused}");
+    let (error, changed) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "remove_accounts": [ids[2]], "organization": "Acme"}),
+    );
+    assert!(!error, "{changed}");
+    let (_, listed) = agent.tool("switchboard_projects", json!({}));
+    assert_eq!(
+        listed["projects"][0]["organization_name"], "Acme",
+        "{listed}"
+    );
+    let (error, changed) = agent.tool(
+        "switchboard_project_edit",
+        json!({"pool": pool, "organization": "personal"}),
+    );
+    assert!(!error, "{changed}");
+    let (_, listed) = agent.tool("switchboard_projects", json!({}));
+    assert!(listed["projects"][0]["organization"].is_null(), "{listed}");
     // SB-135 part 2: the disk map and moving a repository between projects.
     let (error, map) = agent.tool(
         "switchboard_repository_map",
