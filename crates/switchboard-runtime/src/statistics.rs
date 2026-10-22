@@ -555,6 +555,7 @@ mod tests {
             domains: vec!["acme.example".into()],
             provider_organizations: vec![],
             created_at: 1,
+            vesta_id: None,
         });
         let report = s.report(&snapshot, &index, 7, now);
         let rows = report["organizations"].as_array().unwrap();

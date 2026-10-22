@@ -430,6 +430,15 @@ fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
 enum Org {
     /// The organizations, then every account with the organization it belongs to and why.
     List,
+    /// Connect PassionCode.ai (SB-159): sign in in the browser, then your organizations there
+    /// arrive here with their names and domains and are read again every 6 hours.
+    Connect,
+    /// Read your PassionCode.ai organizations again now.
+    Read,
+    /// Where the PassionCode.ai connection stands (no token is shown).
+    Passioncode,
+    /// Delete the PassionCode.ai token; the organizations stay as local ones.
+    Disconnect,
     /// Add an organization with the e-mail domains it owns.
     Add {
         /// Its name, unique on this machine.
@@ -1088,6 +1097,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Org { command } => match command {
             Org::List => Operation::Organizations,
+            Org::Connect => Operation::VestaConnect,
+            Org::Read => Operation::VestaSync,
+            Org::Passioncode => Operation::VestaStatus,
+            Org::Disconnect => Operation::VestaDisconnect,
             Org::Add { name, domains } => Operation::OrganizationAdd {
                 name: name.clone(),
                 domains: domains.clone(),
@@ -2533,6 +2546,10 @@ mod mcp_parity {
         ("org edit", Tool("switchboard_organization_set")),
         ("org remove", Tool("switchboard_organization_set")),
         ("org assign", Tool("switchboard_organization_set")),
+        ("org connect", Not(PERSON)),
+        ("org read", Tool("switchboard_organization_set")),
+        ("org passioncode", Tool("switchboard_organizations")),
+        ("org disconnect", Not(PERSON)),
         ("accounts remove", Not(PERSON)),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),

@@ -78,6 +78,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-068 | Groups of projects: one repository in several groups, and the projects a group holds on hover | draft |
 | SCN-069 | See which accounts belong to which organization | draft |
 | SCN-070 | Keep a group's work on its organization's accounts | draft |
+| SCN-071 | Keep organizations current from PassionCode.ai | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1477,3 +1478,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `organizations::tests` SB-109 cases, runtime statistics test, ui-logic SB-109 case, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-109, SB-111
+## SCN-071: Keep organizations current from PassionCode.ai
+**Persona:** P-01
+**Goal:** A person who is a member of organizations on PassionCode.ai (Vesta, `org.passioncode.ai`) gets them in Switchboard with their names and domains, kept current, without typing them; Switchboard keeps working the same without it (operator 2026-10-21: «связь с организацией … если нет, будет просто стандартный switchboard»; decision on board thread `63af7559`: a browser sign-in with a loopback redirect and PKCE, a read-only token for `GET /v1/me/organizations`, kept in the OS vault, read at start and at most every 6 hours).
+**Preconditions:** none; with no connection nothing changes.
+**Entry point:** sidebar → *Organizations* → *Connect PassionCode.ai…*; CLI `switchboard org connect`.
+**Steps:**
+1. *Connect PassionCode.ai…* → the system browser opens the PassionCode.ai consent page (“Fabric Switchboard wants to read your organizations…”); the window says “Waiting for PassionCode.ai in your browser…” with *Cancel*.
+2. *Allow* → the browser shows “Switchboard is connected. You can close this tab.”; the window reads the organizations and says “Connected to PassionCode.ai: {count} organizations.”
+3. Each organization of the person appears on *Organizations* with its name and domains and a *PassionCode.ai* mark; one with the same name or a shared domain that the person had typed is linked rather than duplicated, keeping its accounts.
+4. Switchboard reads them again at start and every 6 hours; a renamed organization or a new domain shows up by itself, and accounts on the new domain get its badge.
+5. *Disconnect* → the token is deleted from the vault; the organizations stay as local ones.
+**Alt paths:** *Deny* in the browser → “PassionCode.ai was not connected: access was denied.”; no answer within 5 minutes or *Cancel* → nothing changes; the person left an organization on PassionCode.ai → it stays as a local organization, no longer marked; PassionCode.ai unreachable → the last copy stays in force and the panel says when it was read; the grant ended or was revoked → “Sign in to PassionCode.ai again” with *Connect…*; the person has not signed in through their identity provider for a while → “Sign in to PassionCode.ai in your browser, then read again”.
+**Expected result:** the organizations Switchboard uses are the person's PassionCode.ai memberships, current within 6 hours; nothing about accounts leaves the computer (only the read of the person's own memberships goes out).
+**UI elements:** the PassionCode.ai panel on *Organizations* (state line, *Connect…*, *Read now*, *Disconnect*), the waiting line with *Cancel*, the *PassionCode.ai* mark on a linked organization's card.
+**States covered:** not connected; waiting for the browser; connected and current; read failed (unreachable); sign in again; provider sign-in needed; disconnected.
+**Errors & recovery:** every failure keeps the last organizations and names the next step.
+**Status:** draft
+**Meaning:** operator 2026-10-21 (SB-159), board thread `63af7559` (decision `25edcc48`, Vesta VES-APP-TOKEN `9f7c7618`).
+**Coverage:** core `vesta` cases, runtime `vesta::tests` (loopback, exchange, refresh, 401 classes against a synthetic server), ui-logic SB-159 case, WebKit demo.
+**Product:** unobserved
+**Traces:** SB-159

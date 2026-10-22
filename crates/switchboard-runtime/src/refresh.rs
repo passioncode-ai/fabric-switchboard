@@ -76,7 +76,7 @@ pub(crate) struct RefreshState {
     /// Claude Swap ran at the monitor's last look.
     swap_running: std::sync::atomic::AtomicBool,
     /// False for the offline CLI and a `--data-dir` owner: they never spend a refresh token.
-    grants: std::sync::atomic::AtomicBool,
+    grants: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Refresh tokens a grant is spending right now (the grant outlives a cancelled caller).
     in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Which stored account holds a refresh token, as of a store change count: the scan of
@@ -165,7 +165,7 @@ impl RefreshState {
             client_rejected: Mutex::new(None),
             swap_switching: Default::default(),
             swap_running: Default::default(),
-            grants: std::sync::atomic::AtomicBool::new(true),
+            grants: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
             in_flight: Default::default(),
             stash: Arc::new(Mutex::new(HashMap::new())),
             swap_held: Mutex::new(Default::default()),
@@ -210,6 +210,14 @@ impl RefreshState {
     #[cfg(test)]
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;
+    }
+    /// False once the drain began: nothing may spend a refresh token any more (SB-159 too).
+    pub(crate) fn grants_allowed(&self) -> bool {
+        self.grants.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    /// The same switch, for a task that outlives the pass that spawned it.
+    pub(crate) fn grants_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.grants.clone()
     }
     pub(crate) fn set_grants(&self, allowed: bool) {
         self.grants

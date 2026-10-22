@@ -54,6 +54,7 @@ export const nativeAdapter: Adapter = {
   organizationEdit: (id, name, domains) => invoke('organization_edit', { id, name, domains }),
   organizationRemove: (id) => invoke('organization_remove', { id }),
   organizationAssign: (account, choice) => invoke('organization_assign', { account, choice }),
+  passioncode: (action) => invoke('passioncode', { action }),
   projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
   acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),
   dismissProjectSuggestion: (folder) => invoke('dismiss_project_suggestion', { folder }),
@@ -103,6 +104,15 @@ const safeErrors = new Set([
   'Name the organization in 1 to 80 characters.',
   'An organization has at most 16 domains.',
   'At most 32 organizations.',
+  // PassionCode.ai (SB-159).
+  'PassionCode.ai was not connected: access was denied.',
+  'PassionCode.ai did not answer in the browser within 5 minutes. Nothing changed.',
+  'Connecting PassionCode.ai was cancelled. Nothing changed.',
+  'PassionCode.ai could not be connected. Try again.',
+  'PassionCode.ai is not connected.',
+  'PassionCode.ai is already waiting for your browser.',
+  'The PassionCode.ai connection could not be read. Disconnect and connect again.',
+  'The browser could not be opened.',
   // A group's organization (SB-109).
   "This account belongs to another organization than this group. Move it, or change the group's organization.",
   "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.",

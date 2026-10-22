@@ -495,6 +495,20 @@ async fn organization_assign(
         .execute(Operation::OrganizationAssign { account, choice })
         .await
 }
+/// SB-159: the PassionCode.ai connection: `status`, `connect` (browser sign-in, waits up to
+/// 5 minutes), `cancel`, `read` or `disconnect`.
+#[tauri::command]
+async fn passioncode(action: String, state: State<'_, Slot>) -> Result<Value, String> {
+    let operation = match action.as_str() {
+        "status" => Operation::VestaStatus,
+        "connect" => Operation::VestaConnect,
+        "cancel" => Operation::VestaCancel,
+        "read" => Operation::VestaSync,
+        "disconnect" => Operation::VestaDisconnect,
+        _ => return Err("Unknown action".into()),
+    };
+    state.runtime().await?.execute(operation).await
+}
 /// SB-143: Codex in project folders: the state, or `enabled` to switch it.
 #[tauri::command]
 async fn codex_route(enabled: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
@@ -1121,6 +1135,7 @@ fn main() {
             organization_edit,
             organization_remove,
             organization_assign,
+            passioncode,
             agents_overview,
             agent_enable,
             agent_default,

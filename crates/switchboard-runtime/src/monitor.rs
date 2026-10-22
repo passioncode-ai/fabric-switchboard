@@ -134,6 +134,38 @@ impl Pass {
         if native_sources {
             let _ = runtime.maybe_backup(time, false);
         }
+        // SB-159: the PassionCode.ai organizations, read again at most every 6 hours while
+        // connected; network work outside the pass and the owner transaction.
+        if native_sources
+            && runtime.refresh.grants_allowed()
+            && crate::vesta::due(&runtime.root, time)
+        {
+            let root = runtime.root.clone();
+            let store = runtime.store.clone();
+            let grants = runtime.refresh.grants_flag();
+            tokio::spawn(async move {
+                let Some(read) = crate::vesta::sync_if_due(&root, &store, || {
+                    grants.load(std::sync::atomic::Ordering::SeqCst)
+                })
+                .await
+                else {
+                    return;
+                };
+                let outcome = match &read {
+                    Ok(v) => v["state"].as_str().map_or("failed", |s| match s {
+                        "ok" => "ok",
+                        "sign_in_again" => "sign_in_again",
+                        "provider_sign_in" => "provider_sign_in",
+                        _ => "unreachable",
+                    }),
+                    Err(_) => "failed",
+                };
+                crate::oplog::event(
+                    "vesta_read",
+                    &[("outcome", crate::oplog::Field::Code(outcome))],
+                );
+            });
+        }
         // Reads recent transcripts: file work, in a blocking section (2026-10-17 stalls).
         crate::blocking::run(|| scan_limits(runtime, claude, time));
         if stop.as_ref().is_some_and(|s| *s.borrow()) {

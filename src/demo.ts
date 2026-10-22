@@ -2,7 +2,7 @@ import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
-import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
+import type { PassioncodeStatus, Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -57,6 +57,7 @@ export function createDemoAdapter(): Adapter {
   const enabled = (id: string) => { const found = account(id); if (!found.enabled) throw new Error('This account is disabled. Enable it before continuing.'); return found; };
   const logins = new Map<string, LoginInput & { started: number }>();
   let signIns = 0;
+  let passioncode: PassioncodeStatus = { connected: false, base: 'https://org.passioncode.ai' };
   const rateLimited = new Set<string>();
   // Explicit browser-only acceptance fixtures for ordering, multi-window waits and failure.
   if (new URLSearchParams(location.search).get('quota-review') === '1') {
@@ -258,6 +259,23 @@ export function createDemoAdapter(): Adapter {
       for (const [account, choice] of Object.entries(state.memberships ?? {})) if (choice === id) delete state.memberships![account];
       for (const p of state.projects ?? []) if (p.organization === id) p.organization = null;
       log('organization', '', 'removed');
+    },
+    async passioncode(action) {
+      await pause();
+      if (action === 'connect') {
+        const list = (state.organizations ??= []);
+        const at = list.find((o) => o.name.toLowerCase() === 'passioncode.ai');
+        if (at) at.vesta_id = 'demo-vesta-passioncode';
+        else list.push({ id: crypto.randomUUID(), name: 'PassionCode.ai', domains: ['passioncode.ai'], created_at: now(), vesta_id: 'demo-vesta-passioncode' });
+        passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now(), read_at: now(), checked_at: now(), organizations: 1 };
+        log('organization', '', 'updated');
+      } else if (action === 'read' && passioncode.connected) {
+        passioncode = { ...passioncode, state: 'ok', read_at: now(), checked_at: now() };
+      } else if (action === 'disconnect') {
+        for (const o of state.organizations ?? []) o.vesta_id = null;
+        passioncode = { connected: false, base: 'https://org.passioncode.ai', disconnected: true };
+      } else if (action === 'read') throw new Error('PassionCode.ai is not connected.');
+      return structuredClone(passioncode);
     },
     async organizationAssign(accountId, choice) {
       await pause();

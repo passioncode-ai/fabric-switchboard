@@ -98,6 +98,9 @@ for (const match of updates.matchAll(/pub const [A-Z_]+: &str =\s*"((?:[^"\\]|\\
   const text = match[1].replace(/\\"/g, '"');
   if (/\s/.test(text)) add(text, 'src-tauri/src/updates.rs');
 }
+// SB-159: sentences ui-logic returns as `{ key: '…' }` for the window to translate.
+const uiLogic = readFileSync(join(ROOT, 'src/ui-logic.ts'), 'utf8');
+for (const match of uiLogic.matchAll(/\{ key: '((?:[^'\\]|\\.)*)'/g)) { const text = match[1].replace(/\\'/g, "'"); if (text) add(text, 'src/ui-logic.ts passioncodeLine'); }
 // Window names the feature label translates by value.
 for (const word of ['primary', 'secondary']) add(word, 'src/ui-logic.ts featureWindowLabel');
 

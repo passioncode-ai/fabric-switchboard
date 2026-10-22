@@ -58,6 +58,8 @@ const ALLOWLIST = {
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
+  'Invalid secret': 'internal: callers pass a vault item they created and a token PassionCode.ai issued (SB-159)',
+  'Unknown action': 'the window sends only its own fixed actions (SB-159)',
   'Could not save the new capability.': 'RotatePoolCapability: CLI `project rotate-capability` only; the window has no such action',
   "This project does not hold that folder. List the project's folders and name one of them.": 'ProjectEdit (SB-134): CLI `project edit` and MCP `switchboard_project_edit` only; the window saves whole projects',
   "This account is not in the project. List the project's accounts and name one of them.": 'ProjectEdit (SB-134): CLI `project edit` and MCP `switchboard_project_edit` only; the window saves whole projects',

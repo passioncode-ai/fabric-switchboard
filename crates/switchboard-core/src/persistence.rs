@@ -26,7 +26,10 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // the unknown field, and says "Unsupported account metadata version" instead of "corrupt".
     // Version 6 only while a group has an organization (SB-109): a 0.6.64 or older reader
     // refuses the unknown field the same way.
-    if snapshot.projects.iter().any(|p| p.organization.is_some()) {
+    // Version 7 only while an organization is linked to PassionCode.ai (SB-159).
+    if snapshot.organizations.iter().any(|o| o.vesta_id.is_some()) {
+        7
+    } else if snapshot.projects.iter().any(|p| p.organization.is_some()) {
         6
     } else if snapshot.projects.iter().any(|p| !p.sources.is_empty()) {
         5
@@ -121,7 +124,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=6) {
+            if !matches!(disk.schema_version, 1..=7) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -204,7 +207,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=6) {
+        if !matches!(disk.schema_version, 1..=7) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;
