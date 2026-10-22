@@ -1206,4 +1206,13 @@ export const RU: Record<string, string> = {
   "placed by you": "вручную",
   "by its team": "по команде",
   "by its domain": "по домену",
+  "Runs only on accounts of {name}.": "Работает только на аккаунтах {name}.",
+  "Belongs to {name}.": "Относится к {name}.",
+  "Personal account.": "Личный аккаунт.",
+  "Sessions in this group's folders run only on this organization's accounts, or on personal ones for Personal.": "Сессии в папках этой группы работают только на аккаунтах этой организации, а при выборе «Личная» только на личных.",
+  "By organization": "По организациям",
+  "Removed organization": "Удалённая организация",
+  "This account belongs to another organization than this group. Move it, or change the group's organization.": "Этот аккаунт относится к другой организации, чем группа. Перенесите его или смените организацию группы.",
+  "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.": "Выбранный для группы аккаунт относится к другой организации. Выберите аккаунты организации группы или смените её.",
+  "This group still holds accounts that belong elsewhere. Move them out first.": "В группе ещё есть аккаунты другой организации. Сначала перенесите их.",
 };

@@ -195,6 +195,10 @@ pub enum Operation {
         /// whole list.
         #[serde(default)]
         base_folders: Option<Vec<PathBuf>>,
+        /// SB-109: the group's organization by id or name, or `personal`; left out, a saved
+        /// group keeps its own.
+        #[serde(default)]
+        organization: Option<String>,
     },
     RemoveProject {
         pool: String,
@@ -218,6 +222,9 @@ pub enum Operation {
         add_folders: Vec<PathBuf>,
         #[serde(default)]
         remove_folders: Vec<PathBuf>,
+        /// SB-109: as in `SaveProject`.
+        #[serde(default)]
+        organization: Option<String>,
     },
     /// SB-143: whether Codex sessions in a project's folders use its Codex accounts (one
     /// user-level provider at the proxy). `enabled` none: the state only.
@@ -2458,7 +2465,27 @@ fn project_edit(
         folders,
         account_ids: accounts,
         base_folders: Some(held),
+        organization: None,
     })
+}
+/// SB-109: a group's organization as the person names it (its id, its name in any case, or
+/// `personal`) → the store's choice: `Some(None)` personal, `Some(Some(id))` an organization.
+fn group_organization(
+    snapshot: &switchboard_core::Snapshot,
+    named: Option<&str>,
+) -> Result<Option<Option<String>>, String> {
+    let Some(named) = named.map(str::trim) else {
+        return Ok(None);
+    };
+    if named.is_empty() || named.eq_ignore_ascii_case(switchboard_core::organizations::PERSONAL) {
+        return Ok(Some(None));
+    }
+    snapshot
+        .organizations
+        .iter()
+        .find(|o| o.id == named || o.name.eq_ignore_ascii_case(named))
+        .map(|o| Some(Some(o.id.clone())))
+        .ok_or_else(|| switchboard_core::organizations::ORGANIZATION_NOT_FOUND.into())
 }
 /// The account a stopped session in a project's folder was using: the pool's selected Claude
 /// account, else its first enabled Claude OAuth account.
@@ -3451,8 +3478,10 @@ async fn execute(
             folders,
             account_ids,
             base_folders,
+            organization,
         } => {
             let before = store.snapshot()?;
+            let organization = group_organization(&before, organization.as_deref())?;
             let held: Vec<String> = pool
                 .as_deref()
                 .and_then(|p| before.projects.iter().find(|x| x.pool == p))
@@ -3538,7 +3567,13 @@ async fn execute(
                         .collect()
                 })
                 .unwrap_or_default();
-            let project = store.save_project(pool.as_deref(), &name, &folders, &account_ids)?;
+            let project = store.save_project_in(
+                pool.as_deref(),
+                &name,
+                &folders,
+                &account_ids,
+                organization.as_ref().map(Option::as_deref),
+            )?;
             let gone_text: Vec<String> = gone
                 .iter()
                 .filter(|g| is_held(g))
@@ -3710,6 +3745,7 @@ async fn execute(
             remove_accounts,
             add_folders,
             remove_folders,
+            organization,
         } => {
             let snapshot = store.snapshot()?;
             // SB-135: a root taken out takes its worktrees and clones with it.
@@ -3731,7 +3767,7 @@ async fn execute(
                     }
                 }
             }
-            let save = project_edit(
+            let mut save = project_edit(
                 &snapshot,
                 &pool,
                 name,
@@ -3740,6 +3776,13 @@ async fn execute(
                 &add_folders,
                 &remove_folders,
             )?;
+            if let Operation::SaveProject {
+                organization: chosen,
+                ..
+            } = &mut save
+            {
+                *chosen = organization;
+            }
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
         }
@@ -3782,6 +3825,7 @@ async fn execute(
                     remove_accounts: remove,
                     add_folders: Vec::new(),
                     remove_folders: Vec::new(),
+                    organization: None,
                 };
             if pool != "default" {
                 if snapshot.project_of_pool(&pool).is_none() {
@@ -3859,6 +3903,7 @@ async fn execute(
                     remove_accounts: Vec::new(),
                     add_folders: add,
                     remove_folders: remove,
+                    organization: None,
                 };
             let holds = |p: &&switchboard_core::Project| {
                 p.folders
@@ -4896,6 +4941,7 @@ mod owner_tests {
             folders: vec![repo.path().to_owned()],
             account_ids: ids,
             base_folders: None,
+            organization: None,
         };
         assert_eq!(
             runtime
@@ -4944,6 +4990,7 @@ mod owner_tests {
                 folders: vec![repo.path().to_owned()],
                 account_ids: vec![b.id.clone()],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -4985,6 +5032,7 @@ mod owner_tests {
             folders,
             account_ids: vec![],
             base_folders: None,
+            organization: None,
         };
         runtime
             .execute(Operation::SaveProject {
@@ -4993,6 +5041,7 @@ mod owner_tests {
                 folders: vec![a.clone(), b.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -5096,6 +5145,7 @@ mod owner_tests {
                     folders,
                     account_ids: vec![],
                     base_folders: None,
+                    organization: None,
                 })
                 .await
                 .unwrap();
@@ -5129,6 +5179,7 @@ mod owner_tests {
                 folders: vec![shared.clone(), own.join("sub")],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await;
         assert!(nested.is_err());
@@ -5193,6 +5244,7 @@ mod owner_tests {
                     folders: vec![folder.clone()],
                     account_ids: vec![],
                     base_folders: None,
+                    organization: None,
                 })
                 .await
                 .unwrap();
@@ -5264,6 +5316,7 @@ mod owner_tests {
                 folders: vec![app.clone()],
                 account_ids: vec![],
                 base_folders: Some(vec![app.clone()]),
+                organization: None,
             })
             .await
             .unwrap();
@@ -5327,6 +5380,7 @@ mod owner_tests {
                 folders: vec![app.clone(), lib.clone()],
                 account_ids: vec![],
                 base_folders: Some(vec![app.clone(), lib.clone()]),
+                organization: None,
             })
             .await
             .unwrap();
@@ -5460,6 +5514,7 @@ mod owner_tests {
                 folders: vec![app.clone()],
                 account_ids: vec![one],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -5559,6 +5614,7 @@ mod owner_tests {
                 folders: vec![wt.clone(), main.clone(), other.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -5577,6 +5633,7 @@ mod owner_tests {
                 remove_accounts: vec![],
                 add_folders: vec![],
                 remove_folders: vec![main.clone()],
+                organization: None,
             })
             .await
             .unwrap();
@@ -5648,6 +5705,7 @@ mod owner_tests {
                     folders,
                     account_ids: vec![],
                     base_folders: None,
+                    organization: None,
                 })
                 .await
                 .unwrap();
@@ -5777,6 +5835,7 @@ mod owner_tests {
                 folders: vec![a.clone(), b.clone()],
                 account_ids: vec![one.clone()],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -5790,6 +5849,7 @@ mod owner_tests {
             remove_accounts,
             add_folders,
             remove_folders,
+            organization: None,
         };
         let view = runtime
             .execute(edit(
@@ -5873,6 +5933,7 @@ mod owner_tests {
                     folders: vec![folder.clone()],
                     account_ids: vec![],
                     base_folders: None,
+                    organization: None,
                 })
                 .await
                 .unwrap();
@@ -5952,6 +6013,7 @@ mod owner_tests {
                 folders: vec![main.clone(), worktree.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -5989,6 +6051,7 @@ mod owner_tests {
                 folders: vec![main.clone(), worktree.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -6065,6 +6128,7 @@ mod owner_tests {
                 folders: vec![main.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -6105,6 +6169,7 @@ mod owner_tests {
                 folders: vec![main.clone(), older.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -6127,6 +6192,7 @@ mod owner_tests {
                 folders: with_manual,
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -6137,6 +6203,7 @@ mod owner_tests {
                 folders: vec![main.clone(), older.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();
@@ -6158,6 +6225,7 @@ mod owner_tests {
                 folders: vec![main.clone()],
                 account_ids: vec![],
                 base_folders: None,
+                organization: None,
             })
             .await
             .unwrap();

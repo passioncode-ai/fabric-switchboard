@@ -6,6 +6,12 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.65 (2026-10-22)
+
+- **A group can belong to a company (SB-109).** Once you have an organization, a group's dialog has *Organization*: choose the company, and sessions in the group's folders run only on that company's accounts; choose *Personal*, and only on personal ones. Accounts that do not fit are shown greyed with the reason, and a group card carries its company's badge. If an account later stops belonging to the group's company (you moved it, or its domain changed), Switchboard stops using it there and says why. A folder that is in a personal group and a company's group runs in the personal one. Without organizations nothing changes. The same is in the CLI (`switchboard project edit --organization`) and for agents (`switchboard_project_edit`, and the organization on each `switchboard_projects` row).
+- **Statistics by organization.** Once you have an organization, *Statistics* shows *By organization* above *By group*: each company and *Personal*, by whose account the requests ran.
+- **Backups keep organizations.** Organizations, the accounts you placed yourself and each group's company now travel in the encrypted backups and come back on a reinstall; before, a backup carried none of them.
+
 ## 0.6.64 (2026-10-22)
 
 - **Hosts read stopped sessions at once (SB-166).** `switchboard recovery`, which Fabric Dashboards and other hosts read to continue sessions stopped on a limit, used to wait while Switchboard renewed or switched an account in the background, up to 15 seconds. It now answers straight away.

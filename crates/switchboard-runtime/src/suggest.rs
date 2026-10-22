@@ -1163,6 +1163,7 @@ mod tests {
                         .collect(),
                     created_at: 1,
                     sources: sources.iter().map(|s| (*s).into()).collect(),
+                    organization: None,
                 })
                 .collect(),
             ..Default::default()

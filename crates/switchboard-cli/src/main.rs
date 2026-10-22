@@ -289,9 +289,9 @@ enum Project {
         #[arg(long)]
         pool: String,
     },
-    /// Change a project by delta (SB-134): add or take out accounts and folders, or rename it.
-    /// Everything not named stays as it is; naming something the project does not hold is
-    /// refused.
+    /// Change a project by delta (SB-134): add or take out accounts and folders, rename it, or
+    /// bind it to an organization (SB-109). Everything not named stays as it is; naming something
+    /// the project does not hold is refused.
     Edit {
         /// The project's pool (`switchboard project list`).
         #[arg(long)]
@@ -311,6 +311,11 @@ enum Project {
         /// A folder of the project to take out; repeat for each. It is not added back by itself.
         #[arg(long = "remove-folder")]
         remove_folders: Vec<PathBuf>,
+        /// The organization whose accounts the project runs on (its id or name from `switchboard
+        /// org list`), or `personal`. With an organization defined, a project takes only accounts
+        /// of its own organization, or personal ones when it has none.
+        #[arg(long)]
+        organization: Option<String>,
     },
     /// Move a project's repository (its root folder), with the worktrees and clones under it,
     /// into another project in one step (SB-135); a repository in no project joins the named one.
@@ -1413,6 +1418,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 account_ids: accounts.clone(),
                 base_folders: None,
+                organization: None,
             },
             Project::Codex { state } => Operation::CodexRoute {
                 enabled: state.map(|s| matches!(s, OnOff::On)),
@@ -1427,6 +1433,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 remove_accounts,
                 add_folders,
                 remove_folders,
+                organization,
             } => Operation::ProjectEdit {
                 pool: pool.clone(),
                 name: name.clone(),
@@ -1438,6 +1445,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 // A folder to take out may be gone from disk: taken as given.
                 remove_folders: remove_folders.clone(),
+                organization: organization.clone(),
             },
             Project::MoveRoot {
                 folder: path,

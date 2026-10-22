@@ -202,3 +202,31 @@ fn schema_three_is_written_only_while_rules_exist() {
         serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
     assert!(disk["snapshot"].get("rules").is_none());
 }
+
+#[test]
+fn schema_six_is_written_only_while_a_group_has_an_organization() {
+    // SB-109: a 0.6.64 or older reader refuses version 6 by name, not as a corrupt file.
+    let (root, store) = setup();
+    let alpha = project(&root, "alpha");
+    let group = store
+        .save_project(None, "Alpha", std::slice::from_ref(&alpha), &[])
+        .unwrap();
+    assert_eq!(schema(root.path()), 4);
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    store
+        .set_project_organization(&group.pool, Some(&acme.id))
+        .unwrap();
+    assert_eq!(schema(root.path()), 6);
+    drop(store);
+    let reopened = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+    assert_eq!(
+        reopened.snapshot().unwrap().projects[0]
+            .organization
+            .as_deref(),
+        Some(acme.id.as_str())
+    );
+    reopened
+        .set_project_organization(&group.pool, None)
+        .unwrap();
+    assert_eq!(schema(root.path()), 4);
+}

@@ -6,7 +6,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, attribution, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { APPEARANCE_KEY, attribution, groupAdmits, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -455,6 +455,9 @@ function projectsSection() {
     const details = el('div', 'account-details'); const title = el('div', 'account-title');
     const name = el('h2', ''); name.append(groupHint(project.name, project.pool));
     title.append(name, el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
+    // SB-109: the organization the group runs on; a personal group carries no badge.
+    const groupOrg = project.organization ? snapshot!.organizations?.find((o) => o.id === project.organization) : undefined;
+    if (groupOrg) { const badge = el('span', 'badge org-badge', groupOrg.name); badge.title = t('Runs only on accounts of {name}.', { name: groupOrg.name }); title.append(badge); }
     const folders = projectFolderList(project);
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
@@ -513,21 +516,40 @@ function projectDialog(existing?: Project) {
   const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
+  // SB-109 (SCN-070): with organizations, the group runs on one organization's accounts or on personal ones.
+  const organizations = snapshot!.organizations ?? [];
+  const orgPicker = organizations.length ? select([['personal', t('Personal')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
+  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : 'personal';
+  const chosenOrg = () => (orgPicker && orgPicker.value !== 'personal' ? orgPicker.value : null);
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
+  const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = !!existing && account.pool === existing.pool;
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
-    option.append(box, el('span', '', `${account.label} · ${providerName(account.provider)}${note}`)); picker.append(option);
+    const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
+    option.append(box, why); picker.append(option);
+    rows.push({ account, box, why, text: why.textContent ?? '' });
   }
+  const syncAccounts = () => {
+    const org = chosenOrg();
+    for (const { account, box, why, text } of rows) {
+      const fits = groupAdmits(snapshot!, org, account);
+      box.disabled = !fits; if (!fits) box.checked = false;
+      const own = attribution(snapshot!, account).organization;
+      why.textContent = fits ? text : `${text} · ${own ? t('Belongs to {name}.', { name: organizations.find((o) => o.id === own)?.name ?? '' }) : t('Personal account.')}`;
+    }
+  };
+  orgPicker?.addEventListener('change', syncAccounts); syncAccounts();
   const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The projects and folders of this group. Subfolders are included. Repositories its agents create or work in join it by themselves, and folders deleted from disk leave it.')));
+  if (orgPicker) grid.append(field(t('Organization'), orgPicker, t('Sessions in this group\'s folders run only on this organization\'s accounts, or on personal ones for Personal.')));
   context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default pool.')));
   context.actions.append(submit(existing ? t('Save group') : t('Create group')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
     const list = folders.require(); if (!list) return;
-    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
+    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders, organization: orgPicker ? orgPicker.value : undefined }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
 function rulesSection() {
@@ -1625,6 +1647,7 @@ function renderStats(main: HTMLElement) {
     const accountName = (label: string | null) => label ?? t('Removed account');
     const grid = el('div', 'stat-grid');
     grid.append(
+      ...(s.organizations?.length ? [statTable('stat-organizations', t('By organization'), [t('Organization')], s.organizations.map((r) => ({ cells: [r.organization === 'personal' ? t('Personal') : r.organization === 'unknown' ? t('Removed account') : r.name ?? t('Removed organization')], counts: r })), true)] : []),
       statTable('stat-groups', t('By group'), [t('Group')], s.groups.map((r) => ({ cells: [groupName(r.pool, r.name)], counts: r })), true),
       statTable('stat-projects', t('By project'), [t('Project')], s.projects.map((r) => ({ cells: [[projectName(r.name), r.groups.map((g) => groupName(g.pool, g.name)).join(', ')]], counts: r })), true),
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),

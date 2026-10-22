@@ -837,6 +837,7 @@ mod tests {
                 folders: vec!["/work/alpha".into()],
                 created_at: 1,
                 sources: vec![],
+                organization: None,
             }],
             ..Default::default()
         };

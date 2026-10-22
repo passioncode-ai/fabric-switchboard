@@ -1,6 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
-import { providerOrganization } from './ui-logic';
+import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import type { Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
 
@@ -220,12 +220,15 @@ export function createDemoAdapter(): Adapter {
       }
       if (input.accountIds.some((id) => (current.claude.account_id === id || current.codex.account_id === id) && state.accounts.find((a) => a.id === id)?.pool !== pool)) throw new Error('This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.');
       for (const other of projects.filter((p) => p.pool !== pool)) for (const f of folders) if (other.folders.some((g) => g !== f && (inside(f, g) || inside(g, f)))) throw new Error('A folder sits inside a folder of another group. Add the repository itself to that group instead.');
+      const organization = input.organization === undefined ? existing?.organization ?? null : input.organization === 'personal' ? null : input.organization;
+      if (organization && !(state.organizations ?? []).some((o) => o.id === organization)) throw new Error('Organization not found.');
+      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!groupAdmits(state, organization, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
       for (const account of state.accounts) {
         const target = input.accountIds.includes(account.id) ? pool : account.pool === pool ? 'default' : account.pool;
         if (target !== account.pool) { const old = `${account.provider}:${account.pool}`; if (state.routes[old] === account.id) delete state.routes[old]; account.pool = target; }
       }
       for (const policy of state.policies ?? []) if (policy.pool === pool && policy.target === 'claude_cli') policy.enabled = false;
-      const project = { pool, name, folders, created_at: existing?.created_at ?? now() };
+      const project = { pool, name, folders, created_at: existing?.created_at ?? now(), organization };
       if (existing) Object.assign(existing, project); else projects.push(project);
       projects.sort((a, b) => a.name.localeCompare(b.name));
       log('project', '', existing ? 'updated' : 'created');
@@ -253,6 +256,7 @@ export function createDemoAdapter(): Adapter {
       await pause();
       state.organizations = (state.organizations ?? []).filter((o) => o.id !== id);
       for (const [account, choice] of Object.entries(state.memberships ?? {})) if (choice === id) delete state.memberships![account];
+      for (const p of state.projects ?? []) if (p.organization === id) p.organization = null;
       log('organization', '', 'removed');
     },
     async organizationAssign(accountId, choice) {
@@ -415,6 +419,7 @@ function demoStatistics(state: Snapshot, days: number): Statistics {
   return {
     days, from: day(days - 1), to: day(0), since: day(89), total,
     groups: sum((r) => r.pool).map((g) => ({ pool: g.first.pool, name: g.first.name, ...g.c })),
+    organizations: (state.organizations ?? []).length ? sum((r) => { const a = state.accounts.find((x) => x.id === r.account_id); return a ? attribution(state, a).organization ?? 'personal' : 'unknown'; }).map((g) => { const a = state.accounts.find((x) => x.id === g.first.account_id); const key = a ? attribution(state, a).organization ?? 'personal' : 'unknown'; return { organization: key, name: state.organizations?.find((o) => o.id === key)?.name ?? null, ...g.c }; }) : [],
     projects: sum((r) => r.project).map((g) => ({ project: g.first.project, name: g.first.project_name, groups: [...g.pools].map((pool) => ({ pool, name: groupName(pool) })), ...g.c })),
     accounts: sum((r) => r.account_id).map((g) => ({ account_id: g.first.account_id, label: g.first.label, provider: g.first.provider, kind: g.first.kind, ...g.c })),
     agents: sum((r) => r.agent).map((g) => ({ agent: g.first.agent, ...g.c })),

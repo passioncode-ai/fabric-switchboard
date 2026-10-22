@@ -18,6 +18,14 @@ pub const ORGANIZATION_NAME_TAKEN: &str = "Another organization already has this
 pub const DOMAIN_TAKEN: &str = "Another organization already has this domain.";
 pub const DOMAIN_INVALID: &str = "A domain is a name such as example.com.";
 pub const ORGANIZATION_NAME_INVALID: &str = "Name the organization in 1 to 80 characters.";
+/// A request or a selection on a seat that left the group's context after it was placed.
+pub const SEAT_OUTSIDE: &str = "This account belongs to another organization than this group. Move it, or change the group's organization.";
+
+/// Saving a group with an account of another context (SB-109).
+pub const SEAT_CHOSEN: &str = "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.";
+/// Changing a group's organization while it holds an account of another context (SB-109).
+pub const SEATS_ELSEWHERE: &str =
+    "This group still holds accounts that belong elsewhere. Move them out first.";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -147,6 +155,16 @@ impl Snapshot {
     pub fn organization(&self, id: &str) -> Option<&Organization> {
         self.organizations.iter().find(|o| o.id == id)
     }
+    /// Whether `account` may serve the group that reserves `pool` (SB-109): its attribution
+    /// equals the group's organization, personal included. Always while no organization exists,
+    /// and for a pool no group reserves (`default`).
+    pub fn context_admits(&self, pool: &str, account: &Account) -> bool {
+        if self.organizations.is_empty() {
+            return true;
+        }
+        self.project_of_pool(pool)
+            .is_none_or(|p| p.organization == self.attribution(account).organization)
+    }
 }
 
 pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
@@ -177,6 +195,13 @@ pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
         {
             return Err("Invalid organization metadata".into());
         }
+    }
+    if s.projects.iter().any(|p| {
+        p.organization
+            .as_ref()
+            .is_some_and(|o| !ids.contains(o.as_str()))
+    }) {
+        return Err("Invalid organization metadata".into());
     }
     for (account, choice) in &s.memberships {
         if !uuid_valid(account) || (choice != PERSONAL && !ids.contains(choice.as_str())) {
@@ -293,10 +318,56 @@ impl Store {
             .ok_or(ORGANIZATION_NOT_FOUND)?;
         let organization = candidate.organizations.remove(index);
         candidate.memberships.retain(|_, choice| choice != id);
+        // Its groups become personal (SB-109).
+        for p in &mut candidate.projects {
+            if p.organization.as_deref() == Some(id) {
+                p.organization = None;
+            }
+        }
         append_event(&mut candidate, "organization", None, "removed");
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(organization)
+    }
+    /// Puts an organization back from a backup, unless this install holds one of the same id,
+    /// name or domain. Provider organizations another one already holds are left out.
+    pub fn restore_organization(&self, mut organization: Organization) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if candidate.organization(&organization.id).is_some()
+            || candidate.organizations.len() >= MAX_ORGANIZATIONS
+        {
+            return Err("Organization already here.".into());
+        }
+        check_unique(&candidate, None, &organization.name, &organization.domains)?;
+        let held: Vec<String> = candidate
+            .organizations
+            .iter()
+            .flat_map(|o| o.provider_organizations.clone())
+            .collect();
+        organization
+            .provider_organizations
+            .retain(|k| !held.contains(k));
+        candidate.organizations.push(organization);
+        append_event(&mut candidate, "organization", None, "added");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
+    /// The person's word on one account from a backup, where this install has none.
+    pub fn restore_membership(&self, account: &str, choice: &str) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if candidate.memberships.contains_key(account)
+            || !candidate.accounts.iter().any(|a| a.id == account)
+            || (choice != PERSONAL && candidate.organization(choice).is_none())
+        {
+            return Err("Nothing to restore.".into());
+        }
+        candidate.memberships.insert(account.into(), choice.into());
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// The person's word on one account: an organization's id, [`PERSONAL`], or none to let the
     /// rules decide again. Assigning to an organization also records the account's provider

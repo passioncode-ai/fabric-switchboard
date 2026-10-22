@@ -1,7 +1,8 @@
 # Organizations in Switchboard: accounts, groups and employee onboarding
 
-Design, 2026-10-21. Status: proposed (operator request of 2026-10-21; builds on the RM-28
-decisions of 2026-10-12). Nothing here is built yet. Rows: SB-158, SB-159, SB-160, with
+Design, 2026-10-21. Status: phases 1 (0.6.60, SB-158) and 2 (0.6.65, SB-109; the badge on
+groups of SB-111) built; phases 3 and 4 open (operator request of 2026-10-21; builds on the RM-28
+decisions of 2026-10-12). Rows: SB-158, SB-159, SB-160, with
 SB-109 and SB-111 (backlog).
 
 ## 1. What the operator asked
@@ -52,7 +53,10 @@ plus the organization list. No Fabric, Vesta or Observatory call is needed to at
   (omitted while empty) and therefore in encrypted backups.
 - Nothing is added to the account itself: attribution is computed from these two and the
   identity already stored (`Snapshot::attribution`).
-- Group (today's "project"): `organization: id | null` comes with SB-109 (phase 2).
+- Group (today's "project"): `organization: id | null` (SB-109, 0.6.65); the default pool is not
+  a group and stays unrestricted (it serves the ordinary Claude Code login's rotation). Built
+  2026-10-22: organizations, memberships and a group's organization also travel in backups,
+  which the phase-1 build had left out.
 
 ## 5. What changes for the person
 
