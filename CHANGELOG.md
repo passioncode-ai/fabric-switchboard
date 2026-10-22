@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.67 (2026-10-22)
+
+- **Repositories are recognized the way the rest of PassionCode recognizes them (SB-141).** Switchboard now reads a repository's address exactly as the shared rule does, checked against its published examples. GitLab repositories in subgroups (`gitlab.example.com/group/sub/app`) are now recognized as repositories, so their worktrees and clones join their group by themselves, and a group can watch a GitLab subgroup as a source. Addresses that only look like a host (an underscore, look-alike letters) or use another protocol no longer count as one.
+
 ## 0.6.66 (2026-10-22)
 
 - **Your PassionCode.ai organizations, kept current (SB-159).** *Organizations* has a PassionCode.ai panel: *Connect PassionCode.ai…* opens the sign-in in your browser, and after *Allow* the organizations you belong to there arrive with their names and domains. One you had typed yourself with the same name or a shared domain is linked rather than added twice, and keeps its accounts. Switchboard reads them again at start and every 6 hours, so a renamed organization or a new domain shows up by itself; *Read now* reads at once and *Disconnect* deletes the token while the organizations stay. If PassionCode.ai cannot be reached, the last organizations stay and the panel says when they were read. Only a read-only token for your own memberships is kept, in the system keychain; nothing about your accounts leaves the computer. In the CLI: `switchboard org connect`, `org read`, `org passioncode`, `org disconnect`.

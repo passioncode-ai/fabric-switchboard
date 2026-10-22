@@ -230,3 +230,42 @@ fn schema_six_is_written_only_while_a_group_has_an_organization() {
         .unwrap();
     assert_eq!(schema(root.path()), 4);
 }
+
+#[test]
+fn a_source_may_be_a_group_path() {
+    // SB-141 (DEC-0089 `ownerOf`): GitLab's `host/group/sub` is an owner as GitHub's `host/owner` is.
+    let (root, store) = setup();
+    let alpha = project(&root, "alpha");
+    let group = store
+        .save_project(None, "Alpha", std::slice::from_ref(&alpha), &[])
+        .unwrap();
+    let saved = store
+        .set_project_sources(
+            &group.pool,
+            &[
+                "github.com/Example".into(),
+                "gitlab.example.com/group/sub/".into(),
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        saved.sources,
+        vec![
+            "github.com/example".to_string(),
+            "gitlab.example.com/group/sub".to_string()
+        ]
+    );
+    for bad in [
+        "github.com",
+        "example/owner",
+        "github.com//x",
+        "github.com/a b",
+    ] {
+        assert!(
+            store
+                .set_project_sources(&group.pool, &[bad.into()])
+                .is_err(),
+            "{bad}"
+        );
+    }
+}

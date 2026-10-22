@@ -33,18 +33,20 @@ pub struct RuleResolution {
 }
 
 /// A repository owner as `host/owner`, lowercase: `github.com/passioncode-ai` (SB-117).
+/// `host/owner`, or a group path `host/group/sub` (DEC-0089 `ownerOf`, SB-141): a repository's
+/// identity without its last segment.
 pub fn source_valid(source: &str) -> bool {
-    let mut parts = source.split('/');
-    let (Some(host), Some(owner), None) = (parts.next(), parts.next(), parts.next()) else {
-        return false;
-    };
+    let parts: Vec<&str> = source.split('/').collect();
     let ok = |p: &str| {
         !p.is_empty()
             && p.len() <= 100
             && p.bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-_.".contains(&b))
     };
-    ok(host) && host.contains('.') && ok(owner)
+    source.len() <= 300
+        && (2..=8).contains(&parts.len())
+        && parts[0].contains('.')
+        && parts.iter().all(|p| ok(p))
 }
 
 fn path_valid(path: &str) -> bool {
@@ -621,13 +623,13 @@ impl Store {
         Ok(())
     }
     /// Replaces a project's sources: the repository owners whose new repositories Switchboard
-    /// suggests for it (SB-117). Each is `host/owner`, lowercase.
+    /// suggests for it (SB-117). Each is `host/owner` or a group path `host/group/sub`, lowercase.
     pub fn set_project_sources(&self, pool: &str, sources: &[String]) -> Result<Project, String> {
         let mut list: Vec<String> = Vec::new();
         for source in sources {
             let source = source.trim().trim_end_matches('/').to_ascii_lowercase();
             if !source_valid(&source) {
-                return Err("Name a source as host/owner, for example github.com/example.".into());
+                return Err("Name a source as host/owner or host/group/subgroup, for example github.com/example.".into());
             }
             if !list.contains(&source) {
                 list.push(source);

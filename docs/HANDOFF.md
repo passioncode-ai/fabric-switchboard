@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-22: 0.6.67, repository identity by the contract's vectors (SB-141 part 1)
+
+- **Done.** The contract's 28 origin vectors (fabric-agent-contract `c7376eaa`, DEC-0089 item 2)
+  run in the gate; they found six differences in how Switchboard keyed repositories (GitLab group
+  paths were not repositories at all, an scp remote kept its query, `_` and Unicode look-alike
+  hosts passed, `ftp:` passed). `suggest::normalize` now follows the contract; sources take group
+  paths.
+- **Published today.** v0.6.65 (SB-109) at 19:47 UTC, run `39816032184`, 25 assets, announced on
+  `c764dc65`; v0.6.66 (SB-159) building in run `39839898783`. Plugin at 0.6.66.
+- **Next task.** SB-141 part 2: port `attributeFolder` and run the 135 attribution and 28 record
+  vectors; SB-168's design note by 2026-10-29.
+
 ## 2026-10-22: 0.6.66, organizations from PassionCode.ai (SB-159)
 
 - **Done (task-pipeline).** Organizations phase 3: scenario SCN-071 first; `vesta.rs` (browser
