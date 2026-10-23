@@ -179,6 +179,8 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
             let switchable = crate::agent_catalog::switchable(&id);
             let disabled = settings.disabled.iter().any(|d| d == &id);
             json!({
+                // SB-154: the contract's catalogue id (DEC-0093), for a host that keys agents by it.
+                "contract_id": crate::agent_catalog::contract_id(&id),
                 "id": id,
                 "name": agent["name"],
                 "maker": agent["maker"],
