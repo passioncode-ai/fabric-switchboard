@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.73, the contract's folder attribution decides joins (SB-141 part 2)
+
+- **Done.** `crates/switchboard-runtime/src/attribution.rs` ports `attributeFolder`,
+  `explainFolder`'s record and `recordOrigin` from fabric-agent-contract `0a4ce773`; tests
+  `folders_attribute_as_the_contracts_vectors_say` (135), `records_are_kept_as_the_contracts_vectors_say`
+  (28), `remotes_normalize_as_the_contracts_vectors_say` (28). `suggest::classify` now asks it
+  (worktree, repository, owner join; ambiguous is a conflict; new and refusals join nothing).
+  `scripts/sync_attribution_vectors.py` (it was named in the old fixture but never existed)
+  refreshes the one fixture file.
+- **Next task.** SB-168 design note (due 2026-10-29); SB-174 once `control_slow` lines exist;
+  CT-66 tombstones from removed folders when the contract asks for them.
+
 ## 2026-10-23: 0.6.72, statistics by folder, stop reports, organization edges (SB-157, SB-150, SB-170)
 
 - **Done.** SB-157: a request naming a folder no group holds counts under that folder, resolved

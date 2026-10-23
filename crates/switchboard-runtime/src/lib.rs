@@ -4,6 +4,7 @@ pub mod agent_keys;
 pub mod agent_settings;
 pub mod agents;
 pub mod analytics;
+pub mod attribution;
 mod bindings;
 mod blocking;
 mod carry;

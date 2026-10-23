@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.73 (2026-10-23)
+
+- **One rule for which group a new folder joins, shared with Fabric and Observatory (SB-141).** When Switchboard finds a new checkout (a worktree or a clone of a group's repository), it now decides which group it belongs to with the same rules Fabric and Project Observatory use, checked against all 163 shared examples of those rules. A folder in a temporary place, a container of other projects or a tool's own folder never joins; when two groups match equally, nothing is guessed. A remote address carrying a password in the short `user:password@host:path` form is now recognised as the same repository.
+
 ## 0.6.72 (2026-10-23)
 
 - **Statistics knows where more of the work happened (SB-157).** A session in a folder that is in no group, or an agent Switchboard started on an API key, used to land in "No folder recorded". Its requests now count under the repository that holds the folder, found through Git, the same way as a group's own folders.
