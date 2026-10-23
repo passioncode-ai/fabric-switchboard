@@ -60,6 +60,19 @@ PassionCode.ai. Without a connection nothing here runs.
 
 Without a running owner, metadata operations acquire the Store’s exclusive lock and release it after the command. With GUI or `serve` running, they use the owner’s authenticated loopback control server. Both paths run core validation. The CLI must not convert an authentication failure into a local-write fallback.
 
+### Moving to another machine (SB-176)
+
+Accounts never move: the other machine signs in to its own seats ([two machines](research/two-machines-2026-10-23.md), D-1). Settings do:
+
+```sh
+switchboard settings export > switchboard-settings.json          # on this machine: no account, no credential
+switchboard settings import switchboard-settings.json             # on the other one: what it would do
+switchboard settings import switchboard-settings.json --apply     # do it
+switchboard settings import switchboard-settings.json --under ~/code --under ~/work   # where its checkouts are (default ~/DATA)
+```
+
+The file (`switchboard-settings/1`) holds each group's name, organization, sources, the identities of its repositories (`host/owner/name`) and its plain folders; the organizations' names and domains; the default and disabled agents; the rotation policies. Import finds this machine's checkouts of each repository under `--under`, lists what it found and what has no checkout here, and on `--apply` adds the organizations it lacks, makes the missing groups with no accounts (give them this machine's own), adds found folders to existing groups without changing their accounts, and sets the agents' settings and the policies; a policy for the ordinary Claude Code (`claude_cli`) arrives switched off. Rules and fallback chains name accounts and stay behind. Nothing reaches an agent through MCP: the file is the person's to carry.
+
 ## Running sessions and official sign-in
 
 Keep the desktop open **or** run this in a separate terminal:

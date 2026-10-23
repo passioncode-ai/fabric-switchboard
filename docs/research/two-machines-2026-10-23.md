@@ -69,6 +69,6 @@ two machines"), board thread `b2511678`.
 | Phase | What | Row |
 |---|---|---|
 | 1 | The *Used on another machine* mark: `Snapshot.elsewhere` (schema 8), the account disabled here (so no renewal, rotation or switch), a refused switch with its reason, the card's badge and *Use here*, CLI `accounts update --elsewhere`, MCP `switchboard_account_update.elsewhere`, kept by backups (SCN-072); built in 0.6.74 | SB-175 |
-| 2 | Settings bundle export and import with repository matching and a preview | SB-176 |
+| 2 | Settings bundle export and import with repository matching and a preview: CLI `settings export|import`, built in 0.6.75 | SB-176 |
 | 3 | Identities published and read through Fabric's hub | SB-177 (waits for Fabric's hub ADR) |
 | 4 | D-6 acceptance on two machines | SB-178 (operator-assisted) |
