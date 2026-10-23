@@ -2,6 +2,14 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.76, phases of a long owner transaction (SB-163 T-1)
+
+- **Done.** Design note [owner-transaction-2026-10-23](research/owner-transaction-2026-10-23.md);
+  `Held::phase` marks in `renewal`, `source_sync` and `suggest_found`, logged in
+  `transaction_held`; rows SB-179 (grants leave the transaction) and SB-180 (one save per group).
+- **Next task.** After a day on 0.6.76: read `transaction_held` phases and `control_slow`
+  (SB-174), then build SB-179.
+
 ## 2026-10-23: 0.6.75, settings move to another machine (SB-176)
 
 - **Done.** `crates/switchboard-runtime/src/settings_bundle.rs` (`switchboard-settings/1`),

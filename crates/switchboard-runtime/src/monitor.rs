@@ -322,14 +322,17 @@ impl Pass {
             self.swap_last_signature = signature;
             self.swap_was_running = Some(running);
         }
-        let _mutation = runtime.hold("source_sync").await;
+        let mut mutation = runtime.hold("source_sync").await;
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
         // sessions and quota checks on that account keep working.
         if claude {
             crate::refresh::renew_idle_live(&runtime.store, runtime.native, &runtime.refresh).await;
+            mutation.phase("renew_live");
         }
         crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
+        mutation.phase("swap");
         sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
+        mutation.phase("sync");
         runtime.invalidate_current();
         self.last_source_sync = time;
     }
@@ -569,7 +572,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
         if due_at > time || schedule.retry_at.get(&id).is_some_and(|at| *at > time) {
             continue;
         }
-        let _mutation = runtime.hold("renewal").await;
+        let mut mutation = runtime.hold("renewal").await;
         let outcome = crate::refresh::ensure_fresh(
             &runtime.store,
             runtime.native,
@@ -578,6 +581,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
             false,
         )
         .await;
+        mutation.phase("refresh");
         if outcome == crate::refresh::Outcome::Refreshed {
             done += 1;
             schedule.retry_at.remove(&id);
