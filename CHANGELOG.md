@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.78 (2026-10-23)
+
+- **One Refresh on the Agents page (SB-169).** The page had two Refresh buttons that did the same thing; the one at the top of the page stays and also looks the agents up again.
+- **The highlighted account row stays readable in both themes, and a check keeps it so (SB-169).** Its text was measured against the tinted background: the faintest, gold text in the light theme, reads at 5.2 to 1, above the 4.5 to 1 accessibility minimum, and the build now fails if the colours stop meeting it.
+
 ## 0.6.77 (2026-10-23)
 
 - **Agents and Fabric Dashboards keep working while Switchboard updates itself (SB-181).** During an automatic update restart, every `switchboard` command and agent tool used to be refused with "Another Switchboard instance owns this account storage" for up to half a minute. A command now waits up to 8 seconds for the new copy and is answered by it, and the old copy ends as soon as its work is saved instead of lingering for 10 more seconds.

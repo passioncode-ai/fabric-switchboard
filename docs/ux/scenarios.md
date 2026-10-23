@@ -1210,15 +1210,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** Know at a glance which coding agents this computer has, and decide which of them Switchboard may hand a workflow to when its account runs out.
 **Preconditions:** none.
-**Entry point:** Agents (the agents are looked up when the page opens and on *Refresh*, never in the background).
+**Entry point:** Agents (the agents are looked up when the page opens and on the page header's *Refresh*, never in the background; SB-169: the Installed section has no Refresh of its own).
 **Steps:**
 1. Open Agents → **Installed · N detected** lists every agent found on this computer: agents that can take over work first (Claude Code, Codex, Kimi Code, Hermes, OpenCode), then the tools-only ones. Each row shows its name, the command Switchboard runs (with the OpenRouter model for an OpenRouter agent), **Enabled / Disabled**, **✓ Default** or **Set default**, and **Set up**.
 2. Press **Disabled** on an agent → “Kimi Code CLI no longer takes over work.”; the row dims and says *Disabled*; it is skipped in fallback chains and refused by `switchboard continue`. Account switching is not affected.
 3. **Details** → what Switchboard can do with it and its documentation link; for Hermes, *Change Hermes's model*. **Set up** opens its tools, endpoint and OpenRouter launch with copyable commands (SCN-036).
-4. **Available to install · N** → *Show all* lists the agents not found, each with its install command and **Copy**; after installing one, **Refresh** moves it to Installed.
+4. **Available to install · N** → *Show all* lists the agents not found, each with its install command and **Copy**; after installing one, the header's **Refresh** moves it to Installed.
 **Alt paths:** an agent that cannot take over a workflow shows *Tools only* instead of Enabled/Disabled and cannot be the default; disabling the default agent → “… no longer takes over work. The default agent is Auto again.”; the look-up fails → the error and *Retry*.
 **Expected result:** the operator sees the real set of agents and chooses which take over work.
-**UI elements:** Installed list, segmented Enabled/Disabled, Default mark or Set default, Set up, Details, Available list with Copy, Refresh.
+**UI elements:** Installed list, segmented Enabled/Disabled, Default mark or Set default, Set up, Details, Available list with Copy, the header's Refresh.
 **States covered:** looking up, detected, not detected, enabled, disabled, tools only, default, look-up failed.
 **Errors & recovery:** a save that fails keeps the previous state and names the cause; an unreadable agents-settings.json is named with how to restore it.
 **Status:** draft

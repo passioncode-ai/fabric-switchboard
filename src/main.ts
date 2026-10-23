@@ -644,7 +644,8 @@ function installedAgentsPanel(view: AgentsOverview) {
   const head = el('div', 'agents-head'); const heading = el('h2', '', t('Installed')); heading.id = 'installed-agents-heading';
   // Agents that can take over work first, in chain order; tools-only agents after them.
   const installed = sortAgents(view.agents.filter((a) => a.installed));
-  head.append(heading, el('span', 'badge', plural(installed.length, { one: '{n} detected', other: '{n} detected' })), button(t('Refresh'), () => { agentsView = null; render(); void loadAgents(); }, 'button quiet', 'agents-refresh'));
+  // SB-169: the page header's Refresh looks the agents up again (`reload`); one button, one meaning.
+  head.append(heading, el('span', 'badge', plural(installed.length, { one: '{n} detected', other: '{n} detected' })));
   section.append(head, el('p', '', t('Enabled agents can take over a workflow whose account ran out: in fallback chains and with switchboard continue. Disable one to keep work away from it; switching accounts is not affected.')));
   const list = el('div', 'agent-list');
   for (const agent of installed) list.append(agentRow(agent));
