@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.71, slow control requests are logged (SB-174)
+
+- **Found.** Fabric Dashboards' finding 62868a2a: its hand-over reads still miss a 10 s
+  deadline in bursts (30 on 10-22), while `Handovers` skips the owner transaction since 0.6.37
+  and answers in 7 to 8 ms when measured.
+- **Done.** The control listener logs `control_slow` (operation tag, ms) for a request it took
+  5 s or more to answer; the tag never carries arguments (`control::tests`).
+- **Next task.** After a day on 0.6.71: compare Dashboards' "hand-overs cannot be read" times
+  with `control_slow` lines. None at those times means the wait is before the owner's handler
+  (connect, accept, or the CLI's offline path); then SB-141 part 2.
+
 ## 2026-10-23: 0.6.70, Windows on ARM signs again
 
 - **Found.** v0.6.68 and v0.6.69 stopped at "Sign the desktop executable and the CLI" on

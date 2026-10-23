@@ -258,11 +258,48 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    let kind = operation_kind(&operation);
+    let started = std::time::Instant::now();
     let reply = match state.runtime.execute(operation).await {
         Ok(value) => Reply::Ok { value },
         Err(message) => Reply::Error { message },
     };
+    slow_request(kind, started.elapsed());
     Json(reply).into_response()
+}
+/// SB-174: a request the owner took longer than this to answer is logged, so a client's stall
+/// can be told apart from one on the way to the owner.
+const SLOW_REQUEST: Duration = Duration::from_secs(5);
+fn slow_request(kind: &'static str, took: Duration) {
+    if took >= SLOW_REQUEST {
+        oplog::event(
+            "control_slow",
+            &[
+                ("operation", oplog::Field::Code(kind)),
+                ("ms", oplog::Field::Number(took.as_millis() as i64)),
+            ],
+        );
+    }
+}
+/// The operation's tag (`handovers`, `usage`, ...), never its arguments. The tags come from a
+/// request that parsed as an `Operation`, so they are the enum's own names: each is kept once.
+fn operation_kind(operation: &Operation) -> &'static str {
+    static KINDS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let tag = serde_json::to_value(operation)
+        .ok()
+        .and_then(|v| v.get("operation")?.as_str().map(str::to_owned));
+    let Some(tag) = tag else {
+        return "unknown";
+    };
+    let Ok(mut kinds) = KINDS.lock() else {
+        return "unknown";
+    };
+    if let Some(known) = kinds.iter().find(|k| **k == tag) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(tag.into_boxed_str());
+    kinds.push(kept);
+    kept
 }
 
 /// None means no descriptor or connection refused before a request could be sent.
@@ -447,6 +484,19 @@ async fn request_on_connection(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_operation_kind_is_its_tag_and_never_its_arguments() {
+        assert_eq!(operation_kind(&Operation::Handovers), "handovers");
+        let usage = Operation::Usage {
+            id: "acct-secret-id".into(),
+        };
+        assert_eq!(operation_kind(&usage), "usage");
+        // The same tag is kept once.
+        assert!(std::ptr::eq(
+            operation_kind(&Operation::Handovers),
+            operation_kind(&Operation::Handovers)
+        ));
+    }
     use super::*;
     use crate::Owner;
     use switchboard_core::{AuthKind, MemoryVault, Provider, Store};
