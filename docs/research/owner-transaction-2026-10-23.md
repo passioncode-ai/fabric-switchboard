@@ -1,7 +1,7 @@
 # The owner transaction: what holds it, and the order to shorten it
 
-Design note, 2026-10-23, for SB-163. Status: measurement built (0.6.76), the changes below
-decided and not built.
+Design note, 2026-10-23, for SB-163. Status: measurement built (0.6.76); T-2 and T-3 built in
+0.6.77 (SB-179, SB-180); T-4 stands.
 
 ## 1. What is measured
 
@@ -53,4 +53,7 @@ manual switch on one account at once (the grant's result is dropped, the switch 
 
 ## 4. Rows
 
-T-1 is SB-163's first part (done in 0.6.76). T-2 and T-3 are SB-179 and SB-180.
+T-1 is SB-163's first part (done in 0.6.76). T-2 and T-3 are SB-179 and SB-180, both done in
+0.6.77: `refresh::ensure_fresh_with` and `add_suggested_folders`, with their tests named in
+[CONTRACTS](../CONTRACTS.md). The `renewal` step no longer appears in `transaction_held`; its
+transaction now lasts as long as the checks and the store.

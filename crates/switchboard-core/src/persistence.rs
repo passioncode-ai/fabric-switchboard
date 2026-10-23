@@ -109,8 +109,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         .open(root.join("instance.lock"))
         .map_err(error)?;
     secure_file(&lock)?;
-    lock.try_lock_exclusive()
-        .map_err(|_| "Another Switchboard instance owns this account storage")?;
+    lock.try_lock_exclusive().map_err(|_| crate::STORE_LOCKED)?;
     let path = root.join(METADATA);
     let snapshot = match private_options().read(true).open(&path) {
         Ok(file) => {
@@ -203,8 +202,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             Err(_) => open_private(&lock_path, true)?,
         }
     };
-    lock.try_lock_exclusive()
-        .map_err(|_| "Another Switchboard instance owns this account storage")?;
+    lock.try_lock_exclusive().map_err(|_| crate::STORE_LOCKED)?;
     let path = root.join(METADATA);
     let snapshot = if path.exists() {
         let bytes = read_private(&path, MAX_FILE)?;

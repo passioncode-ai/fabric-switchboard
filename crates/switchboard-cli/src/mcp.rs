@@ -5,7 +5,7 @@ use serde_json::{json, Map, Value};
 use std::path::PathBuf;
 use switchboard_core::Provider;
 use switchboard_runtime::{
-    control, execute_offline, onboarding,
+    control, onboarding,
     projects::{detect_session, Session},
     Operation,
 };
@@ -119,27 +119,8 @@ impl Server {
         }
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
-        let body = serde_json::to_vec(&operation).map_err(|_| "Operation unavailable.")?;
-        let mut attempt = 0;
-        loop {
-            let operation: Operation =
-                serde_json::from_slice(&body).map_err(|_| "Operation unavailable.")?;
-            match control::request(&self.root, &operation).await? {
-                Some(value) => return Ok(value),
-                None => match execute_offline(self.root.clone(), operation).await {
-                    // Another short-lived CLI or agent holds the offline lock; it is released
-                    // within one operation.
-                    Err(error)
-                        if error == "Another Switchboard instance owns this account storage"
-                            && attempt < 10 =>
-                    {
-                        attempt += 1;
-                        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-                    }
-                    result => return result,
-                },
-            }
-        }
+        // Waits out an owner's update restart and another command's offline lock (SB-181).
+        switchboard_runtime::call(&self.root, operation).await
     }
     async fn online(&self) -> Option<Value> {
         control::request(&self.root, &Operation::Status)
