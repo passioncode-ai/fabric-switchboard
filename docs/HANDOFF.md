@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.77 and 0.6.78 measured live; contract v0.1.0 pinned
+
+- **Measured (switchboard.log on this Mac).** 0.6.77 started 12:09:53 UTC, 0.6.78 at 14:32:21. That
+  restart: `drained` and `exiting` at 14:32:20, the new owner one second later (SB-181). From
+  12:09:53 to 18:37 UTC no `transaction_held` and no `control_slow` (SB-179, SB-174).
+- **Pinned.** Attribution vectors at the contract's first release `2f020a69` (PR #297, unchanged
+  content); SB-167 due 2026-10-30 (DEC-0111). Board: re-pinned, row SB-167; DEC-0112 to 0117 not
+  affected; the Agents Team Telegram rule not affected.
+- **Next task.** Read the log again after a full day (2026-10-24 12:10 UTC); if still no
+  `control_slow`, close SB-174 with that evidence. SB-167 once Observatory delivers keys (OBS-191).
+
 ## 2026-10-23: 0.6.78, the design pass's leftovers (SB-169)
 
 - **Done.** The tinted selected row and card are measured and asserted in `scripts/check-brand.mjs`
