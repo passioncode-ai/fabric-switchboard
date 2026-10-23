@@ -840,6 +840,35 @@ mod tests {
     }
 
     #[test]
+    fn a_group_whose_seats_all_left_its_organization_stays_bound() {
+        // SB-170: fail closed. The group's only Claude seat is the person's own now (outside the
+        // group's organization); its folder keeps the group's route, so the proxy refuses the
+        // seat, rather than the folder falling back to the ordinary login.
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().canonicalize().unwrap().join("app");
+        git(&app);
+        let acme: switchboard_core::Organization = serde_json::from_value(serde_json::json!({
+            "id": "org-acme", "name": "Acme", "domains": ["example.invalid"], "created_at": 1
+        }))
+        .unwrap();
+        let mut group = project("pc", &[&app]);
+        group.organization = Some(acme.id.clone());
+        let seat = account("pc");
+        let s = Snapshot {
+            projects: vec![group],
+            memberships: [(
+                seat.id.clone(),
+                switchboard_core::organizations::PERSONAL.into(),
+            )]
+            .into(),
+            accounts: vec![seat],
+            organizations: vec![acme],
+            ..Default::default()
+        };
+        assert_eq!(desired(&s), vec![(app.clone(), "pc".to_string())]);
+    }
+
+    #[test]
     fn a_worktree_inside_a_project_folder_is_bound_too() {
         let tmp = tempfile::tempdir().unwrap();
         let data = tmp.path().canonicalize().unwrap();

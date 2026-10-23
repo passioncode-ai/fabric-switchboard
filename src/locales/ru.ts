@@ -1207,6 +1207,7 @@ export const RU: Record<string, string> = {
   "by its team": "по команде",
   "by its domain": "по домену",
   "Runs only on accounts of {name}.": "Работает только на аккаунтах {name}.",
+  "None of these accounts belongs to {name} any more, so sessions in this group's folders are refused. Add an account of {name}, or change the group's organization.": "Ни один из этих аккаунтов больше не относится к {name}, поэтому сессии в папках группы получают отказ. Добавьте аккаунт {name} или смените организацию группы.",
   "Belongs to {name}.": "Относится к {name}.",
   "Personal account.": "Личный аккаунт.",
   "Sessions in this group's folders run only on this organization's accounts, or on personal ones for Personal.": "Сессии в папках этой группы работают только на аккаунтах этой организации, а при выборе «Личная» только на личных.",

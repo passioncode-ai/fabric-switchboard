@@ -857,6 +857,10 @@ impl Runtime {
                 // The recovery file is written by rename and the limits live in memory; behind
                 // the transaction a host's read waited 12 to 15 s for a renewal (SB-166).
                 | Operation::Recovery
+                // SB-150: a session's own stop report (Claude Code's `StopFailure` hook) writes
+                // the recovery file under its own lock (`recovery::writing`); behind the owner
+                // transaction the hook waited out its 10 s and the stop went unrecorded.
+                | Operation::RecoveryHook { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -5055,6 +5059,29 @@ mod owner_tests {
         .expect("answered while the transaction is held")
         .unwrap();
         assert_eq!(status["sessions"], json!([]));
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn a_stop_report_does_not_wait_behind_a_background_step() {
+        // SB-150: the `StopFailure` hook's registration waited for the owner transaction like
+        // SB-149's session start did; the hook gives up after 10 s.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let held = runtime.hold("test").await;
+        let answer = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.execute(Operation::RecoveryHook {
+                session: "session-1".into(),
+                directory: work.path().to_path_buf(),
+                billing: false,
+            }),
+        )
+        .await
+        .expect("answered while the transaction is held");
+        // No saved account matches in this fixture: the answer is a refusal, given at once.
+        assert!(answer.is_err());
         drop(held);
     }
 

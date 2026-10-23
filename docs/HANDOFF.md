@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.72, statistics by folder, stop reports, organization edges (SB-157, SB-150, SB-170)
+
+- **Done.** SB-157: a request naming a folder no group holds counts under that folder, resolved
+  to its repository through Git (also from a subfolder); the user's "No folder recorded" row
+  (9K requests over 30 days) shrinks to requests that named no folder at all. SB-150:
+  `RecoveryHook` on the read fast path, recovery writers under `recovery::writing`. SB-170:
+  fail-closed binding test, restore by domain, the group card's note (SCN-070 step 5a).
+- **Published 0.6.71.** Run 39879505885 green; 25 assets; `latest.json` 0.6.71 on 7
+  platforms; plugin 0.6.71 on this Mac.
+- **Next task.** SB-141 part 2 (port `attributeFolder` against the contract's 135 attribution
+  and 28 record vectors); SB-168 design note due 2026-10-29; SB-174 after a day of
+  `control_slow` lines.
+
 ## 2026-10-23: 0.6.71, slow control requests are logged (SB-174)
 
 - **Found.** Fabric Dashboards' finding 62868a2a: its hand-over reads still miss a 10 s

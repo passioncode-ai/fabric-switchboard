@@ -302,6 +302,13 @@ export function groupAdmits(snapshot: OrgSnapshot, organization: string | null, 
   if (!(snapshot.organizations ?? []).length) return true;
   return attribution(snapshot, account).organization === organization;
 }
+/** SB-170: a group bound to an organization whose accounts all belong elsewhere now (their
+ * domain or team moved, or the person placed them): its folders keep the group's route and every
+ * request is refused (fail closed), so its card says why. */
+export function groupSeatsElsewhere(snapshot: OrgSnapshot, organization: string | null, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[]): boolean {
+  if (!organization || !accounts.length) return false;
+  return !accounts.some((a) => groupAdmits(snapshot, organization, a));
+}
 /** SB-159: the PassionCode.ai panel's line as a translation key and its values. */
 export function passioncodeLine(status: { connected: boolean; state?: string; read_at?: number | null; organizations?: number } | null): { key: string; values?: Record<string, string | number> } {
   if (!status || !status.connected) return { key: 'Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.' };

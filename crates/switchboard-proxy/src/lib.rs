@@ -709,7 +709,10 @@ async fn relay(
             }
             Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "Request body timed out."),
         };
-    // SB-147: the folder the request came from: its own capability, else the folder it names.
+    // SB-147: the folder the request came from: its own capability, else the group folder that
+    // holds the folder it names; SB-157: else the folder it names, which the statistics resolve
+    // to its repository (a session outside every group, or an agent Switchboard launched on a
+    // key), instead of a count with no folder.
     let folder = g
         .stat_folders
         .read()
@@ -724,8 +727,11 @@ async fn relay(
             presented(&header)
                 .or_else(|| presented(&bearer))
                 .or_else(|| {
-                    stats::folder_hint(&bytes)
-                        .and_then(|hint| stats::deepest(&map.folders, &hint).map(str::to_owned))
+                    stats::folder_hint(&bytes).map(|hint| {
+                        stats::deepest(&map.folders, &hint)
+                            .map(str::to_owned)
+                            .unwrap_or(hint)
+                    })
                 })
         })
         .unwrap_or_default();

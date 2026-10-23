@@ -698,6 +698,11 @@ check(() => {
   assert.equal(logic.groupAdmits(snap, 'o1', home), false);
   snap.memberships.w = 'personal';
   assert.equal(logic.groupAdmits(snap, null, work), true);
+  // SB-170: a group of Acme whose only account was placed as personal says so on its card.
+  assert.equal(logic.groupSeatsElsewhere(snap, 'o1', [work]), true);
+  assert.equal(logic.groupSeatsElsewhere(snap, 'o1', [work, account('w2', 'ops@acme.example')]), false);
+  assert.equal(logic.groupSeatsElsewhere(snap, 'o1', []), false, 'an empty group has its own note');
+  assert.equal(logic.groupSeatsElsewhere(snap, null, [work]), false);
 });
 // SB-159: the PassionCode.ai panel's sentence for each state.
 check(() => {

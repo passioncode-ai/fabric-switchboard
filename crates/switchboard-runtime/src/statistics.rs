@@ -388,6 +388,15 @@ pub(crate) struct ProjectIndex {
     /// unique: two projects that share one get their owner in brackets.
     names: std::collections::HashMap<String, String>,
 }
+/// SB-157: the top of the checkout that holds `folder` (the folder itself or the nearest folder
+/// above it with a `.git`), at most 32 levels up; none outside Git.
+fn checkout_top(folder: &Path) -> Option<String> {
+    folder
+        .ancestors()
+        .take(32)
+        .find(|dir| std::fs::symlink_metadata(dir.join(".git")).is_ok())
+        .map(|dir| dir.to_string_lossy().into_owned())
+}
 impl ProjectIndex {
     /// From the groups' folders as Git sees them (`roots::tree` per group).
     pub(crate) fn build(snapshot: &Snapshot) -> Self {
@@ -419,7 +428,17 @@ impl ProjectIndex {
         if strays.is_empty() {
             return self;
         }
-        for root in crate::roots::tree(&strays) {
+        // SB-157: a folder a session named may be inside a checkout; its checkout's top is what
+        // Git knows. A folder already known through its top takes the top's key.
+        let tops: Vec<(String, String)> = strays
+            .iter()
+            .filter_map(|f| checkout_top(Path::new(f)).map(|top| (f.clone(), top)))
+            .collect();
+        let mut wanted: Vec<String> = tops.iter().map(|(_, top)| top.clone()).collect();
+        wanted.sort();
+        wanted.dedup();
+        wanted.retain(|top| !self.by_folder.contains_key(top));
+        for root in crate::roots::tree(&wanted) {
             let Some(key) = root.remote.clone() else {
                 continue;
             };
@@ -428,6 +447,11 @@ impl ProjectIndex {
                 .chain(root.derived.iter().map(|d| d.folder.clone()))
             {
                 self.by_folder.entry(folder).or_insert(key.clone());
+            }
+        }
+        for (folder, top) in tops {
+            if let Some(key) = self.by_folder.get(&top).cloned() {
+                self.by_folder.entry(folder).or_insert(key);
             }
         }
         self
@@ -776,13 +800,20 @@ mod tests {
             3,
             "without Git the two keys read as two rows"
         );
+        // SB-157: a session that names a folder inside the checkout counts there too.
+        let inner = format!("{out}/src/app");
+        std::fs::create_dir_all(&inner).unwrap();
+        split.absorb(Tallies::from([(
+            stats::key(&today, "a1", "agents", "codex", &inner),
+            tally(2, 2),
+        )]));
         let resolved = ProjectIndex::default().with_strays(&split.folders());
         let rows = split.report(&snapshot, &resolved, 7, now)["projects"].clone();
         let rows = rows.as_array().unwrap();
         assert_eq!(rows.len(), 2, "{rows:?}");
         assert_eq!(rows[0]["project"], "github.com/o/nicegram-business");
         assert_eq!(rows[0]["name"], "nicegram-business");
-        assert_eq!(rows[0]["requests"], 7);
+        assert_eq!(rows[0]["requests"], 9);
         assert_eq!(
             rows[1]["project"], "/gone/folder",
             "a folder that is gone stays its own"
