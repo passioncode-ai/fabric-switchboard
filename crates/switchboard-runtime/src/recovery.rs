@@ -102,6 +102,14 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Wait>, String> {
     Ok(rows)
 }
 
+/// SB-150: every read-modify-write of the file holds this, so the `StopFailure` registration
+/// can run beside the owner transaction (it no longer waits behind a renewal or a sync) without
+/// losing another writer's row. Held only for the file's read and rename.
+static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn writing() -> std::sync::MutexGuard<'static, ()> {
+    WRITES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 fn write(root: &Path, rows: &[Wait]) -> Result<(), String> {
     let bytes = serde_json::to_vec(rows).map_err(|_| INVALID)?;
     if bytes.len() > MAX_BYTES {
@@ -123,6 +131,7 @@ pub(crate) fn register(
         return Err(INVALID.into());
     }
     let directory = directory.canonicalize().map_err(|_| INVALID)?;
+    let _writing = writing();
     let mut rows = read(root)?;
     if let Some(old) = rows.iter().find(|r| r.event == event) {
         return if old.session == session && old.account == account && old.directory == directory {
@@ -205,6 +214,7 @@ pub(crate) fn register_stop(
         return Err(INVALID.into());
     }
     let directory = directory.canonicalize().map_err(|_| INVALID)?;
+    let _writing = writing();
     let mut rows = read(root)?;
     if let Some(live) = rows
         .iter_mut()
@@ -399,6 +409,7 @@ pub(crate) fn claim(
     sign_in: &HashSet<String>,
     now: i64,
 ) -> Result<Wait, String> {
+    let _writing = writing();
     let mut rows = read(root)?;
     let row = rows
         .iter_mut()
@@ -417,6 +428,7 @@ pub(crate) fn claim(
 }
 
 pub(crate) fn finish(root: &Path, event: &str, resumed: bool) -> Result<(), String> {
+    let _writing = writing();
     let mut rows = read(root)?;
     let row = rows.iter_mut().find(|r| r.event == event).ok_or(INVALID)?;
     let target = if resumed {

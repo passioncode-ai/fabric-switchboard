@@ -556,22 +556,32 @@ pub fn restore(
     // Organizations before projects, the person's word and the selections: each of these may
     // name one (SB-109 refuses a selection outside a group's organization).
     // Backup organization id → the one it is here: itself, or this install's organization of the
-    // same name (an install that made "Acme" again keeps its own, and the backup's groups follow it).
+    // same name (an install that made "Acme" again keeps its own, and the backup's groups follow it),
+    // or, SB-170, the one holding one of its e-mail domains: a domain belongs to one organization,
+    // so the backup's was refused for that clash and its groups belong to the one holding it.
     let mut org_ids: BTreeMap<String, String> = BTreeMap::new();
     for organization in payload.organizations {
         let old = organization.id.clone();
         let name = organization.name.clone();
+        let domains = organization.domains.clone();
         if store.restore_organization(organization).is_ok() {
             result.organizations += 1;
             org_ids.insert(old.clone(), old);
             continue;
         }
         let here = store.snapshot()?;
-        if let Some(same) = here
+        let by_name = here
             .organizations
             .iter()
-            .find(|o| o.id == old || o.name.trim().eq_ignore_ascii_case(name.trim()))
-        {
+            .find(|o| o.id == old || o.name.trim().eq_ignore_ascii_case(name.trim()));
+        let by_domain = || {
+            here.organizations.iter().find(|o| {
+                o.domains
+                    .iter()
+                    .any(|d| domains.iter().any(|b| b.eq_ignore_ascii_case(d)))
+            })
+        };
+        if let Some(same) = by_name.or_else(by_domain) {
             org_ids.insert(old, same.id.clone());
         }
     }
@@ -967,6 +977,19 @@ mod tests {
         assert_eq!(
             snap.projects[0].organization.as_deref(),
             Some(own.id.as_str())
+        );
+        // SB-170: an install whose organization holds the backup's domain under another name
+        // keeps its own, and the group follows it instead of turning personal.
+        let renamed = store(&temp.path().join("four"));
+        let held = renamed
+            .add_organization("Acme Inc", &["EXAMPLE.invalid".into()])
+            .unwrap();
+        let restored = restore(&renamed, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.organizations, 0);
+        let snap = renamed.snapshot().unwrap();
+        assert_eq!(
+            snap.projects[0].organization.as_deref(),
+            Some(held.id.as_str())
         );
     }
     const PERSONAL_WORD: &str = crate::organizations::PERSONAL;

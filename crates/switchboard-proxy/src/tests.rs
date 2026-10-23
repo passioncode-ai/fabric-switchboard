@@ -2152,6 +2152,29 @@ async fn statistics_count_each_request_and_the_providers_own_token_usage_only() 
     assert!(!json.contains("SECRET"));
     // Handed over once: the next call starts from nothing.
     assert!(p.take_statistics().is_empty());
+    // SB-157: a folder no group holds is counted as itself (the statistics resolve it to its
+    // repository), not as a request with no folder.
+    let outside = reqwest::Client::new()
+        .post(format!("http://{}/claude/default/v1/messages", p.address()))
+        .bearer_auth(p.token())
+        .header("user-agent", "claude-cli/2.1.300 (external, cli)")
+        .body("{\"system\":\"<env>\\nWorking directory: /elsewhere/tool\\n\",\"messages\":[]}")
+        .send()
+        .await
+        .unwrap();
+    assert!(outside.text().await.unwrap().contains("message_delta"));
+    let tallies = p.take_statistics();
+    assert!(
+        tallies.contains_key(&stats::key(
+            &day,
+            &b.id,
+            "default",
+            "claude-code",
+            "/elsewhere/tool"
+        )),
+        "{:?}",
+        tallies.keys().collect::<Vec<_>>()
+    );
     p.shutdown().await;
     up.abort();
 }
