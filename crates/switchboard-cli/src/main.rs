@@ -528,6 +528,10 @@ enum Accounts {
         /// `true` or `false`. A disabled account is never selected or switched to.
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: Option<bool>,
+        /// `true`: the account is used on another machine, so this one never renews, rotates to
+        /// or switches to it (disabled here); `false`: it is used here again (SB-175).
+        #[arg(long, action = clap::ArgAction::Set)]
+        elsewhere: Option<bool>,
     },
     /// Move an account into a project's pool, or back to `default`. Joining or leaving a project
     /// is that project's change (`project edit`); the account the ordinary Claude Code or Codex is
@@ -1075,10 +1079,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 pool: pool.clone(),
                 secret: read_secret()?,
             },
-            Accounts::Update { id, label, enabled } => Operation::Update {
+            Accounts::Update {
+                id,
+                label,
+                enabled,
+                elsewhere,
+            } => Operation::Update {
                 id: id.clone(),
                 label: label.clone(),
                 enabled: *enabled,
+                elsewhere: *elsewhere,
             },
             Accounts::Move { id, pool } => Operation::MoveAccount {
                 id: id.clone(),

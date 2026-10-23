@@ -25,6 +25,7 @@ export const nativeAdapter: Adapter = {
   runtime: () => readWithDeadline(invoke('runtime_status')),
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
+  markElsewhere: (id, on) => invoke('mark_elsewhere', { id, on }),
   remove: (id) => invoke('remove_account', { id }),
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
@@ -115,6 +116,7 @@ const safeErrors = new Set([
   'The browser could not be opened.',
   // A group's organization (SB-109).
   "This account belongs to another organization than this group. Move it, or change the group's organization.",
+  "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.",
   "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.",
   'This group still holds accounts that belong elsewhere. Move them out first.',
   // Project suggestions (SB-117).

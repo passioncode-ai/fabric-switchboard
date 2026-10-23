@@ -1291,7 +1291,9 @@ function accountRow(account: Account) {
   const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
-  if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
+  const elsewhere = snapshot?.elsewhere?.[account.id] !== undefined;
+  if (elsewhere) { const badge = el('span', 'badge muted', t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews, rotates to or switches to it.'); title.append(badge); }
+  else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
   const email = account.external_identity?.email;
@@ -1311,6 +1313,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
   else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {pool}.', { label: account.label, pool: account.pool }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
+  else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
   return slot;
 }
@@ -1322,6 +1325,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
   items.push([t('Move to another pool…'), () => moveDialog(account, state.current)]);
   if (snapshot?.organizations?.length) items.push([t('Organization…'), () => assignDialog(account)]);
+  // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
+  if (snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Used on another machine'), () => void mutate(() => adapter.markElsewhere(account.id, true), t('{label} is marked as used on another machine. This computer no longer renews, rotates to or switches to it.', { label: account.label }), `menu-${account.id}`)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }

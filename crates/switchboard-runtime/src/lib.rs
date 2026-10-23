@@ -101,6 +101,10 @@ pub enum Operation {
         label: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         enabled: Option<bool>,
+        /// SB-175: `true` marks the account as used on another machine (disabled here), `false`
+        /// clears the mark (enabled again).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        elsewhere: Option<bool>,
     },
     Remove {
         id: String,
@@ -2578,8 +2582,18 @@ async fn execute(
             let credential = Credential::parse(provider, kind, &secret)?;
             Ok(json!(store.add(label, provider, kind, pool, credential)?))
         }
-        Operation::Update { id, label, enabled } => {
-            store.update_fields(&id, label, enabled)?;
+        Operation::Update {
+            id,
+            label,
+            enabled,
+            elsewhere,
+        } => {
+            if label.is_some() || enabled.is_some() || elsewhere.is_none() {
+                store.update_fields(&id, label, enabled)?;
+            }
+            if let Some(on) = elsewhere {
+                store.mark_elsewhere(&id, on, monitor::now())?;
+            }
             Ok(Value::Null)
         }
         Operation::Remove { id } => {
@@ -7218,6 +7232,7 @@ mod usage_gate_tests {
                 id: a.id.clone(),
                 label: Some("renamed".into()),
                 enabled: Some(true),
+                elsewhere: None,
             }),
         )
         .await

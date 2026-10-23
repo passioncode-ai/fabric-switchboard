@@ -801,8 +801,10 @@ mod tests {
             "without Git the two keys read as two rows"
         );
         // SB-157: a session that names a folder inside the checkout counts there too.
-        let inner = format!("{out}/src/app");
+        // Joined as a path: on Windows `out` is a `\\?\` path, where `/` is not a separator.
+        let inner = std::path::Path::new(&out).join("src").join("app");
         std::fs::create_dir_all(&inner).unwrap();
+        let inner = inner.to_string_lossy().into_owned();
         split.absorb(Tallies::from([(
             stats::key(&today, "a1", "agents", "codex", &inner),
             tally(2, 2),
