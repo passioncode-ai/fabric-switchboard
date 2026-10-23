@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.71 (2026-10-23)
+
+- **Slow answers are now on record (SB-174).** Fabric Dashboards sometimes waits more than 10 seconds for Switchboard to list hand-overs, though the same request usually takes a few milliseconds. Switchboard's log now notes any request it took 5 seconds or more to answer, with the kind of request and the time (never its contents), so the next stall shows whether the wait was inside Switchboard or on the way to it.
+
 ## 0.6.70 (2026-10-23)
 
 - **The Windows build on ARM signs again.** 0.6.69 never reached anyone: GitHub's Windows on ARM build machines came without the PowerShell module gallery that the code-signing step installs its tool from, so that build stopped before signing. The release now registers the gallery when it is missing, and a check keeps that step ahead of signing. 0.6.70 carries everything listed under 0.6.69 and 0.6.68 (neither was published).
