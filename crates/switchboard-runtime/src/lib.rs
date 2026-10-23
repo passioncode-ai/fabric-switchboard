@@ -1090,10 +1090,14 @@ impl Runtime {
     /// agent's unassigned Git root, folders that could not be added yet, and deleted folders.
     /// The owner transaction for a background step, logged when held long.
     pub(crate) async fn hold(&self, step: &'static str) -> Held<'_> {
+        let guard = self.mutations.lock().await;
+        let now = std::time::Instant::now();
         Held {
-            _guard: self.mutations.lock().await,
+            _guard: guard,
             step,
-            since: std::time::Instant::now(),
+            since: now,
+            phases: Vec::new(),
+            last: now,
         }
     }
     #[cfg(test)]
@@ -1151,22 +1155,25 @@ impl Runtime {
         if stopped() {
             return;
         }
-        let _transaction = self.hold("suggest_found").await;
+        let mut transaction = self.hold("suggest_found").await;
         let Ok(fresh) = self.store.snapshot() else {
             return;
         };
+        transaction.phase("snapshot");
         // Projects changed meanwhile: what was decided may be stale. The scanner starts over on
         // the new projects at the next pass (`collect`), so nothing found is lost.
         if suggest::projects_key(&fresh) != suggest::projects_key(&snapshot) {
             return;
         }
-        blocking::run(|| {
-            let found = match self.suggest.lock() {
-                Ok(mut scanner) => scanner.settle_assessed(&self.root, assessed, time),
-                Err(_) => return,
-            };
-            self.add_found(found, time);
+        let found = blocking::run(|| match self.suggest.lock() {
+            Ok(mut scanner) => Some(scanner.settle_assessed(&self.root, assessed, time)),
+            Err(_) => None,
         });
+        transaction.phase("settle");
+        if let Some(found) = found {
+            blocking::run(|| self.add_found(found, time));
+            transaction.phase("add");
+        }
     }
     /// The recent Claude Code transcripts the limit scan reads, walked at most once per
     /// background pass.
@@ -2335,18 +2342,35 @@ pub(crate) struct Held<'a> {
     _guard: tokio::sync::MutexGuard<'a, ()>,
     step: &'static str,
     since: std::time::Instant,
+    /// SB-163: where the time went, as `phase` marks: each phase's milliseconds since the mark
+    /// before it, logged beside a long hold.
+    phases: Vec<(&'static str, i64)>,
+    last: std::time::Instant,
+}
+impl Held<'_> {
+    /// SB-163: ends a phase of this step: the time since the previous mark is logged under
+    /// `name` when the whole hold is long.
+    pub(crate) fn phase(&mut self, name: &'static str) {
+        let now = std::time::Instant::now();
+        self.phases
+            .push((name, now.duration_since(self.last).as_millis() as i64));
+        self.last = now;
+    }
 }
 impl Drop for Held<'_> {
     fn drop(&mut self) {
         let held = self.since.elapsed();
         if held >= HELD_LONG {
-            oplog::event(
-                "transaction_held",
-                &[
-                    ("step", oplog::Field::Code(self.step)),
-                    ("millis", oplog::Field::Number(held.as_millis() as i64)),
-                ],
+            let mut fields = vec![
+                ("step", oplog::Field::Code(self.step)),
+                ("millis", oplog::Field::Number(held.as_millis() as i64)),
+            ];
+            fields.extend(
+                self.phases
+                    .iter()
+                    .map(|(name, ms)| (*name, oplog::Field::Number(*ms))),
             );
+            oplog::event("transaction_held", &fields);
         }
     }
 }
@@ -5113,6 +5137,21 @@ mod owner_tests {
         .unwrap();
         assert_eq!(status["sessions"], json!([]));
         drop(held);
+    }
+
+    #[tokio::test]
+    async fn a_long_hold_names_where_its_time_went() {
+        // SB-163: `transaction_held` carries each marked phase's milliseconds.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let mut held = runtime.hold("test").await;
+        held.phase("first");
+        held.phase("second");
+        assert_eq!(
+            held.phases.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(held.phases.iter().all(|(_, ms)| *ms >= 0));
     }
 
     #[tokio::test]
