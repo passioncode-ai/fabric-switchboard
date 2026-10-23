@@ -44,10 +44,12 @@ npx sheleg-design-skill --lint src @ 58163e7 + working tree (sheleg-design-skill
 
 ## Alignment
 
-Falsifier checked on the after captures: no overlap at 740 px on any page in either theme; statistics tables show every column or scroll; card pages share one width. Measured half only: contrast of the new tinted selected row was not computed (NOT_RUN), and visual judgment is this agent's single pass.
+Falsifier checked on the after captures: no overlap at 740 px on any page in either theme; statistics tables show every column or scroll; card pages share one width. Contrast of the tinted selected row was measured later (SB-169, below); visual judgment is this agent's single pass.
 
 ## Open
 
-- Agents shows two Refresh buttons (page header and the Installed section); keep one?
-- At 740 px the header actions stack with the primary action on top; a person may prefer Refresh first.
-- Contrast of `color-mix(accent-weak 40%)` behind muted text on the selected row: measure in both themes.
+None. Closed by SB-169 (2026-10-23):
+
+- Agents shows two Refresh buttons: kept one, the page header's (`reload` looks the agents up too); the Installed section's is gone. WebKit at 740 px, both themes: one Refresh, no page error.
+- At 740 px the header actions stack with the primary action on top: kept. The primary action is what the page is for; Refresh is quiet and secondary, and the Agents page, where Refresh was doubled, has no primary action.
+- Contrast of the tinted selected row and card: measured and asserted by `scripts/check-brand.mjs` (pairs `row-selected`, `card-selected`). Lowest: `--accent-text` on the light selected row, 5.20:1; muted text 6.11:1 light, 7.90:1 dark (WCAG 1.4.3 AA, 4.5:1). The check fails when `style.css` stops mixing what it measures.

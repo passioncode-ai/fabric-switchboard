@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.78, the design pass's leftovers (SB-169)
+
+- **Done.** The tinted selected row and card are measured and asserted in `scripts/check-brand.mjs`
+  (64 pairs; lowest 5.20:1, light `--accent-text` on the selected row); the check fails when
+  `style.css` changes the mix (tried: 40% to 30% fails). One Refresh on Agents (the header's);
+  the 740 px header order kept; [director record](design/switchboard/director-record.md) *Open*
+  is empty. SCN-057 names the header's Refresh.
+- **Checks run.** `./scripts/check.sh` (exit code in the PR); WebKit at 740 px on `?demo=1`, both
+  themes: one Refresh on Agents, no page error.
+- **Next task.** As the 0.6.77 entry below: after a day, read `transaction_held` and `control_slow`.
+
 ## 2026-10-23: 0.6.77, reads survive an update restart; grants leave the transaction (SB-181, SB-179, SB-180)
 
 - **Done.** SB-181 (board finding `0ab48130` from Fabric Dashboards): `switchboard_runtime::call`

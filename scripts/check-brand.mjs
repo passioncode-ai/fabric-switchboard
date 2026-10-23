@@ -51,9 +51,23 @@ const pairs = [
   ['text', '--info', '--info-weak'], ['text', '--info', '--panel'],
   ['ui', '--focus', '--bg'], ['ui', '--focus', '--panel'], ['ui-light', '--border-strong', '--panel'], ['ui-light', '--border-strong', '--bg'], ['ui', '--accent-text', '--border'], ['ui', '--ok', '--panel'], ['ui', '--accent-text', '--panel-2'],
 ];
+// SB-169: the selected account row and card are tinted with color-mix over the panel; their
+// text is measured on the mixed colour. The CSS must still mix exactly what is measured here.
+const mixes = {
+  'row-selected': ['--accent-weak', 40, '--panel', /\.account-row\.is-selected\s*\{\s*background:\s*color-mix\(in srgb, var\(--accent-weak\) 40%, transparent\)/],
+  'card-selected': ['--accent-weak', 45, '--panel', /\.account-card\.is-selected\s*\{[^}]*background:\s*color-mix\(in srgb, var\(--accent-weak\) 45%, var\(--panel\)\)/],
+};
+for (const [name, [, , , pattern]] of Object.entries(mixes)) assert(pattern.test(styles), `${name}: style.css no longer mixes what check-brand measures`);
+const hex = (n) => n.toString(16).padStart(2, '0');
+const mixed = (theme, name) => {
+  const [top, percent, under] = mixes[name];
+  const [a, b] = [color(theme, top), color(theme, under)];
+  return '#' + [1, 3, 5].map((i) => hex(Math.round(parseInt(a.slice(i, i + 2), 16) * percent / 100 + parseInt(b.slice(i, i + 2), 16) * (100 - percent) / 100))).join('');
+};
+for (const name of Object.keys(mixes)) for (const fg of ['--ink', '--muted', '--accent-text']) pairs.push(['text', fg, name]);
 const report = [];
 for (const theme of Object.keys(themes)) for (const [kind, fg, bg] of pairs) {
-  const value = ratio(color(theme, fg), color(theme, bg)); const floor = kind === 'text' ? 4.5 : 3;
+  const value = ratio(color(theme, fg), mixes[bg] ? mixed(theme, bg) : color(theme, bg)); const floor = kind === 'text' ? 4.5 : 3;
   // Dark --pc-border-strong is 2.51:1 on panel in canonical v1.0.0/v1.1.0 and the canonical
   // checker asserts it for light only; it is reported here and tracked upstream, not asserted.
   const asserted = kind !== 'ui-light' || theme === 'light';
