@@ -2,6 +2,14 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.75, settings move to another machine (SB-176)
+
+- **Done.** `crates/switchboard-runtime/src/settings_bundle.rs` (`switchboard-settings/1`),
+  CLI `settings export|import`, CONTRACTS *Settings that move to another machine*, docs/CLI.md
+  *Moving to another machine*. No MCP tool (parity table reason).
+- **Next task.** SB-178 (operator, two machines); SB-177 after Fabric's hub ADR; SB-174 after a
+  day of `control_slow`; SB-163 design note; SB-154 catalogue adoption.
+
 ## 2026-10-23: 0.6.74, an account used on another machine (SB-175; SB-168 design)
 
 - **Done.** SB-168's design note [two-machines-2026-10-23](research/two-machines-2026-10-23.md)

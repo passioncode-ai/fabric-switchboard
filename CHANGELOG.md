@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.75 (2026-10-23)
+
+- **Take your Switchboard setup to another computer (SB-176).** `switchboard settings export > settings.json` on one computer and `switchboard settings import settings.json` on the other show which groups, organizations, agent settings and rotation rules would arrive, and where that computer's own copies of each group's repositories are; `--apply` sets it up. Accounts and passwords never travel: sign in on the new computer with its own accounts and give them to the groups.
+
 ## 0.6.74 (2026-10-23)
 
 - **An account you also use on another computer can be kept out of this one (SB-175).** If one subscription is signed in on two computers, renewing its sign-in on one signs the other out. Mark it with ⋯ → *Used on another machine*: this computer then never renews it, rotates to it or switches to it, and its card says *On another machine*. *Use here* undoes it. Also `switchboard accounts update ID --elsewhere true` and the agents' `switchboard_account_update`. This is the first step of using Switchboard on two computers ([design](docs/research/two-machines-2026-10-23.md)).

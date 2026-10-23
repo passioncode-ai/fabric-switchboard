@@ -46,6 +46,12 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// Settings that move to another machine (SB-176): groups by their repositories,
+    /// organizations, the agents' settings and rotation policies. No account or credential.
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCmd,
+    },
     /// Cached usage for all accounts, or refresh a specific account from its provider.
     Usage {
         /// An account id (`switchboard accounts list`): ask its provider now. Without it, the
@@ -425,6 +431,25 @@ fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
             std::env::current_dir().map_err(|_| "Current folder unavailable. Pass --path.".into())
         }
     }
+}
+#[derive(Subcommand)]
+enum SettingsCmd {
+    /// Print this machine's settings as a `switchboard-settings/1` file
+    /// (`switchboard settings export > settings.json`).
+    Export,
+    /// Show what importing a settings file would do here, then do it with `--apply`.
+    Import {
+        /// The file `settings export` wrote.
+        file: PathBuf,
+        /// Where to look for this machine's checkouts of the groups' repositories (repeatable;
+        /// default `~/DATA`, else the home folder).
+        #[arg(long)]
+        under: Vec<PathBuf>,
+        /// Do it: add the organizations, the groups (with no accounts: give them this
+        /// machine's own), the agents' settings and the rotation policies.
+        #[arg(long)]
+        apply: bool,
+    },
 }
 #[derive(Subcommand)]
 enum Org {
@@ -1105,6 +1130,27 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
+        Command::Settings { command } => match command {
+            SettingsCmd::Export => Operation::SettingsExport,
+            SettingsCmd::Import { file, under, apply } => {
+                let meta = std::fs::metadata(file).map_err(|_| "Settings file unavailable.")?;
+                if meta.len() > switchboard_runtime::settings_bundle::MAX_BYTES as u64 {
+                    return Err(switchboard_runtime::settings_bundle::NOT_A_BUNDLE.into());
+                }
+                let bytes = std::fs::read(file).map_err(|_| "Settings file unavailable.")?;
+                let mut value: Value = serde_json::from_slice(&bytes)
+                    .map_err(|_| switchboard_runtime::settings_bundle::NOT_A_BUNDLE)?;
+                // `--json` wraps it as {ok, data}.
+                if value.get("format").is_none() && value["data"].get("format").is_some() {
+                    value = value["data"].take();
+                }
+                Operation::SettingsImport {
+                    bundle: value,
+                    under: under.clone(),
+                    apply: *apply,
+                }
+            }
+        },
         Command::Org { command } => match command {
             Org::List => Operation::Organizations,
             Org::Connect => Operation::VestaConnect,
@@ -2565,6 +2611,14 @@ mod mcp_parity {
         ("usage", Tool("switchboard_usage")),
         ("events", Tool("switchboard_events")),
         ("stats", Tool("switchboard_statistics")),
+        (
+            "settings export",
+            Not("SB-176: a file the person carries to another machine; an agent has no second machine to carry it to"),
+        ),
+        (
+            "settings import",
+            Not("SB-176: reads a file the person brought from another machine and adds groups and policies; the person runs it once per move"),
+        ),
         ("status", Tool("switchboard_status")),
         ("sessions", Tool("switchboard_sessions")),
         ("current", Tool("switchboard_status")),

@@ -45,6 +45,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime settings_bundle.rs parse(): SB-176 settings import runs from the CLI only; the window
+  // has no import, so this prints to the terminal.
+  'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',
   'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
