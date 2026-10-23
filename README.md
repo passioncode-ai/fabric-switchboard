@@ -39,13 +39,13 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 
 ## Release status
 
-**Latest published: [v0.6.53](https://github.com/passioncode-ai/fabric-switchboard/releases/tag/v0.6.53)** · October 20, 2026.
-Groups list their projects, and Statistics counts requests and tokens by project as well as by
-group, account, agent and day, with a daily chart (0.6.53). 0.6.52 made projects groups (one
-project in several groups, no group made by itself for a stray repository), added Statistics
-and gave every CLI command an MCP tool. 0.6.48 added a key per group for agents on OpenRouter;
-0.6.49 lets Codex in a group's folders use the group's Codex accounts. Release notes for each
-version are in [CHANGELOG.md](CHANGELOG.md).
+**Latest published:** [the latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)
+(its number is on that page; installed copies update themselves). Recent changes: 0.6.77 keeps
+`switchboard` commands and agents' tools answering while Switchboard updates itself, and a
+sign-in renewal no longer holds your changes; 0.6.74 and 0.6.75 start using Switchboard on two
+computers (an account used on another one, settings that move without a password); 0.6.65 and
+0.6.66 add organizations, linked to PassionCode.ai. Release notes for each version are in
+[CHANGELOG.md](CHANGELOG.md).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,
 arm64) are built natively and Authenticode-signed (Azure Artifact Signing, timestamped). Linux
