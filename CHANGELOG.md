@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## 0.6.75 (2026-10-23)
 
 - **Take your Switchboard setup to another computer (SB-176).** `switchboard settings export > settings.json` on one computer and `switchboard settings import settings.json` on the other show which groups, organizations, agent settings and rotation rules would arrive, and where that computer's own copies of each group's repositories are; `--apply` sets it up. Accounts and passwords never travel: sign in on the new computer with its own accounts and give them to the groups.
+- **The coding-agent list agrees with Fabric's (SB-154).** Switchboard's list of 30 coding agents is now checked against the shared PassionCode catalogue on every build, and each agent the agents' tool lists carries the shared catalogue's id, so Fabric and Switchboard name the same agent the same way.
 
 ## 0.6.74 (2026-10-23)
 

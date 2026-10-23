@@ -9,6 +9,16 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 const CATALOG: &str = include_str!("../../../catalog/agents.json");
+/// SB-154: the contract's ids for the two agents Switchboard names by their binary (DEC-0093).
+const CONTRACT_ALIASES: &[(&str, &str)] = &[("cursor-cli", "cursor-agent"), ("kiro-cli", "kiro")];
+/// The contract's catalogue id (fabric-agent-contract `catalogue/coding-agents.json`) of one of
+/// Switchboard's agents.
+pub fn contract_id(id: &str) -> &str {
+    CONTRACT_ALIASES
+        .iter()
+        .find(|(ours, _)| *ours == id)
+        .map_or(id, |(_, theirs)| theirs)
+}
 
 /// The whole catalog, as embedded.
 pub fn catalog() -> Value {
@@ -245,6 +255,47 @@ pub fn connect(id: &str, proxy: Option<&str>, pool: &str, cli: &str) -> Result<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_catalog_agrees_with_the_contracts_catalogue() {
+        // SB-154 (DEC-0093): the same agents, with the same name, maker, URL, binary and MCP
+        // support; Switchboard's own fields beyond them are its evidence.
+        let pinned: Value =
+            serde_json::from_str(include_str!("../../../catalog/coding-agents.contract.json"))
+                .unwrap();
+        let theirs = pinned["catalogue"]["agents"].as_array().unwrap();
+        let ours = catalog();
+        let ours = ours["agents"].as_array().unwrap();
+        assert_eq!(theirs.len(), ours.len(), "the same number of agents");
+        let mut wrong = Vec::new();
+        for a in ours {
+            let id = a["id"].as_str().unwrap();
+            let Some(c) = theirs.iter().find(|c| c["id"] == contract_id(id)) else {
+                wrong.push(format!("{id}: not in the contract's catalogue"));
+                continue;
+            };
+            for field in ["name", "maker", "url"] {
+                if a[field] != c[field] {
+                    wrong.push(format!("{id}.{field}: {} vs {}", a[field], c[field]));
+                }
+            }
+            if a["binary"] != c["launch"]["argv"][0] {
+                wrong.push(format!(
+                    "{id}.binary: {} vs {}",
+                    a["binary"], c["launch"]["argv"][0]
+                ));
+            }
+            if a["mcp"]["supported"] != c["mcp"] {
+                wrong.push(format!(
+                    "{id}.mcp: {} vs {}",
+                    a["mcp"]["supported"], c["mcp"]
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+        assert_eq!(contract_id("kiro-cli"), "kiro");
+        assert_eq!(contract_id("codex"), "codex");
+    }
 
     #[test]
     fn the_catalog_is_well_formed_and_every_launch_profile_is_complete() {

@@ -6,7 +6,8 @@
 
 - **Done.** `crates/switchboard-runtime/src/settings_bundle.rs` (`switchboard-settings/1`),
   CLI `settings export|import`, CONTRACTS *Settings that move to another machine*, docs/CLI.md
-  *Moving to another machine*. No MCP tool (parity table reason).
+  *Moving to another machine*. No MCP tool (parity table reason). Also SB-154: the contract's
+  agent catalogue pinned and checked (`the_catalog_agrees_with_the_contracts_catalogue`).
 - **Next task.** SB-178 (operator, two machines); SB-177 after Fabric's hub ADR; SB-174 after a
   day of `control_slow`; SB-163 design note; SB-154 catalogue adoption.
 
