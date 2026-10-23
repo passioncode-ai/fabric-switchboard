@@ -14,8 +14,12 @@
   SB-171 took that folder out of Agents. Folders no group holds now resolve through Git
   (`ProjectIndex::with_strays`); on this Mac the two rows (12 folder-keyed, 15 repository-keyed
   tallies) read as one once 0.6.70 runs.
-- **Next task.** Watch the v0.6.70 run to success, check `latest.json` and the 25 assets, update
-  the plugin, announce on the board; then SB-141 part 2.
+- **Published.** Run 39870482509 green on all jobs, Windows arm64 signing included; release
+  v0.6.70 is Latest with 25 assets; `latest.json` reads 0.6.70 for 7 platforms; the plugin on
+  this Mac is 0.6.70. v0.6.68 attempt 2 was cancelled on purpose (a late publish could have
+  made it Latest again); neither 0.6.68 nor 0.6.69 is published, CHANGELOG says so.
+- **Next task.** SB-141 part 2 (port `attributeFolder` with the 135 attribution and 28 record
+  vectors); SB-168 design note due 2026-10-29.
 
 ## 2026-10-22: 0.6.69, running sessions survive a folder leaving its group (SB-172)
 
