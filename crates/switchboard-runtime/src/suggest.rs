@@ -100,10 +100,14 @@ fn read_small(path: &Path, limit: u64) -> Option<String> {
 pub(crate) struct Repo {
     pub common: PathBuf,
     pub remote: Option<String>,
+    /// SB-141: `remote.origin.url` as written, which the contract's attribution reads.
+    pub origin: Option<String>,
     /// This checkout's own git folder (a worktree's lives under `common/worktrees`).
     pub gitdir: PathBuf,
     /// The repository's main checkout (`.git` is a folder), not a linked worktree.
     pub main: bool,
+    /// The folder this was read from (a checkout's top).
+    pub top: PathBuf,
 }
 
 pub(crate) fn repo(dir: &Path) -> Option<Repo> {
@@ -135,14 +139,15 @@ pub(crate) fn repo(dir: &Path) -> Option<Repo> {
         None => gitdir.clone(),
     };
     let common = common.canonicalize().ok()?;
-    let remote = read_small(&common.join("config"), CONFIG_LIMIT)
-        .and_then(|c| origin_url(&c))
-        .and_then(|u| normalize(&u));
+    let origin = read_small(&common.join("config"), CONFIG_LIMIT).and_then(|c| origin_url(&c));
+    let remote = origin.as_deref().and_then(normalize);
     Some(Repo {
         common,
         remote,
+        origin,
         gitdir,
         main: meta.is_dir(),
+        top: dir.to_path_buf(),
     })
 }
 
@@ -167,6 +172,15 @@ fn origin_url(config: &str) -> Option<String> {
     None
 }
 
+/// The scp form `[user@]host:path`: its host and path, read as the contract's expression
+/// `^(?:[^@/\s]+@)?([^:/\s]+):([^\s]+)$` does (leftmost, the user greedy).
+fn scp_form(value: &str) -> Option<(&str, &str)> {
+    static SCP: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^(?:[^@/\s]+@)?([^:/\s]+):(\S+)$").unwrap()
+    });
+    let caps = SCP.captures(value)?;
+    Some((caps.get(1)?.as_str(), caps.get(2)?.as_str()))
+}
 /// A remote's repository identity, as fabric-agent-contract DEC-0089 item 2 defines it (SB-141):
 /// `host/path`, ASCII-lowercased, from a URL with one of `SCHEMES` or the scp form
 /// `[user@]host:path`; the user, a password, the port, a query, a fragment, slashes at either end
@@ -205,21 +219,12 @@ pub(crate) fn normalize(url: &str) -> Option<String> {
         if value.starts_with('/') || value.starts_with('.') || drive {
             return None;
         }
-        // `[user@]host:path`: the user has no `@`, `/` or space; the host no `:`, `/` or space.
-        let (left, path) = value.split_once(':')?;
-        let host = match left.split_once('@') {
-            Some((user, host)) if !user.is_empty() && !user.contains('/') => host,
-            Some(_) => return None,
-            None => left,
-        };
-        if host.is_empty()
-            || host.contains(['/', '@'])
-            || host.chars().any(char::is_whitespace)
-            || path.is_empty()
-            || path.chars().any(char::is_whitespace)
-        {
-            return None;
-        }
+        // `[user@]host:path`, as the contract's expression reads it
+        // (`^(?:[^@/\s]+@)?([^:/\s]+):([^\s]+)$`): the user has no `@`, `/` or space and may hold a
+        // `:` (a password, dropped); the host no `:`, `/` or space, and a host holding `@` keeps what
+        // follows its last one (below).
+        let caps = scp_form(value)?;
+        let (host, path) = (caps.0, caps.1);
         (host.to_owned(), cut(path))
     };
     let host = host.rsplit_once('@').map_or(host.as_str(), |(_, h)| h);
@@ -260,8 +265,11 @@ pub(crate) fn project_repos(snapshot: &Snapshot) -> Vec<(String, Repo)> {
         .collect()
 }
 
-/// Which project a folder belongs to, and why: the strongest match wins (worktree, then clone,
-/// then source); two projects matching equally strongly is a conflict, never a guess (D-7).
+/// Which project a folder belongs to, and why: the contract's attribution (DEC-0089, SB-141 part
+/// 2, `attribution::attribute_folder`) over the groups' folders. Only a checkout's top is a
+/// candidate. Attached by worktree, by repository or by an owner a group lists joins that group; a
+/// tie is a conflict, never a guess (D-7); a new Project or a refusal joins nothing (Switchboard
+/// never makes a group by itself, SB-146).
 fn classify_inner(
     snapshot: &Snapshot,
     repos: &[(String, Repo)],
@@ -273,53 +281,154 @@ fn classify_inner(
     let Some(candidate) = repo(folder) else {
         return Ok(None);
     };
-    let mut best: Option<(u8, String, Reason, String)> = None;
-    let mut tie = false;
-    for project in &snapshot.projects {
-        let mut here: Option<(u8, Reason, String)> = None;
-        for (_, r) in repos.iter().filter(|(pool, _)| pool == &project.pool) {
+    let Some(input) = attribution_snapshot(snapshot, repos, folder, &candidate) else {
+        return Ok(None);
+    };
+    let answer = crate::attribution::attribute_folder(&input);
+    match answer["outcome"].as_str() {
+        Some("attached") => {
+            let pool = answer["project"].as_str().unwrap_or_default().to_owned();
             let label = || {
-                r.remote
+                candidate
+                    .remote
                     .clone()
-                    .unwrap_or_else(|| r.common.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| candidate.common.to_string_lossy().into_owned())
             };
-            let found = if r.common == candidate.common {
-                Some((3, Reason::Worktree, label()))
-            } else if r.remote.is_some() && r.remote == candidate.remote {
-                Some((2, Reason::SameRepository, label()))
-            } else {
-                None
+            let found = match answer["rule"].as_str() {
+                Some("worktree") => (Reason::Worktree, label()),
+                Some("repository") => (Reason::SameRepository, label()),
+                Some("owner") => (
+                    Reason::Ecosystem,
+                    candidate
+                        .remote
+                        .as_deref()
+                        .map(owner_of)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                _ => return Ok(None),
             };
-            if let Some(f) = found {
-                if here.as_ref().is_none_or(|h| f.0 > h.0) {
-                    here = Some(f);
-                }
-            }
+            Ok(Some((pool, found.0, found.1)))
         }
-        if here.is_none() {
-            if let Some(remote) = &candidate.remote {
-                let owner = owner_of(remote);
-                if project.sources.iter().any(|s| s == owner) {
-                    here = Some((1, Reason::Ecosystem, owner.to_owned()));
-                }
-            }
-        }
-        let Some((rank, reason, label)) = here else {
-            continue;
-        };
-        match &best {
-            Some((top, pool, ..)) if *top == rank && pool != &project.pool => tie = true,
-            Some((top, ..)) if *top >= rank => {}
-            _ => {
-                best = Some((rank, project.pool.clone(), reason, label));
-                tie = false;
-            }
-        }
+        Some("ambiguous") => Err(()),
+        _ => Ok(None),
     }
-    if tie {
-        return Err(());
+}
+
+/// A path as the contract writes it: absolute, `/`-separated, a Windows drive upper case, no
+/// trailing `/`; none for a path it cannot hold.
+pub(crate) fn contract_path(path: &Path) -> Option<String> {
+    let text = path.to_str()?;
+    let text = text.strip_prefix(r"\\?\").unwrap_or(text);
+    let mut text = if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.to_owned()
+    };
+    if text.as_bytes().get(1) == Some(&b':') {
+        let drive = text[..1].to_ascii_uppercase();
+        text.replace_range(..1, &drive);
     }
-    Ok(best.map(|(_, pool, reason, label)| (pool, reason, label)))
+    while text.len() > 1 && text.ends_with('/') && !text.ends_with(":/") {
+        text.pop();
+    }
+    crate::attribution::is_path(&text).then_some(text)
+}
+
+/// The platform's temporary and cache roots that exist, resolved (the contract's `tempRoots`).
+fn temp_roots(home: &Path) -> Vec<String> {
+    // Unit tests build their repositories in the temporary folder, as `transient` allows.
+    #[cfg(test)]
+    if !CHECK_TRANSIENT.with(std::cell::Cell::get) {
+        return Vec::new();
+    }
+    let mut roots: Vec<PathBuf> = vec![
+        std::env::temp_dir(),
+        "/tmp".into(),
+        "/private/tmp".into(),
+        "/private/var/folders".into(),
+        "/var/tmp".into(),
+        home.join(".cache"),
+        home.join("Library/Caches"),
+        home.join("AppData/Local/Temp"),
+    ];
+    roots.retain(|r| r.exists());
+    let mut out: Vec<String> = roots
+        .iter()
+        .filter_map(|r| r.canonicalize().ok())
+        .filter_map(|r| contract_path(&r))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// A checkout's Git facts as the contract reads them: its top level, common dir, main checkout
+/// (a worktree's is the folder its common `.git` sits in; a bare repository's is the common dir)
+/// and raw origin.
+fn git_facts(top: &Path, r: &Repo) -> Option<serde_json::Value> {
+    let main = if r.main {
+        top.to_path_buf()
+    } else if r.common.file_name().is_some_and(|n| n == ".git") {
+        r.common.parent()?.to_path_buf()
+    } else {
+        r.common.clone()
+    };
+    Some(serde_json::json!({
+        "toplevel": contract_path(top)?,
+        "commonDir": contract_path(&r.common)?,
+        "mainCheckout": contract_path(&main)?,
+        "origin": r.origin,
+    }))
+}
+
+/// The contract's snapshot of `folder` (a checkout's top) against the groups: each group a Project
+/// by its pool, its folders with their Git facts, its sources. A group folder Switchboard holds
+/// no repository for is read by path only.
+fn attribution_snapshot(
+    snapshot: &Snapshot,
+    repos: &[(String, Repo)],
+    folder: &Path,
+    candidate: &Repo,
+) -> Option<serde_json::Value> {
+    let home = dirs::home_dir()?.canonicalize().ok()?;
+    let projects: Vec<serde_json::Value> = snapshot
+        .projects
+        .iter()
+        .map(|p| {
+            let folders: Vec<serde_json::Value> = p
+                .folders
+                .iter()
+                .filter_map(|f| {
+                    let path = Path::new(f);
+                    let text = contract_path(path)?;
+                    let r = repos
+                        .iter()
+                        .find(|(pool, r)| pool == &p.pool && r.top == path)
+                        .map(|(_, r)| r);
+                    Some(match r {
+                        Some(r) => serde_json::json!({
+                            "path": text,
+                            "commonDir": contract_path(&r.common),
+                            "origin": r.origin,
+                            "toplevel": text,
+                        }),
+                        None => {
+                            serde_json::json!({"path": text, "commonDir": null, "origin": null})
+                        }
+                    })
+                })
+                .collect();
+            serde_json::json!({"id": p.pool, "folders": folders, "sources": p.sources})
+        })
+        .collect();
+    Some(serde_json::json!({
+        "folder": contract_path(folder)?,
+        "home": contract_path(&home)?,
+        "tempRoots": temp_roots(&home),
+        "git": git_facts(folder, candidate)?,
+        "projects": projects,
+    }))
 }
 
 pub(crate) fn classify(
@@ -1185,10 +1294,9 @@ mod tests {
     #[test]
     fn remotes_normalize_as_the_contracts_vectors_say() {
         // SB-141 (DEC-0089 item 2): the contract's origin vectors, copied at the pinned commit.
-        let file: serde_json::Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/folder-attribution-origin.json"
-        ))
-        .unwrap();
+        let file: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/folder-attribution.json"))
+                .unwrap();
         let mut wrong = Vec::new();
         for v in file["origin"].as_array().unwrap() {
             let got = v["origin"].as_str().and_then(normalize);
