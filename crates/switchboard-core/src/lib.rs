@@ -35,6 +35,9 @@ pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED};
 pub use rotation::{Fits, RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
+/// The store's exclusive lock is held by another process: a running, draining or starting
+/// owner, or another offline command.
+pub const STORE_LOCKED: &str = "Another Switchboard instance owns this account storage";
 
 use serde::{Deserialize, Serialize};
 use std::{

@@ -821,13 +821,20 @@ pub(crate) fn find_pending(root: &Path, folder: &str) -> Result<Suggestion, Stri
 /// Marks a folder added to its project (SB-121): remembered, so a folder the person removes from
 /// the project afterwards is not added again. `now` is when it was added.
 pub(crate) fn mark_added(root: &Path, folder: &str, now: i64) -> Result<(), String> {
+    mark_added_all(root, &[folder], now)
+}
+/// SB-180: every folder of one pass marked in one write; a folder without its row is refused
+/// before anything is written.
+pub(crate) fn mark_added_all(root: &Path, folders: &[&str], now: i64) -> Result<(), String> {
     let mut rows = read(root)?;
-    let row = rows
-        .iter_mut()
-        .find(|r| r.folder == folder)
-        .ok_or(NOT_FOUND)?;
-    row.state = State::Added;
-    row.first_seen = now;
+    for folder in folders {
+        let row = rows
+            .iter_mut()
+            .find(|r| r.folder == *folder)
+            .ok_or(NOT_FOUND)?;
+        row.state = State::Added;
+        row.first_seen = now;
+    }
     write(root, &rows)
 }
 

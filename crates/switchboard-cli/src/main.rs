@@ -9,7 +9,7 @@ use std::{
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
-    arm_hard_exit, control, default_root, execute_offline, onboarding, oplog,
+    arm_hard_exit, control, default_root, onboarding, oplog,
     projects::{detect_session, Session},
     rfc3339, AgentVia, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
@@ -1914,10 +1914,7 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     }
 }
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
-    match control::request(root, &operation).await? {
-        Some(value) => Ok(value),
-        None => execute_offline(root.to_owned(), operation).await,
-    }
+    switchboard_runtime::call(root, operation).await
 }
 fn utc(value: &Value) -> String {
     value

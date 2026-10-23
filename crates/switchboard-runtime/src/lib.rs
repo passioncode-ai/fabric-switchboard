@@ -1050,9 +1050,13 @@ impl Runtime {
             return;
         }
         let mut added = 0;
-        for s in &found {
-            match add_suggested_folder(&self.store, &self.root, s, time) {
-                Ok(_) => added += 1,
+        for (s, result) in
+            found
+                .iter()
+                .zip(add_suggested_folders(&self.store, &self.root, &found, time))
+        {
+            match result {
+                Ok(()) => added += 1,
                 Err(error) => {
                     if self.first_time(&format!("add:{}", s.folder)) {
                         oplog::event(
@@ -2072,6 +2076,10 @@ impl Owner {
         // and holding it means no other one starts.
         let transaction = tokio::time::timeout(left(deadline), runtime.mutations.lock()).await;
         drained &= transaction.is_ok();
+        // SB-179: grants run outside the transaction; one that ended meanwhile is stored now.
+        if transaction.is_ok() {
+            refresh::adopt_all_kept(&runtime.store, &runtime.refresh);
+        }
         drained &= runtime
             .proxy
             .stop(left(std::time::Duration::from_secs(2)))
@@ -2140,6 +2148,83 @@ fn add_refusal(error: &str) -> &'static str {
     } else {
         "other"
     }
+}
+/// SB-180: the folders one pass found, added with one `save_project` per group (each save
+/// publishes `accounts.json` and syncs the bindings) and one write of the suggestion list. The
+/// answer is one result per suggestion, in order. A group whose save is refused falls back to one
+/// save per folder, so one folder that cannot join does not keep the others out.
+fn add_suggested_folders(
+    store: &Store,
+    root: &Path,
+    found: &[suggest::Suggestion],
+    now: i64,
+) -> Vec<Result<(), String>> {
+    let mut results: Vec<Option<Result<(), String>>> = found.iter().map(|_| None).collect();
+    let mut pools: Vec<&str> = found.iter().map(|s| s.pool.as_str()).collect();
+    pools.sort_unstable();
+    pools.dedup();
+    for pool in pools {
+        let mut batch: Vec<(usize, PathBuf)> = Vec::new();
+        for (i, s) in found.iter().enumerate().filter(|(_, s)| s.pool == pool) {
+            if !Path::new(&s.folder).is_dir() {
+                results[i] = Some(Err(
+                    "This folder is gone. Read the suggestions again.".into()
+                ));
+                continue;
+            }
+            match projects::project_dir(root, Path::new(&s.folder)) {
+                Ok(admitted) => batch.push((i, admitted)),
+                Err(error) => results[i] = Some(Err(error)),
+            }
+        }
+        if batch.is_empty() {
+            continue;
+        }
+        let saved = store.snapshot().and_then(|snapshot| {
+            let project = snapshot
+                .projects
+                .iter()
+                .find(|p| p.pool == pool)
+                .ok_or("Project not found.")?;
+            let mut folders: Vec<PathBuf> = project.folders.iter().map(PathBuf::from).collect();
+            folders.extend(batch.iter().map(|(_, f)| f.clone()));
+            let accounts: Vec<String> = snapshot
+                .accounts
+                .iter()
+                .filter(|a| a.pool == project.pool)
+                .map(|a| a.id.clone())
+                .collect();
+            store.save_project(Some(&project.pool), &project.name, &folders, &accounts)
+        });
+        match saved {
+            Ok(_) => {
+                let folders: Vec<&str> = batch
+                    .iter()
+                    .map(|(i, _)| found[*i].folder.as_str())
+                    .collect();
+                if suggest::mark_added_all(root, &folders, now).is_err() {
+                    oplog::event(
+                        "project_suggestion",
+                        &[("remember", oplog::Field::Code("failed"))],
+                    );
+                }
+                for (i, _) in &batch {
+                    results[*i] = Some(Ok(()));
+                }
+            }
+            Err(_) if batch.len() > 1 => {
+                for (i, _) in &batch {
+                    results[*i] =
+                        Some(add_suggested_folder(store, root, &found[*i], now).map(|_| ()));
+                }
+            }
+            Err(error) => results[batch[0].0] = Some(Err(error)),
+        }
+    }
+    results
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| Err("Project not found.".into())))
+        .collect()
 }
 fn add_suggested_folder(
     store: &Store,
@@ -2471,6 +2556,44 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
     execute(store, &root, None, operation).await
+}
+/// How long a command waits for the store when another process holds it (SB-181): an update
+/// restart keeps the lock through the old owner's drain and frees it once the new owner runs,
+/// and Fabric Dashboards gives each read 10 s.
+pub const STORE_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+/// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
+/// store's lock is held and no owner answers (an owner draining or starting, another offline
+/// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
+pub async fn call(root: &Path, operation: Operation) -> Result<Value, String> {
+    call_within(root, operation, STORE_WAIT, execute_offline).await
+}
+async fn call_within<F, Fut>(
+    root: &Path,
+    operation: Operation,
+    wait: std::time::Duration,
+    offline: F,
+) -> Result<Value, String>
+where
+    F: Fn(PathBuf, Operation) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    // `Operation` is not Clone (it may carry a sign-in's answers): a second attempt rebuilds it
+    // from its own bytes.
+    let body = serde_json::to_vec(&operation).map_err(|_| "Operation unavailable.")?;
+    let started = std::time::Instant::now();
+    let mut operation = operation;
+    loop {
+        if let Some(value) = control::request(root, &operation).await? {
+            return Ok(value);
+        }
+        match offline(root.to_owned(), operation).await {
+            Err(error) if error == switchboard_core::STORE_LOCKED && started.elapsed() < wait => {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                operation = serde_json::from_slice(&body).map_err(|_| "Operation unavailable.")?;
+            }
+            result => return result,
+        }
+    }
 }
 async fn execute(
     store: Arc<Store>,
@@ -4597,6 +4720,50 @@ mod owner_tests {
     use super::*;
     use fixtures::*;
     use switchboard_core::{private_fs, MemoryVault};
+    /// SB-180: `suggest_found` held the owner transaction while every found folder was saved on
+    /// its own, each save publishing `accounts.json` and syncing the bindings. One pass's folders
+    /// of one group now join in one save; a folder that cannot join is refused alone.
+    #[tokio::test]
+    async fn folders_found_in_one_pass_join_their_group_in_one_save() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let names = ["repo", "wt-a", "wt-b", "wt-c"];
+        for name in names {
+            std::fs::create_dir_all(work.join(name)).unwrap();
+        }
+        let saved = runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Agents".into(),
+                folders: vec![work.join("repo")],
+                account_ids: vec![],
+                base_folders: None,
+                organization: None,
+            })
+            .await
+            .unwrap();
+        let pool = saved["pool"].as_str().unwrap().to_owned();
+        let row = |folder: PathBuf| suggest::Suggestion {
+            folder: folder.to_string_lossy().into_owned(),
+            pool: pool.clone(),
+            reason: suggest::Reason::SameRepository,
+            repository: "github.com/org/repo".into(),
+            first_seen: 1,
+            state: suggest::State::Pending,
+        };
+        let mut found: Vec<_> = names[1..].iter().map(|n| row(work.join(n))).collect();
+        found.push(row(work.join("gone")));
+        let writes = runtime.store.metadata_writes();
+        let results = add_suggested_folders(&runtime.store, root.path(), &found, 2);
+        assert_eq!(runtime.store.metadata_writes() - writes, 1);
+        assert!(results[..3].iter().all(Result::is_ok), "{:?}", results);
+        assert_eq!(add_refusal(results[3].as_ref().unwrap_err()), "gone");
+        let snapshot = runtime.store.snapshot().unwrap();
+        let project = snapshot.projects.iter().find(|p| p.pool == pool).unwrap();
+        assert_eq!(project.folders.len(), 4, "{:?}", project.folders);
+    }
     #[test]
     fn a_refused_found_folder_logs_why() {
         assert_eq!(add_refusal(switchboard_core::FOLDER_NESTED), "nested");
@@ -6811,6 +6978,85 @@ mod lifecycle_tests {
     use super::*;
     use std::time::Duration;
     use switchboard_core::MemoryVault;
+
+    fn memory_offline(
+        root: PathBuf,
+        operation: Operation,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send>> {
+        Box::pin(async move {
+            let store = Arc::new(Store::open(root.clone(), Arc::new(MemoryVault::default()))?);
+            execute(store, &root, None, operation).await
+        })
+    }
+
+    /// SB-181: Fabric Dashboards' `handovers` and `recovery` were refused for the length of an
+    /// update restart, while the draining owner still held the store and had removed its
+    /// descriptor. A command now waits for the lock and is answered once it is free.
+    #[tokio::test]
+    async fn a_command_waits_for_a_store_a_draining_owner_still_holds() {
+        let root = tempfile::tempdir().unwrap();
+        let held = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            drop(held);
+        });
+        let started = std::time::Instant::now();
+        let answer = call_within(
+            root.path(),
+            Operation::Snapshot,
+            Duration::from_secs(5),
+            memory_offline,
+        )
+        .await
+        .unwrap();
+        assert!(answer["accounts"].is_array(), "{answer}");
+        assert!(started.elapsed() >= Duration::from_millis(400));
+        release.await.unwrap();
+    }
+
+    /// The owner that starts during the wait answers it, through its descriptor.
+    #[tokio::test]
+    async fn a_command_waiting_for_the_store_is_answered_by_the_owner_that_starts() {
+        let root = tempfile::tempdir().unwrap();
+        let held = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+        let path = root.path().to_owned();
+        let starting = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            drop(held);
+            owner(&path).await
+        });
+        let refused =
+            |_: PathBuf, _: Operation| async { Err(switchboard_core::STORE_LOCKED.to_string()) };
+        let answer = call_within(
+            root.path(),
+            Operation::Status,
+            Duration::from_secs(5),
+            refused,
+        )
+        .await
+        .unwrap();
+        assert!(answer["proxy_address"].is_string(), "{answer}");
+        starting.await.unwrap().shutdown(DRAIN_DEADLINE).await;
+    }
+
+    /// The wait is bounded: a lock still held at its end is reported as before.
+    #[tokio::test]
+    async fn a_store_held_past_the_wait_is_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let _held = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+        let started = std::time::Instant::now();
+        let error = call_within(
+            root.path(),
+            Operation::Snapshot,
+            Duration::from_millis(400),
+            memory_offline,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error, switchboard_core::STORE_LOCKED);
+        assert!(started.elapsed() >= Duration::from_millis(400));
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
 
     /// Starts an owner, also on a store another owner of this test just released. Tests beside it
     /// start child processes; a child forked at that moment shares the store lock's open file

@@ -378,70 +378,52 @@ pub(crate) async fn ensure_fresh(
     id: &str,
     force: bool,
 ) -> Outcome {
+    ensure_fresh_with(store, native, state, id, force, None).await
+}
+/// As `ensure_fresh`, for a caller that does not hold the owner transaction (SB-179): `lock` is
+/// taken for the checks and the token's reservation, released while the grant is on the network,
+/// and taken again to store its successor. A caller that holds the transaction passes None.
+/// While the grant runs, its token is in flight: a native activation of the account is refused
+/// (`activate_native`), a second grant of it too, and a credential stored meanwhile (a new
+/// sign-in) keeps its place, since the successor is stored only where the spent token still is
+/// (`adopt_refreshed_for`).
+pub(crate) async fn ensure_fresh_with(
+    store: &Store,
+    native: NativeSources,
+    state: &RefreshState,
+    id: &str,
+    force: bool,
+    lock: Option<&tokio::sync::Mutex<()>>,
+) -> Outcome {
+    let guard = match lock {
+        Some(lock) => Some(lock.lock().await),
+        None => None,
+    };
+    let (result, refresh_token) = match reserve_due(store, native, state, id, force) {
+        Step::Done(outcome) => return outcome,
+        Step::Refused(failure, token) => (Err(failure), token),
+        Step::Grant(reservation, token) => {
+            drop(guard);
+            let result = reservation.grant().await;
+            let _guard = match lock {
+                Some(lock) => Some(lock.lock().await),
+                None => None,
+            };
+            return granted(store, state, id, &token, result);
+        }
+    };
+    granted(store, state, id, &refresh_token, result)
+}
+/// What a grant's end means for the account, under the owner transaction.
+fn granted(
+    store: &Store,
+    state: &RefreshState,
+    id: &str,
+    refresh_token: &str,
+    result: Result<Kept, Failure>,
+) -> Outcome {
     let time = now();
-    let Some(account) = store
-        .snapshot()
-        .ok()
-        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
-    else {
-        return Outcome::NotNeeded;
-    };
-    if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
-        return Outcome::NotNeeded;
-    }
-    let Ok(credential) = store.stored_credential(id) else {
-        return Outcome::NotNeeded;
-    };
-    // A successor that could not be stored yet goes first; the stored token is already spent.
-    if let Some(outcome) = adopt_stash(store, state, id) {
-        return outcome;
-    }
-    let Some(refresh_token) = credential.refresh_token.clone() else {
-        return Outcome::NotNeeded;
-    };
-    // A rejected lineage is reported before anything else, due or not.
-    if state.is_dead(store, id) {
-        return Outcome::SignInRequired;
-    }
-    // Without a captured identity nothing proves this is not the live Claude Code lineage
-    // in an older generation; renewing it could spend a token Claude Code still needs.
-    if account
-        .external_identity
-        .as_ref()
-        .is_none_or(|i| i.account_id.is_none())
-    {
-        return Outcome::NotNeeded;
-    }
-    // A running Claude Swap renews this lineage itself; a second renewer would spend its token.
-    if account
-        .external_identity
-        .as_ref()
-        .and_then(|i| i.account_id.as_ref())
-        .is_some_and(|id| {
-            state
-                .swap_held
-                .lock()
-                .is_ok_and(|held| held.contains_key(id))
-        })
-    {
-        return Outcome::NotNeeded;
-    }
-    if !force && !due(&credential, time) {
-        return Outcome::NotNeeded;
-    }
-    if state
-        .backoff
-        .lock()
-        .ok()
-        .and_then(|b| b.get(id).copied())
-        .is_some_and(|(next, _)| time < next)
-    {
-        return Outcome::NotNeeded;
-    }
-    if state.recently_active(&account, time) || is_active(native, state, &account, &credential) {
-        return Outcome::Active;
-    }
-    match spend(state, &credential).await {
+    match result {
         Ok(kept) => {
             if let Ok(mut backoff) = state.backoff.lock() {
                 backoff.remove(id);
@@ -449,9 +431,9 @@ pub(crate) async fn ensure_fresh(
             // The token endpoint names whose token it issued: only that account's copies get
             // the successor, and a copy of another account holding it is a dead lineage here
             // (Claude Swap `autoswitch.py:836-877`).
-            settled(store, state, id, &refresh_token, &kept)
+            settled(store, state, id, refresh_token, &kept)
         }
-        Err(Failure::Permanent) => remember_dead(state, id, &refresh_token),
+        Err(Failure::Permanent) => remember_dead(state, id, refresh_token),
         // Not this account's fault and not its backoff: the hold covers every account.
         Err(Failure::Systemic) => Outcome::Transient,
         Err(Failure::Transient) => {
@@ -466,10 +448,109 @@ pub(crate) async fn ensure_fresh(
         }
     }
 }
+enum Step<'a> {
+    Done(Outcome),
+    /// No grant could be reserved (grants off, the client refused, the token in flight).
+    Refused(Failure, String),
+    Grant(Box<Reservation<'a>>, String),
+}
+/// Everything `ensure_fresh` decides before the network: Ok is the reserved grant and the
+/// token it spends, Err the outcome without one.
+fn reserve_due<'a>(
+    store: &Store,
+    native: NativeSources,
+    state: &'a RefreshState,
+    id: &str,
+    force: bool,
+) -> Step<'a> {
+    let time = now();
+    let Some(account) = store
+        .snapshot()
+        .ok()
+        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
+    else {
+        return Step::Done(Outcome::NotNeeded);
+    };
+    if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    let Ok(credential) = store.stored_credential(id) else {
+        return Step::Done(Outcome::NotNeeded);
+    };
+    // A successor that could not be stored yet goes first; the stored token is already spent.
+    if let Some(outcome) = adopt_stash(store, state, id) {
+        return Step::Done(outcome);
+    }
+    let Some(refresh_token) = credential.refresh_token.clone() else {
+        return Step::Done(Outcome::NotNeeded);
+    };
+    // A rejected lineage is reported before anything else, due or not.
+    if state.is_dead(store, id) {
+        return Step::Done(Outcome::SignInRequired);
+    }
+    // Without a captured identity nothing proves this is not the live Claude Code lineage
+    // in an older generation; renewing it could spend a token Claude Code still needs.
+    if account
+        .external_identity
+        .as_ref()
+        .is_none_or(|i| i.account_id.is_none())
+    {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    // A running Claude Swap renews this lineage itself; a second renewer would spend its token.
+    if account
+        .external_identity
+        .as_ref()
+        .and_then(|i| i.account_id.as_ref())
+        .is_some_and(|id| {
+            state
+                .swap_held
+                .lock()
+                .is_ok_and(|held| held.contains_key(id))
+        })
+    {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    if !force && !due(&credential, time) {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    if state
+        .backoff
+        .lock()
+        .ok()
+        .and_then(|b| b.get(id).copied())
+        .is_some_and(|(next, _)| time < next)
+    {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    if state.recently_active(&account, time) || is_active(native, state, &account, &credential) {
+        return Step::Done(Outcome::Active);
+    }
+    match reserve(state, &credential) {
+        Ok(reservation) => Step::Grant(Box::new(reservation), refresh_token),
+        Err(failure) => Step::Refused(failure, refresh_token),
+    }
+}
 /// One refresh grant whose successor survives its caller: the grant runs in its own task and
 /// records the successor before returning, so a deadline, a dropped control request or a
 /// cancelled caller can never lose a token the provider has already spent.
 async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Failure> {
+    reserve(state, credential)?.grant().await
+}
+/// A grant whose refresh token is marked in flight; only its task unmarks it.
+struct Reservation<'a> {
+    state: &'a RefreshState,
+    consumed: String,
+    credential: Credential,
+    release: Option<Release>,
+}
+/// Marks the token in flight; nothing goes to the network yet. Taken while the caller still
+/// holds the owner transaction (SB-179), so no native activation of the account slips in
+/// between the checks and the grant.
+fn reserve<'a>(
+    state: &'a RefreshState,
+    credential: &Credential,
+) -> Result<Reservation<'a>, Failure> {
     let Some(consumed) = credential.refresh_token.clone() else {
         return Err(Failure::Transient);
     };
@@ -481,8 +562,8 @@ async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Fa
         return Err(Failure::Systemic);
     }
     // One grant per refresh token: a second caller would spend the successor's predecessor.
-    // Marked last, right before the grant task that alone releases it: no early return can
-    // leave a token marked forever.
+    // Marked last; the reservation's release unmarks it on every exit, a dropped reservation
+    // included.
     if !state
         .in_flight
         .lock()
@@ -490,35 +571,47 @@ async fn spend(state: &RefreshState, credential: &Credential) -> Result<Kept, Fa
     {
         return Err(Failure::Transient);
     }
-    let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
-    let stash = state.stash.clone();
-    let in_flight = state.in_flight.clone();
-    let credential = credential.clone();
-    let result = tokio::spawn(async move {
-        // Releases the token on every exit, a panic included, once the successor is kept.
-        let _release = Release(in_flight, consumed.clone());
-        let result = grant(&endpoint, &credential).await;
-        if let Ok((refreshed, owner)) = &result {
-            if let Ok(mut stash) = stash.lock() {
-                stash.insert(
-                    consumed.clone(),
-                    Kept {
-                        refreshed: refreshed.clone(),
-                        owner: owner.clone(),
-                    },
-                );
-            }
-        }
-        result.map(|(refreshed, owner)| Kept { refreshed, owner })
+    Ok(Reservation {
+        state,
+        release: Some(Release(state.in_flight.clone(), consumed.clone())),
+        consumed,
+        credential: credential.clone(),
     })
-    .await
-    .unwrap_or(Err(Failure::Transient));
-    match &result {
-        Err(Failure::Systemic) => state.client_refused(true),
-        Ok(_) | Err(Failure::Permanent) => state.client_refused(false),
-        Err(Failure::Transient) => {}
+}
+impl Reservation<'_> {
+    async fn grant(mut self) -> Result<Kept, Failure> {
+        let state = self.state;
+        let endpoint = state.endpoint.lock().map(|e| e.clone()).unwrap_or_default();
+        let stash = state.stash.clone();
+        let consumed = self.consumed;
+        let credential = self.credential;
+        let release = self.release.take();
+        let result = tokio::spawn(async move {
+            // Releases the token on every exit, a panic included, once the successor is kept.
+            let _release = release;
+            let result = grant(&endpoint, &credential).await;
+            if let Ok((refreshed, owner)) = &result {
+                if let Ok(mut stash) = stash.lock() {
+                    stash.insert(
+                        consumed.clone(),
+                        Kept {
+                            refreshed: refreshed.clone(),
+                            owner: owner.clone(),
+                        },
+                    );
+                }
+            }
+            result.map(|(refreshed, owner)| Kept { refreshed, owner })
+        })
+        .await
+        .unwrap_or(Err(Failure::Transient));
+        match &result {
+            Err(Failure::Systemic) => state.client_refused(true),
+            Ok(_) | Err(Failure::Permanent) => state.client_refused(false),
+            Err(Failure::Transient) => {}
+        }
+        result
     }
-    result
 }
 /// Unmarks a refresh token as in flight when the grant task ends, however it ends.
 struct Release(Arc<Mutex<std::collections::HashSet<String>>>, String);
@@ -613,6 +706,31 @@ pub(crate) fn adopt_stash(store: &Store, state: &RefreshState, id: &str) -> Opti
     let consumed = store.stored_credential(id).ok()?.refresh_token?;
     let kept = state.stash.lock().ok()?.get(&consumed).cloned()?;
     Some(settled(store, state, id, &consumed, &kept))
+}
+/// SB-179: a grant runs outside the owner transaction, so one that ends while the drain holds
+/// it keeps its successor in memory only. The drain stores every kept successor whose spent
+/// token an account still holds, before the process ends. Answers how many were stored.
+pub(crate) fn adopt_all_kept(store: &Store, state: &RefreshState) -> usize {
+    let kept: std::collections::HashSet<String> = match state.stash.lock() {
+        Ok(stash) if !stash.is_empty() => stash.keys().cloned().collect(),
+        _ => return 0,
+    };
+    let Ok(snapshot) = store.snapshot() else {
+        return 0;
+    };
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+        .filter(|a| {
+            store
+                .stored_credential(&a.id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+                .is_some_and(|token| kept.contains(&token))
+        })
+        .filter(|a| adopt_stash(store, state, &a.id) == Some(Outcome::Refreshed))
+        .count()
 }
 #[cfg(test)]
 pub(crate) fn has_stash(state: &RefreshState, consumed: &str) -> bool {
@@ -1934,6 +2052,88 @@ mod tests {
             Some("c-g3-r"),
             "c's newest sign-in is kept, not dropped"
         );
+    }
+    /// SB-179 (design note owner-transaction-2026-10-23, T-2): the grant leaves the owner
+    /// transaction. While it is on the network the transaction is free, a native switch to the
+    /// account is refused, and a new sign-in stored meanwhile stays: the successor goes only
+    /// where the spent token still is.
+    #[tokio::test]
+    async fn a_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands() {
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                Json(json!({"access_token":"late","expires_in":28800,"refresh_token":"late-r"}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = Arc::new(RefreshState::at(format!("http://{address}/token")));
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let b = id_of(&store, "synthetic-b", "default");
+        let renewal = {
+            let (store, state, lock, b) = (store.clone(), state.clone(), lock.clone(), b.clone());
+            tokio::spawn(async move {
+                ensure_fresh_with(&store, SIGNED_IN_A, &state, &b, false, Some(&lock)).await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.in_flight(&store, &b));
+        // The transaction is free during the grant: a control write takes it at once.
+        let held = lock
+            .try_lock()
+            .expect("the grant holds the owner transaction");
+        assert_eq!(
+            crate::activate_native(&store, &b, None, SIGNED_IN_A, Some(&state)).unwrap_err(),
+            RENEWING
+        );
+        // The person signs b in again meanwhile.
+        let mut new = expired("synthetic-b");
+        new.access_token = "signed-in-again".into();
+        new.refresh_token = Some("signed-in-again-r".into());
+        new.expires_at = Some(now() + 28_800);
+        store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                new,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        drop(held);
+        assert_eq!(renewal.await.unwrap(), Outcome::NotNeeded);
+        let stored = store.stored_credential(&b).unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("signed-in-again-r"));
+        assert!(!has_stash(&state, "synthetic-b-refresh"));
+    }
+    /// SB-179: a successor kept in memory, because its grant ended while the drain held the
+    /// transaction, is stored by the drain.
+    #[tokio::test]
+    async fn the_drain_stores_a_successor_kept_in_memory() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at("http://127.0.0.1:9/token".into());
+        let b = id_of(&store, "synthetic-b", "default");
+        let mut refreshed = expired("synthetic-b");
+        refreshed.access_token = "kept".into();
+        refreshed.refresh_token = Some("kept-r".into());
+        refreshed.expires_at = Some(now() + 28_800);
+        state.stash.lock().unwrap().insert(
+            "synthetic-b-refresh".into(),
+            Kept {
+                refreshed,
+                owner: None,
+            },
+        );
+        assert_eq!(adopt_all_kept(&store, &state), 1);
+        let stored = store.stored_credential(&b).unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("kept-r"));
+        assert_eq!(adopt_all_kept(&store, &state), 0);
     }
     #[tokio::test]
     async fn an_account_whose_renewal_is_in_flight_is_not_switched_to() {

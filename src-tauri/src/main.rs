@@ -71,7 +71,7 @@ impl Slot {
                 }
             });
             *owner = Some(started.map_err(|error| {
-                if error == "Another Switchboard instance owns this account storage" {
+                if error == switchboard_core::STORE_LOCKED {
                     STORE_BUSY.to_string()
                 } else {
                     // Start-up internals (proxy, control socket, data folder) are not the

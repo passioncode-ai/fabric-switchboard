@@ -6,6 +6,12 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.77 (2026-10-23)
+
+- **Agents and Fabric Dashboards keep working while Switchboard updates itself (SB-181).** During an automatic update restart, every `switchboard` command and agent tool used to be refused with "Another Switchboard instance owns this account storage" for up to half a minute. A command now waits up to 8 seconds for the new copy and is answered by it, and the old copy ends as soon as its work is saved instead of lingering for 10 more seconds.
+- **Your changes no longer wait for a sign-in renewal (SB-179).** Renewing an inactive Claude account's sign-in talks to Anthropic over the network, and your edits in the window, the CLI and agents' tools waited for it, up to 20 seconds on a busy machine. The renewal now runs alongside them; Switchboard still never switches Claude Code to an account while its sign-in is being renewed, and a new sign-in you make meanwhile is kept.
+- **Found worktrees join their group in one step (SB-180).** When Switchboard finds several new checkouts of a group's repository at once, it now adds them together with one save, instead of one save each.
+
 ## 0.6.76 (2026-10-23)
 
 - **The log now says where a slow background step spent its time (SB-163).** When Switchboard's background work keeps your changes waiting for 5 seconds or more, its log line now splits the time into the step's parts (a sign-in renewal over the network, reading sign-in files, recording found folders), so the next change can shorten the right part ([design note](docs/research/owner-transaction-2026-10-23.md)).

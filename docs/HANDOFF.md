@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.77, reads survive an update restart; grants leave the transaction (SB-181, SB-179, SB-180)
+
+- **Done.** SB-181 (board finding `0ab48130` from Fabric Dashboards): `switchboard_runtime::call`
+  (CLI and MCP) waits up to 8 s for a held store lock, asking the owner first; after an update
+  restart's drain the app exits at once. SB-179: `refresh::ensure_fresh_with` holds the owner
+  transaction for the checks and the reservation only, and the drain stores kept successors.
+  SB-180: `add_suggested_folders`, one save per group. CONTRACTS, the design note and the
+  backlog say so; SB-179 was built without waiting a day of T-1 phases (reason in its row).
+- **Checks run.** `./scripts/check.sh` (exit code in the PR); new tests named in CONTRACTS.
+- **Next task.** After a day on 0.6.77: `transaction_held` should show no `renewal`; read the
+  remaining `rotate`, `source_sync` and `suggest_found` phases and `control_slow` (SB-174);
+  reply on thread `1cf4538e` once 0.6.77 is installed. Then SB-169 (contrast measurement).
+
 ## 2026-10-23: 0.6.76, phases of a long owner transaction (SB-163 T-1)
 
 - **Done.** Design note [owner-transaction-2026-10-23](research/owner-transaction-2026-10-23.md);

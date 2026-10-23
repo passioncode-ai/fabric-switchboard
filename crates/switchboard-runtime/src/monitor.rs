@@ -494,12 +494,9 @@ pub(crate) async fn check(
     lock: Option<&tokio::sync::Mutex<()>>,
     gate: &UsageGate,
 ) -> Result<Usage, String> {
+    // SB-179: the owner transaction is held for the checks and the store, not for the grant.
     let refreshed = |force: bool| async move {
-        let _guard = match lock {
-            Some(lock) => Some(lock.lock().await),
-            None => None,
-        };
-        crate::refresh::ensure_fresh(store, native, refresh, id, force).await
+        crate::refresh::ensure_fresh_with(store, native, refresh, id, force, lock).await
     };
     // A dead lineage leaves the due queue for the long backoff; otherwise it would sort
     // first on every tick and starve every other account's check and renewal.
@@ -572,16 +569,17 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
         if due_at > time || schedule.retry_at.get(&id).is_some_and(|at| *at > time) {
             continue;
         }
-        let mut mutation = runtime.hold("renewal").await;
-        let outcome = crate::refresh::ensure_fresh(
+        // SB-179: the transaction is taken for the checks and the store only; while the grant
+        // is on the network, control writes go on.
+        let outcome = crate::refresh::ensure_fresh_with(
             &runtime.store,
             runtime.native,
             &runtime.refresh,
             &id,
             false,
+            Some(&runtime.mutations),
         )
         .await;
-        mutation.phase("refresh");
         if outcome == crate::refresh::Outcome::Refreshed {
             done += 1;
             schedule.retry_at.remove(&id);

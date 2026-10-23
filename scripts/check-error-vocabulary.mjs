@@ -61,6 +61,9 @@ const ALLOWLIST = {
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
+  // runtime lib.rs call_within(): the CLI's and switchboard mcp's way to the owner (SB-181); the
+  // window talks to its own owner in process and never comes through it.
+  'Operation unavailable.': 'CLI and MCP only: an operation that cannot be serialized (SB-181)',
   'Invalid secret': 'internal: callers pass a vault item they created and a token PassionCode.ai issued (SB-159)',
   'Unknown action': 'the window sends only its own fixed actions (SB-159)',
   'Could not save the new capability.': 'RotatePoolCapability: CLI `project rotate-capability` only; the window has no such action',

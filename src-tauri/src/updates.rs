@@ -1365,7 +1365,15 @@ pub fn finish(app: &AppHandle) {
     #[cfg(not(windows))]
     {
         let _ = (ready, signal);
-        if let Some(restart) = restart.filter(|r| !r.helper) {
+        // SB-181: the helper starts the new copy when this process ends, and the store's lock
+        // ends with it. The owner has drained; waiting for the event loop's own teardown kept
+        // the lock 11 s longer on 2026-10-23 (until the hard exit), while every CLI and MCP
+        // read was refused.
+        if restart.as_ref().is_some_and(|r| r.helper) {
+            event("update_restart", &[("outcome", Field::Code("exiting"))]);
+            std::process::exit(0);
+        }
+        if let Some(restart) = restart {
             let mut env = app.env();
             let program = env.args_os.first().cloned().unwrap_or_default();
             env.args_os = relaunch_args(program, restart.background);
