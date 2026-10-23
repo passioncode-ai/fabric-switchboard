@@ -6,11 +6,16 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.6.73 (2026-10-23)
+## 0.6.74 (2026-10-23)
+
+- **An account you also use on another computer can be kept out of this one (SB-175).** If one subscription is signed in on two computers, renewing its sign-in on one signs the other out. Mark it with ⋯ → *Used on another machine*: this computer then never renews it, rotates to it or switches to it, and its card says *On another machine*. *Use here* undoes it. Also `switchboard accounts update ID --elsewhere true` and the agents' `switchboard_account_update`. This is the first step of using Switchboard on two computers ([design](docs/research/two-machines-2026-10-23.md)).
+- 0.6.72 and 0.6.73 never reached anyone: a new statistics test built a folder path that Windows does not accept, and the release checks stopped there. 0.6.74 carries everything listed under 0.6.73 and 0.6.72.
+
+## 0.6.73 (2026-10-23, not published: see 0.6.74)
 
 - **One rule for which group a new folder joins, shared with Fabric and Observatory (SB-141).** When Switchboard finds a new checkout (a worktree or a clone of a group's repository), it now decides which group it belongs to with the same rules Fabric and Project Observatory use, checked against all 163 shared examples of those rules. A folder in a temporary place, a container of other projects or a tool's own folder never joins; when two groups match equally, nothing is guessed. A remote address carrying a password in the short `user:password@host:path` form is now recognised as the same repository.
 
-## 0.6.72 (2026-10-23)
+## 0.6.72 (2026-10-23, not published: see 0.6.74)
 
 - **Statistics knows where more of the work happened (SB-157).** A session in a folder that is in no group, or an agent Switchboard started on an API key, used to land in "No folder recorded". Its requests now count under the repository that holds the folder, found through Git, the same way as a group's own folders.
 - **A session stopped on a limit is always recorded (SB-150).** The stop a Claude Code session reports when it hits a limit no longer waits behind Switchboard's background work, so it is not lost when the machine is busy.

@@ -201,6 +201,21 @@ async fn update_account(
             id,
             label: Some(label),
             enabled: Some(enabled),
+            elsewhere: None,
+        })
+        .await
+}
+/// SB-175: mark an account as used on another machine, or clear the mark.
+#[tauri::command]
+async fn mark_elsewhere(id: String, on: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Update {
+            id,
+            label: None,
+            enabled: None,
+            elsewhere: Some(on),
         })
         .await
 }
@@ -1090,6 +1105,7 @@ fn main() {
             sessions,
             add_account,
             update_account,
+            mark_elsewhere,
             remove_account,
             select_account,
             runtime_status,

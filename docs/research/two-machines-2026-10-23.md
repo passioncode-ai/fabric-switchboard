@@ -30,7 +30,7 @@ two machines"), board thread `b2511678`.
 |---|---|---|
 | D-1 | **Each machine has its own seats.** The Studio signs in to accounts of its own (a separate pool of subscriptions, or separate seats of a Team), the readiness report's own recommendation. One subscription is active on one machine at a time. | Two machines on one subscription halve its limits for both and race on its refresh lineage; no client-side design removes either. |
 | D-2 | **Never renew an account another machine holds.** An account marked *in use on another machine* is not renewed, not rotated to and not switched to on this machine; a session already on it keeps its token until that expires. | A renewal here signs the other machine out (§1). Failing closed costs a sign-in on this machine at worst; failing open costs the other machine's running sessions. |
-| D-3 | **The mark is explicit first, shared later.** Phase 1: the person marks an account *Used on another machine* (account ⋯ menu, CLI, MCP); Switchboard also offers it when it sees, at sign-in, an identity this machine already holds under another account. Phase 3: each machine publishes the identities it holds (provider + account id digest, never a token or an e-mail) to the estate through Fabric's hub, and the mark follows them. | No channel between the two machines exists yet (readiness report §4 items 1 and 2: the hub and the relay are undecided or not live). An explicit mark works now and stays correct later. |
+| D-3 | **The mark is explicit first, shared later.** Phase 1: the person marks an account *Used on another machine* (account ⋯ menu, CLI, MCP). Phase 3: each machine publishes the identities it holds (provider + account id digest, never a token or an e-mail) to the estate through Fabric's hub, and the mark follows them. | No channel between the two machines exists yet (readiness report §4 items 1 and 2: the hub and the relay are undecided or not live). An explicit mark works now and stays correct later. |
 | D-4 | **Credentials never travel; settings do.** Moving to the Studio is a fresh official sign-in per account (a human gate, recorded as such). Groups, rules, fallback chains, agent settings and organizations move as a settings bundle with no credential, and a group's folders are matched on the Studio by repository identity (DEC-0089 item 2, `suggest::normalize`): a folder joins where a checkout of the same repository exists, the rest are listed as not found. | A fresh sign-in gives the Studio its own refresh lineage (D-1, D-2). Matching by identity is the rule the three products already share (SB-141). |
 | D-5 | **What the window shows.** An account marked in use elsewhere reads *In use on another machine* on its card, is skipped by rotation with that reason, and a manual switch to it is refused with “This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.” | The person sees why nothing happens, and the one way out. |
 | D-6 | **Prove the risk before S1.** One operator-assisted acceptance with a spare Claude account signed in on both machines: renew on one, observe the other (401 within one request, or not). The result goes in `docs/evidence/` and either confirms D-2 or relaxes it. | §1's lineage claim comes from the SB-21 history on one machine; it has not been measured across two. |
@@ -45,8 +45,9 @@ two machines"), board thread `b2511678`.
 
 ## 4. Data
 
-- `Account.elsewhere: Option<Elsewhere>` with `{since, by: person|estate, machine_label?}` in
-  `accounts.json` (schema +1); backups carry it, so a restore on the same machine keeps the mark.
+- `Snapshot.elsewhere`: account id → when it was marked, in `accounts.json` (schema version 8
+  while one exists); backups carry it, so a restore on the same machine keeps the mark. Phase 3
+  adds who marked it (the person or the estate).
 - Settings bundle `switchboard-settings/1`: `{groups: [{name, pool, organization?, repositories:
   [identity], plain_folders: [path]}], rules, chains, agents_settings, organizations}`; no account
   id, no credential, no capability. Import matches repositories by identity under the folders the
@@ -67,7 +68,7 @@ two machines"), board thread `b2511678`.
 
 | Phase | What | Row |
 |---|---|---|
-| 1 | The *Used on another machine* mark: core field, no renewal, no rotation, refused switch, card text, CLI `account mark-elsewhere`, MCP `switchboard_account_update.elsewhere`; offered at sign-in when the identity is already held | SB-175 |
+| 1 | The *Used on another machine* mark: `Snapshot.elsewhere` (schema 8), the account disabled here (so no renewal, rotation or switch), a refused switch with its reason, the card's badge and *Use here*, CLI `accounts update --elsewhere`, MCP `switchboard_account_update.elsewhere`, kept by backups (SCN-072); built in 0.6.74 | SB-175 |
 | 2 | Settings bundle export and import with repository matching and a preview | SB-176 |
 | 3 | Identities published and read through Fabric's hub | SB-177 (waits for Fabric's hub ADR) |
 | 4 | D-6 acceptance on two machines | SB-178 (operator-assisted) |

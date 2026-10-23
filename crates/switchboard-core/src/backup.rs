@@ -120,6 +120,9 @@ struct Payload {
     memberships: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     project_organizations: BTreeMap<String, String>,
+    /// SB-175: accounts marked as used on another machine (old account id → when).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    elsewhere: BTreeMap<String, i64>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -279,6 +282,7 @@ pub fn write(
                 ..o
             })
             .collect(),
+        elsewhere: snapshot.elsewhere.clone(),
         memberships: snapshot.memberships.into_iter().collect(),
     })
     .map_err(|_| UNAVAILABLE)?;
@@ -599,6 +603,12 @@ pub fn restore(
             result.projects += 1;
         }
     }
+    // SB-175: a restore on this machine keeps what the person marked as used elsewhere.
+    for (old, at) in &payload.elsewhere {
+        if let Some(id) = ids.get(old) {
+            let _ = store.mark_elsewhere(id, true, *at);
+        }
+    }
     for (old, choice) in &payload.memberships {
         let choice = if choice == crate::organizations::PERSONAL {
             Some(choice.clone())
@@ -853,6 +863,7 @@ mod tests {
             organizations: vec![],
             memberships: BTreeMap::new(),
             project_organizations: BTreeMap::new(),
+            elsewhere: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -930,6 +941,8 @@ mod tests {
         original
             .assign_organization(&b.id, Some(PERSONAL_WORD))
             .unwrap();
+        // SB-175: b is also marked as used on another machine.
+        original.mark_elsewhere(&b.id, true, 900).unwrap();
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         original
@@ -964,6 +977,8 @@ mod tests {
             snap.memberships.get(&b2.id).map(String::as_str),
             Some(PERSONAL_WORD)
         );
+        assert_eq!(snap.elsewhere.get(&b2.id), Some(&900));
+        assert!(!b2.enabled);
         // A second restore adds nothing twice.
         let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
         assert_eq!(again.organizations, 0);

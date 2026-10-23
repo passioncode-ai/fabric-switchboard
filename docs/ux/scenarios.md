@@ -79,6 +79,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-069 | See which accounts belong to which organization | draft |
 | SCN-070 | Keep a group's work on its organization's accounts | draft |
 | SCN-071 | Keep organizations current from PassionCode.ai | draft |
+| SCN-072 | Keep an account signed in on another machine out of this one | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1500,3 +1501,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `vesta` cases, runtime `vesta::tests` (loopback, exchange, refresh, 401 classes against a synthetic server), ui-logic SB-159 case, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-159
+
+## SCN-072: Keep an account signed in on another machine out of this one
+**Persona:** P-01
+**Goal:** A person who works on two computers (a MacBook and a Mac Studio) and has one subscription signed in on both keeps this computer from renewing that account's sign-in, which would sign the other computer out, and from switching or rotating to it (SB-168 D-2, operator decision 2026-10-23 in [two-machines-2026-10-23](../research/two-machines-2026-10-23.md)).
+**Preconditions:** at least one saved account.
+**Entry point:** *Accounts* → an account's ⋯ → *Used on another machine*; CLI `switchboard accounts update ID --elsewhere true`; MCP `switchboard_account_update` with `elsewhere`.
+**Steps:**
+1. ⋯ → *Used on another machine* → “{label} is marked as used on another machine. This computer no longer renews, rotates to or switches to it.”; the card shows *On another machine* (its title says why) and *Use here* in place of *Switch*.
+2. Rotation skips the account; its selection in any pool is cleared; a switch to it (CLI, MCP, a project rule) is refused with “This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.”
+3. *Use here* (or enabling the account) → “{label} is used on this computer again.”; the account is enabled and chosen as before.
+**Alt paths:** an encrypted backup restored on this machine keeps the mark; removing the account removes the mark.
+**Expected result:** an account the person uses elsewhere is never renewed or chosen here, and the way back is one action.
+**UI elements:** the ⋯ item, the *On another machine* badge, *Use here*.
+**States covered:** marked; cleared; marked and selected before (selection cleared); restore.
+**Errors & recovery:** a refused switch names the way out.
+**Status:** draft
+**Meaning:** SB-175 builds phase 1 of SB-168; marks shared by the machines themselves are SB-177.
+**Coverage:** core `an_account_used_on_another_machine_is_never_chosen_here`, backup `a_reinstall_gets_organizations_their_accounts_and_groups_back`, WebKit demo.
+**Product:** unobserved
+**Traces:** SB-168, SB-175

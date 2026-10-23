@@ -278,6 +278,10 @@ pub struct Snapshot {
     /// The person's word per account: an organization's id or `personal` (SB-158).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub memberships: BTreeMap<String, String>,
+    /// SB-175 (SB-168 D-2): accounts the person marked as used on another machine, with when.
+    /// Such an account is disabled here: never renewed, rotated to or switched to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub elsewhere: BTreeMap<String, i64>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -381,6 +385,8 @@ fn merge_windows(old: &Usage, new: &Usage) -> Option<Usage> {
     usage_valid(&merged).then_some(merged)
 }
 
+/// SB-175: the refusal for an account marked as used on another machine.
+pub const ELSEWHERE: &str = "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.";
 /// An account update that names neither a label nor an enabled state.
 pub const NOTHING_TO_UPDATE: &str = "Give a new label, an enabled state, or both.";
 /// Fixed vocabulary prevents callers from accidentally persisting upstream error bodies.
@@ -1428,6 +1434,33 @@ impl Store {
         a.enabled = enabled;
         if !enabled {
             candidate.routes.retain(|_, value| value != id);
+        } else {
+            // Enabling an account here says it is used here (SB-175).
+            candidate.elsewhere.remove(id);
+        }
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
+    /// SB-175 (SB-168 D-2): marks an account as used on another machine, or clears the mark. A
+    /// marked account is disabled and leaves every selection, so this machine never renews,
+    /// rotates to or switches to it and the other machine's sign-in is never spent from here;
+    /// clearing the mark enables it again.
+    pub fn mark_elsewhere(&self, id: &str, on: bool, now: i64) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let a = candidate
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or("Account not found")?;
+        a.enabled = !on;
+        if on {
+            candidate.elsewhere.insert(id.to_owned(), now);
+            candidate.routes.retain(|_, value| value != id);
+        } else {
+            candidate.elsewhere.remove(id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -1451,6 +1484,7 @@ impl Store {
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
         candidate.memberships.remove(id);
+        candidate.elsewhere.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -1494,6 +1528,9 @@ impl Store {
             if route != expected {
                 return Ok(false);
             }
+        }
+        if state.elsewhere.contains_key(id) {
+            return Err(ELSEWHERE.into());
         }
         let a = state
             .accounts

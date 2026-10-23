@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-23: 0.6.74, an account used on another machine (SB-175; SB-168 design)
+
+- **Done.** SB-168's design note [two-machines-2026-10-23](research/two-machines-2026-10-23.md)
+  (D-1 to D-6, rows SB-175 to SB-178). SB-175 built: the *Used on another machine* mark
+  (SCN-072, CONTRACTS *An account used on another machine*).
+- **0.6.72 and 0.6.73 not published.** v0.6.72's nightly on the tag failed on both Windows
+  runners (`statistics::tests::the_report_groups_by_group_project_account_agent_and_day_inside_the_range`:
+  `format!("{out}/src/app")` on a `\\?\` path, os error 123); the run was cancelled before its
+  guard failed; v0.6.73 was never tagged. The test joins the path now.
+- **Next task.** SB-176 (settings bundle with repository matching); SB-178 needs the operator and
+  a spare account on two machines; SB-177 waits for Fabric's hub ADR; SB-174 once
+  `control_slow` lines exist.
+
 ## 2026-10-23: 0.6.73, the contract's folder attribution decides joins (SB-141 part 2)
 
 - **Done.** `crates/switchboard-runtime/src/attribution.rs` ports `attributeFolder`,

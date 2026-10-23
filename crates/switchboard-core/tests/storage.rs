@@ -1596,3 +1596,39 @@ fn organizations_from_passioncode_are_linked_kept_current_and_released() {
     assert!(store.secret(&item).is_err());
     let _ = vault;
 }
+
+#[test]
+fn an_account_used_on_another_machine_is_never_chosen_here() {
+    // SB-175 (SB-168 D-2): a renewal here would spend the other machine's sign-in; marking the
+    // account disables it, clears its selection and refuses a switch with its own reason.
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-secret-alpha");
+    store.select(Provider::Claude, "default", &a.id).unwrap();
+    store.mark_elsewhere(&a.id, true, 1_000).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(!snap.accounts[0].enabled);
+    assert_eq!(snap.elsewhere.get(&a.id), Some(&1_000));
+    assert!(snap.routes.is_empty(), "its selection is cleared");
+    assert_eq!(
+        store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap_err(),
+        switchboard_core::ELSEWHERE
+    );
+    // The mark survives a restart, under schema version 8.
+    drop(store);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(disk["schema_version"], 8);
+    let store = reopen(root.path(), vault);
+    assert!(store.snapshot().unwrap().elsewhere.contains_key(&a.id));
+    // Enabling it says it is used here: the mark goes.
+    store.update_fields(&a.id, None, Some(true)).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.accounts[0].enabled && snap.elsewhere.is_empty());
+    store.mark_elsewhere(&a.id, true, 2_000).unwrap();
+    store.mark_elsewhere(&a.id, false, 2_001).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.accounts[0].enabled && snap.elsewhere.is_empty());
+    assert!(store.mark_elsewhere("missing", true, 1).is_err());
+}
