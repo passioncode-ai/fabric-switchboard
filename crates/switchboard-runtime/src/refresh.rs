@@ -104,51 +104,64 @@ impl Default for RefreshState {
 }
 impl RefreshState {
     /// The first stored Claude OAuth account (in store order) holding `token`. The map from
-    /// token fingerprint to holder is rebuilt only when the store's credentials changed.
+    /// token fingerprint to holder is rebuilt only when what it reads changed
+    /// (`credentials_key`: a credential written, or an account's identity or kind; N1 round 1:
+    /// not a project save), and built outside the map's lock.
     fn holder(&self, store: &Store, snapshot: &Snapshot, token: &str) -> Option<String> {
-        let changes = store.changes();
-        let mut holders = self.holders.lock().ok()?;
-        if holders.as_ref().is_none_or(|(at, _)| *at != changes) {
-            let mut map = HashMap::new();
-            for account in snapshot
-                .accounts
-                .iter()
-                .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
-            {
-                if let Some(held) = store
-                    .stored_credential(&account.id)
-                    .ok()
-                    .and_then(|c| c.refresh_token)
-                {
-                    // One token held by copies of two different accounts names nobody: an
-                    // interrupted switch filed it under the wrong one, and the first copy read
-                    // must not decide whose it is.
-                    let who = account
-                        .external_identity
-                        .as_ref()
-                        .and_then(|i| i.account_id.clone());
-                    map.entry(fingerprint(&held))
-                        .and_modify(|seen: &mut Option<String>| {
-                            let other = seen.as_ref().and_then(|id| {
-                                snapshot
-                                    .accounts
-                                    .iter()
-                                    .find(|a| &a.id == id)
-                                    .and_then(|a| a.external_identity.as_ref())
-                                    .and_then(|i| i.account_id.clone())
-                            });
-                            if other != who {
-                                *seen = None;
-                            }
-                        })
-                        .or_insert_with(|| Some(account.id.clone()));
-                }
-            }
-            *holders = Some((changes, map));
-        }
-        holders
+        let key = credentials_key(store, snapshot);
+        let cached = self
+            .holders
+            .lock()
+            .ok()?
             .as_ref()
-            .and_then(|(_, map)| map.get(&fingerprint(token)).cloned().flatten())
+            .filter(|(at, _)| *at == key)
+            .map(|(_, map)| map.get(&fingerprint(token)).cloned().flatten());
+        if let Some(answer) = cached {
+            return answer;
+        }
+        let mut map = HashMap::new();
+        for account in snapshot
+            .accounts
+            .iter()
+            .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
+        {
+            if let Some(held) = store
+                .stored_credential(&account.id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+            {
+                // One token held by copies of two different accounts names nobody: an
+                // interrupted switch filed it under the wrong one, and the first copy read
+                // must not decide whose it is.
+                let who = account
+                    .external_identity
+                    .as_ref()
+                    .and_then(|i| i.account_id.clone());
+                map.entry(fingerprint(&held))
+                    .and_modify(|seen: &mut Option<String>| {
+                        let other = seen.as_ref().and_then(|id| {
+                            snapshot
+                                .accounts
+                                .iter()
+                                .find(|a| &a.id == id)
+                                .and_then(|a| a.external_identity.as_ref())
+                                .and_then(|i| i.account_id.clone())
+                        });
+                        if other != who {
+                            *seen = None;
+                        }
+                    })
+                    .or_insert_with(|| Some(account.id.clone()));
+            }
+        }
+        let answer = map.get(&fingerprint(token)).cloned().flatten();
+        // A credential written while these were read may have changed one: keep nothing then.
+        if credentials_key(store, snapshot) == key {
+            if let Ok(mut holders) = self.holders.lock() {
+                *holders = Some((key, map));
+            }
+        }
+        answer
     }
     pub(crate) fn at(endpoint: String) -> Self {
         Self {
@@ -382,27 +395,39 @@ impl RefreshState {
             return vec![];
         }
         let changes = store.credential_changes();
+        let mut previous = Vec::new();
         if let Ok(cache) = self.sign_in_cache.lock() {
             if let Some((at, of, ids)) = cache.as_ref() {
                 if *at == changes && *of == dead {
                     return ids.clone();
                 }
+                previous = ids.clone();
             }
         }
         // PRD-01: each read may wait seconds on the Keychain; off the async worker it shares.
-        let ids: Vec<String> = crate::blocking::run(|| {
-            dead.iter()
-                .filter(|(id, hash)| {
-                    store.stored_credential(id).is_ok_and(|c| {
+        // N1 round 1: a read that failed (a `security` timeout, a locked keychain) says nothing
+        // about the lineage: the account keeps the answer it had, and nothing is cached.
+        let (ids, certain) = crate::blocking::run(|| {
+            let mut certain = true;
+            let ids: Vec<String> = dead
+                .iter()
+                .filter(|(id, hash)| match store.stored_credential(id) {
+                    Ok(c) => {
                         c.refresh_token.as_deref().map(fingerprint).as_deref()
                             == Some(hash.as_str())
-                    })
+                    }
+                    Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => false,
+                    Err(_) => {
+                        certain = false;
+                        previous.contains(id)
+                    }
                 })
                 .map(|(id, _)| id.clone())
-                .collect()
+                .collect();
+            (ids, certain)
         });
         // A credential stored while these were read may have replaced one: keep nothing then.
-        if store.credential_changes() == changes {
+        if certain && store.credential_changes() == changes {
             if let Ok(mut cache) = self.sign_in_cache.lock() {
                 *cache = Some((changes, dead, ids.clone()));
             }
@@ -411,6 +436,23 @@ impl RefreshState {
     }
 }
 
+/// N1 round 1 (seam tier): what a cache of vault reads over `snapshot`'s accounts depends on:
+/// the store's credential writes (`Store::credential_changes`) and each account's id, provider,
+/// kind, enabled flag and captured identity. A project save, a policy or a quota change leaves
+/// it as it is; `Store::changes` moved with each of them.
+pub(crate) fn credentials_key(store: &Store, snapshot: &Snapshot) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    store.credential_changes().hash(&mut h);
+    for a in &snapshot.accounts {
+        a.id.hash(&mut h);
+        a.provider.as_str().hash(&mut h);
+        format!("{:?}", a.kind).hash(&mut h);
+        a.enabled.hash(&mut h);
+        format!("{:?}", a.external_identity).hash(&mut h);
+    }
+    h.finish()
+}
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1541,7 +1583,7 @@ mod tests {
     use super::*;
     use crate::fixtures::*;
     use axum::{routing::post, Json, Router};
-    use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc};
+    use std::sync::{atomic::AtomicUsize, atomic::Ordering, Arc, Mutex};
 
     const EXPIRED: i64 = 1_000;
 
@@ -2011,6 +2053,158 @@ mod tests {
         assert!(
             checks.is_some_and(|ms| ms >= 50),
             "the checks' time is under `checks`: {phases:?}"
+        );
+    }
+    struct FailingVault {
+        inner: switchboard_core::MemoryVault,
+        gets: AtomicUsize,
+        /// Reads of this id fail while `failures` is above zero.
+        failing: Mutex<Option<String>>,
+        failures: Mutex<usize>,
+    }
+    impl switchboard_core::Vault for FailingVault {
+        fn get(&self, id: &str) -> Result<Credential, String> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            let mut failures = self.failures.lock().unwrap();
+            if self.failing.lock().unwrap().as_deref() == Some(id) && *failures > 0 {
+                *failures -= 1;
+                return Err("Credential storage unavailable".into());
+            }
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// N1 round 1 (unit tier): a vault read that failed (a `security` timeout, a locked
+    /// keychain) read as "not dead", and that answer was cached until the next credential write,
+    /// so recovery offered an account whose lineage the provider had rejected. A failed read is
+    /// never cached and never hides a sign-in the previous answer needed.
+    #[test]
+    fn a_failed_vault_read_is_not_cached_and_does_not_hide_a_needed_sign_in() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(FailingVault {
+            inner: Default::default(),
+            gets: Default::default(),
+            failing: Default::default(),
+            failures: Default::default(),
+        });
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        for account in ["synthetic-a", "synthetic-b"] {
+            store
+                .upsert(
+                    account.into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    expired(account),
+                    Some(identity(account)),
+                )
+                .unwrap();
+        }
+        let (a, b) = (
+            id_of(&store, "synthetic-a", "default"),
+            id_of(&store, "synthetic-b", "default"),
+        );
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        *vault.failing.lock().unwrap() = Some(a.clone());
+        *vault.failures.lock().unwrap() = 1;
+        let _ = state.sign_in_required(&store);
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap();
+        store.save_project(None, "App", &[folder], &[]).unwrap();
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        let reads = vault.gets.load(Ordering::SeqCst);
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        assert_eq!(
+            vault.gets.load(Ordering::SeqCst),
+            reads,
+            "a good answer is cached"
+        );
+        // A credential write elsewhere sends it back to the vault; a read that fails then keeps
+        // the sign-in the previous answer needed.
+        let mut other = expired("synthetic-b");
+        other.refresh_token = Some("synthetic-b-new".into());
+        store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                other,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        let _ = b;
+        *vault.failures.lock().unwrap() = 1;
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+    }
+    /// N1 round 1 (seam tier): the map of which account holds a refresh token was rebuilt,
+    /// reading every Claude account's credential from the vault, whenever `Store::changes`
+    /// moved, which every project save does.
+    #[test]
+    fn a_project_save_does_not_rebuild_the_token_holders() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        let snapshot = store.snapshot().unwrap();
+        assert_eq!(
+            state.holder(&store, &snapshot, "synthetic-a-refresh"),
+            Some(a.clone())
+        );
+        let reads = vault.gets.load(Ordering::SeqCst);
+        let work = tempfile::tempdir().unwrap();
+        let mut folders = Vec::new();
+        for n in 0..5 {
+            let folder = work.path().join(format!("repo-{n}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            folders.push(folder.canonicalize().unwrap());
+            store
+                .save_project(Some("app"), "App", &folders, &[])
+                .or_else(|_| store.save_project(None, "App", &folders, &[]))
+                .unwrap();
+            let snapshot = store.snapshot().unwrap();
+            assert_eq!(
+                state.holder(&store, &snapshot, "synthetic-a-refresh"),
+                Some(a.clone())
+            );
+        }
+        assert_eq!(vault.gets.load(Ordering::SeqCst), reads);
+        // A credential written is seen.
+        let mut fresh = expired("synthetic-a");
+        fresh.refresh_token = Some("synthetic-a-next".into());
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                fresh,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let snapshot = store.snapshot().unwrap();
+        assert_eq!(state.holder(&store, &snapshot, "synthetic-a-refresh"), None);
+        assert_eq!(
+            state.holder(&store, &snapshot, "synthetic-a-next"),
+            Some(a.clone())
         );
     }
     /// PRD-01 (iteration 2026-10-24): the SB-182 cache was keyed on `Store::changes`, which

@@ -47,9 +47,16 @@ account in another pool/project cannot wake the session.
 Claim takes an event and candidate, rechecks availability, and writes `claimed`
 before returning. Repeated claims refuse, including after restart. The host
 reports `resumed` or `cancelled`; a crash after claim remains `claimed` for manual
-reconciliation, never an automatic duplicate. Records are bounded; a full registry
-refuses new registrations rather than evicting unfinished work. Completed records
-are retained within the bound for deduplication.
+reconciliation, never an automatic duplicate. Records are bounded (D-4 of 0.6.82,
+superseding this packet's first bound): stops older than 7 days are dropped, and past
+512 rows finished records go before unfinished ones; the record being written is always
+kept, so a new stop is never refused for room. Pruned event ids are kept (ids only, the
+newest 2048) so a replayed registration stores nothing and a replayed finish is a no-op;
+a claim of a pruned event answers not ready. Evidence: `recovery::tests`
+(`stops_older_than_a_week_are_dropped_at_read_and_at_the_next_write`,
+`a_full_file_keeps_a_new_stop_and_drops_finished_ones_first`,
+`the_stop_just_written_is_kept_however_the_rows_are_dated`,
+`a_pruned_event_replayed_is_not_a_new_stop`).
 
 ## Integration boundary
 
