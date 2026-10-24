@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: SB-110 design; contract v0.1.0+2026-10-24 pinned
+
+- **Done.** [session-home-per-context-2026-10-24](research/session-home-per-context-2026-10-24.md):
+  homes stay keyed by pool and account; phase 1 records the context (SB-110, by 2026-11-07);
+  phase 2 an opt-in shell hook for plain sessions (SB-183, by 2026-11-14); phase 3 applies the
+  node's context profile (SB-184), which nobody owns yet (asked on thread `12bd8b4c`).
+  Attribution vectors pinned at `4e5440cf` (PR #302, unchanged content); SB-111's session badge
+  dated with SB-110 (PR #303). 0.6.79 live since 04:12:57 UTC: restart gap 1 s.
+- **Next task.** SB-110 phase 1 (context on every launch), then after 2026-10-25 04:13 UTC the
+  SB-174/SB-163 read as in the entry below.
+
 ## 2026-10-24: 0.6.79, the review of 0.6.77 and 0.6.78 (SB-179, SB-181, SB-182)
 
 - **Review.** Three blind readings (unit, seam, product) of `4de0ab4..eb710ab`. All three found
