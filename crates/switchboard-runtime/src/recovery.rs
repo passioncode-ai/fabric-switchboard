@@ -11,7 +11,11 @@ use std::{
 use switchboard_core::{AuthKind, Provider, Snapshot};
 
 const FILE: &str = "recovery.json";
+/// The most rows a file may hold to be read (an older version wrote up to this many).
 const MAX_ROWS: usize = 1024;
+/// PRD-03 (D-4, 2026-10-24): the file keeps stops of the last 7 days, at most this many.
+const KEEP_ROWS: usize = 512;
+const KEEP_SECONDS: i64 = 7 * 86_400;
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_AGE: i64 = 300;
 const INVALID: &str = "The recovery record is invalid or conflicts with an existing stop.";
@@ -102,6 +106,50 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Wait>, String> {
     Ok(rows)
 }
 
+/// PRD-03 (D-4): drops stops older than 7 days, then, past 512, the oldest finished stops
+/// (resumed, cancelled) before the oldest live ones. The order of the rows kept is unchanged.
+/// Answers how many were dropped.
+fn prune(rows: &mut Vec<Wait>, now: i64) -> usize {
+    let before = rows.len();
+    rows.retain(|r| r.stopped_at >= now.saturating_sub(KEEP_SECONDS));
+    if rows.len() > KEEP_ROWS {
+        let mut order: Vec<usize> = (0..rows.len()).collect();
+        order.sort_by_key(|&i| {
+            let live = matches!(rows[i].state, State::Waiting | State::Claimed);
+            (live, rows[i].stopped_at)
+        });
+        let drop: HashSet<usize> = order[..rows.len() - KEEP_ROWS].iter().copied().collect();
+        let mut index = 0;
+        rows.retain(|_| {
+            let keep = !drop.contains(&index);
+            index += 1;
+            keep
+        });
+    }
+    before - rows.len()
+}
+
+/// The stops as of `now`: the file's rows without those `prune` drops (PRD-03), and how many
+/// it dropped. Reading writes nothing; the next write leaves them out of the file.
+fn current(root: &Path, now: i64) -> Result<(Vec<Wait>, usize), String> {
+    let mut rows = read(root)?;
+    let dropped = prune(&mut rows, now);
+    Ok((rows, dropped))
+}
+
+/// Writes the stops as of `now`, pruned again after a stop was added; logs what left the file.
+fn keep(root: &Path, rows: &mut Vec<Wait>, now: i64, dropped: usize) -> Result<(), String> {
+    let dropped = dropped + prune(rows, now);
+    write(root, rows)?;
+    if dropped > 0 {
+        crate::oplog::event(
+            "recovery_pruned",
+            &[("dropped", crate::oplog::Field::Number(dropped as i64))],
+        );
+    }
+    Ok(())
+}
+
 /// SB-150: every read-modify-write of the file holds this, so the `StopFailure` registration
 /// can run beside the owner transaction (it no longer waits behind a renewal or a sync) without
 /// losing another writer's row. Held only for the file's read and rename.
@@ -132,7 +180,7 @@ pub(crate) fn register(
     }
     let directory = directory.canonicalize().map_err(|_| INVALID)?;
     let _writing = writing();
-    let mut rows = read(root)?;
+    let (mut rows, dropped) = current(root, now)?;
     if let Some(old) = rows.iter().find(|r| r.event == event) {
         return if old.session == session && old.account == account && old.directory == directory {
             Ok(())
@@ -146,13 +194,12 @@ pub(crate) fn register(
     {
         return Err(INVALID.into());
     }
-    let row = new_row(&rows, snapshot, event, session, account, directory, now)?;
+    let row = new_row(snapshot, event, session, account, directory, now)?;
     rows.push(row);
-    write(root, &rows)
+    keep(root, &mut rows, now, dropped)
 }
 
 fn new_row(
-    rows: &[Wait],
     snapshot: &Snapshot,
     event: &str,
     session: &str,
@@ -160,9 +207,7 @@ fn new_row(
     directory: PathBuf,
     now: i64,
 ) -> Result<Wait, String> {
-    if rows.len() >= MAX_ROWS {
-        return Err(INVALID.into());
-    }
+    // PRD-03: no row limit refuses a stop here: `keep` makes room.
     let a = snapshot
         .accounts
         .iter()
@@ -215,7 +260,7 @@ pub(crate) fn register_stop(
     }
     let directory = directory.canonicalize().map_err(|_| INVALID)?;
     let _writing = writing();
-    let mut rows = read(root)?;
+    let (mut rows, dropped) = current(root, now)?;
     if let Some(live) = rows
         .iter_mut()
         .find(|r| r.session == session && r.state == State::Waiting)
@@ -224,7 +269,7 @@ pub(crate) fn register_stop(
         live.attempt = live.attempt.saturating_add(1);
         live.kind = kind;
         let event = live.event.clone();
-        write(root, &rows)?;
+        keep(root, &mut rows, now, dropped)?;
         return Ok(Stopped::Again(event));
     }
     let mut attempt = 0;
@@ -247,11 +292,11 @@ pub(crate) fn register_stop(
     if !identifier(&event) || rows.iter().any(|r| r.event == event) {
         return Err(INVALID.into());
     }
-    let mut row = new_row(&rows, snapshot, &event, session, account, directory, now)?;
+    let mut row = new_row(snapshot, &event, session, account, directory, now)?;
     row.kind = kind;
     row.attempt = attempt;
     rows.push(row);
-    write(root, &rows)?;
+    keep(root, &mut rows, now, dropped)?;
     Ok(Stopped::New(event))
 }
 
@@ -410,7 +455,7 @@ pub(crate) fn claim(
     now: i64,
 ) -> Result<Wait, String> {
     let _writing = writing();
-    let mut rows = read(root)?;
+    let (mut rows, dropped) = current(root, now)?;
     let row = rows
         .iter_mut()
         .find(|r| r.event == event)
@@ -423,7 +468,7 @@ pub(crate) fn claim(
     row.selected_account = Some(account.into());
     row.mode = ready.mode;
     let result = row.clone();
-    write(root, &rows)?;
+    keep(root, &mut rows, now, dropped)?;
     Ok(result)
 }
 
@@ -456,7 +501,7 @@ pub(crate) fn status(
     sign_in: &HashSet<String>,
     now: i64,
 ) -> Result<serde_json::Value, String> {
-    let rows = read(root)?;
+    let (rows, _) = current(root, now)?;
     let waiting = rows.iter().filter(|r| r.state == State::Waiting).count();
     let claimed = rows.iter().filter(|r| r.state == State::Claimed).count();
     let sessions: Vec<_> = rows
@@ -1060,6 +1105,107 @@ mod tests {
             700
         )
         .is_err());
+    }
+
+    fn stop(n: usize, at: i64, state: State, directory: &Path) -> Wait {
+        Wait {
+            event: format!("limit:{n}"),
+            session: format!("session-{n}"),
+            account: "old".into(),
+            provider: Provider::Claude,
+            pool: "default".into(),
+            directory: directory.to_owned(),
+            stopped_at: at,
+            state,
+            selected_account: None,
+            kind: StopKind::Limit,
+            attempt: 0,
+            mode: None,
+        }
+    }
+    const DAY: i64 = 86_400;
+    /// PRD-03 (iteration 2026-10-24, D-4): recovery.json was never pruned (120 rows, the oldest
+    /// 9.5 days old, on the operator's Mac). A stop older than 7 days leaves the answer at once
+    /// and the file at the next write.
+    #[test]
+    fn stops_older_than_a_week_are_dropped_at_read_and_at_the_next_write() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        write(
+            root.path(),
+            &[
+                stop(1, now - 8 * DAY, State::Waiting, &dir),
+                stop(2, now - 8 * DAY, State::Resumed, &dir),
+                stop(3, now - DAY, State::Waiting, &dir),
+            ],
+        )
+        .unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        let answer = status(root.path(), &s, &none, &none, &none, now).unwrap();
+        assert_eq!(answer["sessions"].as_array().unwrap().len(), 1, "{answer}");
+        assert_eq!(answer["waiting_sessions"], 1);
+        assert_eq!(read(root.path()).unwrap().len(), 3, "a read writes nothing");
+        register(root.path(), &s, "limit:4", "session-4", "old", &dir, now).unwrap();
+        let events: Vec<_> = read(root.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.event)
+            .collect();
+        assert_eq!(events, ["limit:3", "limit:4"]);
+    }
+    /// PRD-03: a file at its row limit refused every new stop as "invalid or conflicts with an
+    /// existing stop". A new stop is always kept; the file keeps the newest 512, finished stops
+    /// leaving before waiting ones.
+    #[test]
+    fn a_full_file_keeps_a_new_stop_and_drops_finished_ones_first() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let mut rows = Vec::new();
+        for n in 0..MAX_ROWS {
+            let state = if n < 600 {
+                State::Resumed
+            } else {
+                State::Waiting
+            };
+            rows.push(stop(n, now - DAY + n as i64, state, &dir));
+        }
+        write(root.path(), &rows).unwrap();
+        let s = snapshot();
+        let stopped = register_stop(
+            root.path(),
+            &s,
+            "session-new",
+            "old",
+            &dir,
+            StopKind::Limit,
+            now,
+        )
+        .unwrap();
+        let Stopped::New(event) = stopped else {
+            panic!("{stopped:?}")
+        };
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows.len(), KEEP_ROWS);
+        assert!(
+            rows.iter().any(|r| r.event == event),
+            "the new stop is kept"
+        );
+        let waiting = rows.iter().filter(|r| r.state == State::Waiting).count();
+        assert_eq!(waiting, MAX_ROWS - 600 + 1, "every waiting stop is kept");
+        // The finished stops kept are the newest ones.
+        let oldest_resumed = rows
+            .iter()
+            .filter(|r| r.state == State::Resumed)
+            .map(|r| r.stopped_at)
+            .min()
+            .unwrap();
+        assert_eq!(
+            oldest_resumed,
+            now - DAY + (600 - (KEEP_ROWS - waiting)) as i64
+        );
     }
 
     #[test]

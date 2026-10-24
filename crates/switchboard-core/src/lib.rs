@@ -295,6 +295,10 @@ pub struct Store {
     state: Mutex<Snapshot>,
     /// Counts changes a backup must capture: credentials, accounts and policies — not quota.
     changes: std::sync::atomic::AtomicU64,
+    /// PRD-01: counts credential writes only (every vault put or delete, kept or refused), so
+    /// a cache of what the vault holds is not thrown away by a project save, which `changes`
+    /// also counts (about 740 folder joins a day).
+    credential_changes: Arc<std::sync::atomic::AtomicU64>,
     /// Metadata publications written to disk, for the idle budget (lifecycle LC-08).
     writes: std::sync::atomic::AtomicU64,
     /// SB-185: the slowest credential read since the runtime last took it (ms), so a vault that
@@ -526,6 +530,38 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     Ok(())
 }
 
+// Refusals of a usage observation, coded for the log by `Store::usage_refusal_code` (PRD-17).
+const OBSERVATION_INVALID: &str = "Invalid usage observation";
+const OBSERVATION_SUPERSEDED: &str = "Usage observation is older than the stored observation";
+const OBSERVATION_CREDENTIAL_CHANGED: &str = "Credential changed during usage check";
+const ACCOUNT_NOT_FOUND: &str = "Account not found";
+const STORE_UNAVAILABLE: &str = "Account store unavailable";
+const VAULT_UNAVAILABLE: &str = "Credential storage unavailable";
+
+/// The store's own view of its vault: counts every write and removal after it returns, kept
+/// or refused (a refused write may still have changed the item), for `credential_changes`.
+struct CountedVault {
+    inner: Arc<dyn Vault>,
+    writes: Arc<std::sync::atomic::AtomicU64>,
+}
+impl Vault for CountedVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        let result = self.inner.put(id, value);
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        result
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        let result = self.inner.delete(id);
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        result
+    }
+}
+
 /// Closing the store writes timestamps still held in memory.
 impl Drop for Store {
     fn drop(&mut self) {
@@ -536,12 +572,17 @@ impl Drop for Store {
 impl Store {
     pub fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, String> {
         let (lock, state) = persistence::open(&root)?;
+        let credential_changes: Arc<std::sync::atomic::AtomicU64> = Default::default();
         Ok(Self {
             root,
             _lock: lock,
-            vault,
+            vault: Arc::new(CountedVault {
+                inner: vault,
+                writes: credential_changes.clone(),
+            }),
             state: Mutex::new(state),
             changes: Default::default(),
+            credential_changes,
             writes: Default::default(),
             slowest_read: Default::default(),
             pending_since: Default::default(),
@@ -556,9 +597,7 @@ impl Store {
         &self.root
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
-        self.state
-            .lock()
-            .map_err(|_| "Account store unavailable".into())
+        self.state.lock().map_err(|_| STORE_UNAVAILABLE.into())
     }
     fn publish(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
         validate_snapshot(&candidate)?;
@@ -887,6 +926,14 @@ impl Store {
     pub(crate) fn changed(&self) {
         self.changes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// PRD-01: increases after every credential written to or removed from the vault through
+    /// this store, and only then: a cache of vault reads keyed on it stays valid across project,
+    /// policy and quota changes. A write that lands while a reader reads is counted after it
+    /// lands, so a reader that compares the count before and after never keeps a stale answer.
+    pub fn credential_changes(&self) -> u64 {
+        self.credential_changes
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
     /// Metadata plus every credential that can be read, for a backup. Never serialize this
     /// pair anywhere but into the sealed backup payload.
@@ -1409,11 +1456,11 @@ impl Store {
             let current = self
                 .vault
                 .get(id)
-                .map_err(vault::surface("Credential storage unavailable"))?;
+                .map_err(vault::surface(VAULT_UNAVAILABLE))?;
             if current.access_token != expected.access_token
                 || current.expires_at != expected.expires_at
             {
-                return Err("Credential changed during usage check".into());
+                return Err(OBSERVATION_CREDENTIAL_CHANGED.into());
             }
         }
         // The same verdict again only moves its timestamps (lifecycle LC-08).
@@ -1642,6 +1689,21 @@ impl Store {
         self.observe_generation(id, None, usage)
     }
     /// Only publishes quota if the request's captured credential generation is still stored.
+    /// PRD-17: the operations log's code for a refusal `observe_credential` gave a quota check
+    /// (its text reaches no log): `superseded` (a newer observation or check is already held),
+    /// `credential_changed` (renewed or signed in again while the check ran),
+    /// `invalid_observation`, `account_gone`, `vault`, `store`. None: not one of its refusals.
+    pub fn usage_refusal_code(message: &str) -> Option<&'static str> {
+        Some(match message {
+            OBSERVATION_SUPERSEDED => "superseded",
+            OBSERVATION_CREDENTIAL_CHANGED => "credential_changed",
+            OBSERVATION_INVALID => "invalid_observation",
+            ACCOUNT_NOT_FOUND => "account_gone",
+            STORE_UNAVAILABLE => "store",
+            m if m == VAULT_UNAVAILABLE || keychain::ACTIONABLE.contains(&m) => "vault",
+            _ => return None,
+        })
+    }
     pub fn observe_credential(
         &self,
         id: &str,
@@ -1657,7 +1719,7 @@ impl Store {
         mut usage: Usage,
     ) -> Result<(), String> {
         if !usage_valid(&usage) || ahead(usage.observed_at) {
-            return Err("Invalid usage observation".into());
+            return Err(OBSERVATION_INVALID.into());
         }
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -1665,7 +1727,7 @@ impl Store {
             .accounts
             .iter_mut()
             .find(|a| a.id == id)
-            .ok_or("Account not found")?;
+            .ok_or(ACCOUNT_NOT_FOUND)?;
         if a.usage
             .as_ref()
             .is_some_and(|old| old.observed_at > usage.observed_at && !ahead(old.observed_at))
@@ -1676,7 +1738,7 @@ impl Store {
                 health.checked_at > usage.observed_at && !ahead(health.checked_at)
             })
         {
-            return Err("Usage observation is older than the stored observation".into());
+            return Err(OBSERVATION_SUPERSEDED.into());
         }
         if let Some(expected) = expected {
             let current = self
