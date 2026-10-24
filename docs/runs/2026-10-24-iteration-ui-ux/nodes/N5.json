@@ -1,0 +1,463 @@
+{
+ "node": "N5",
+ "done": [
+  {
+   "id": "UX-01",
+   "evidence": [
+    "src/main.ts:295",
+    "scripts? none; browser: /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-accounts.png (header + Add account shown only with accounts)"
+   ]
+  },
+  {
+   "id": "UX-02",
+   "evidence": [
+    "src/main.ts:207",
+    "src/main.ts:1754 (Retry beside the error)"
+   ]
+  },
+  {
+   "id": "UX-03",
+   "evidence": [
+    "src/main.ts:207",
+    "src/main.ts:360",
+    "src/main.ts:372 (Retry when the read failed)"
+   ]
+  },
+  {
+   "id": "UX-04",
+   "evidence": [
+    "src/main.ts:159",
+    "src/main.ts:1577 (In use now: Could not read the sign-in + Retry)"
+   ]
+  },
+  {
+   "id": "UX-05",
+   "evidence": [
+    "src/main.ts:1063",
+    "WebKit: focus after Rename dialog closes = menu-demo-claude-summit (740 and 1100)"
+   ]
+  },
+  {
+   "id": "UX-06",
+   "evidence": [
+    "src/main.ts:319",
+    "src/main.ts:314 (full error state only without a list; Unable to load organizations)"
+   ]
+  },
+  {
+   "id": "UX-07",
+   "evidence": [
+    "src/main.ts:308",
+    "src/window.css:5",
+    "WebKit: About Back up now toast inView=true at 740 and 1100; /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-about-toast.png"
+   ]
+  },
+  {
+   "id": "UX-08",
+   "evidence": [
+    "src/adapter.ts:445",
+    "src/adapter.ts:446",
+    "scripts/check-locale.mjs:87"
+   ]
+  },
+  {
+   "id": "UX-09",
+   "evidence": [
+    "src/main.ts:609",
+    "docs/ux/scenarios.md SCN-034, SCN-055"
+   ]
+  },
+  {
+   "id": "UX-10",
+   "evidence": [
+    "docs/ux/scenarios.md SCN-025, 034, 035, 042, 045, 059, 063, 064, 065",
+    "docs/ux/screens.md SCR-01 Elements"
+   ]
+  },
+  {
+   "id": "UX-11",
+   "evidence": [
+    "src/main.ts:623 (Folder rules)",
+    "src/main.ts:1951 (restore counts say groups)",
+    "D-1/D-5 in every window sentence: src/ui-logic.ts:822-842"
+   ]
+  },
+  {
+   "id": "UX-12",
+   "evidence": [
+    "src/main.ts:999",
+    "src/main.ts:833"
+   ]
+  },
+  {
+   "id": "UX-14",
+   "evidence": [
+    "src/main.ts:351",
+    "WebKit: Review rules focuses rules-heading at 740 and 1100"
+   ]
+  },
+  {
+   "id": "UX-17",
+   "evidence": [
+    "src/main.ts:1520",
+    "src/ui-logic.ts:833",
+    "scripts/test-ui-logic.mjs:728",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-dlg-addkey.png"
+   ]
+  },
+  {
+   "id": "UX-18",
+   "evidence": [
+    "src/main.ts:1201",
+    "src/ui-logic.ts firstRunHint",
+    "scripts/test-ui-logic.mjs:752"
+   ]
+  },
+  {
+   "id": "UX-19",
+   "evidence": [
+    "src/main.ts:672"
+   ]
+  },
+  {
+   "id": "UX-20",
+   "evidence": [
+    "src/main.ts:490",
+    "src/window.css:22"
+   ]
+  },
+  {
+   "id": "UX-21",
+   "evidence": [
+    "src/main.ts:2196",
+    "src/main.ts:2218 (a failed Cancel is reported)"
+   ]
+  },
+  {
+   "id": "UX-22",
+   "evidence": [
+    "src/main.ts:1943",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-dlg-restore.png"
+   ]
+  },
+  {
+   "id": "UX-23",
+   "evidence": [
+    "src/main.ts:581",
+    "WebKit: new group dialog folders = 'No folder chosen'"
+   ]
+  },
+  {
+   "id": "UX-24",
+   "evidence": [
+    "src/main.ts:180",
+    "src/ui-logic.ts:871",
+    "scripts/test-ui-logic.mjs:764",
+    "src/main.ts:200 (a Refresh during an action never applies an older list)"
+   ]
+  },
+  {
+   "id": "UX-26",
+   "evidence": [
+    "src/ui-logic.ts:107",
+    "scripts/test-ui-logic.mjs:489"
+   ]
+  },
+  {
+   "id": "UX-28",
+   "evidence": [
+    "src/main.ts:1289"
+   ]
+  },
+  {
+   "id": "UX-29",
+   "evidence": [
+    "src/main.ts:2312"
+   ]
+  },
+  {
+   "id": "UX-30",
+   "evidence": [
+    "src/main.ts:51",
+    "src/main.ts:66"
+   ]
+  },
+  {
+   "id": "VIS-03",
+   "evidence": [
+    "src/ui-logic.ts:822",
+    "scripts/test-ui-logic.mjs:722",
+    "WebKit: patternMismatch true for 'Bad Value', false for 'good-id_1'; no page error"
+   ]
+  },
+  {
+   "id": "VIS-11",
+   "evidence": [
+    "src/main.ts:1308",
+    "src/main.ts:2215 (PassionCode line wraps, with title)",
+    "src/window.css:24"
+   ]
+  },
+  {
+   "id": "VIS-12",
+   "evidence": [
+    "src/ui-logic.ts:844",
+    "src/main.ts:66",
+    "scripts/test-ui-logic.mjs:741",
+    "WebKit: card overlaps target in 0 of 8 targeted steps at 740x560 and 1100x560; /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/740-dark-tour3.png"
+   ]
+  },
+  {
+   "id": "VIS-13",
+   "evidence": [
+    "src/main.ts:1190",
+    "src/window.css:9",
+    "WebKit demo, 800 px high: first account row top 826 -> 774 at 740 px, 639 -> 582 at 1100 px (5 blocks -> 4)"
+   ]
+  },
+  {
+   "id": "VIS-15",
+   "evidence": [
+    "src/main.ts:613",
+    "src/window.css:26",
+    "WebKit: focus INPUT 'e.g. Client Alpha', account list overflow visible"
+   ]
+  },
+  {
+   "id": "VIS-16",
+   "evidence": [
+    "src/window.css:28",
+    "src/window.css:29",
+    "WebKit: setup dialog actions within the viewport at 740 and 1100; /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-dlg-setup.png"
+   ]
+  },
+  {
+   "id": "VIS-19",
+   "evidence": [
+    "src/main.ts:329",
+    "WebKit: 8 inline SVG icons in the sidebar, both themes"
+   ]
+  },
+  {
+   "id": "VIS-21",
+   "evidence": [
+    "src/main.ts:295",
+    "src/main.ts (empty Groups button '+ New group')"
+   ]
+  },
+  {
+   "id": "VIS-23",
+   "evidence": [
+    "src/ui-logic.ts:709",
+    "src/main.ts:1702",
+    "scripts/test-ui-logic.mjs:769"
+   ]
+  },
+  {
+   "id": "VIS-27",
+   "evidence": [
+    "src/main.ts:1061",
+    "src/window.css:16",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/1100-light-en-menu-row.png"
+   ]
+  },
+  {
+   "id": "VIS-31",
+   "evidence": [
+    "src/demo.ts:5",
+    "src/demo.ts:87"
+   ]
+  },
+  {
+   "id": "CPY-04",
+   "evidence": [
+    "src/adapter.ts:298",
+    "src/adapter.ts:300"
+   ]
+  },
+  {
+   "id": "CPY-05",
+   "evidence": [
+    "src/adapter.ts:298",
+    "src/ui-logic.ts:384",
+    "scripts/test-ui-logic.mjs:759"
+   ]
+  },
+  {
+   "id": "CPY-06",
+   "evidence": [
+    "src/main.ts (decisionText, policy dialog, rules, About: 'automatic switching')",
+    "src/locales/ru.ts (no «ротац» left)"
+   ]
+  },
+  {
+   "id": "CPY-07",
+   "evidence": [
+    "src/main.ts:1605",
+    "src/ui-logic.ts poolName"
+   ]
+  },
+  {
+   "id": "CPY-10",
+   "evidence": [
+    "scripts/check-locale.mjs:128",
+    "src/locales/ru.ts:1128",
+    "src/locales/ru.ts:1238"
+   ]
+  },
+  {
+   "id": "CPY-11",
+   "evidence": [
+    "src/locales/ru.ts:30",
+    "src/locales/ru.ts:1233"
+   ]
+  },
+  {
+   "id": "CPY-14",
+   "evidence": [
+    "src/main.ts:275",
+    "src/locales/ru.ts:1168"
+   ]
+  },
+  {
+   "id": "CPY-15",
+   "evidence": [
+    "src/main.ts:586",
+    "src/locales/ru.ts:91"
+   ]
+  },
+  {
+   "id": "CPY-17",
+   "evidence": [
+    "src/main.ts:317",
+    "src/adapter.ts:311 ('Choose an existing project directory.' -> 'Choose an existing folder.'); dead macOS-and-Windows sentence removed from safeErrors"
+   ]
+  },
+  {
+   "id": "CPY-18",
+   "evidence": [
+    "src/locales/ru.ts:793 (рабочая копия)",
+    "ru: «не к организации группы», «идентификатор»/«ID» in running text"
+   ]
+  },
+  {
+   "id": "D-5",
+   "evidence": [
+    "src/ui-logic.ts poolName/poolChoices",
+    "src/main.ts:1520",
+    "WebKit options: Default group, Alpha Web, Tools, Group personal · no folders, Group work · no folders, New id…"
+   ]
+  },
+  {
+   "id": "N2-seam",
+   "evidence": [
+    "src/adapter.ts:100 (N2's new sentences verbatim, older ones mapped)",
+    "src/demo.ts:369-370",
+    "docs/ux/scenarios.md SCN-034 steps 3-4, SCN-046, SCN-065",
+    "node scripts/check-error-vocabulary.mjs --root <N2 crates + N5 src> exit 0"
+   ]
+  }
+ ],
+ "not_done": [
+  {
+   "id": "VIS-13 (full)",
+   "reason": "Merged the terms notice and the rules strip into one block (5 blocks to 4, list 52-57 px higher). At 740x800 the first row still starts at y 774; further folding (In use now, the automatic switching bar) needs N3's styles or a scenario decision, so it is left as a board row."
+  },
+  {
+   "id": "UX-13, UX-16, UX-25, UX-27",
+   "reason": "out of N5 scope per the canvas (next pool)"
+  }
+ ],
+ "scenarios_changed": [
+  "SCN-001",
+  "SCN-002",
+  "SCN-010",
+  "SCN-011",
+  "SCN-013",
+  "SCN-022",
+  "SCN-024",
+  "SCN-025",
+  "SCN-030",
+  "SCN-034",
+  "SCN-035",
+  "SCN-042",
+  "SCN-043",
+  "SCN-045",
+  "SCN-046",
+  "SCN-047",
+  "SCN-050",
+  "SCN-055",
+  "SCN-059",
+  "SCN-062",
+  "SCN-063",
+  "SCN-064",
+  "SCN-065",
+  "SCN-066",
+  "SCN-067",
+  "SCN-068",
+  "SCN-071",
+  "SCR-01",
+  "FLW-01"
+ ],
+ "new_css_classes": [
+  "toast (with .notice)",
+  "stale-list",
+  "status-stack",
+  "status-item",
+  "is-placed (tour-card)",
+  "menu-separator",
+  "nav-svg",
+  "is-copied",
+  "is-dismissed (group-hint)",
+  "wraps (row-sub)",
+  "pool-field",
+  "is-alert (styled by N3)"
+ ],
+ "checks": [
+  {
+   "cmd": "npm run build",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/test-ui-logic.mjs",
+   "exit": 0,
+   "out": "59 cases"
+  },
+  {
+   "cmd": "node scripts/test-read-deadline.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-locale.mjs",
+   "exit": 0,
+   "out": "1251 interface strings, all in Russian"
+  },
+  {
+   "cmd": "node scripts/check-error-vocabulary.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-error-vocabulary.mjs --root <N2 backend + N5 src>",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-brand.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "docs/ux/lint.py",
+   "exit": null,
+   "out": "not present in the repository"
+  },
+  {
+   "cmd": "Playwright WebKit 1.64.1 on http://127.0.0.1:5197/?demo=1, 740 and 1100 px, light and dark, en and ru, all pages and dialogs",
+   "exit": 0,
+   "out": "0 page errors, 0 console errors; screenshots in /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/"
+  }
+ ],
+ "seams": {
+  "N2": "28 changed backend sentences read from sb-iter-n2-cli N2.json; window-facing ones (3 OpenRouter/key refusals incl. KEY_POOL_INVALID, 2 launch refusals) are verbatim in safeErrors, the old ones stay mapped so the table holds before and after merge.",
+  "N3": "style.css and tokens.css untouched; new classes only in src/window.css, imported after style.css."
+ },
+ "commit": "32940d3", "commits": ["c4d9325", "78383bf", "d050670", "32940d3"]
+}

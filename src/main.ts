@@ -1,14 +1,15 @@
 import './tokens.css';
 import './style.css';
+import './window.css';
 import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage } from './adapter';
+import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -42,20 +43,38 @@ const onWindows = () => runtime?.platform === 'windows';
 /** SB-104: the tray icon sits in the notification area on Windows and Linux, in the menu bar on macOS. */
 const trayInArea = () => runtime?.platform === 'windows' || runtime?.platform === 'linux';
 const onLinux = () => runtime?.platform === 'linux';
-const tour = (): { page: Page; target: string | null; title: string; text: string }[] => [
-  { page: 'accounts', target: null, title: t('Welcome to Switchboard'), text: t('Switchboard keeps your Claude Code and Codex accounts on this computer and moves your work between them, so you can keep working on another account when one reaches its limit.') },
-  { page: 'accounts', target: '[data-focus="menu-add"]', title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
-  { page: 'accounts', target: '.rotation-bar', title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
-  { page: 'projects', target: '[data-focus="new-project"]', title: t('Give a group its own accounts'), text: t('Press + New group, add the group\'s projects (repository folders) and choose its accounts. Sessions launched from those folders use only them, and other groups never switch to them.') },
-  { page: 'agents', target: '[data-focus="copy-onboard"]', title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
+const tour = (): { page: Page; target: string[]; title: string; text: string }[] => [
+  { page: 'accounts', target: [], title: t('Welcome to Switchboard'), text: t('Switchboard keeps your Claude Code and Codex accounts on this computer and moves your work between them, so you can keep working on another account when one reaches its limit.') },
+  { page: 'accounts', target: ['[data-focus="menu-add"]'], title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
+  { page: 'accounts', target: ['.rotation-bar'], title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
+  { page: 'projects', target: ['[data-focus="new-project"]', '[data-focus="empty-new-project"]'], title: t('Give a group its own accounts'), text: t('Press + New group, add the group\'s repositories and choose its accounts. Sessions launched from those folders use only them, and other groups never switch to them.') },
+  { page: 'agents', target: ['[data-focus="copy-onboard"]', '#connect-panel'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
 let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
-  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title');
+  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour();
 }
+/** The first selector of a step that is on the page (UX-30: the setup prompt may still be reading). */
+function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
+  for (const selector of tour()[step].target) { const found = scope.querySelector<HTMLElement>(selector); if (found) return found; }
+  return null;
+}
+/** VIS-12: the card goes beside its target, never over it, and the target is scrolled into sight first. */
+function placeTour() {
+  const card = root.querySelector<HTMLElement>('.tour-card'); if (!card || tourStep === null) return;
+  const target = tourTarget(root, tourStep);
+  const viewport = { width: window.innerWidth, height: window.innerHeight }; const size = { width: card.offsetWidth, height: card.offsetHeight };
+  const measure = () => { const r = target?.getBoundingClientRect(); return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
+  // Centred first; when the card fits neither above nor below, the target goes to the top so the card fits under it.
+  if (target) target.scrollIntoView({ block: 'center', inline: 'nearest' });
+  let at = tourPlacement(measure(), size, viewport);
+  if (target && at.side === 'corner') { target.scrollIntoView({ block: 'start', inline: 'nearest' }); at = tourPlacement(measure(), size, viewport); }
+  card.classList.add('is-placed'); card.style.left = `${at.left}px`; card.style.top = `${at.top}px`; card.dataset.side = at.side;
+}
+window.addEventListener('resize', () => placeTour());
 function tourCard(step: number) {
   const item = tour()[step]; const last = step === tour().length - 1;
   const card = el('section', 'tour-card'); card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'false'); card.setAttribute('aria-labelledby', 'tour-title');
@@ -74,7 +93,7 @@ const noticeStore = () => { try { return localStorage; } catch { return null; } 
 let termsDismissed = termsNoticeDismissed(noticeStore());
 function termsBanner(main: HTMLElement) {
   if (termsNoticeOn(page, termsDismissed) !== 'banner') return;
-  const banner = el('section', 'notice terms-notice'); banner.setAttribute('aria-label', t('Provider terms'));
+  const banner = el('div', 'status-item terms-notice'); banner.setAttribute('role', 'note'); banner.setAttribute('aria-label', t('Provider terms'));
   banner.append(el('span', '', termsNoticeText()), button(t('Dismiss'), () => { dismissTermsNotice(noticeStore()); termsDismissed = true; render(); restoreFocus('page-title'); }, 'text-button', 'dismiss-terms'));
   main.append(banner);
 }
@@ -136,12 +155,14 @@ const currentMatch = (account: Account) => {
   const identity = account.external_identity;
   return !!identity?.account_id && identity.account_id === current.identity?.account_id && identity.organization_id === current.identity?.organization_id;
 };
-interface Context { current: CurrentAccounts | null; monitor: MonitorStatus | null }
+interface Context { current: CurrentAccounts | null; currentFailed: boolean; monitor: MonitorStatus | null }
+/** UX-04: a read of the CLIs' sign-ins that failed (or ran out of time) is kept as failed, so In use now offers Retry instead of reading forever. */
+let currentReadFailed = false;
 async function readContext(): Promise<Context> {
   const [current, status] = await Promise.allSettled([adapter.currentAccounts(), adapter.monitorStatus()]);
-  return { current: current.status === 'fulfilled' ? current.value : null, monitor: status.status === 'fulfilled' ? status.value : null };
+  return { current: current.status === 'fulfilled' ? current.value : null, currentFailed: current.status === 'rejected', monitor: status.status === 'fulfilled' ? status.value : null };
 }
-function applyContext(context: Context) { currentAccounts = context.current; monitor = context.monitor; }
+function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
 async function refreshContext() { applyContext(await readContext()); }
 /** Background results apply only when no user mutation began after they were requested. */
 function backgroundRender() {
@@ -155,23 +176,38 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text 
   const node = document.createElement(tag); node.className = className; if (text) node.textContent = text; return node;
 }
 function button(text: string, action: () => void, className = '', key = ''): HTMLButtonElement {
-  const node = el('button', className, text); node.type = 'button'; node.disabled = busy || loading;
+  const node = el('button', className, text); node.type = 'button';
+  node.disabled = (loading && (key === 'refresh' || !usableWhileBusy(key))) || (busy && !usableWhileBusy(key));
   node.addEventListener('click', action); if (key) node.dataset.focus = key; return node;
 }
 function announce(text: string) { announcements.textContent = ''; requestAnimationFrame(() => { announcements.textContent = text; }); }
 /** Notices may carry a backend's English refusal: it is translated here, where it is shown (L10N-04). */
 function showNotice(text: string, error = false) { notice = t(text); noticeError = error; announce(notice); }
+/** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
+function goTo(target: Page, focusKey?: string) {
+  page = target; notice = '';
+  if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
+  render();
+  if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
+  else document.querySelector<HTMLElement>('h1')?.focus();
+}
 function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus(); }); }
 
 async function reload() {
   if (!native && !demo) { loading = false; render(); return; }
   loading = true; loadError = ''; render();
+  // A Refresh pressed while an action runs may read the list from before it: that list is not applied (UX-24).
+  const listStamp = clock.stamp();
   const [data, status] = await Promise.allSettled([adapter.snapshot(), adapter.runtime()]);
-  if (data.status === 'fulfilled') snapshot = data.value;
-  else { loadError = safeError(data.reason); announce(t(loadError)); }
+  if (data.status === 'fulfilled') { if (clock.accepts(listStamp)) snapshot = data.value; }
+  else { loadError = safeError(data.reason, 'read'); announce(t(loadError)); }
   if (status.status === 'fulfilled') { runtime = status.value; runtimeError = false; }
   else { runtime = null; runtimeError = true; }
-  loading = false; render();
+  loading = false;
+  // UX-02, UX-03: Refresh reads statistics and the Codex switch again, so their errors clear.
+  codexRouteState = null; codexRouteError = '';
+  if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
+  render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   void loadOpenrouter();
   void loadKimi();
@@ -194,7 +230,7 @@ async function reload() {
     }
   });
 }
-async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string) {
+async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string, operation: Operation = 'change') {
   busy = true; notice = ''; clock.begin(); render();
   try {
     await action();
@@ -203,7 +239,7 @@ async function mutate(action: () => Promise<unknown>, success: string, focusKey?
     showNotice(restoredText || success); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
-  } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
+  } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
   finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
 }
 
@@ -220,11 +256,11 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
-    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); return true;
+    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); if (tourStep !== null) placeTour(); return true;
   };
   const withTour = () => {
     if (tourStep !== null && (native || demo)) {
-      const target = tour()[tourStep].target; if (target) shell.querySelector(target)?.classList.add('tour-target');
+      tourTarget(shell, tourStep)?.classList.add('tour-target');
       shell.append(tourCard(tourStep));
     }
   };
@@ -236,9 +272,9 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label, icon] of [['accounts', t('Accounts'), '▦'], ['tokens', t('Tokens'), '⚿'], ['projects', t('Groups'), '◫'], ['orgs', t('Organizations'), '◇'], ['agents', t('Agents'), '⌁'], ['activity', t('Activity'), '≋'], ['stats', t('Statistics'), '▤'], ['about', t('About'), '○']] as const) {
-    const control = button('', () => { page = target; notice = ''; if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats') void loadStats(); if (target === 'orgs') void loadPassioncode(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
-    const symbol = el('span', 'nav-icon', icon); symbol.setAttribute('aria-hidden', 'true');
+  for (const [target, label] of [['accounts', t('Accounts')], ['tokens', t('API keys')], ['projects', t('Groups')], ['orgs', t('Organizations')], ['agents', t('Agents')], ['activity', t('Activity')], ['stats', t('Statistics')], ['about', t('About')]] as const) {
+    const control = button('', () => { if (target === 'stats') { stats = null; statsError = false; } goTo(target); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
+    const symbol = el('span', 'nav-icon'); symbol.setAttribute('aria-hidden', 'true'); symbol.append(navIcon(target));
     control.append(symbol, el('span', '', label));
     if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
     if (page === target) control.setAttribute('aria-current', 'page'); nav.append(control);
@@ -250,15 +286,17 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('Tokens'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of projects with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word, their team at the provider or their address.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word, their team at the provider or their address.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
-    if (page === 'accounts') actions.append(addMenu());
-    if (page === 'projects') actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
-    if (page === 'orgs') actions.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-add'));
+    // VIS-21, UX-01: while a page shows its empty state, that state carries the one primary action.
+    const empty = (list?: unknown[]) => !!snapshot && !(list ?? []).length;
+    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu());
+    if (page === 'projects' && !empty(snapshot?.projects)) actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
+    if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-add'));
     header.append(actions);
   }
   main.append(header);
@@ -267,17 +305,19 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
     shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
   else if (page === 'stats') renderStats(main);
-  else if (loadError) {
-    const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load groups') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
+  else if (loadError && !snapshot) {
+    const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load groups') : page === 'orgs' ? t('Unable to load organizations') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
-    const state = emptyState(t('Loading your workbench'), t('Reading account metadata from the native app…')); state.setAttribute('role', 'status'); main.append(state);
+    const state = emptyState(t('Loading Switchboard'), t('Reading account metadata from the native app…')); state.setAttribute('role', 'status'); main.append(state);
   } else if (snapshot) {
+    // UX-06: an action that worked keeps the last list on screen; only the re-read failed.
+    if (loadError) { const stale = el('div', 'notice error stale-list'); stale.setAttribute('role', 'status'); stale.append(el('span', '', t(loadError)), button(t('Retry'), () => void reload(), 'text-button', 'retry-load')); main.append(stale); }
     if (page === 'accounts') renderAccounts(main);
     else if (page === 'projects') renderProjects(main);
     else if (page === 'orgs') renderOrganizations(main);
@@ -285,33 +325,51 @@ function render(options: { background?: boolean } = {}): boolean {
   }
   shell.append(main); return commit();
 }
+/** VIS-19: one icon set for the sidebar: 16 px, drawn with one 1.5 px stroke in the text colour. */
+const NAV_ICONS: Record<Page, string> = {
+  accounts: 'M5.5 7a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM1.5 14c0-2.5 1.8-4 4-4s4 1.5 4 4M11 3.5h3.5M11 7h3.5M11 10.5h3.5',
+  tokens: 'M6 10a3.5 3.5 0 1 1 2.6-1.2L14.5 14.7M12 12.2l1.4-1.4M10.4 10.6l1.2-1.2M4.2 6.5h.01',
+  projects: 'M1.5 4.5V12a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3h-4a1 1 0 0 0-1 1.5Z',
+  orgs: 'M2.5 14V3.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1V14M9.5 7h3a1 1 0 0 1 1 1v6M1.5 14h13M5 5.5h2M5 8h2M5 10.5h2',
+  agents: 'M3 4.5h10a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1ZM5 7.5l1.5 1.5L5 10.5M8.5 10.5H11M8 4.5V2',
+  activity: 'M1.5 8h3l2-5 3 10 2-5h3',
+  stats: 'M2 14h12M4 14V9M7 14V5M10 14V8M13 14V3',
+  about: 'M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM8 7.2V11M8 5h.01',
+};
+function navIcon(target: Page) {
+  const icon = svg('svg', { viewBox: '0 0 16 16', width: 16, height: 16, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: 'nav-svg' });
+  icon.append(svg('path', { d: NAV_ICONS[target] })); return icon;
+}
 const ruleAccount = (rule: ProjectRule) => snapshot?.accounts.find((account) => account.id === rule.account_id);
 const ruleTarget = (rule: ProjectRule) => rule.target === 'managed' ? t('Managed sessions') : t('Claude Code login (all claude sessions)');
 /** Active rules stay in sight on Accounts, so an optional rule is never forgotten. */
 function rulesStrip(main: HTMLElement) {
   const live = activeRules(snapshot?.rules, Date.now() / 1000);
   if (!live.length) return;
-  const strip = el('section', 'notice rules-strip'); strip.setAttribute('aria-label', t('Active project rules'));
+  const strip = el('div', 'status-item rules-strip'); strip.setAttribute('role', 'note'); strip.setAttribute('aria-label', t('Active folder rules'));
   const names = live.map((rule) => `${projectName(rule.path)} → ${ruleAccount(rule)?.label ?? t('missing account')}${rule.expires_at ? t(' until {date}', { date: date(rule.expires_at) }) : ''}`);
-  strip.append(el('span', '', plural(live.length, { one: '{n} project rule is active: {names}. Rotation still moves off an exhausted account.', other: '{n} project rules are active: {names}. Rotation still moves off an exhausted account.' }, { names: names.join('; ') })), button(t('Review rules'), () => { page = 'projects'; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'review-rules'));
+  strip.append(el('span', '', plural(live.length, { one: '{n} folder rule is active: {names}. Automatic switching still moves off an exhausted account.', other: '{n} folder rules are active: {names}. Automatic switching still moves off an exhausted account.' }, { names: names.join('; ') })), button(t('Review rules'), () => goTo('projects', 'rules-heading'), 'text-button', 'review-rules'));
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
   main.append(projectsSection(), codexRouteSection(), diskMapSection(), rulesSection());
 }
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
-let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = '';
+let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = ''; let codexRouteKey = '';
+/** What the section's answer depends on: the groups and where Codex accounts are (UX-03). */
+const codexRouteInputs = () => JSON.stringify([(snapshot?.projects ?? []).map((p) => p.pool), (snapshot?.accounts ?? []).filter((a) => a.provider === 'codex').map((a) => a.pool)]);
 function loadCodexRoute() {
   if (codexRouteLoading) return;
-  codexRouteLoading = true;
-  void adapter.codexRoute(null).then((r) => { codexRouteState = r; codexRouteError = ''; }, (e) => { codexRouteError = t(safeError(e)); }).finally(() => { codexRouteLoading = false; render(); });
+  codexRouteLoading = true; const key = codexRouteInputs();
+  void adapter.codexRoute(null).then((r) => { codexRouteState = r; codexRouteError = ''; codexRouteKey = key; }, (e) => { codexRouteError = t(safeError(e, 'read')); codexRouteKey = key; }).finally(() => { codexRouteLoading = false; render(); });
 }
 function codexRouteSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'codex-route-heading');
   const heading = el('h2', 'section-heading', t('Codex in group folders')); heading.id = 'codex-route-heading';
   section.append(heading, el('p', 'surface-note', t('Codex sessions started in a group\'s folders use that group\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside groups keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
+  if (codexRouteState && codexRouteKey !== codexRouteInputs()) loadCodexRoute();
   if (!codexRouteState && !codexRouteError) { loadCodexRoute(); section.append(el('p', 'form-note', t('Reading Codex\'s settings…'))); return section; }
-  if (codexRouteError) section.append(el('p', 'form-error', codexRouteError));
+  if (codexRouteError) { section.append(el('p', 'form-error', codexRouteError)); if (!codexRouteState) { section.append(button(t('Retry'), () => { codexRouteError = ''; loadCodexRoute(); render(); }, 'button', 'codex-route-retry')); return section; } }
   const r = codexRouteState;
   if (r) {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
@@ -332,7 +390,7 @@ function saveMapFolders() { try { noticeStore()?.setItem(MAP_FOLDERS_KEY, JSON.s
 function loadMap() {
   if (mapLoading) return;
   mapLoading = true; mapError = ''; render();
-  void adapter.repositoryMap(mapFolders).then((map) => { diskMap = map; }, (error) => { mapError = t(safeError(error)); }).finally(() => { mapLoading = false; render(); });
+  void adapter.repositoryMap(mapFolders).then((map) => { diskMap = map; }, (error) => { mapError = t(safeError(error, 'read')); }).finally(() => { mapLoading = false; render(); });
 }
 function diskMapSection() {
   const section = el('section', 'project-section disk-map'); section.setAttribute('aria-labelledby', 'disk-map-heading');
@@ -405,7 +463,7 @@ function moveRootDialog(row: MapRow, also = false) {
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-root'; radio.value = target.pool; radio.checked = target.current; radio.required = true;
     const text = t('Group “{name}”', { name: target.name });
-    option.append(radio, groupHint(target.current ? t('{target} (now)', { target: text }) : text, target.pool)); group.append(option); radios.push(radio);
+    option.append(radio, groupHint(target.current ? t('{target} (now)', { target: text }) : text, target.pool, false)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
   if (!targets.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups first.')));
@@ -423,15 +481,19 @@ function moveRootDialog(row: MapRow, also = false) {
 }
 /** SB-146: a group's name; hovering or focusing it shows the projects it holds (repositories, never worktrees or subfolders). */
 let hintSeq = 0;
-function groupHint(text: string, pool: string) {
+function groupHint(text: string, pool: string, focusable = true) {
   wantRoots();
   const project = snapshot?.projects?.find((p) => p.pool === pool);
-  const wrap = el('span', 'group-hint'); wrap.tabIndex = 0;
+  const wrap = el('span', 'group-hint');
   wrap.append(el('span', 'group-hint-name', text));
   if (!project) return wrap;
+  // UX-20: one tab stop only where there is something to show, none inside a radio's label; Escape closes the tip.
+  if (focusable) wrap.tabIndex = 0;
+  wrap.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !wrap.classList.contains('is-dismissed')) { event.stopPropagation(); wrap.classList.add('is-dismissed'); } });
+  wrap.addEventListener('pointerleave', () => wrap.classList.remove('is-dismissed')); wrap.addEventListener('blur', () => wrap.classList.remove('is-dismissed'));
   const names = groupProjects(project.folders, projectRoots?.[pool] ?? null);
   const tip = el('span', 'group-tip'); tip.setAttribute('role', 'tooltip'); tip.id = `group-tip-${++hintSeq}`;
-  tip.append(el('strong', '', plural(names.length, { one: '{n} project', other: '{n} projects' })));
+  tip.append(el('strong', '', plural(names.length, { one: '{n} repository', other: '{n} repositories' })));
   const list = el('ul', 'group-tip-list');
   for (const name of names.slice(0, 40)) list.append(el('li', '', name));
   if (names.length > 40) list.append(el('li', 'group-tip-more', t('and {n} more', { n: names.length - 40 })));
@@ -442,11 +504,11 @@ function groupHint(text: string, pool: string) {
 function projectsSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'projects-heading');
   const heading = el('h2', 'section-heading sr-only', t('Groups')); heading.id = 'projects-heading';
-  section.append(heading, el('p', 'surface-note', t('A group holds one or more projects (repository folders) with accounts of its own, and a project may be in several groups. Sessions launched from its folders use only its accounts, rotation stays inside them, and no other group or the ordinary Claude Code switches to them.')));
+  section.append(heading, el('p', 'surface-note', t('A group holds one or more repositories with accounts of its own, and a repository may be in several groups. Sessions launched from its folders use only its accounts, automatic switching stays inside them, and no other group or the ordinary Claude Code switches to them.')));
   const projects = snapshot!.projects ?? [];
   if (!projects.length) {
     const empty = emptyState(t('No groups yet'), t('Create one when a client or a team should work only on its own subscriptions. Its accounts move into the group, and its folders stay on them.'));
-    empty.append(button(t('New group'), () => projectDialog(), 'button primary', 'empty-new-project'));
+    empty.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'empty-new-project'));
     section.append(empty); return section;
   }
   const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Groups'));
@@ -489,7 +551,7 @@ function projectFolderList(project: Project) {
   // SB-147: the group's projects, each with its folders (the repository, its worktrees and clones).
   const projects = groupProjectRows(project.folders, projectRoots?.[project.pool] ?? null);
   const shown = open ? projects : projects.slice(0, FOLDERS_SHOWN);
-  const list = el('ul', 'group-projects'); list.setAttribute('aria-label', t('Projects'));
+  const list = el('ul', 'group-projects'); list.setAttribute('aria-label', t('Repositories'));
   for (const entry of shown) {
     const item = el('li', 'group-project');
     const title = el('div', 'group-project-title');
@@ -506,7 +568,7 @@ function projectFolderList(project: Project) {
   }
   wrap.append(list);
   if (projects.length > FOLDERS_SHOWN || open) {
-    const label = open ? t('Show fewer projects') : t('Show all projects ({n})', { n: projects.length });
+    const label = open ? t('Show fewer repositories') : t('Show all repositories ({n})', { n: projects.length });
     const toggle = button(label, () => { if (open) expandedProjects.delete(project.pool); else expandedProjects.add(project.pool); render(); restoreFocus(`folders-${project.pool}`); }, 'text-button', `folders-${project.pool}`);
     toggle.setAttribute('aria-expanded', String(open));
     wrap.append(toggle);
@@ -514,14 +576,14 @@ function projectFolderList(project: Project) {
   return wrap;
 }
 function projectDialog(existing?: Project) {
-  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s projects (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a project may be in several groups.'));
+  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s repositories (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a repository may be in several groups.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
-  const folders = foldersPicker(context, existing?.folders ?? (lastWorkingDirectory ? [lastWorkingDirectory] : []), 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
+  const folders = foldersPicker(context, existing?.folders ?? [], 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
   // SB-109 (SCN-070): with organizations, the group runs on one organization's accounts or on personal ones.
   const organizations = snapshot!.organizations ?? [];
-  const orgPicker = organizations.length ? select([['personal', t('Personal')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
+  const orgPicker = organizations.length ? select([['personal', t('Personal accounts')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
   if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : 'personal';
   const chosenOrg = () => (orgPicker && orgPicker.value !== 'personal' ? orgPicker.value : null);
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
@@ -544,10 +606,11 @@ function projectDialog(existing?: Project) {
     }
   };
   orgPicker?.addEventListener('change', syncAccounts); syncAccounts();
-  const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The projects and folders of this group. Subfolders are included. Repositories its agents create or work in join it by themselves, and folders deleted from disk leave it.')));
-  if (orgPicker) grid.append(field(t('Organization'), orgPicker, t('Sessions in this group\'s folders run only on this organization\'s accounts, or on personal ones for Personal.')));
-  context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default pool.')));
+  const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this group; subfolders are included. Worktrees and clones of its repositories join it by themselves, and folders deleted from disk leave it. Add any other repository here, or from Repositories on disk.')));
+  if (orgPicker) grid.append(field(t('Organization'), orgPicker, t('Sessions in this group\'s folders run only on this organization\'s accounts, or only on personal ones when you choose Personal accounts.')));
+  context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default group.')));
   context.actions.append(submit(existing ? t('Save group') : t('Create group')));
+  name.focus();
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
@@ -557,27 +620,27 @@ function projectDialog(existing?: Project) {
 }
 function rulesSection() {
   const main = el('section', 'project-section'); main.setAttribute('aria-labelledby', 'rules-heading');
-  const heading = el('div', 'section-heading-row'); const h = el('h2', 'section-heading', t('Project rules')); h.id = 'rules-heading';
+  const heading = el('div', 'section-heading-row'); const h = el('h2', 'section-heading', t('Folder rules')); h.id = 'rules-heading'; h.tabIndex = -1; h.dataset.focus = 'rules-heading';
   heading.append(h); if (snapshot!.accounts.length) heading.append(button(t('+ Add rule'), () => ruleDialog(), 'button quiet', 'add-rule'));
   main.append(heading);
   const rules = snapshot!.rules ?? [];
-  main.append(el('p', 'surface-note', t('Rules are optional. With none, Switchboard follows your selection and rotation in every project. A rule applies when an agent or switchboard project apply asks for it, only to that session, and never turns rotation off.')));
+  main.append(el('p', 'surface-note', t('Folder rules are optional. With none, Switchboard follows your selection and automatic switching in every folder. A rule applies when an agent or switchboard project apply asks for it, only to that session, and never turns automatic switching off.')));
   if (!rules.length) {
-    const empty = emptyState(t('No project rules'), snapshot!.accounts.length ? t('Add a rule when one project should start on a specific account, for example a client project on its own subscription. Prefer an expiry.') : t('Add an account first; a rule names one of your accounts.'));
+    const empty = emptyState(t('No folder rules'), snapshot!.accounts.length ? t('Add a rule when one folder should start on a specific account, for example a client repository on its own subscription. Prefer an expiry.') : t('Add an account first; a rule names one of your accounts.'));
     if (snapshot!.accounts.length) empty.append(button(t('Add rule'), () => ruleDialog(), 'button primary', 'empty-add-rule'));
     main.append(empty); return main;
   }
   const now = Date.now() / 1000;
-  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Project rules'));
+  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Folder rules'));
   for (const rule of rules) {
     const state = ruleState(rule, now); const account = ruleAccount(rule); const key = `${rule.provider}-${rule.path}`;
     const card = el('article', `account-card ${state === 'active' ? 'is-selected' : 'is-disabled'}`); card.setAttribute('aria-label', `${projectName(rule.path)}, ${state}`);
     const details = el('div', 'account-details'); const title = el('div', 'account-title');
     title.append(el('h2', '', projectName(rule.path)), el('span', `badge ${state === 'active' ? 'current-badge' : 'muted'}`, { active: t('Active'), paused: t('Paused'), expired: t('Expired') }[state]));
     const path = el('p', 'account-meta', rule.path); path.title = rule.path;
-    details.append(title, path, el('p', 'account-meta', `${providerName(rule.provider)} · ${account ? `${account.label} · ${account.pool}` : t('account missing')} · ${ruleTarget(rule)}`), el('p', 'usage-caption', rule.expires_at ? (state === 'expired' ? t('Expired {date}', { date: date(rule.expires_at) }) : t('Until {date}', { date: date(rule.expires_at) })) : t('No expiry')));
+    details.append(title, path, el('p', 'account-meta', `${providerName(rule.provider)} · ${account ? `${account.label} · ${poolName(account.pool, snapshot!.projects)}` : t('account missing')} · ${ruleTarget(rule)}`), el('p', 'usage-caption', rule.expires_at ? (state === 'expired' ? t('Expired {date}', { date: date(rule.expires_at) }) : t('Until {date}', { date: date(rule.expires_at) })) : t('No expiry')));
     const actions = el('div', 'management-actions');
-    if (state === 'active') actions.append(button(t('Pause'), () => void mutate(() => adapter.setProjectRule({ path: rule.path, accountId: rule.account_id, target: rule.target, enabled: false, expiresAt: rule.expires_at }), t('Rule paused. Selection and rotation are unchanged.'), `pause-${key}`), 'text-button', `pause-${key}`));
+    if (state === 'active') actions.append(button(t('Pause'), () => void mutate(() => adapter.setProjectRule({ path: rule.path, accountId: rule.account_id, target: rule.target, enabled: false, expiresAt: rule.expires_at }), t('Rule paused. Selection and automatic switching are unchanged.'), `pause-${key}`), 'text-button', `pause-${key}`));
     else actions.append(button(t('Resume…'), () => ruleDialog(rule), 'text-button', `resume-${key}`));
     actions.append(button(t('Edit'), () => ruleDialog(rule), 'text-button', `edit-${key}`), button(t('Remove'), () => removeRuleDialog(rule), 'text-button danger-text', `remove-${key}`));
     card.append(details, actions); list.append(card);
@@ -586,17 +649,17 @@ function rulesSection() {
   return main;
 }
 function ruleDialog(existing?: ProjectRule) {
-  const context = openDialog(existing ? t('Edit project rule') : t('Add project rule'), t('Sessions in this folder and its subfolders start on the chosen account when the rule is applied. Rotation still runs.'));
+  const context = openDialog(existing ? t('Edit folder rule') : t('Add folder rule'), t('Sessions in this folder and its subfolders start on the chosen account when the rule is applied. Automatic switching still runs.'));
   const path = folderPicker(context, existing?.path ?? lastWorkingDirectory, 'rule-folder', !!existing);
   const usable = snapshot!.accounts.filter((account) => account.enabled);
-  const account = select(usable.map((item) => [item.id, `${item.label} · ${providerName(item.provider)} · ${item.pool}`]));
+  const account = select(usable.map((item) => [item.id, `${item.label} · ${providerName(item.provider)} · ${poolName(item.pool, snapshot!.projects)}`]));
   if (existing) account.value = existing.account_id;
   const target = select([['managed', t('Managed sessions (switch from the next request)')], ['claude_cli', t('Claude Code login (changes every claude session)')]]);
   target.value = existing?.target ?? 'managed';
   const expiry = select(EXPIRY_CHOICES); expiry.value = existing && existing.expires_at === null ? '' : '8';
   const sync = () => { const chosen = usable.find((item) => item.id === account.value); const option = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; option.disabled = !(chosen?.provider === 'claude' && chosen.kind === 'oauth' && chosen.external_identity) || !!snapshot!.projects?.some((project) => project.pool === chosen?.pool); if (option.disabled && target.value === 'claude_cli') target.value = 'managed'; };
   account.addEventListener('change', sync); sync();
-  const grid = el('div', 'form-grid'); grid.append(groupField(t('Project folder'), path.node, t('Sessions in this folder and its subfolders.')), field(t('Account'), account), field(t('Applies to'), target), field(t('Keep the rule'), expiry, t('Pause or remove it any time on this screen.')));
+  const grid = el('div', 'form-grid'); grid.append(groupField(t('Folder'), path.node, t('Sessions in this folder and its subfolders.')), field(t('Account'), account), field(t('Applies to'), target), field(t('Keep the rule'), expiry, t('Pause or remove it any time on this screen.')));
   context.body.append(grid); context.actions.append(submit(existing ? t('Save rule') : t('Add rule')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -605,16 +668,25 @@ function ruleDialog(existing?: ProjectRule) {
   });
   if (existing) account.focus(); else path.focus();
 }
+/** UX-19: the button itself says Copied for two seconds, beside the announcement. */
+function copyText(control: HTMLButtonElement, text: string, label: string) {
+  if (!navigator.clipboard) { announce(t('Copy is unavailable here. Select the command text instead.')); return; }
+  void navigator.clipboard.writeText(text).then(() => {
+    announce(t('{label} command copied.', { label })); control.textContent = t('Copied'); control.classList.add('is-copied');
+    window.setTimeout(() => { control.textContent = t('Copy'); control.classList.remove('is-copied'); }, 2000);
+  }, () => announce(t('Copy is unavailable here. Select the command text instead.')));
+}
 function copyable(label: string, command: string, key: string) {
   const row = el('div', 'policy-row'); const content = el('div');
   content.append(el('strong', 'block', label), el('code', 'address', command));
-  row.append(content, button(t('Copy'), () => { void navigator.clipboard?.writeText(command).then(() => announce(t('{label} command copied.', { label })), () => announce(t('Copy is unavailable here. Select the command text instead.'))); }, 'text-button', key));
+  const copy = button(t('Copy'), () => copyText(copy, command, label), 'text-button', key);
+  row.append(content, copy);
   return row;
 }
 let agentsView: AgentsOverview | null = null;
 let agentsError = '';
 async function loadAgents() {
-  try { agentsView = await adapter.agentsOverview(); agentsError = ''; } catch (error) { agentsError = safeError(error); }
+  try { agentsView = await adapter.agentsOverview(); agentsError = ''; } catch (error) { agentsError = safeError(error, 'read'); }
   backgroundRender();
 }
 const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).agents.find((a) => a.id === id);
@@ -699,7 +771,7 @@ function availableAgentsPanel(view: AgentsOverview) {
     info.append(title);
     if (agent.install) info.append(el('code', 'agent-command', agent.install)); else info.append(address(agent.url));
     const controls = el('div', 'agent-controls');
-    if (agent.install) controls.append(button(t('Copy'), () => { void navigator.clipboard?.writeText(agent.install!).then(() => announce(t('{label} command copied.', { label: agent.name })), () => announce(t('Copy is unavailable here. Select the command text instead.'))); }, 'text-button', `install-${agent.id}`));
+    if (agent.install) { const copy = button(t('Copy'), () => copyText(copy, agent.install!, agent.name), 'text-button', `install-${agent.id}`); controls.append(copy); }
     row.append(info, controls); list.append(row);
   }
   details.append(list); section.append(details, el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents status | enable | disable | default | launch.')));
@@ -707,8 +779,8 @@ function availableAgentsPanel(view: AgentsOverview) {
 }
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
 function connectPanel() {
-  const setup = el('section', 'about-panel'); setup.append(el('h2', '', t('Connect an agent')));
-  setup.append(el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a project rule when they start work in a project. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.')));
+  const setup = el('section', 'about-panel'); setup.id = 'connect-panel'; setup.append(el('h2', '', t('Connect an agent')));
+  setup.append(el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a folder rule when they start work in a folder. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.')));
   if (agentSetupError || !agentSetup) { setup.append(el('p', 'form-note', agentSetupError ? t('Agent setup is unavailable. Refresh to retry.') : t('Reading agent setup…'))); return setup; }
   if (agentSetup.translocated) setup.append(el('p', 'form-note', runtime?.platform === 'linux' ? t('This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.') : t('macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.')));
   if (agentSetup.agent_prompt) {
@@ -724,7 +796,7 @@ function connectPanel() {
   return setup;
 }
 async function loadHermes() {
-  try { hermes = await adapter.hermesModel(); hermesError = ''; } catch (error) { hermesError = safeError(error); }
+  try { hermes = await adapter.hermesModel(); hermesError = ''; } catch (error) { hermesError = safeError(error, 'read'); }
   backgroundRender();
 }
 function hermesDialog() {
@@ -746,7 +818,7 @@ function hermesDialog() {
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
 async function loadOpenrouter() {
-  try { [openrouter, openrouterKeys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); openrouterError = ''; } catch (error) { openrouterError = safeError(error); }
+  try { [openrouter, openrouterKeys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); openrouterError = ''; } catch (error) { openrouterError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** SB-144: the Tokens page: the key every folder uses, and each project's own. */
@@ -758,7 +830,7 @@ function renderTokens(main: HTMLElement) {
 function tokensPointer() {
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'tokens-pointer');
   const heading = el('h2', '', t('OpenRouter keys')); heading.id = 'tokens-pointer';
-  section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each group\'s own key are under Tokens.')), button(t('Open Tokens'), () => { page = 'tokens'; void loadOpenrouter(); render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'button', 'open-tokens'));
+  section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each group\'s own key are under API keys.')), button(t('Open API keys'), () => goTo('tokens'), 'button', 'open-api-keys'));
   return section;
 }
 /** SB-144: each project, with its own key or the machine's. */
@@ -804,7 +876,7 @@ function openrouterPanel() {
   section.append(facts);
   const actions = el('div', 'management-actions');
   actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
-  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from its Set up button in Installed, above. CLI: switchboard agents launch <agent> --openrouter.')));
+  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from Agents: its Set up button under Installed. CLI: switchboard agents launch <agent> --openrouter.')));
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
@@ -869,14 +941,14 @@ function openrouterRemoveDialog(target?: { pool: string; name: string }) {
   context.actions.querySelector('button')?.focus();
 }
 async function agentDialog(agent: AgentInfo) {
-  const context = openDialog(t('Set up {agent}', { agent: agent.name }), agent.level === 'mcp' ? t('This agent can use Switchboard\'s tools; its model requests go to its own service.') : t('Register Switchboard\'s tools, then point the agent at Switchboard\'s proxy for one pool.'));
+  const context = openDialog(t('Set up {agent}', { agent: agent.name }), agent.level === 'mcp' ? t('This agent can use Switchboard\'s tools; its model requests go to its own service.') : t('Register Switchboard\'s tools, then point the agent at Switchboard\'s proxy for one group.'));
   const pools = [...new Set(snapshot!.accounts.map((a) => a.pool))];
-  const pool = select((pools.length ? pools : ['default']).map((p) => [p, projectOf(p) ? t('{pool} (group {name})', { pool: p, name: projectOf(p)!.name }) : p]));
+  const pool = select((pools.length ? pools : ['default']).map((p) => [p, poolName(p, snapshot!.projects)]));
   const out = el('div', 'agent-setup');
   const show = async () => {
     out.replaceChildren(el('p', 'form-note', t('Reading the setup…')));
     let info: AgentConnection;
-    try { info = await adapter.agentConnect(agent.id, pool.value); } catch (error) { out.replaceChildren(el('p', 'usage-error', t(safeError(error)))); return; }
+    try { info = await adapter.agentConnect(agent.id, pool.value); } catch (error) { out.replaceChildren(el('p', 'usage-error', t(safeError(error, 'read')))); return; }
     out.replaceChildren();
     if (info.mcp.add_command) out.append(copyable(t('Register the tools'), info.mcp.add_command, `mcp-${agent.id}`));
     if (info.mcp.config_snippet) out.append(copyable(t('Or add to {place}', { place: info.mcp.config_path ?? t('its config') }), info.mcp.config_snippet, `mcp-file-${agent.id}`));
@@ -893,7 +965,7 @@ async function agentDialog(agent: AgentInfo) {
     if (info.launch) out.append(copyable(t('Launch from the command line'), info.launch, `launch-cmd-${agent.id}`));
   };
   pool.addEventListener('change', () => void show());
-  const grid = el('div', 'form-grid'); grid.append(field(t('Pool'), pool, t('The pool whose selected API-key account this agent will use.')));
+  const grid = el('div', 'form-grid'); grid.append(field(t('Group'), pool, t('The group whose selected API-key account this agent uses.')));
   context.body.append(grid, out);
   const launches = agent.level !== 'mcp' && !!agent.binary;
   const dir = folderPicker(context, lastWorkingDirectory, `agent-folder-${agent.id}`);
@@ -902,9 +974,9 @@ async function agentDialog(agent: AgentInfo) {
   // The operator's choice (2026-10-08): agents with a recipe start on the OpenRouter key by
   // default; one whose recipe says `default: false` (Kimi Code, on its subscription) keeps it second.
   const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
-  if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the pool\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
+  if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the group\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
   if (viaKey) context.body.append(viaKey.part);
-  const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name })); };
+  const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name }), 'launch'); };
   if (keyFirst) {
     if (launches) context.actions.append(button(t('Launch through the proxy'), throughProxy, 'button', `proxy-launch-${agent.id}`));
     context.actions.append(submit(t('Launch on OpenRouter')));
@@ -923,7 +995,10 @@ async function agentDialog(agent: AgentInfo) {
 function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () => string | null): { part: HTMLElement; run: (() => void) | null } {
   const part = el('div', 'agent-setup');
   part.append(el('h3', 'pool-heading', t('On the OpenRouter key')));
-  if (!openrouter?.saved) { part.append(el('p', 'form-note', t('Save an OpenRouter key on the Agents screen first; then {agent} launches on it.', { agent: agent.name }))); return { part, run: null }; }
+  if (!openrouter?.saved) {
+    part.append(el('p', 'form-note', t('Save an OpenRouter key under API keys first; then {agent} launches on it.', { agent: agent.name })), button(t('Open API keys'), () => { context.close(); goTo('tokens'); }, 'button', `open-api-keys-${agent.id}`));
+    return { part, run: null };
+  }
   const picksItself = !agent.openrouter?.model_flag?.length && !agent.openrouter?.model_env;
   const picker = modelPicker(openrouter.model ?? '', `launch-${agent.id}`); const model = picker.value;
   if (picksItself) part.append(el('p', 'form-note', t('{agent} picks its model in its own interface; the key comes from Switchboard.', { agent: agent.name })));
@@ -931,7 +1006,7 @@ function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () =
   if (agent.openrouter?.notes) part.append(el('p', 'form-note', agent.openrouter.notes));
   const run = () => {
     const value = folder(); if (!value) return;
-    void dialogSave(context, () => adapter.launchOnOpenrouter(agent.id, picksItself ? null : model.value.trim() || null, value), t('Terminal launch requested for {agent} on OpenRouter.', { agent: agent.name }));
+    void dialogSave(context, () => adapter.launchOnOpenrouter(agent.id, picksItself ? null : model.value.trim() || null, value), t('Terminal launch requested for {agent} on OpenRouter.', { agent: agent.name }), 'launch');
   };
   return { part, run };
 }
@@ -982,9 +1057,12 @@ function menu(key: string, label: string, items: ([string, () => void] | [string
   wrapper.append(trigger);
   if (openMenu === key) {
     const list = el('div', 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
-    for (const [text, action, tone] of items) {
-      const item = button(text, () => { openMenu = null; render(); action(); }, `menu-item ${tone ?? ''}`); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; list.append(item);
-    }
+    items.forEach(([text, action, tone], index) => {
+      // VIS-27: a line sets a destructive item apart from the ordinary ones above it.
+      if (tone?.includes('danger') && index > 0) { const line = el('div', 'menu-separator'); line.setAttribute('role', 'separator'); list.append(line); }
+      // UX-05: focus returns to the trigger before the action, so a dialog it opens gives focus back there.
+      const item = button(text, () => { openMenu = null; render(); restoreFocus(`menu-${key}`); action(); }, `menu-item ${tone ?? ''}`); item.setAttribute('role', 'menuitem'); item.tabIndex = -1; list.append(item);
+    });
     list.addEventListener('keydown', (event) => {
       const entries = [...list.querySelectorAll<HTMLElement>('[role="menuitem"]')]; const index = entries.indexOf(document.activeElement as HTMLElement);
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); entries[(index + (event.key === 'ArrowDown' ? 1 : entries.length - 1)) % entries.length]?.focus(); }
@@ -1011,7 +1089,7 @@ async function startLogin(provider: Provider, label = '', pool = 'default') {
     const result = await adapter.beginLogin({ provider, label, pool });
     pendingLogin = { id: result.login_id, provider, label, pool, state: 'pending', error: '' };
     announce(t('Sign in to {provider} in the Terminal window that opened. Switchboard adds the account when you finish.', { provider: providerName(provider) }));
-  } catch (error) { showNotice(safeError(error), true); }
+  } catch (error) { showNotice(safeError(error, 'sign_in'), true); }
   finally { busy = false; render(); restoreFocus('login-cancel'); }
 }
 /** SB-65: a sign-in the owner holds — begun before this window opened, or taken back after a restart — shows its banner again and finishes as usual. */
@@ -1044,9 +1122,9 @@ async function pollLogin() {
   try {
     const account = await adapter.finishLogin(login.id);
     // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
-    await loginSaved(signInNotice(account, providerName(account.provider)));
+    await loginSaved(signInNotice(account, providerName(account.provider), snapshot?.projects));
   } catch (error) {
-    const text = safeError(error); const outcome = loginOutcome(text);
+    const text = safeError(error, 'sign_in'); const outcome = loginOutcome(text);
     // The owner saved the account and released the sign-in; only its staging folder is left.
     // Defensive: finish_login reports a pending cleanup in its receipt today; an older owner
     // answered with this refusal instead, and the account is saved either way.
@@ -1097,7 +1175,7 @@ async function importSwap() {
     const result = await adapter.importClaudeSwap('default');
     await refreshContext();
     try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'); }
-    const parts = [plural(result.imported.length, { one: '{n} Claude Swap profile imported or updated in the default pool', other: '{n} Claude Swap profiles imported or updated in the default pool' })];
+    const parts = [plural(result.imported.length, { one: '{n} Claude Swap account imported or updated in the default group', other: '{n} Claude Swap accounts imported or updated in the default group' })];
     if (result.skipped) parts.push(t('{n} skipped', { n: result.skipped }));
     if (result.failed) parts.push(t('{n} could not be read; check them in Claude Swap and import again', { n: result.failed }));
     if (result.claude_swap_running) parts.push(t('Claude Swap is still running, so it keeps renewing those accounts and Switchboard follows its newest sign-ins'));
@@ -1109,22 +1187,25 @@ function switchNative(account: Account) {
   void mutate(() => adapter.activateNative(account.id), demo ? t('Synthetic switch: Claude Code now uses {label}. No local credentials were read or written.', { label: account.label }) : t('Claude Code now uses {label}. New claude sessions start on it; a running session may need a restart.', { label: account.label }), `primary-${account.id}`);
 }
 function renderAccounts(main: HTMLElement) {
-  termsBanner(main);
-  rulesStrip(main);
+  // VIS-13: the provider terms and the active folder rules share one compact block above the accounts.
+  const status = el('section', 'status-stack'); status.setAttribute('aria-label', t('Notices'));
+  termsBanner(status);
+  rulesStrip(status);
+  if (status.childElementCount) main.append(status);
   renderCurrent(main);
   renderPolicies(main);
   const accounts = snapshot!.accounts;
   if (!accounts.length) {
     // A reinstall with a backup this computer can open: one press brings everything back.
     const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
-    const empty = emptyState(t('Start with one account'), backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, projects and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, projects and settings back, or add an account.' }, { date: date(backup.created_at) }) : t('Add the account Claude Code or Codex CLI already uses with one click above, or sign in to another account. Nothing opens until you choose.'));
+    const empty = emptyState(t('Start with one account'), backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : firstRunHint(currentAccounts) === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
     empty.append(addMenu()); main.append(empty, kimiSection()); return;
   }
   const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
   const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
   const sorting = el('div', 'account-sort-note');
-  sorting.append(el('span', '', t('Within each pool: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
+  sorting.append(el('span', '', t('Within each group: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'text-button', 'countdown-toggle'));
@@ -1143,7 +1224,7 @@ function renderAccounts(main: HTMLElement) {
       const owner = projectOf(pool.pool);
       if (group.pools.length > 1 || owner || anyProject) {
         const poolHead = el('div', 'pool-heading');
-        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default pool') : t('Pool · {pool}', { pool: pool.pool })));
+        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : t('Group {id} · no folders', { id: pool.pool })));
         poolHead.append(poolTitle);
         // SB-142: which account this pool's sessions use, so every pool reads the same way.
         const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
@@ -1163,7 +1244,7 @@ function renderAccounts(main: HTMLElement) {
 let kimiLoadedAt = 0;
 async function loadKimi() {
   kimiLoadedAt = Date.now();
-  try { kimi = await adapter.kimiAccounts(); kimiError = ''; } catch (error) { kimiError = safeError(error); }
+  try { kimi = await adapter.kimiAccounts(); kimiError = ''; } catch (error) { kimiError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** The state line of a Kimi Code home: its plan windows, or why there are none. */
@@ -1200,6 +1281,22 @@ function kimiSection() {
   section.append(footer, el('p', 'surface-note', t('Each Kimi Code account signs in with the official kimi in its own folder and stays there; Switchboard never copies or renews its login. Usage comes from Kimi at each refresh.')));
   return section;
 }
+/**
+ * UX-28: after Sign in again, the Kimi list is read every few seconds for up to five minutes, and
+ * stops as soon as the account reads signed in; the row then updates without a Refresh.
+ */
+let kimiWatch: number | null = null;
+function watchKimiSignIn(id: string) {
+  if (kimiWatch !== null) window.clearInterval(kimiWatch);
+  const until = Date.now() + 5 * 60_000; const before = kimi?.accounts.find((a) => a.account.id === id)?.status.checked_at ?? null;
+  kimiWatch = window.setInterval(() => {
+    if (Date.now() > until) { window.clearInterval(kimiWatch!); kimiWatch = null; return; }
+    void adapter.kimiAccounts().then((next) => {
+      const row = next.accounts.find((a) => a.account.id === id);
+      if (!row || (row.status.signed_in && !row.status.error && row.status.checked_at !== before)) { window.clearInterval(kimiWatch!); kimiWatch = null; kimi = next; kimiLoadedAt = Date.now(); if (row) showNotice(t('{label} is signed in again.', { label: row.account.label })); backgroundRender(); }
+    }, () => { /* the next look retries */ });
+  }, 3000);
+}
 /** A Kimi Code account in the same row as Claude and Codex accounts: a small primary action and a menu. */
 function kimiRow(account: KimiAccount, status: KimiStatus) {
   const signedOut = !status.signed_in;
@@ -1208,7 +1305,7 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   const limitedUntil = signedOut ? null : kimiLimitUntil(status.windows, Math.floor(Date.now() / 1000));
   row.dataset.state = signedOut ? 'sign_in' : limitedUntil !== null ? 'blocked' : status.error ? 'stale' : 'available';
   const icon = el('span', 'provider-icon kimi', 'K'); icon.setAttribute('aria-hidden', 'true');
-  const name = el('div', 'row-name'); const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
+  const name = el('div', 'row-name'); const title = el('div', 'row-title'); const labelNode = el('strong', '', account.label); labelNode.title = account.label; title.append(labelNode);
   if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   else if (limitedUntil !== null) title.append(el('span', 'badge danger-badge', limitedUntil > 0 ? t('Limit reached · resets in {time}', { time: compactCountdown(limitedUntil, Math.floor(Date.now() / 1000)) }) : t('Limit reached')));
   name.append(title, el('span', 'row-sub', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
@@ -1220,7 +1317,7 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
     for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
     if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
   } else usage.append(kimiStatusLine(status));
-  const relogin = () => void mutate(() => adapter.kimiSignInAgain(account.id), t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`);
+  const relogin = () => void mutate(async () => { await adapter.kimiSignInAgain(account.id); watchKimiSignIn(account.id); }, t('Sign in to {label} in Terminal. The row updates when you finish.', { label: account.label }), `kimi-primary-${account.id}`, undefined, 'sign_in');
   const primary = el('div', 'row-primary');
   primary.append(signedOut ? button(t('Sign in'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
   const items: ([string, () => void] | [string, () => void, string])[] = [];
@@ -1272,7 +1369,7 @@ function kimiLaunchDialog(id: string, accountLabel: string) {
   context.actions.append(submit(t('Launch')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault(); const value = folder.require(); if (!value) return;
-    void dialogSave(context, () => adapter.kimiLaunch(id, value), t('Terminal launch requested for {agent}.', { agent: accountLabel }));
+    void dialogSave(context, () => adapter.kimiLaunch(id, value), t('Terminal launch requested for {agent}.', { agent: accountLabel }), 'launch');
   });
   folder.focus();
 }
@@ -1285,20 +1382,22 @@ function kimiRemoveDialog(id: string, accountLabel: string) {
 function accountRow(account: Account) {
   const current = currentMatch(account); const active = selected(account); const signIn = signInRequired(account);
   const row = el('article', `account-row ${current ? 'is-current' : ''} ${active ? 'is-selected' : ''} ${!account.enabled ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
-  row.setAttribute('aria-label', t('{label}, {provider}, {pool} pool', { label: account.label, provider: providerName(account.provider), pool: account.pool }) + (current ? t(', in use by the CLI') : '') + (active ? t(', selected in this pool') : ''));
+  row.setAttribute('aria-label', t('{label}, {provider}, {group}', { label: account.label, provider: providerName(account.provider), group: poolName(account.pool, snapshot?.projects) }) + (current ? t(', in use by the CLI') : '') + (active ? t(', selected for managed sessions') : ''));
   const state = cardState(account, quotaContext()); row.dataset.state = state;
   const icon = el('span', `provider-icon ${account.provider}`, account.provider === 'claude' ? '✳' : '◎'); icon.setAttribute('aria-hidden', 'true'); icon.title = CARD_STATE[state];
   const name = el('div', 'row-name');
-  const title = el('div', 'row-title'); title.append(el('strong', '', account.label));
+  const labelNode = el('strong', '', account.label); labelNode.title = account.label;
+  const title = el('div', 'row-title'); title.append(labelNode);
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   const elsewhere = snapshot?.elsewhere?.[account.id] !== undefined;
-  if (elsewhere) { const badge = el('span', 'badge muted', t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews, rotates to or switches to it.'); title.append(badge); }
+  if (elsewhere) { const badge = el('span', 'badge muted', t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
   else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
   const email = account.external_identity?.email;
-  name.append(title, el('span', 'row-sub', [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? t('OAuth') : '')));
+  const subText = [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? t('OAuth') : '');
+  const sub = el('span', 'row-sub', subText); sub.title = subText; name.append(title, sub);
   const project = !!projectOf(account.pool);
   row.append(icon, name, usageCell(account), primaryButton(account, { current, selected: active, signIn, project }), rowMenu(account, { current, selected: active, signIn, project }));
   if (quotaOpen.has(account.id) && account.usage) row.append(quotaDetails(account));
@@ -1312,7 +1411,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   if (action === 'in_use') slot.append(status(t('✓ In use')));
   else if (action === 'selected') slot.append(status(t('✓ Selected')));
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
-  else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {pool}.', { label: account.label, pool: account.pool }), key), 'button row-button', key));
+  else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {group}.', { label: account.label, group: poolName(account.pool, snapshot?.projects) }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
@@ -1320,14 +1419,14 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
 }
 function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const items: ([string, () => void] | [string, () => void, string])[] = [];
-  if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {pool}.', { label: account.label, pool: account.pool }), `menu-${account.id}`)]);
+  if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {group}.', { label: account.label, group: poolName(account.pool, snapshot?.projects) }), `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
-  items.push([t('Move to another pool…'), () => moveDialog(account, state.current)]);
+  items.push([t('Move to another group…'), () => moveDialog(account, state.current)]);
   if (snapshot?.organizations?.length) items.push([t('Organization…'), () => assignDialog(account)]);
   // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
-  if (snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Used on another machine'), () => void mutate(() => adapter.markElsewhere(account.id, true), t('{label} is marked as used on another machine. This computer no longer renews, rotates to or switches to it.', { label: account.label }), `menu-${account.id}`)]);
+  if (snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Used on another machine'), () => void mutate(() => adapter.markElsewhere(account.id, true), t('{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.', { label: account.label }), `menu-${account.id}`)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }
@@ -1414,13 +1513,29 @@ function quotaDetails(account: Account) {
   else if (!monitorChecks(account)) details.append(el('span', 'usage-caption', canProbe(account) ? t('Not checked automatically while disabled') : t('Not checked automatically · Quota checks need OAuth')));
   return details;
 }
+/**
+ * UX-17, D-1: the group an account or a setting belongs to, chosen from the groups that exist (by
+ * name), Default, and pools accounts already use; a new id is typed only after choosing "New id…".
+ */
+function poolField(current: string, locked = false) {
+  const choices = poolChoices(snapshot?.accounts ?? [], snapshot?.projects ?? [], current);
+  const picker = select([...choices.map((c): [string, string] => [c.pool, c.group || c.pool === 'default' ? c.name : t('Group {id} · no folders', { id: c.pool })]), ...(locked ? [] : [['__new', t('New id…')] as [string, string]])]);
+  picker.value = current;
+  const typed = input(''); typed.maxLength = 32; typed.pattern = POOL_PATTERN; typed.required = false; typed.placeholder = 'work'; typed.title = t('Use lowercase letters, numbers, hyphens, or underscores.');
+  const typedField = field(t('Group id'), typed, t('Accounts in one group switch among themselves. Use an existing group id, or a new one to start a group: lowercase letters, numbers, hyphens or underscores.')); typedField.hidden = true;
+  const sync = () => { const fresh = picker.value === '__new'; typedField.hidden = !fresh; typed.required = fresh; if (fresh) typed.focus(); };
+  picker.addEventListener('change', sync);
+  if (locked) { picker.disabled = true; picker.dataset.locked = 'true'; }
+  const node = el('div', 'pool-field'); node.append(field(t('Group'), picker, t('The default group works in every folder outside other groups.')), typedField);
+  return { node, picker, value: () => (picker.value === '__new' ? typed.value.trim() : picker.value), onChange: (fn: () => void) => { picker.addEventListener('change', fn); typed.addEventListener('change', fn); } };
+}
 function addDialog() {
   const context = openDialog(t('Add an API key or token'), t('For accounts without an official sign-in. To add a Claude Code or Codex login, use + Add account → Sign in, or add the account the CLI already uses.'));
   const provider = select([['claude', t('Claude Code')], ['codex', t('Codex CLI')]]);
   const method = select([['api_key', t('API key')], ['setup_token', t('Claude setup token')], ['oauth', t('OAuth JSON')]]);
   const label = input(); label.maxLength = 80; label.placeholder = t('e.g. Studio');
-  const pool = input('default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+'; pool.title = t('Use lowercase letters, numbers, hyphens, or underscores.');
-  const grid = el('div', 'form-grid'); grid.append(field(t('Provider'), provider), field(t('Credential type'), method), field(t('Account label'), label), field(t('Pool'), pool, t('A boundary for routing, such as work or personal.')));
+  const pool = poolField('default');
+  const grid = el('div', 'form-grid'); grid.append(field(t('Provider'), provider), field(t('Credential type'), method), field(t('Account label'), label), pool.node);
   const credentialSlot = el('div'); context.actions.append(submit(t('Add account'))); context.body.append(grid, credentialSlot);
   let secret: HTMLInputElement | HTMLTextAreaElement | null = null;
   const update = () => {
@@ -1437,7 +1552,7 @@ function addDialog() {
     event.preventDefault(); if (!context.form.reportValidity()) return;
     if (!label.value.trim()) { label.setCustomValidity(t('Enter an account label.')); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; }
     const value = secret!.value; secret!.value = '';
-    void dialogSave(context, () => adapter.add({ provider: provider.value as Provider, label: label.value.trim(), pool: pool.value.trim(), kind: method.value as AuthKind, secret: value }), t('Account added. Select it when you are ready.'));
+    void dialogSave(context, () => adapter.add({ provider: provider.value as Provider, label: label.value.trim(), pool: pool.value(), kind: method.value as AuthKind, secret: value }), t('Account added. Select it when you are ready.'));
   });
   provider.focus();
 }
@@ -1459,9 +1574,10 @@ function renderCurrent(main: HTMLElement) {
       if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
       else card.append(button(t('Add to Switchboard'), () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), t('{identity} added to {provider} · default. Switchboard keeps its sign-in up to date.', { identity: identityText(current.identity), provider: providerName(provider) }), `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
     } else {
-      copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : current ? t('Could not read the sign-in') : t('Reading…')));
+      const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
+      copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));
       card.append(copy);
-      if (current?.status === 'unavailable') card.append(button(t('Retry'), () => void reload(), 'button quiet row-button', `retry-current-${provider}`));
+      if (failed) card.append(button(t('Retry'), () => { currentReadFailed = false; render(); void refreshContext().then(() => { backgroundRender(); render(); restoreFocus(`retry-current-${provider}`); }); }, 'button quiet row-button', `retry-current-${provider}`));
     }
     grid.append(card);
   }
@@ -1477,7 +1593,7 @@ function renderPolicies(main: HTMLElement) {
   copy.append(el('strong', '', enabled.length ? t('Automatic switching is on') : t('Automatic switching is off')));
   if (enabled.length) for (const policy of enabled) {
     const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
-    copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${policy.pool} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
+    copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
   } else copy.append(el('span', 'usage-caption', monitor ? t('When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.') : t('Quota monitor status unavailable. Refresh to retry.')));
   const swapHeld = monitor?.claude_swap_accounts ?? 0;
   if (swapHeld) copy.append(el('span', 'usage-caption', t('Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.', { n: swapHeld })));
@@ -1485,9 +1601,9 @@ function renderPolicies(main: HTMLElement) {
   if (demo) copy.append(el('span', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
-  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code in {pool}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { pool, threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
-  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {pool}', { pool: policy.pool }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for this provider, pool and target.'), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
-  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} · {pool} · {target}…', { provider: providerName(policy.provider), pool: policy.pool, target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New policy…'), () => policyDialog()]], 'icon-button', '⚙'));
+  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code in {group}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { group: poolName(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
+  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop in {group}', { group: poolName(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} in {group}.', { provider: providerName(policy.provider), group: poolName(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
+  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} in {group} ({target})…', { provider: providerName(policy.provider), group: poolName(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
 }
 /** SB-145/SB-147: the proxy's counts for the chosen range (7, 30 or 90 days). */
@@ -1498,6 +1614,7 @@ let chartMetric: ChartMetric = 'tokens';
 async function loadStats() {
   keySpend = null;
   try { stats = await adapter.statistics(statsDays); statsError = false; } catch { statsError = true; }
+  render();
   backgroundRender();
 }
 function statTile(label: string, value: string, note: string) {
@@ -1582,7 +1699,7 @@ function statTable(id: string, title: string, names: string[], rows: StatRow[], 
     const c = row.counts; const trouble = statTrouble(c);
     const values = compact ? [compactCount(c.requests), compactCount(statTokens(c))] : [compactCount(c.requests), compactCount(c.input_tokens + c.cache_write_tokens), compactCount(c.cache_read_tokens), compactCount(c.output_tokens)];
     for (const v of values) tr.append(el('td', 'num', v));
-    tr.append(el('td', `num${c.limited + c.failed ? ' is-trouble' : ''}`, trouble === null ? '–' : `${compactCount(c.limited + c.failed)} · ${statTroubleText(c)}`));
+    tr.append(el('td', `num${c.limited + c.failed ? ' is-trouble' : ''}${statAlert(c) ? ' is-alert' : ''}`, trouble === null ? '–' : `${compactCount(c.limited + c.failed)} · ${statTroubleText(c)}`));
     body.append(tr);
   }
   table.append(body); wrap.append(table); section.append(wrap);
@@ -1609,7 +1726,7 @@ function statKeysPanel() {
   const heading = el('h2', '', t('API keys')); heading.id = 'stat-keys';
   section.append(heading, el('p', 'form-note', t('Agents on OpenRouter spend the key of the group whose folder they start in, else the machine’s. OpenRouter reports the spend per key.')));
   if (!keySpend) { loadKeySpend(); section.append(el('p', 'form-note', t('Reading the keys…'))); return section; }
-  if (!keySpend.length) { section.append(el('p', 'form-note', t('No OpenRouter key is saved. Add one under Tokens.'))); return section; }
+  if (!keySpend.length) { section.append(el('p', 'form-note', t('No OpenRouter key is saved. Add one under API keys.'))); return section; }
   const table = el('table', 'stat-table'); const head = el('tr');
   for (const [name, cls] of [[t('Key'), ''], [t('Model'), ''], [t('Today'), 'num'], [t('In all'), 'num'], [t('Limit'), 'num']]) { const th = el('th', cls, name); th.setAttribute('scope', 'col'); head.append(th); }
   const thead = el('thead'); thead.append(head); table.append(thead);
@@ -1634,7 +1751,7 @@ function renderStats(main: HTMLElement) {
   }
   const page = el('div', 'stat-page');
   const bar = el('div', 'stat-bar'); bar.append(range); page.append(bar); main.append(page);
-  if (statsError) { page.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.'))); return; }
+  if (statsError) { page.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.')), button(t('Retry'), () => { statsError = false; void loadStats(); render(); restoreFocus('stats-retry'); }, 'button', 'stats-retry')); return; }
   if (!stats) { page.append(el('p', 'form-note', t('Reading statistics…'))); return; }
   const s = stats;
   if (!s.total.requests) {
@@ -1658,16 +1775,16 @@ function renderStats(main: HTMLElement) {
     grid.append(
       ...(s.organizations?.length ? [statTable('stat-organizations', t('By organization'), [t('Organization')], s.organizations.map((r) => ({ cells: [r.organization === 'personal' ? t('Personal') : r.organization === 'unknown' ? t('Removed account') : r.name ?? t('Removed organization')], counts: r })), true)] : []),
       statTable('stat-groups', t('By group'), [t('Group')], s.groups.map((r) => ({ cells: [groupName(r.pool, r.name)], counts: r })), true),
-      statTable('stat-projects', t('By project'), [t('Project')], s.projects.map((r) => ({ cells: [[projectName(r.name), r.groups.map((g) => groupName(g.pool, g.name)).join(', ')]], counts: r })), true),
+      statTable('stat-projects', t('By repository'), [t('Repository')], s.projects.map((r) => ({ cells: [[projectName(r.name), r.groups.map((g) => groupName(g.pool, g.name)).join(', ')]], counts: r })), true),
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
     );
     page.append(grid, statKeysPanel(),
-      statTable('stat-routes', t('Who works where'), [t('Project'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
+      statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
     );
   }
-  page.append(el('p', 'surface-note', t('What is counted where: Claude Code and Codex sessions that go through Switchboard (managed launches, group folders, the Codex switch) and agents on an API-key account through its proxy are counted above, each request placed in the project of the group folder it came from; “No folder recorded” holds requests counted before 0.6.53, when the folder was not kept, and requests that named no group folder. Agents on OpenRouter (Hermes, OpenCode, Pi and others) go to OpenRouter directly: their spend is under API keys, per key. Kimi Code runs on its own subscription: its usage is on its card under Accounts. A session on its own sign-in outside Switchboard is not counted. Token counts are the ones the provider reports; counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
+  page.append(el('p', 'surface-note', t('What is counted where: Claude Code and Codex sessions that go through Switchboard (managed launches, group folders, the Codex switch) and agents on an API-key account through its proxy are counted above, each request placed in the repository of the group folder it came from; “No folder recorded” holds requests counted before 0.6.53, when the folder was not kept, and requests that named no group folder. Agents on OpenRouter (Hermes, OpenCode, Pi and others) go to OpenRouter directly: their spend is under API keys, per key. Kimi Code runs on its own subscription: its usage is on its card under Accounts. A session on its own sign-in outside Switchboard is not counted. Token counts are the ones the provider reports; counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;
@@ -1692,7 +1809,7 @@ function sessionsPanel() {
     const contextOrg = session.context?.startsWith('org:') ? snapshot?.organizations?.find((o) => `org:${o.id}` === session.context) : undefined;
     if (contextOrg) { const badge = el('span', 'badge org-badge', contextOrg.name); badge.title = t("Runs in {name}'s context.", { name: contextOrg.name }); name.append(' ', badge); }
     title.append(name, el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
-    const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
+    const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session, snapshot?.projects), date: date(session.started_at) }) : sessionHow(session, snapshot?.projects));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }
   panel.append(list);
@@ -1720,14 +1837,14 @@ function renderAbout(main: HTMLElement) {
   const definitions = el('dl', 'definitions');
   for (const [term, description] of [
     [t('Isolated launch'), t('A new official CLI session using this account’s private home. Account changes affect new launches.')],
-    [t('Managed launch'), t('A session routed through the local HTTP/SSE proxy. Select an account for each provider and pool; the next request uses that selection. A response already in progress keeps its identity.')],
-    [t('Pools'), t('Explicit routing boundaries, such as work and personal. Selection never silently falls back to a different pool.')],
+    [t('Managed launch'), t('A session routed through the local HTTP/SSE proxy. Select an account for each provider and group; the next request uses that selection. A response already in progress keeps its identity.')],
+    [t('Groups'), t('Repositories with accounts of their own, such as a client\'s. Accounts in no other group are in the default group, which works in every other folder. Selection never silently falls back to another group.')],
     [t('Usage'), t('A timestamped provider observation. Unknown, stale, and unavailable are distinct from measured zero. API billing is separate from subscription quota.')],
     [t('Build'), demo ? t('Synthetic browser demo; it runs without the native app.') : t('{platform} build. Native platform is reported by the running app.', { platform: platformLabel(runtime?.platform) })],
     [t('Compatibility'), t('macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
-    [t('Imported OAuth'), t('A captured credential snapshot. After you sign in again elsewhere, add the account the CLI uses again. Switchboard renews inactive Claude accounts; the account Claude Code uses is renewed by Claude Code.')],
+    [t('Imported OAuth'), t('A snapshot of a credential you pasted. After you sign in again elsewhere, add the account the CLI uses again. Switchboard renews inactive Claude accounts; the account Claude Code uses is renewed by Claude Code.')],
     [t('Switch'), t('Switch changes the account of the ordinary Claude Code. New claude sessions start on it; a session already running may keep its account until it restarts.')],
-    [t('Automatic switching'), t('Off by default for each provider, pool and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
+    [t('Automatic switching'), t('Off by default for each provider, group and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
   main.append(section, termsPanel(), tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), languagePanel(), productPanel());
@@ -1791,7 +1908,7 @@ function updateControls(panel: HTMLElement) {
 function analyticsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
   const heading = el('h2', '', t('Usage analytics')); heading.id = 'analytics-heading';
-  panel.append(heading, el('p', '', t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, pool names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.')));
+  panel.append(heading, el('p', '', t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.')));
   if (analyticsError) { panel.append(el('p', 'form-note', t('The analytics setting is unavailable. Refresh to retry.'))); return panel; }
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
@@ -1816,15 +1933,22 @@ function backupsPanel() {
     const row = el('div', 'policy-row'); const copy = el('div');
     copy.append(el('strong', 'block', date(backup.created_at)), el('span', 'usage-caption', `${plural(backup.accounts, { one: '{n} account', other: '{n} accounts' })}`));
     if (backup.openable === false) { copy.append(el('span', 'usage-caption', ` · ${t('made on another computer')}`)); row.append(copy); list.append(row); continue; }
-    row.append(copy, button(t('Restore'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), `restore-${backup.file}`), 'text-button', `restore-${backup.file}`));
+    row.append(copy, button(t('Restore…'), () => restoreDialog(backup), 'text-button', `restore-${backup.file}`));
     list.append(row);
   }
   panel.append(list, button(t('Back up now'), () => void mutate(async () => { await adapter.backupNow(); backupStatus = await adapter.backups(); }, t('Backup saved.'), 'backup-now'), 'button', 'backup-now'));
   return panel;
 }
+/** UX-22: restoring names the backup's date and what returns, and runs only on a second press. */
+function restoreDialog(backup: BackupInfo) {
+  const context = openDialog(t('Restore the backup from {date}?', { date: date(backup.created_at) }), plural(backup.accounts, { one: 'It holds {n} account. Accounts, groups, rules and settings in it come back, including any you removed since; accounts already here stay as they are.', other: 'It holds {n} accounts. Accounts, groups, rules and settings in it come back, including any you removed since; accounts already here stay as they are.' }));
+  const confirm = submit(t('Restore')); context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.')); });
+  confirm.focus();
+}
 let restoredText = '';
 function showRestored(result: Restored) {
-  const extra = [result.projects ? `${plural(result.projects, { one: '{n} project', other: '{n} projects' })}` : '', result.rules ? `${plural(result.rules, { one: '{n} rule', other: '{n} rules' })}` : '', result.settings ? t('settings') : ''].filter(Boolean);
+  const extra = [result.projects ? `${plural(result.projects, { one: '{n} group', other: '{n} groups' })}` : '', result.rules ? `${plural(result.rules, { one: '{n} rule', other: '{n} rules' })}` : '', result.settings ? t('settings') : ''].filter(Boolean);
   restoredText = `${plural(result.added, { one: '{n} account restored', other: '{n} accounts restored' })}${extra.length ? t(', with {what}', { what: extra.join(', ') }) : ''} · ${t('{n} already here', { n: result.skipped })}${result.failed ? ` · ${t('{n} could not be restored', { n: result.failed })}` : ''}.`;
 }
 /** Language (L10N-01): the system's by default; a choice here reloads the window in that language. */
@@ -1960,10 +2084,10 @@ function field(label: string, input: HTMLInputElement | HTMLSelectElement | HTML
 function input(value = '', type = 'text') { const node = el('input'); node.type = type; node.value = value; node.required = true; node.autocomplete = 'off'; node.spellcheck = false; return node; }
 function select(options: [string, string][]) { const node = el('select'); options.forEach(([value, text]) => { const option = el('option', '', text); option.value = value; node.append(option); }); return node; }
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
-async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string) {
+async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string, operation: Operation = 'change') {
   context.error.textContent = ''; context.setBusy(true); clock.begin();
-  try { await action(); await refreshContext(); showNotice(success); try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
-  catch (error) { context.error.textContent = t(safeError(error)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
+  try { await action(); await refreshContext(); showNotice(restoredText || success); restoredText = ''; try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
+  catch (error) { context.error.textContent = t(safeError(error, operation)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
 /**
@@ -1973,16 +2097,16 @@ async function dialogSave(context: DialogContext, action: () => Promise<unknown>
  */
 function launchDialog(account: Account) {
   const choice = launchChoice(selected(account), !runtimeError);
-  const context = openDialog(t('Launch {label}', { label: account.label }), t('{provider} · {pool} pool', { provider: providerName(account.provider), pool: account.pool }));
+  const context = openDialog(t('Launch {label}', { label: account.label }), t('{provider} · {group}', { provider: providerName(account.provider), group: poolName(account.pool, snapshot?.projects) }));
   const folder = folderPicker(context, lastWorkingDirectory, `launch-folder-${account.id}`);
   const isolated = input('', 'checkbox'); isolated.required = false; isolated.checked = choice.isolatedByDefault;
   if (!choice.managed) { isolated.disabled = true; isolated.dataset.locked = 'true'; }
   const box = el('label', 'checkbox-field'); box.append(isolated, el('span', '', t('Isolated session')));
   const note = el('p', 'form-note');
-  const explain = () => { note.textContent = demo ? t('Synthetic launch only. The demo does not open a terminal.') : isolated.checked ? t('Runs in this account’s own home and keeps this account; automatic switching does not move it. Existing clients are not changed.') : t('Goes through the local proxy: new requests use the selected account of this pool, and automatic switching can move it. In-progress responses keep their account.'); };
+  const explain = () => { note.textContent = demo ? t('Synthetic launch only. The demo does not open a terminal.') : isolated.checked ? t('Runs in this account’s own home and keeps this account; automatic switching does not move it. Existing clients are not changed.') : t('Goes through the local proxy: new requests use the selected account of its group, and automatic switching can move it. In-progress responses keep their account.'); };
   isolated.addEventListener('change', explain); explain();
   context.body.append(groupField(t('Folder'), folder.node), box);
-  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the selected account of {pool} launches through the proxy, so this session is isolated.', { pool: account.pool })));
+  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the selected account of {group} launches through the proxy, so this session is isolated.', { group: poolName(account.pool, snapshot?.projects) })));
   context.body.append(note);
   context.actions.append(submit(t('Launch')));
   context.form.addEventListener('submit', (event) => {
@@ -1991,29 +2115,29 @@ function launchDialog(account: Account) {
     const mode = isolated.checked ? 'isolated' : 'managed';
     let tools = true;
     const noTools = t(' Agents in this session have no Switchboard tools: link the command-line tool under Agents, then launch again.');
-    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your project through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your project with this account’s private home. Provider acceptance is not yet observed.')).then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
+    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your folder through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your folder with this account’s private home. Provider acceptance is not yet observed.'), 'launch').then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
   });
   folder.focus();
 }
 function editDialog(account: Account) {
-  const context = openDialog(t('Edit account'), t('{provider} · {pool} pool. To change credentials, add the account again; to change the pool, use Move to another pool.', { provider: providerName(account.provider), pool: account.pool }));
+  const context = openDialog(t('Edit account'), t('{provider} · {group}. To change credentials, add the account again; to change the group, use Move to another group.', { provider: providerName(account.provider), group: poolName(account.pool, snapshot?.projects) }));
   const label = input(account.label); label.maxLength = 80; const enabled = input('', 'checkbox'); enabled.required = false; enabled.checked = account.enabled;
   const enabledLabel = el('label', 'checkbox-field'); enabledLabel.append(enabled, el('span', '', t('Enabled for selection and launch')));
-  context.body.append(field(t('Account label'), label), enabledLabel, el('p', 'form-note', t('Disabling a selected account clears its route. Managed requests in that pool will fail until you select another account.')));
+  context.body.append(field(t('Account label'), label), enabledLabel, el('p', 'form-note', t('Disabling a selected account clears its route. Managed requests in its group fail until you select another account.')));
   context.actions.append(submit(t('Save changes')));
   context.form.addEventListener('submit', (event) => { event.preventDefault(); if (!label.value.trim()) { label.setCustomValidity(t('Enter an account label.')); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; } void dialogSave(context, () => adapter.update(account.id, label.value.trim(), enabled.checked), enabled.checked ? t('Account updated.') : t('Account disabled. Any selection for this account has been cleared.')); }); label.focus();
 }
 /** SB-122: the account card's ⋯ → *Move to another pool…*: the default pool or a project, the current one marked (SCN-062). */
 function moveDialog(account: Account, inCli: boolean) {
-  const context = openDialog(t('Move to another pool'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default pool works in every other folder.', { label: account.label }));
-  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Pool')));
+  const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default group works in every other folder.', { label: account.label }));
+  const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
   const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
-    const text = target.name === null ? t('Default pool') : t('Group “{name}”', { name: target.name });
+    const text = target.name === null ? t('Default group') : t('Group “{name}”', { name: target.name });
     const label = target.current ? t('{target} (now)', { target: text }) : text;
-    option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool)); group.append(option); radios.push(radio);
+    option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool, false)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
   if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
@@ -2025,7 +2149,7 @@ function moveDialog(account: Account, inCli: boolean) {
     event.preventDefault();
     const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === account.pool) return;
     const target = targets.find((x) => x.pool === chosen.value)!;
-    const success = target.name === null ? t('{label} moved to the default pool.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
+    const success = target.name === null ? t('{label} moved to the default group.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
     void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
   });
   (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();
@@ -2065,9 +2189,11 @@ function organizationsBar(accounts: Account[]): HTMLElement | null {
 /** SB-159 (SCN-071): the PassionCode.ai connection, read when the page opens. */
 let passioncodeView: PassioncodeStatus | null = null; let passioncodeWaiting = false; let passioncodeError = '';
 async function loadPassioncode() {
-  try { passioncodeView = await adapter.passioncode('status'); passioncodeError = ''; } catch (error) { passioncodeError = safeError(error); }
+  try { passioncodeView = await adapter.passioncode('status'); passioncodeError = ''; } catch (error) { passioncodeError = safeError(error, 'read'); }
   backgroundRender();
 }
+/** UX-21: the person pressed Cancel: a plain notice, not an error. */
+const PASSIONCODE_CANCELLED = 'Connecting PassionCode.ai was cancelled. Nothing changed.';
 async function passioncodeAct(action: 'connect' | 'read' | 'disconnect') {
   if (action === 'connect') { passioncodeWaiting = true; render(); }
   try {
@@ -2075,7 +2201,7 @@ async function passioncodeAct(action: 'connect' | 'read' | 'disconnect') {
     snapshot = await adapter.snapshot();
     if (action === 'connect') showNotice(t('Connected to PassionCode.ai: {organizations}.', { organizations: plural(passioncodeView.organizations ?? 0, { one: '{n} organization', other: '{n} organizations' }) }));
     else if (action === 'disconnect') showNotice(t('PassionCode.ai disconnected. The organizations stay here.'));
-  } catch (error) { showNotice(safeError(error), true); }
+  } catch (error) { const text = safeError(error); showNotice(text, text !== PASSIONCODE_CANCELLED); }
   finally { passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
 }
 function passioncodePanel() {
@@ -2085,9 +2211,11 @@ function passioncodePanel() {
   const line = passioncodeLine(status);
   const values: Record<string, string> = Object.fromEntries(Object.entries(line.values ?? {}).map(([k, v]) => [k, k === 'date' ? date(Number(v)) : String(v)]));
   if (line.values?.count !== undefined) values.organizations = plural(Number(line.values.count), { one: '{n} organization', other: '{n} organizations' });
-  titles.append(el('h2', '', 'PassionCode.ai'), el('span', 'row-sub', passioncodeWaiting ? t('Waiting for PassionCode.ai in your browser…') : passioncodeError ? t(passioncodeError) : t(line.key, values)));
+  const lineText = passioncodeWaiting ? t('Waiting for PassionCode.ai in your browser…') : passioncodeError ? t(passioncodeError) : t(line.key, values);
+  const lineNode = el('span', 'row-sub wraps', lineText); lineNode.title = lineText;
+  titles.append(el('h2', '', 'PassionCode.ai'), lineNode);
   const actions = el('div', 'org-card-actions');
-  if (passioncodeWaiting) actions.append(button(t('Cancel'), () => { void adapter.passioncode('cancel'); }, 'button row-button quiet', 'passioncode-cancel'));
+  if (passioncodeWaiting) actions.append(button(t('Cancel'), () => { void adapter.passioncode('cancel').catch((error) => { showNotice(safeError(error), true); render(); }); }, 'button row-button quiet', 'passioncode-cancel'));
   else if (!status?.connected || status.state === 'sign_in_again') actions.append(button(t('Connect PassionCode.ai…'), () => void passioncodeAct('connect'), 'button row-button', 'passioncode-connect'));
   else {
     actions.append(button(t('Read now'), () => void passioncodeAct('read'), 'button row-button quiet', 'passioncode-read'));
@@ -2128,7 +2256,8 @@ function renderOrganizations(main: HTMLElement) {
         const at = attribution(snapshot!, a);
         const row = el('li', 'org-member');
         const why = el('span', 'row-sub', `${providerName(a.provider)} · ${byShort(at.by)}`); why.title = byText(at.by, o.name);
-        row.append(el('span', `provider-dot ${a.provider}`), el('span', 'org-member-name', a.label), why);
+        const memberName = el('span', 'org-member-name', a.label); memberName.title = a.label;
+        row.append(el('span', `provider-dot ${a.provider}`), memberName, why);
         rows.append(row);
       }
       card.append(el('span', 'eyebrow', plural(members.length, { one: '{n} account', other: '{n} accounts' })), rows);
@@ -2166,7 +2295,7 @@ function assignDialog(account: Account) {
   const automatic = attribution({ organizations: snapshot!.organizations }, account);
   const autoName = automatic.organization ? snapshot!.organizations?.find((o) => o.id === automatic.organization)?.name : null;
   const context = openDialog(t('Organization of {label}', { label: account.label }), t('Automatic follows its team at the provider, then its address’s domain.'));
-  const picker = select([['auto', autoName ? t('Automatic: {name}', { name: autoName }) : t('Automatic: personal')], ...(snapshot!.organizations ?? []).map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal')]]);
+  const picker = select([['auto', autoName ? t('Automatic: {name}', { name: autoName }) : t('Automatic: personal accounts')], ...(snapshot!.organizations ?? []).map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal accounts')]]);
   picker.value = choice;
   context.body.append(field(t('Belongs to'), picker));
   context.actions.append(submit(t('Save')));
@@ -2179,17 +2308,17 @@ function assignDialog(account: Account) {
 function removeDialog(account: Account) {
   const active = selected(account);
   const context = openDialog(t('Remove account?'), t('Remove “{label}” from Switchboard and delete its stored credential. This cannot be undone.', { label: account.label }));
-  context.body.append(el('p', 'form-note', active ? t('This account is selected. Select another account in the same pool, or disable this one in Edit, before removing it.') : t('Existing external clients are not signed out. Managed account metadata and its vault entry will be removed.')));
-  const confirm = submit(t('Remove account')); confirm.className = 'button danger'; confirm.disabled = active; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); if (!active) void dialogSave(context, () => adapter.remove(account.id), t('Account removed.')); });
+  context.body.append(el('p', 'form-note', active ? t('This account is selected for managed sessions in its group. Removing it disables it first, which clears that selection: managed requests there fail until you select another account.') : t('Existing external clients are not signed out. Managed account metadata and its vault entry will be removed.')));
+  const confirm = submit(active ? t('Disable and remove') : t('Remove account')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { if (active) await adapter.update(account.id, account.label, false); await adapter.remove(account.id); }, t('Account removed.')); });
   context.actions.querySelector('button')?.focus();
 }
 
 /** SB-69: deleting a project asks first, like removing an account (SCN-042). */
 function deleteProjectDialog(project: Project) {
-  const context = openDialog(t('Delete group?'), t('Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.', { name: project.name, pool: project.pool }));
+  const context = openDialog(t('Delete group?'), t('Delete “{name}”. Its accounts stay saved and are no longer reserved for it; sessions in its folders use the usual selection again.', { name: project.name }));
   const confirm = submit(t('Delete group')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Group “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.', { name: project.name, pool: project.pool })); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Group “{name}” deleted. Its accounts stay saved and are no longer reserved for it.', { name: project.name })); });
   context.actions.querySelector('button')?.focus();
 }
 /** SB-69: removing a project rule asks first; pausing it is the reversible choice (SCN-042). */
@@ -2202,17 +2331,17 @@ function removeRuleDialog(rule: ProjectRule) {
 
 function decisionText(reason: string) {
   const labels: Record<string, string> = {
-    disabled: t('Rotation is off.'), cooldown: t('Waiting for the cooldown to end.'), below_threshold: t('Current usage is below the threshold.'),
+    disabled: t('Automatic switching is off.'), cooldown: t('Waiting for the cooldown to end.'), below_threshold: t('Current usage is below the threshold.'),
     no_eligible_account: t('No eligible account. Holding the current account.'),
     stale_usage: t('Waiting for fresh usage. Holding the current account.'), usage_unavailable: t('Usage unavailable. Holding the current account.'),
-    current_unavailable: t('Current account unavailable. Holding the current account.'), limit_reached: t('The account in use hit a provider limit. An unlimited account is available; a switch is not yet confirmed.'), limit_no_eligible_account: t('The account in use hit a provider limit, and no other account is free. Holding it.'), switched_on_limit: t('Switched after the account in use hit a provider limit.'), threshold_reached: t('Threshold reached. An eligible account is available; a switch is not yet confirmed.'), switched: t('The monitor recorded a switch.'), switch_failed: t('The switch failed. The current account stays selected; check Activity.'), activation_failed: t('Native activation failed. Check the current CLI identity and retry manually.'), claude_swap_switching: t('Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.'),
+    current_unavailable: t('Current account unavailable. Holding the current account.'), limit_reached: t('The account in use hit a provider limit. An unlimited account is available; a switch is not yet confirmed.'), limit_no_eligible_account: t('The account in use hit a provider limit, and no other account is free. Holding it.'), switched_on_limit: t('Switched after the account in use hit a provider limit.'), threshold_reached: t('Threshold reached. An eligible account is available; a switch is not yet confirmed.'), switched: t('The monitor recorded a switch.'), switch_failed: t('The switch failed. The current account stays selected; check Activity.'), activation_failed: t('Switching Claude Code failed. Check which account it uses, then switch by hand.'), claude_swap_switching: t('Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.'),
   };
   return labels[reason] || t('The monitor has evaluated this policy. Check Activity for recorded changes.');
 }
 function policyDialog(existing?: RotationPolicy) {
-  const context = openDialog(t('Automatic switching'), t('Configure one provider, pool and target. Fresh eligible accounts stay within this boundary; no eligible account means hold.'));
+  const context = openDialog(t('Automatic switching'), t('Choose the provider and group it watches. It moves only to a fresh account in the same group; with none, the current account stays.'));
   const provider = select([['claude', t('Claude Code')], ['codex', t('Codex CLI')]]);
-  const pool = input(existing?.pool || 'default'); pool.maxLength = 32; pool.pattern = '[a-z0-9_-]+';
+  const pool = poolField(existing?.pool || 'default', !!existing);
   const target = select([['managed', t('Managed route')], ['claude_cli', t('Claude Code account')]]);
   const enabled = input('', 'checkbox'); enabled.required = false;
   const number = (value: number, min: number, max: number) => { const control = input(String(value), 'number'); control.min = String(min); control.max = String(max); control.step = '1'; return control; };
@@ -2224,21 +2353,21 @@ function policyDialog(existing?: RotationPolicy) {
   const sync = () => {
     const nativeOption = target.querySelector<HTMLOptionElement>('option[value="claude_cli"]')!; nativeOption.disabled = provider.value !== 'claude';
     if (nativeOption.disabled && target.value === 'claude_cli') target.value = 'managed';
-    populate(snapshot?.policies?.find((policy) => policy.provider === provider.value && policy.pool === pool.value.trim() && policy.target === target.value));
+    populate(snapshot?.policies?.find((policy) => policy.provider === provider.value && policy.pool === pool.value() && policy.target === target.value));
   };
   provider.value = existing?.provider ?? 'claude'; target.value = existing?.target ?? 'managed'; sync(); populate(existing);
-  if (existing) for (const control of [provider, pool, target]) { control.disabled = true; control.dataset.locked = 'true'; }
-  else { provider.addEventListener('change', sync); target.addEventListener('change', sync); pool.addEventListener('change', sync); }
-  const grid = el('div', 'form-grid'); grid.append(field(t('Provider'), provider), field(t('Pool'), pool), field(t('Target'), target), field(t('Switch at usage (%)'), threshold), field(t('Headroom below threshold (points)'), hysteresis, t('The candidate must stay this many points below the switching threshold.')), field(t('Cooldown (seconds)'), cooldown), field(t('Maximum usage age (seconds)'), freshness));
+  if (existing) for (const control of [provider, target]) { control.disabled = true; control.dataset.locked = 'true'; }
+  else { provider.addEventListener('change', sync); target.addEventListener('change', sync); pool.onChange(sync); }
+  const grid = el('div', 'form-grid'); grid.append(field(t('Provider'), provider), pool.node, field(t('Target'), target), field(t('Switch at usage (%)'), threshold), field(t('Headroom below threshold (points)'), hysteresis, t('The candidate must stay this many points below the switching threshold.')), field(t('Cooldown (seconds)'), cooldown), field(t('Maximum usage age (seconds)'), freshness));
   const toggle = el('label', 'checkbox-field'); toggle.append(enabled, el('span', '', t('Turn on automatic switching')));
-  context.body.append(grid, toggle, el('p', 'form-note', t('Claude Code rotation requires OAuth accounts with an external identity. Managed rotation affects the next request. A response already in progress keeps its account.')));
-  context.actions.append(submit(t('Save policy')));
+  context.body.append(grid, toggle, el('p', 'form-note', t('Switching Claude Code automatically needs OAuth accounts with a known owner. In managed sessions it takes effect from the next request; a response already in progress keeps its account.')));
+  context.actions.append(submit(t('Save')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     hysteresis.setCustomValidity(Number(hysteresis.value) >= Number(threshold.value) ? t('Headroom must be less than the usage threshold.') : '');
     if (!context.form.reportValidity()) return;
-    const previous = snapshot?.policies?.find((policy) => policy.provider === provider.value && policy.pool === pool.value.trim() && policy.target === target.value);
-    const policy: RotationPolicy = { provider: provider.value as Provider, pool: pool.value.trim(), target: target.value as RotationPolicy['target'], enabled: enabled.checked, threshold_percent: Number(threshold.value), hysteresis_percent: Number(hysteresis.value), cooldown_seconds: Number(cooldown.value), max_age_seconds: Number(freshness.value), last_switched_at: previous?.last_switched_at ?? null };
+    const previous = snapshot?.policies?.find((policy) => policy.provider === provider.value && policy.pool === pool.value() && policy.target === target.value);
+    const policy: RotationPolicy = { provider: provider.value as Provider, pool: pool.value(), target: target.value as RotationPolicy['target'], enabled: enabled.checked, threshold_percent: Number(threshold.value), hysteresis_percent: Number(hysteresis.value), cooldown_seconds: Number(cooldown.value), max_age_seconds: Number(freshness.value), last_switched_at: previous?.last_switched_at ?? null };
     void dialogSave(context, () => adapter.setPolicy(policy), policy.enabled ? t('Automatic switching saved and turned on.') : t('Automatic switching saved; it is off.'));
   });
   hysteresis.addEventListener('input', () => hysteresis.setCustomValidity('')); threshold.addEventListener('input', () => hysteresis.setCustomValidity(''));

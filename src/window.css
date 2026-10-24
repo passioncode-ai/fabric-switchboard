@@ -1,0 +1,31 @@
+/*
+ * Window behaviour classes of 0.6.82 (node N5). Styled with the existing tokens; src/style.css and
+ * src/tokens.css own the visual system and are not edited here.
+ */
+/* UX-07: an action's result stays in sight wherever the control was. */
+.notice.toast { position: fixed; z-index: 45; right: var(--space-5); bottom: var(--space-5); max-width: min(560px, calc(100vw - 2 * var(--space-5))); margin: 0; box-shadow: var(--shadow-1); border: 1px solid var(--border-strong); }
+/* UX-06: the last list stays on screen under a line that says its re-read failed. */
+.notice.stale-list { margin-bottom: var(--space-3); }
+/* VIS-13: provider terms and active folder rules share one compact block. */
+.status-stack { display: grid; gap: var(--space-1); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); font-size: var(--t-label); }
+.status-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.status-item + .status-item { padding-top: var(--space-1); border-top: 1px solid var(--border); }
+/* VIS-12: placed beside its target by the window (tourPlacement), not pinned to a corner. */
+.tour-card.is-placed { right: auto; bottom: auto; }
+/* VIS-27: a line before a destructive menu item. */
+.menu-separator { height: 1px; margin: var(--space-1) var(--space-2); background: var(--border); }
+/* VIS-19: one icon set in the sidebar. */
+.nav-icon .nav-svg { display: block; width: 16px; height: 16px; }
+/* UX-19: a copy button says Copied for two seconds. */
+.is-copied { color: var(--ok, var(--accent-text)); }
+/* UX-20: Escape closes a group's tooltip until the pointer or focus leaves it. */
+.group-hint.is-dismissed .group-tip { display: none !important; }
+/* VIS-11: a line that may be long wraps instead of being cut. */
+.row-sub.wraps { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+/* VIS-15: a dialog scrolls as one; its account list is not a second scroller. */
+.dialog .project-accounts { max-height: none; overflow: visible; }
+/* VIS-16: commands break between words where they can, and the actions stay at the bottom of the dialog. */
+.agent-setup code.address { word-break: normal; overflow-wrap: anywhere; }
+.dialog .dialog-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
+.pool-field { display: grid; gap: var(--space-3); }
+.pool-field > [hidden] { display: none; }
