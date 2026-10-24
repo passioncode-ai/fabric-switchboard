@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -48,14 +48,14 @@ const tour = (): { page: Page; target: string[]; title: string; text: string }[]
   { page: 'accounts', target: ['[data-focus="menu-add"]'], title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
   { page: 'accounts', target: ['.rotation-bar'], title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
   { page: 'projects', target: ['[data-focus="new-project"]', '[data-focus="empty-new-project"]'], title: t('Give a group its own accounts'), text: t('Press + New group, add the group\'s repositories and choose its accounts. Sessions launched from those folders use only them, and other groups never switch to them.') },
-  { page: 'agents', target: ['[data-focus="copy-onboard"]', '#connect-panel'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
+  { page: 'agents', target: ['[data-focus="copy-onboard"]', '#connect-panel > h2'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
 let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
-  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour();
+  page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour(true);
 }
 /** The first selector of a step that is on the page (UX-30: the setup prompt may still be reading). */
 function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
@@ -63,15 +63,16 @@ function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
   return null;
 }
 /** VIS-12: the card goes beside its target, never over it, and the target is scrolled into sight first. */
-function placeTour() {
+function placeTour(scroll = false) {
   const card = root.querySelector<HTMLElement>('.tour-card'); if (!card || tourStep === null) return;
   const target = tourTarget(root, tourStep);
   const viewport = { width: window.innerWidth, height: window.innerHeight }; const size = { width: card.offsetWidth, height: card.offsetHeight };
   const measure = () => { const r = target?.getBoundingClientRect(); return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
   // Centred first; when the card fits neither above nor below, the target goes to the top so the card fits under it.
-  if (target) target.scrollIntoView({ block: 'center', inline: 'nearest' });
+  // Scrolling happens only when the step changes, never on a background render (unit tier G).
+  if (target && scroll) target.scrollIntoView({ block: 'center', inline: 'nearest' });
   let at = tourPlacement(measure(), size, viewport);
-  if (target && at.side === 'corner') { target.scrollIntoView({ block: 'start', inline: 'nearest' }); at = tourPlacement(measure(), size, viewport); }
+  if (target && scroll && at.side === 'corner') { target.scrollIntoView({ block: 'start', inline: 'nearest' }); at = tourPlacement(measure(), size, viewport); }
   card.classList.add('is-placed'); card.style.left = `${at.left}px`; card.style.top = `${at.top}px`; card.dataset.side = at.side;
 }
 window.addEventListener('resize', () => placeTour());
@@ -209,16 +210,18 @@ async function reload() {
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
   render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
-  void loadOpenrouter();
-  void loadKimi();
+  // Unit tier D: these reads apply only when no action began after this Refresh.
+  const readStamp = clock.stamp();
+  void loadOpenrouter(readStamp);
+  void loadKimi(readStamp);
   void loadHermes();
-  void loadSessions();
+  void loadSessions(readStamp);
   void restorePendingLogin();
-  void loadBackups();
+  void loadBackups(readStamp);
   if (page === 'agents') void loadAgents();
   if (page === 'orgs') void loadPassioncode();
-  void adapter.analytics().then((value) => { analyticsState = value; analyticsError = false; }, () => { analyticsError = true; }).finally(backgroundRender);
-  void adapter.loginItem().then((value) => { loginItem = value; loginItemError = false; }, () => { loginItemError = true; }).finally(backgroundRender);
+  void adapter.analytics().then((value) => { if (clock.accepts(readStamp)) { analyticsState = value; analyticsError = false; } }, () => { analyticsError = true; }).finally(backgroundRender);
+  void adapter.loginItem().then((value) => { if (clock.accepts(readStamp)) { loginItem = value; loginItemError = false; } }, () => { loginItemError = true; }).finally(backgroundRender);
   void loadUpdate();
   // OS credential prompts must not hold the entire workbench in its loading state.
   const stamp = clock.stamp();
@@ -305,7 +308,7 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
     shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourStep !== null ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
@@ -817,8 +820,8 @@ function hermesDialog() {
   model.focus();
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
-async function loadOpenrouter() {
-  try { [openrouter, openrouterKeys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); openrouterError = ''; } catch (error) { openrouterError = safeError(error, 'read'); }
+async function loadOpenrouter(stamp?: number) {
+  try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; } } catch (error) { openrouterError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** SB-144: the Tokens page: the key every folder uses, and each project's own. */
@@ -1242,9 +1245,9 @@ function renderAccounts(main: HTMLElement) {
   main.append(kimiSection());
 }
 let kimiLoadedAt = 0;
-async function loadKimi() {
+async function loadKimi(stamp?: number) {
   kimiLoadedAt = Date.now();
-  try { kimi = await adapter.kimiAccounts(); kimiError = ''; } catch (error) { kimiError = safeError(error, 'read'); }
+  try { const value = await adapter.kimiAccounts(); if (stamp === undefined || clock.accepts(stamp)) { kimi = value; kimiError = ''; } } catch (error) { kimiError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** The state line of a Kimi Code home: its plan windows, or why there are none. */
@@ -1288,12 +1291,13 @@ function kimiSection() {
 let kimiWatch: number | null = null;
 function watchKimiSignIn(id: string) {
   if (kimiWatch !== null) window.clearInterval(kimiWatch);
-  const until = Date.now() + 5 * 60_000; const before = kimi?.accounts.find((a) => a.account.id === id)?.status.checked_at ?? null;
+  // Only a row that cannot be used is watched, so "signed in" is a change, not a fresher check (unit tier F).
+  const until = Date.now() + 5 * 60_000;
   kimiWatch = window.setInterval(() => {
     if (Date.now() > until) { window.clearInterval(kimiWatch!); kimiWatch = null; return; }
     void adapter.kimiAccounts().then((next) => {
       const row = next.accounts.find((a) => a.account.id === id);
-      if (!row || (row.status.signed_in && !row.status.error && row.status.checked_at !== before)) { window.clearInterval(kimiWatch!); kimiWatch = null; kimi = next; kimiLoadedAt = Date.now(); if (row) showNotice(t('{label} is signed in again.', { label: row.account.label })); backgroundRender(); }
+      if (!row || (row.status.signed_in && !row.status.error)) { window.clearInterval(kimiWatch!); kimiWatch = null; kimi = next; kimiLoadedAt = Date.now(); if (row) showNotice(t('{label} is signed in again.', { label: row.account.label })); backgroundRender(); }
     }, () => { /* the next look retries */ });
   }, 3000);
 }
@@ -1317,7 +1321,8 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
     for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
     if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
   } else usage.append(kimiStatusLine(status));
-  const relogin = () => void mutate(async () => { await adapter.kimiSignInAgain(account.id); watchKimiSignIn(account.id); }, t('Sign in to {label} in Terminal. The row updates when you finish.', { label: account.label }), `kimi-primary-${account.id}`, undefined, 'sign_in');
+  const unusable = signedOut || !!status.error;
+  const relogin = () => void mutate(async () => { await adapter.kimiSignInAgain(account.id); if (unusable) watchKimiSignIn(account.id); }, unusable ? t('Sign in to {label} in Terminal. The row updates when you finish.', { label: account.label }) : t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`, undefined, 'sign_in');
   const primary = el('div', 'row-primary');
   primary.append(signedOut ? button(t('Sign in'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
   const items: ([string, () => void] | [string, () => void, string])[] = [];
@@ -1411,7 +1416,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   if (action === 'in_use') slot.append(status(t('✓ In use')));
   else if (action === 'selected') slot.append(status(t('✓ Selected')));
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
-  else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {group}.', { label: account.label, group: poolName(account.pool, snapshot?.projects) }), key), 'button row-button', key));
+  else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
@@ -1419,7 +1424,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
 }
 function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const items: ([string, () => void] | [string, () => void, string])[] = [];
-  if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request in {group}.', { label: account.label, group: poolName(account.pool, snapshot?.projects) }), `menu-${account.id}`)]);
+  if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
   if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
@@ -1521,9 +1526,11 @@ function poolField(current: string, locked = false) {
   const choices = poolChoices(snapshot?.accounts ?? [], snapshot?.projects ?? [], current);
   const picker = select([...choices.map((c): [string, string] => [c.pool, c.group || c.pool === 'default' ? c.name : t('Group {id} · no folders', { id: c.pool })]), ...(locked ? [] : [['__new', t('New id…')] as [string, string]])]);
   picker.value = current;
-  const typed = input(''); typed.maxLength = 32; typed.pattern = POOL_PATTERN; typed.required = false; typed.placeholder = 'work'; typed.title = t('Use lowercase letters, numbers, hyphens, or underscores.');
+  const typed = input(''); typed.maxLength = 32; typed.pattern = POOL_PATTERN; typed.required = false; typed.placeholder = t('e.g. client-a'); typed.title = t('Use lowercase letters, numbers, hyphens, or underscores.');
   const typedField = field(t('Group id'), typed, t('Accounts in one group switch among themselves. Use an existing group id, or a new one to start a group: lowercase letters, numbers, hyphens or underscores.')); typedField.hidden = true;
-  const sync = () => { const fresh = picker.value === '__new'; typedField.hidden = !fresh; typed.required = fresh; if (fresh) typed.focus(); };
+  // Unit tier A: a hidden id field is disabled and emptied, so a typed id that does not fit never blocks the form.
+  const sync = () => { const fresh = picker.value === '__new'; typedField.hidden = !fresh; typed.required = fresh; typed.disabled = !fresh; typed.dataset.locked = String(!fresh); if (!fresh) typed.value = ''; else typed.focus(); };
+  sync();
   picker.addEventListener('change', sync);
   if (locked) { picker.disabled = true; picker.dataset.locked = 'true'; }
   const node = el('div', 'pool-field'); node.append(field(t('Group'), picker, t('The default group works in every folder outside other groups.')), typedField);
@@ -1561,7 +1568,8 @@ function renderCurrent(main: HTMLElement) {
   const heading = el('div', 'section-heading');
   const proxy = el('span', 'proxy-status'); const dot = el('span', `status-dot ${runtimeError ? 'unavailable' : ''}`); dot.setAttribute('aria-hidden', 'true');
   proxy.append(dot, el('span', '', demo ? t('Demo · no live requests') : runtimeError ? t('Local proxy status unavailable') : t('Local proxy {address}', { address: runtime?.proxy_address ?? t('starting…') })));
-  heading.append(el('h2', '', t('In use now')), proxy);
+  const inUse = el('h2', '', t('In use now')); inUse.tabIndex = -1; inUse.dataset.focus = 'current-heading';
+  heading.append(inUse, proxy);
   section.append(heading);
   const grid = el('div', 'current-grid');
   for (const provider of ['claude', 'codex'] as const) {
@@ -1572,12 +1580,15 @@ function renderCurrent(main: HTMLElement) {
       const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
       card.append(copy);
       if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
-      else card.append(button(t('Add to Switchboard'), () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), t('{identity} added to {provider} · default. Switchboard keeps its sign-in up to date.', { identity: identityText(current.identity), provider: providerName(provider) }), `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
+      else card.append(button(t('Add to Switchboard'), () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
     } else {
       const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
       copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));
       card.append(copy);
-      if (failed) card.append(button(t('Retry'), () => { currentReadFailed = false; render(); void refreshContext().then(() => { backgroundRender(); render(); restoreFocus(`retry-current-${provider}`); }); }, 'button quiet row-button', `retry-current-${provider}`));
+      if (failed) card.append(button(t('Retry'), () => {
+        currentReadFailed = false; render(); const stamp = clock.stamp();
+        void readContext().then((context) => { if (clock.accepts(stamp)) applyContext(context); render(); restoreFocus(currentReadFailed ? `retry-current-${provider}` : 'current-heading'); });
+      }, 'button quiet row-button', `retry-current-${provider}`));
     }
     grid.append(card);
   }
@@ -1601,9 +1612,9 @@ function renderPolicies(main: HTMLElement) {
   if (demo) copy.append(el('span', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
-  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code in {group}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { group: poolName(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
-  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop in {group}', { group: poolName(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} in {group}.', { provider: providerName(policy.provider), group: poolName(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
-  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} in {group} ({target})…', { provider: providerName(policy.provider), group: poolName(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
+  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
+  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {where}', { where: inGroup(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
+  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
 }
 /** SB-145/SB-147: the proxy's counts for the chosen range (7, 30 or 90 days). */
@@ -1612,10 +1623,17 @@ let statsError = false;
 let statsDays = 30;
 let chartMetric: ChartMetric = 'tokens';
 async function loadStats() {
-  keySpend = null;
-  try { stats = await adapter.statistics(statsDays); statsError = false; } catch { statsError = true; }
-  render();
-  backgroundRender();
+  keySpend = null; const days = statsDays;
+  let value: Statistics | null = null; let failed = false;
+  try { value = await adapter.statistics(days); } catch { failed = true; }
+  // Unit tier C: an answer for a range the person has left is dropped.
+  if (days !== statsDays) return;
+  stats = value; statsError = failed;
+  // Unit tier B: the render keeps focus where it was (the page title on arrival, Retry after a retry).
+  const key = (document.activeElement as HTMLElement | null)?.dataset.focus;
+  render(); restoreFocus(key);
+  // A Retry that worked is gone from the page: focus goes to the page title, never to the body.
+  if (page === 'stats' && (!document.activeElement || document.activeElement === document.body)) restoreFocus('page-title');
 }
 function statTile(label: string, value: string, note: string) {
   const tile = el('div', 'stat-tile'); tile.append(el('span', 'stat-label', label), el('strong', 'stat-value', value), el('span', 'stat-note', note)); return tile;
@@ -1635,7 +1653,7 @@ function statChart(s: Statistics) {
     b.setAttribute('aria-pressed', String(chartMetric === value)); toggle.append(b);
   }
   head.append(heading, toggle); section.append(head);
-  const names = (pool: string) => s.groups.find((g) => g.pool === pool)?.name ?? (pool === 'default' ? t('No group') : pool);
+  const names = (pool: string) => poolName(pool, s.groups.filter((g): g is { pool: string; name: string } & typeof g => g.name !== null));
   const { days, series } = chartSeries(s, chartMetric, names);
   if (!series.length) { section.append(el('p', 'form-note', t('No traffic in this period.'))); return section; }
   const totals = days.map((_, i) => series.reduce((sum, x) => sum + x.values[i], 0));
@@ -1746,7 +1764,7 @@ function renderStats(main: HTMLElement) {
   if (!stats && !statsError) void loadStats();
   const range = el('div', 'segmented'); range.setAttribute('role', 'group'); range.setAttribute('aria-label', t('Period'));
   for (const days of [7, 30, 90]) {
-    const choice = button(plural(days, { one: '{n} day', other: '{n} days' }), () => { statsDays = days; stats = null; void loadStats(); render(); }, `segment${statsDays === days ? ' is-on' : ''}`, `stats-${days}`);
+    const choice = button(plural(days, { one: '{n} day', other: '{n} days' }), () => { statsDays = days; stats = null; void loadStats(); render(); restoreFocus(`stats-${days}`); }, `segment${statsDays === days ? ' is-on' : ''}`, `stats-${days}`);
     choice.setAttribute('aria-pressed', String(statsDays === days)); range.append(choice);
   }
   const page = el('div', 'stat-page');
@@ -1768,7 +1786,7 @@ function renderStats(main: HTMLElement) {
       statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), statTrouble(s.total) === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
     page.append(tiles, statChart(s));
-    const groupName = (pool: string, name: string | null) => name ?? (pool === 'default' ? t('No group') : pool);
+    const groupName = (pool: string, name: string | null) => name ?? poolName(pool);
     const projectName = (name: string | null) => name ?? t('No folder recorded');
     const accountName = (label: string | null) => label ?? t('Removed account');
     const grid = el('div', 'stat-grid');
@@ -1788,8 +1806,8 @@ function renderStats(main: HTMLElement) {
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;
-async function loadSessions() {
-  try { sessionList = (await adapter.sessions()).sessions; sessionsError = false; } catch { sessionsError = true; }
+async function loadSessions(stamp?: number) {
+  try { const value = (await adapter.sessions()).sessions; if (stamp === undefined || clock.accepts(stamp)) { sessionList = value; sessionsError = false; } } catch { sessionsError = true; }
   backgroundRender();
 }
 /** SB-65: the sessions Switchboard launched that start or run, read from their records (SB-95). */
@@ -1849,8 +1867,8 @@ function renderAbout(main: HTMLElement) {
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
   main.append(section, termsPanel(), tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), languagePanel(), productPanel());
 }
-async function loadBackups() {
-  try { backupStatus = await adapter.backups(); backupError = false; } catch { backupError = true; }
+async function loadBackups(stamp?: number) {
+  try { const value = await adapter.backups(); if (stamp === undefined || clock.accepts(stamp)) { backupStatus = value; backupError = false; } } catch { backupError = true; }
   // Restored on its own at start (a reinstall): say so once per backup.
   const auto = backupStatus?.restored_at_start;
   if (auto) {
@@ -1944,7 +1962,7 @@ function restoreDialog(backup: BackupInfo) {
   const context = openDialog(t('Restore the backup from {date}?', { date: date(backup.created_at) }), plural(backup.accounts, { one: 'It holds {n} account. Accounts, groups, rules and settings in it come back, including any you removed since; accounts already here stay as they are.', other: 'It holds {n} accounts. Accounts, groups, rules and settings in it come back, including any you removed since; accounts already here stay as they are.' }));
   const confirm = submit(t('Restore')); context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.')); });
-  confirm.focus();
+  context.actions.querySelector('button')?.focus();
 }
 let restoredText = '';
 function showRestored(result: Restored) {
@@ -2106,7 +2124,7 @@ function launchDialog(account: Account) {
   const explain = () => { note.textContent = demo ? t('Synthetic launch only. The demo does not open a terminal.') : isolated.checked ? t('Runs in this account’s own home and keeps this account; automatic switching does not move it. Existing clients are not changed.') : t('Goes through the local proxy: new requests use the selected account of its group, and automatic switching can move it. In-progress responses keep their account.'); };
   isolated.addEventListener('change', explain); explain();
   context.body.append(groupField(t('Folder'), folder.node), box);
-  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the selected account of {group} launches through the proxy, so this session is isolated.', { group: poolName(account.pool, snapshot?.projects) })));
+  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the account selected {where} launches through the proxy, so this session is isolated.', { where: inGroup(account.pool, snapshot?.projects) })));
   context.body.append(note);
   context.actions.append(submit(t('Launch')));
   context.form.addEventListener('submit', (event) => {
@@ -2310,7 +2328,13 @@ function removeDialog(account: Account) {
   const context = openDialog(t('Remove account?'), t('Remove “{label}” from Switchboard and delete its stored credential. This cannot be undone.', { label: account.label }));
   context.body.append(el('p', 'form-note', active ? t('This account is selected for managed sessions in its group. Removing it disables it first, which clears that selection: managed requests there fail until you select another account.') : t('Existing external clients are not signed out. Managed account metadata and its vault entry will be removed.')));
   const confirm = submit(active ? t('Disable and remove') : t('Remove account')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { if (active) await adapter.update(account.id, account.label, false); await adapter.remove(account.id); }, t('Account removed.')); });
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    // Unit tier E: a removal that fails after the disable says the account is now disabled, and the list shows it.
+    let disabledOnly: unknown = null;
+    void dialogSave(context, async () => { if (active) await adapter.update(account.id, account.label, false); try { await adapter.remove(account.id); } catch (failure) { if (active) { disabledOnly = failure; try { snapshot = await adapter.snapshot(); render(); } catch { /* the next refresh shows it */ } } throw failure; } }, t('Account removed.'))
+      .then(() => { if (disabledOnly) context.error.textContent = t('{label} is disabled now but was not removed: {reason}', { label: account.label, reason: t(safeError(disabledOnly)) }); });
+  });
   context.actions.querySelector('button')?.focus();
 }
 
