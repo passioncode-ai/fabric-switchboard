@@ -1,0 +1,197 @@
+{
+ "node": "N3",
+ "done": [
+  {
+   "id": "VIS-01",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-longlabel-current.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/740-dark-longlabel-current.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/metrics.json (currentOverflow ok/ok, was OVERFLOW)",
+    "src/style.css:180",
+    "src/style.css:221"
+   ]
+  },
+  {
+   "id": "VIS-02",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-dark-chart.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/before/1100-dark-chart.png",
+    "src/tokens.css:31",
+    "scripts/check-brand.mjs:96"
+   ]
+  },
+  {
+   "id": "VIS-04",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-who-works-where.png",
+    "src/style.css:521"
+   ]
+  },
+  {
+   "id": "VIS-05",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/740-light-chart.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/metrics.json (axis 11.3 px at 740, 11.5 px at 1100; before 7.4 and 11.2)",
+    "src/style.css:455"
+   ]
+  },
+  {
+   "id": "VIS-06",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-chart.png",
+    "src/tokens.css:31",
+    "scripts/check-brand.mjs:78"
+   ]
+  },
+  {
+   "id": "VIS-07",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-dlg-addkey.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/metrics.json (SELECT 36 = INPUT 36; before 22 and 39)",
+    "src/style.css:120"
+   ]
+  },
+  {
+   "id": "VIS-08",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-tokens.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-projects.png",
+    "src/tokens.css:60",
+    "src/style.css:89"
+   ]
+  },
+  {
+   "id": "VIS-09",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/metrics.json (controls 30 and 36 px only)",
+    "src/tokens.css:64",
+    "src/style.css:32"
+   ]
+  },
+  {
+   "id": "VIS-10",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-agents-panel.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-dark-agents-panel.png",
+    "src/style.css:376",
+    "scripts/check-brand.mjs:62"
+   ]
+  },
+  {
+   "id": "VIS-14",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-accounts.png",
+    "src/style.css:65"
+   ]
+  },
+  {
+   "id": "VIS-17",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-agents-panel.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-about.png",
+    "src/tokens.css:79",
+    "src/style.css:99",
+    "src/style.css:361",
+    "scripts/check-brand.mjs:85"
+   ]
+  },
+  {
+   "id": "VIS-18",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-nav-hover.png",
+    "src/tokens.css:74",
+    "src/style.css:19",
+    "scripts/check-brand.mjs:81"
+   ]
+  },
+  {
+   "id": "VIS-22",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-stats.png",
+    "src/style.css:410"
+   ]
+  },
+  {
+   "id": "VIS-25",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/740-light-accounts.png",
+    "src/style.css:204"
+   ]
+  },
+  {
+   "id": "VIS-26",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-activity.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-about.png",
+    "src/style.css:106"
+   ]
+  },
+  {
+   "id": "VIS-28",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/1100-light-projects.png",
+    "src/style.css:429"
+   ]
+  },
+  {
+   "id": "VIS-29",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/740-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n3/after/740-dark-orgs.png",
+    "src/style.css:150",
+    "src/style.css:23",
+    "src/style.css:308"
+   ]
+  },
+  {
+   "id": "VIS-30",
+   "evidence": [
+    "src/tokens.css:53",
+    "src/style.css:180",
+    "src/style.css:319",
+    "src/style.css:348",
+    "scripts/check-brand.mjs:17"
+   ]
+  }
+ ],
+ "not_done": [
+  {
+   "id": "VIS-23",
+   "reason": "Partly done: every limits-and-errors cell is now ink instead of warning orange (src/style.css:422). Colouring only a share worth attention needs the window to mark that cell; CSS cannot read the share.",
+   "ts_change_needed": "src/main.ts:1585 (and the other statTable rows that build the trouble cell): add class 'is-alert' to the td when statTrouble(c) >= 0.01 (1 percent) or c.limited > 0 in a day row, e.g. `num${c.limited + c.failed ? ' is-trouble' : ''}${(statTrouble(c) ?? 0) >= 0.01 ? ' is-alert' : ''}`; .stat-table .is-trouble.is-alert is styled (warn, semibold)."
+  },
+  {
+   "id": "lint",
+   "reason": "npx sheleg-design-skill --lint src was not run: the package download was refused by this session's permission classifier. NOT_RUN, not a pass.",
+   "ts_change_needed": ""
+  }
+ ],
+ "checks": [
+  {
+   "cmd": "node scripts/check-brand.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "npm run build",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-brand.mjs with --chart-4 set back to var(--pc-link) (planted regression, restored)",
+   "exit": 1
+  },
+  {
+   "cmd": "node scripts/check-brand.mjs with --chart-1 set to var(--pc-accent) (planted regression, restored)",
+   "exit": 1
+  },
+  {
+   "cmd": "node walk.cjs (Playwright WebKit, 8 pages x 1100/740 x light/dark, ?demo=1, port 5198): 0 page errors",
+   "exit": 0
+  },
+  {
+   "cmd": "grep -n U+2014 src/style.css src/tokens.css scripts/check-brand.mjs docs/design/switchboard/director-record.md (no match)",
+   "exit": 1
+  }
+ ],
+ "commit": "see git log of branch iter/0.6.82-n3-visual (this file is part of that commit)"
+}
