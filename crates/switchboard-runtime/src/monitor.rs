@@ -27,6 +27,9 @@ const RENEW_RETRY_SECONDS: i64 = 60;
 /// this long after the refusal, near its limit or not.
 pub(crate) const PACED_AFTER_REFUSAL_SECONDS: i64 = 3600;
 
+/// SB-185: a credential read at least this slow is logged as `vault_slow`.
+const SLOW_VAULT_READ_MS: u64 = 1000;
+
 pub fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -123,6 +126,15 @@ impl Pass {
         time: i64,
         stop: Option<&tokio::sync::watch::Receiver<bool>>,
     ) {
+        // SB-185: a credential read that took a second or more since the last pass, by its time
+        // only; the log then tells a stalled vault from the operations that waited on it.
+        let slowest = runtime.store.take_slowest_read();
+        if slowest >= SLOW_VAULT_READ_MS {
+            crate::oplog::event(
+                "vault_slow",
+                &[("ms", crate::oplog::Field::Number(slowest as i64))],
+            );
+        }
         // With no saved Claude OAuth account there is nothing of Claude Code's to keep current:
         // no Keychain read and no Claude Swap read. Unassigned work discovery is stop-aware.
         let claude = native_sources && claude_oauth_saved(&runtime.store);

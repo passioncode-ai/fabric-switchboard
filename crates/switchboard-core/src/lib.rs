@@ -297,6 +297,9 @@ pub struct Store {
     changes: std::sync::atomic::AtomicU64,
     /// Metadata publications written to disk, for the idle budget (lifecycle LC-08).
     writes: std::sync::atomic::AtomicU64,
+    /// SB-185: the slowest credential read since the runtime last took it (ms), so a vault that
+    /// stalls is seen in the log as such and not only as slow operations around it.
+    slowest_read: std::sync::atomic::AtomicU64,
     /// Since when memory holds timestamps not yet on disk (0: nothing pending).
     pending_since: std::sync::atomic::AtomicI64,
     /// Accounts the ordinary CLIs are signed in to, as the monitor last saw (SB-48). Memory only.
@@ -540,6 +543,7 @@ impl Store {
             state: Mutex::new(state),
             changes: Default::default(),
             writes: Default::default(),
+            slowest_read: Default::default(),
             pending_since: Default::default(),
             in_use: Default::default(),
             limited: Default::default(),
@@ -1212,19 +1216,36 @@ impl Store {
             .delete(item)
             .map_err(vault::surface("Credential storage unavailable"))
     }
+    /// SB-185: the metadata lock is held only to find the account, never across the vault read.
+    /// On macOS a Keychain read can take seconds (each `/usr/bin/security` call is bounded at
+    /// 5 s), and the proxy reads a credential for every managed request: under the lock, one slow
+    /// read stalled every `snapshot()` (recovery, hand-overs, agents) for 5 to 82 s on
+    /// 2026-10-23 and 2026-10-24. A write that lands meanwhile is read whole, old or new, as a
+    /// reader waiting on the lock would have read it.
     pub fn stored_credential(&self, id: &str) -> Result<Credential, String> {
-        let state = self.lock()?;
-        let a = state
-            .accounts
-            .iter()
-            .find(|a| a.id == id)
-            .ok_or("Account not found")?;
-        let credential = self
-            .vault
-            .get(id)
-            .map_err(vault::surface("Credential storage unavailable"))?;
-        credential.validate(a.provider, a.kind)?;
+        let (provider, kind) = {
+            let state = self.lock()?;
+            let a = state
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .ok_or("Account not found")?;
+            (a.provider, a.kind)
+        };
+        let started = std::time::Instant::now();
+        let read = self.vault.get(id);
+        self.slowest_read.fetch_max(
+            started.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        let credential = read.map_err(vault::surface("Credential storage unavailable"))?;
+        credential.validate(provider, kind)?;
         Ok(credential)
+    }
+    /// The slowest credential read since the last call, in ms, and resets it (SB-185).
+    pub fn take_slowest_read(&self) -> u64 {
+        self.slowest_read
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
     /// A restore gives an account back the credential it lost (`switchboard uninstall
     /// --keep-data`, a removed Keychain item): only when none can be read for it now, so a

@@ -1632,3 +1632,67 @@ fn an_account_used_on_another_machine_is_never_chosen_here() {
     assert!(snap.accounts[0].enabled && snap.elsewhere.is_empty());
     assert!(store.mark_elsewhere("missing", true, 1).is_err());
 }
+
+/// A vault whose reads wait until released, like a Keychain read held by `/usr/bin/security`.
+struct HeldVault {
+    inner: MemoryVault,
+    hold: std::sync::Mutex<bool>,
+    released: std::sync::Condvar,
+    reading: std::sync::mpsc::SyncSender<()>,
+}
+impl switchboard_core::Vault for HeldVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        let _ = self.reading.try_send(());
+        let mut held = self.hold.lock().unwrap();
+        while *held {
+            held = self.released.wait(held).unwrap();
+        }
+        drop(held);
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn a_slow_credential_read_does_not_hold_the_metadata() {
+    let root = TempDir::new().unwrap();
+    let (reading, read_started) = std::sync::mpsc::sync_channel(1);
+    let vault = Arc::new(HeldVault {
+        inner: MemoryVault::default(),
+        hold: std::sync::Mutex::new(false),
+        released: std::sync::Condvar::new(),
+        reading,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let account = add(&store, "synthetic-held");
+    *vault.hold.lock().unwrap() = true;
+    while read_started.try_recv().is_ok() {}
+    let reader = {
+        let store = store.clone();
+        let id = account.id.clone();
+        std::thread::spawn(move || store.stored_credential(&id))
+    };
+    read_started
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    // The read is in the vault now. Metadata answers at once (SB-185); before, this waited for it.
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(store.snapshot().map(|s| s.accounts.len()));
+        });
+    }
+    let answered = rx.recv_timeout(std::time::Duration::from_secs(2));
+    *vault.hold.lock().unwrap() = false;
+    vault.released.notify_all();
+    assert_eq!(answered.expect("snapshot waited for a vault read"), Ok(1));
+    assert!(reader.join().unwrap().is_ok());
+    let _ = store.take_slowest_read();
+    assert_eq!(store.take_slowest_read(), 0);
+}

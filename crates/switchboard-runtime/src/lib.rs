@@ -882,6 +882,18 @@ impl Runtime {
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
+        // SB-186: a session's start hook (`project suggest --from-hook`) gives up after 1.5 s;
+        // behind a background step it waited 5 to 22 s (2026-10-23 and 2026-10-24) and its folder
+        // joined nothing. Most starts are in a folder already in its group, or in no group's:
+        // those answers write nothing and are given here. Only a folder to record and add takes
+        // the transaction.
+        if let Operation::ProjectSuggest { folder } = &operation {
+            if let Some(answer) =
+                blocking::run(|| suggest_read_only(&self.store, &self.root, folder))?
+            {
+                return Ok(answer);
+            }
+        }
         // A quota check reads the network and writes only its own observation; it takes the
         // owner transaction only for a renewal, as the background pass does, so a slow
         // provider never holds every other operation (SB-39).
@@ -2256,6 +2268,23 @@ fn add_suggested_folder(
         );
     }
     Ok(projects::project_view(&store.snapshot()?, &saved))
+}
+
+/// SB-186: `ProjectSuggest`'s answer when it writes nothing (the folder is in its group, or no
+/// group claims it); None when the folder must be recorded and added, under the transaction.
+fn suggest_read_only(store: &Store, root: &Path, folder: &Path) -> Result<Option<Value>, String> {
+    let snapshot = store.snapshot()?;
+    let repos = suggest::project_repos(&snapshot);
+    let outcome = match suggest::assess(&snapshot, &repos, folder) {
+        suggest::Assessed::Ours { .. } => return Ok(None),
+        suggest::Assessed::Decided(suggest::Outcome::NotOurs { .. }) => {
+            suggest::unassigned(root, &snapshot, &repos, folder)?
+        }
+        suggest::Assessed::Decided(outcome) => outcome,
+    };
+    Ok(Some(
+        json!({"suggested": false, "reason": outcome.code(), "message": outcome.message()}),
+    ))
 }
 
 /// SB-147: every group folder with its group, and the worktrees the bindings route, for the
@@ -5358,6 +5387,44 @@ mod owner_tests {
         .expect("answered while the transaction is held")
         .unwrap();
         assert_eq!(status["sessions"], json!([]));
+        drop(held);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_start_in_its_groups_folder_is_answered_while_a_step_holds_the_transaction() {
+        // SB-186: the start hook gives up after 1.5 s; behind a background step it waited 5 to
+        // 22 s. A folder already in its group, or in none, writes nothing and is answered at once.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let main = work.join("app");
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        let loose = work.join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "App".into(),
+                folders: vec![main.clone()],
+                account_ids: vec![],
+                base_folders: None,
+                organization: None,
+            })
+            .await
+            .unwrap();
+        let held = runtime.hold("test").await;
+        for (folder, reason) in [(main.clone(), "in_project"), (loose, "not_ours")] {
+            let answer = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                runtime.execute(Operation::ProjectSuggest { folder }),
+            )
+            .await
+            .expect("answered while the transaction is held")
+            .unwrap();
+            assert_eq!(answer["suggested"], false, "{answer}");
+            assert_eq!(answer["reason"], reason, "{answer}");
+        }
         drop(held);
     }
 
