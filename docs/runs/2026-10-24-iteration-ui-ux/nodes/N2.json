@@ -1,0 +1,276 @@
+{
+  "node": "N2",
+  "done": [
+    {
+      "id": "CPY-02",
+      "evidence": [
+        "crates/switchboard-core/src/agent_keys.rs:14",
+        "crates/switchboard-runtime/src/launch.rs:331",
+        "crates/switchboard-runtime/src/launch.rs:1622"
+      ]
+    },
+    {
+      "id": "CPY-01",
+      "evidence": [
+        "CLI help, CLI output and MCP titles/descriptions say group and group id; command, flag, tool and field names unchanged",
+        "crates/switchboard-cli/src/main.rs:22 (after_help explains project = groups, pool = group id)",
+        "crates/switchboard-cli/src/mcp.rs:22 (INSTRUCTIONS)",
+        "crates/switchboard-runtime/src/launch.rs:1518, :1520"
+      ]
+    },
+    {
+      "id": "CPY-06",
+      "evidence": [
+        "crates/switchboard-cli/src/mcp.rs titles 'Automatic switching' / 'Set automatic switching'",
+        "rotation help and output say automatic switching (main.rs Rotation, project list empty state)"
+      ]
+    },
+    {
+      "id": "CPY-08",
+      "evidence": [
+        "help_tests::help_carries_no_backlog_id_and_no_dash",
+        "mcp_parity::mcp_wording_carries_no_backlog_id_and_no_dash",
+        "help_tests::the_wording_check_finds_what_it_names",
+        "grep -rn U+2014 crates/switchboard-cli/src: exit 1 (no match)",
+        "crates/switchboard-cli/src/main.rs:1922 PLACEHOLDER '-'",
+        "docs/CLI.md, SKILL.md, references/tools.md, references/cli.md: no U+2014"
+      ]
+    },
+    {
+      "id": "CPY-09",
+      "evidence": [
+        "help_tests::help_carries_no_backlog_id_and_no_dash",
+        "mcp_parity::mcp_wording_carries_no_backlog_id_and_no_dash"
+      ]
+    },
+    {
+      "id": "PRD-07",
+      "evidence": [
+        "crates/switchboard-cli/src/main.rs:2548 (missing subcommand prints the group's help; --json names the group)",
+        "help_tests::a_command_group_named_alone_resolves_to_its_own_names",
+        "top-level after_help: 'Start with: switchboard accounts list'",
+        "accounts about: '(`accounts list` shows them)'"
+      ]
+    },
+    {
+      "id": "PRD-15",
+      "evidence": [
+        "crates/switchboard-cli/src/main.rs:22 (data folder per OS)",
+        "backup --help names ~/.local/share on Linux",
+        "docs/CLI.md:15 (data and backup folders, cites default_root crates/switchboard-runtime/src/lib.rs:50 and backup_dir :693)"
+      ]
+    },
+    {
+      "id": "PRD-05 (CLI.md part)",
+      "evidence": [
+        "docs/CLI.md:3 now 'as of 0.6.82'",
+        "docs/CLI.md:106 a sign-in survives a restart (adopt_logins, crates/switchboard-runtime/src/launch.rs:1002; test a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep, launch.rs:3567; MAX_LOGINS launch.rs:960)"
+      ]
+    },
+    {
+      "id": "D-1 SessionStart hook lines",
+      "evidence": [
+        "crates/switchboard-cli/src/main.rs:1815 and :1819 say group",
+        "crates/switchboard-cli/tests/commands.rs:206 expects 'added to the group \"App\"'"
+      ]
+    },
+    {
+      "id": "PRD-04",
+      "evidence": [
+        "plugins/switchboard/skills/switching-accounts/references/tools.md (45 sections: 23 read, 22 write; sign-in sentence fixed)",
+        "mcp_parity::every_mcp_tool_is_in_the_skill_reference"
+      ]
+    }
+  ],
+  "not_done": [
+    {
+      "id": "seam: docs outside N2",
+      "reason": "docs/CONTRACTS.md:112 and docs/ux/scenarios.md:712-713, :968, :1362 quote the old reservation, OpenRouter-key and KEY_POOL_INVALID sentences; owned by N4 (CONTRACTS) and N5 (scenarios, src/adapter.ts, src/locales/ru.ts, src/demo.ts), which key on the changed sentences listed here"
+    },
+    {
+      "id": "runtime sentences outside launch.rs",
+      "reason": "'Project not found.', 'Choose an existing project directory.' and other project/pool refusals in crates/switchboard-runtime/src/lib.rs and crates/switchboard-core belong to N1 or the next pool; unchanged"
+    },
+    {
+      "id": "CPY-08 check in scripts/check.sh",
+      "reason": "the U+2014 check is a Rust test inside the CLI crate (runs in the gate through cargo test); extending scripts/check-locale.mjs or check.sh is outside N2's files"
+    }
+  ],
+  "changed_backend_sentences": [
+    {
+      "old": "No OpenRouter key is saved. Add one under Agents.",
+      "new": "No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.",
+      "where": "crates/switchboard-core/src/agent_keys.rs:14"
+    },
+    {
+      "old": "That pool is not a project. Choose a project, or none for the key every folder uses.",
+      "new": "That group id names no group. Choose a group, or none for the key every folder uses.",
+      "where": "crates/switchboard-core/src/agent_keys.rs:16"
+    },
+    {
+      "old": "Choose a model for this launch, or set the default model of the OpenRouter key under Agents.",
+      "new": "Choose a model for this launch, or set the key's default model on the API keys page or with switchboard agents openrouter model.",
+      "where": "crates/switchboard-runtime/src/launch.rs:1622"
+    },
+    {
+      "old": "Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.",
+      "new": "Switchboard could not read the OpenRouter key. Check it on the API keys page, then launch again.",
+      "where": "crates/switchboard-runtime/src/launch.rs:331 (printed by a session script in Terminal)"
+    },
+    {
+      "old": "This account belongs to a project. Launch it from one of the project's folders.",
+      "new": "This account belongs to a group. Launch it from one of the group's folders.",
+      "where": "crates/switchboard-runtime/src/launch.rs:1518"
+    },
+    {
+      "old": "This folder belongs to a project. Launch one of the project's accounts.",
+      "new": "This folder belongs to a group. Launch one of the group's accounts.",
+      "where": "crates/switchboard-runtime/src/launch.rs:1520"
+    },
+    {
+      "old": "Project not found.",
+      "new": "Group not found.",
+      "where": "crates/switchboard-cli/src/main.rs:1861 (project source), crates/switchboard-cli/src/mcp.rs:676 (switchboard_project_sources); the runtime's own 'Project not found.' (owned by N1) is unchanged"
+    },
+    {
+      "old": "Scope is machine, project:<pool> or workflow:<wf_id>.",
+      "new": "Scope is machine, project:<group id> or workflow:<wf_id>.",
+      "where": "crates/switchboard-cli/src/main.rs:732"
+    },
+    {
+      "old": "scope is machine, project:<pool> or workflow:<wf_id>.",
+      "new": "scope is machine, project:<group id> or workflow:<wf_id>.",
+      "where": "crates/switchboard-cli/src/mcp.rs:933"
+    },
+    {
+      "old": "Saved rotation policy is unreadable.",
+      "new": "Saved automatic switching settings are unreadable.",
+      "where": "crates/switchboard-cli/src/main.rs:1222, crates/switchboard-cli/src/mcp.rs:527"
+    },
+    {
+      "old": "Pass an absolute project folder.",
+      "new": "Pass an absolute folder.",
+      "where": "crates/switchboard-cli/src/mcp.rs:149"
+    },
+    {
+      "old": "Pass the project folder as path.",
+      "new": "Pass the folder as path.",
+      "where": "crates/switchboard-cli/src/mcp.rs:157"
+    },
+    {
+      "old": "Switchboard is not running: managed sessions cannot route and rotation is paused. Reads come from local metadata.",
+      "new": "Switchboard is not running: managed sessions cannot route and automatic switching is paused. Reads come from local metadata.",
+      "where": "crates/switchboard-cli/src/mcp.rs:215"
+    },
+    {
+      "old": "This session routes the {session_pool} pool; that account is in {pool}. Choose an account in {session_pool}, or launch a managed session in {pool}.",
+      "new": "This session routes group {session_pool}; that account is in group {pool}. Choose an account in group {session_pool}, or launch a managed session in group {pool}.",
+      "where": "crates/switchboard-cli/src/mcp.rs:341"
+    },
+    {
+      "old": "This session does not run through Switchboard's proxy, so a route change cannot reach it. Use target route to prepare a managed pool, or target claude_cli with global: true to change the ordinary Claude Code login.",
+      "new": "This session does not run through Switchboard's proxy, so a route change cannot reach it. Use target route to prepare a group's managed sessions, or target claude_cli with global: true to change the ordinary Claude Code login.",
+      "where": "crates/switchboard-cli/src/mcp.rs:345"
+    },
+    {
+      "old": "{label} handles the next request in the {pool} pool. A response already streaming keeps its account. Manual choice starts the rotation cooldown.",
+      "new": "{label} handles the next request in group {pool}. A response already streaming keeps its account. A manual choice starts the automatic switching cooldown.",
+      "where": "crates/switchboard-cli/src/mcp.rs:355"
+    },
+    {
+      "old": "Project saved. It is visible in the Switchboard app under Projects.",
+      "new": "Group saved. It is visible in the Switchboard app under Groups.",
+      "where": "crates/switchboard-cli/src/mcp.rs:404"
+    },
+    {
+      "old": "Rule saved. It is visible in the Switchboard app under Projects and can be paused there.",
+      "new": "Rule saved. It is visible in the Switchboard app under Groups and can be paused there.",
+      "where": "crates/switchboard-cli/src/mcp.rs:721"
+    },
+    {
+      "old": "The app is not running: nothing rotates now.",
+      "new": "The app is not running: nothing switches automatically now.",
+      "where": "crates/switchboard-cli/src/mcp.rs:829"
+    },
+    {
+      "old": "Switchboard: this folder was added to the project \"{project}\"; its sessions use the project's accounts from their next start.",
+      "new": "Switchboard: this folder was added to the group \"{project}\"; its sessions use the group's accounts from their next start.",
+      "where": "crates/switchboard-cli/src/main.rs:1815 (SessionStart hook output)"
+    },
+    {
+      "old": "Switchboard: this folder looks like part of the project \"{project}\" but could not be added yet; Switchboard tries again by itself.",
+      "new": "Switchboard: this folder looks like part of the group \"{project}\" but could not be added yet; Switchboard tries again by itself.",
+      "where": "crates/switchboard-cli/src/main.rs:1819 (SessionStart hook output)"
+    },
+    {
+      "old": "No projects. `switchboard project save` reserves accounts for a project's folders.",
+      "new": "No groups. `switchboard project save` creates one.",
+      "where": "crates/switchboard-cli/src/main.rs:2181"
+    },
+    {
+      "old": "No project rules. Switchboard follows your selection and rotation everywhere.",
+      "new": "No folder rules. Switchboard follows your selection and automatic switching everywhere.",
+      "where": "crates/switchboard-cli/src/main.rs:2206"
+    },
+    {
+      "old": "applies: none for this workflow or project",
+      "new": "applies: none for this workflow or group",
+      "where": "crates/switchboard-cli/src/main.rs:2371"
+    },
+    {
+      "old": "{name}  pool {pool}  {accounts}",
+      "new": "{name}  group id {pool}  {accounts}",
+      "where": "crates/switchboard-cli/src/main.rs:2191 (project list text)"
+    },
+    {
+      "old": "ID ... PROVIDER  POOL ... STATE  LABEL",
+      "new": "ID ... PROVIDER  GROUP ... STATE  LABEL",
+      "where": "crates/switchboard-cli/src/main.rs:2076 (accounts list header)"
+    },
+    {
+      "old": "U+2014 em dash in an empty cell",
+      "new": "- (empty cell); a session not started yet reads 'not started'",
+      "where": "crates/switchboard-cli/src/main.rs:1922"
+    },
+    {
+      "old": "Invalid arguments. Run switchboard --help. (for a command group named without its command)",
+      "new": "that group's help on stderr, exit 2; with --json: Name a command. Run switchboard <group> --help.",
+      "where": "crates/switchboard-cli/src/main.rs:2548"
+    }
+  ],
+  "checks": [
+    {
+      "cmd": "cargo fmt --all",
+      "exit": 0
+    },
+    {
+      "cmd": "cargo clippy -p switchboard-cli --all-targets --locked -- -D warnings",
+      "exit": 0
+    },
+    {
+      "cmd": "cargo test -p switchboard-cli --locked",
+      "exit": 0
+    },
+    {
+      "cmd": "(ulimit -s 1024 && cargo test -p switchboard-cli --test mcp --locked)",
+      "exit": 0
+    },
+    {
+      "cmd": "cargo test -p switchboard-core --locked",
+      "exit": 0
+    },
+    {
+      "cmd": "cargo test -p switchboard-runtime --lib --locked launch",
+      "exit": 0
+    },
+    {
+      "cmd": "python3 scripts/check_plugin.py",
+      "exit": 0
+    },
+    {
+      "cmd": "python3 scripts/check_docs.py",
+      "exit": 0
+    }
+  ],
+  "commit": "see git log of iter/0.6.82-n2-cli: the commit that adds this file"
+}

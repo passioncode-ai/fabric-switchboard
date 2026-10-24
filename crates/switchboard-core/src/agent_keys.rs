@@ -11,9 +11,9 @@ pub const SERVICES: &[&str] = &["openrouter"];
 pub const KEY_INVALID: &str = "That is not an OpenRouter key: it starts with sk-or-.";
 pub const MODEL_INVALID: &str =
     "A model is an OpenRouter id such as moonshotai/kimi-k2 (letters, digits and / . _ : -).";
-pub const NO_AGENT_KEY: &str = "No OpenRouter key is saved. Add one under Agents.";
+pub const NO_AGENT_KEY: &str = "No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.";
 pub const KEY_POOL_INVALID: &str =
-    "That pool is not a project. Choose a project, or none for the key every folder uses.";
+    "That group id names no group. Choose a group, or none for the key every folder uses.";
 const MAX_KEY: usize = 512;
 const MAX_MODEL: usize = 120;
 

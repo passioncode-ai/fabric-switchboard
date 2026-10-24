@@ -28,7 +28,7 @@ machine, routes managed sessions through a local proxy, and rotates off an exhau
 account on its own. You never touch a credential: you ask Switchboard, report what it
 says, and change an account only through its tools.
 
-## 1. Find the tools — list and match
+## 1. Find the tools: list and match
 
 List the tools and match on the names below; the prefix differs by host and by how the
 server was registered. In Claude Code the plugin's server appears as
@@ -39,14 +39,14 @@ the launch injected it with the session and data folder set explicitly.
 
 | Tool | Writes | Use it to |
 |---|---|---|
-| `switchboard_status` | no | start every task: runtime, this session, routes, active rules, rotation |
+| `switchboard_status` | no | start every task: runtime, this session, routes, active rules, automatic switching |
 | `switchboard_accounts` | no | list accounts (no credentials), optional `provider` |
 | `switchboard_usage` | no | remaining quota per window; `refresh` asks the provider |
 | `switchboard_switch` | yes | choose the account for the next request |
 | `switchboard_sessions` | no | the sessions Switchboard launched, and whether each is starting, running or ended |
 | `switchboard_onboarding` | no | setup steps: what is done, what to run, what is the person's (`switchboard onboard` is the guide) |
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
-| `switchboard_projects` | no | every project: pool, folders, sources, reserved accounts, and the rules |
+| `switchboard_projects` | no | every group: its id (pool), folders, sources, reserved accounts, and the folder rules |
 | `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename, its organization: an id, a name or `personal`), only when the operator asks; with an organization defined, a group runs only on its organization's accounts (personal ones when it has none) and refuses others |
 | `switchboard_codex_route` | yes | whether Codex sessions in project folders use the projects' Codex accounts; turn it on or off only when the operator asks |
 | `switchboard_project_move_root` | yes | move a repository with its worktrees and clones to another project, or put a loose one in a project, only when the operator asks |
@@ -57,7 +57,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_account_move` | yes | move an account into a project's pool or back to `default`, only when the operator asks |
 | `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team, domain), and `passioncode`: whether PassionCode.ai is connected and when it was read (connecting is the person's, in the browser: `switchboard org connect`) |
 | `switchboard_organization_set` | yes | add, edit or remove an organization, or place an account (an organization, personal, auto), only when the operator asks |
-| `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic rotation, the change only when the operator asks |
+| `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |
 | `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |
 | `switchboard_agent_set` | yes | enable or disable an agent for taking over work, or set the default |
@@ -67,11 +67,11 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |
 | `switchboard_chain_get` | no | the operator's fallback chains and the one that applies to a workflow or project |
 | `switchboard_chain_set` | yes | set a fallback chain, only when the operator asks |
-| `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend — never the key |
-| `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on — never a key |
+| `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend; never the key |
+| `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on; never a key |
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |
 | `switchboard_agents` | no | coding agents installed here, which are enabled for taking over work, the machine's default agent and the recommended OpenRouter models |
-| `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in — never a token |
+| `switchboard_kimi_accounts` | no | Kimi Code subscription accounts: tier, 5-hour / 7-day / monthly usage, and the ordinary `kimi`'s sign-in; never a token |
 | `switchboard_kimi_login` | yes | start, follow, finish or cancel a Kimi Code sign-in, or sign an account in again; the person signs in, only when the operator asks |
 | `switchboard_kimi_rename` | yes | rename a Kimi Code account, only when the operator asks |
 | `switchboard_handovers_set` | yes | whether hand-overs open in Fabric's console, only when the operator asks |
@@ -85,9 +85,9 @@ the launch injected it with the session and data folder set explicitly.
 Arguments, result fields and fixed error texts: read `references/tools.md` before the
 first write call, or when a result field is unclear.
 
-**Degraded paths — say it once, then fall back; never loop:**
+**Degraded paths: say it once, then fall back; never loop:**
 
-- **Only the eleven read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the 23 read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI
@@ -152,17 +152,17 @@ From `switchboard_usage`, per account and window:
   own: enabled rotation already moves off an exhausted account; report usage and offer
   the switch.
 
-## 5. Project rules — optional, off unless saved
+## 5. Folder rules: optional, off unless saved
 
 A rule says "this folder and its subfolders start on this account". Most machines have
 none; a rule never stops rotation.
 
 - **On entering a project** (task start, or moving to another project folder), call
-  `switchboard_project_apply` with that folder's absolute `path` — pass it explicitly,
+  `switchboard_project_apply` with that folder's absolute `path`; pass it explicitly,
   since the default is the folder the server started in.
 - **Always tell the operator in one line which rule applied, or that none did**, and
   remind them that rules are visible and can be paused in the Switchboard app under
-  Projects.
+  Groups.
 - **Never create a rule unless the operator asks.** When asked, confirm folder, account
   and target, and prefer an expiry (`expires_in_hours`, 1 to 720). Use
   `switchboard_project_context` to inspect without changing.
@@ -198,6 +198,9 @@ not retry it. `switchboard recovery` lists registered stops with `mode` `capacit
 `probe` and `probe_at`. The rule's home is fabric-workspace principle 10, item 6.
 
 ## 7. Groups, and repositories that join them by themselves
+
+Say **group** to the person; tool names, commands and fields call it a project, and its id is
+its `pool`.
 
 A Switchboard project is a group (SB-146): it holds repositories with accounts of its own, and one
 repository may be in several groups. A repository in no group stays in the default group; it is
@@ -252,6 +255,6 @@ until restarted.
 
 ## References
 
-- `references/tools.md` — read before the first write call, or when a result field or
+- `references/tools.md`: every tool, one section each; read before the first write call, or when a result field or
   refusal text needs its exact meaning.
-- `references/cli.md` — read when the MCP server is absent or failed to connect.
+- `references/cli.md`: read when the MCP server is absent or failed to connect.
