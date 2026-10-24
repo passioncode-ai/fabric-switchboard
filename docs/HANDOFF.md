@@ -2,6 +2,32 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: 0.6.82 published; sessions belong to Dashboards, then Fabric (SB-190 superseded)
+
+- **Adopted.** The session that ran the 0.6.82 iteration stopped on a usage limit at 16:18 UTC in its confirming
+  round. Another session took it over: fix cycle 2 (`37d1663`: an About toggle silenced by the stale-question guard,
+  a lost `app_installed`, a Windows test build missing its unix gate, N5's regression tests), the visual pass of the
+  window (WebKit `?demo=1`, 740 and 1180 px, en and ru, both themes, 151 frames: no blocker; leftovers SB-195), the
+  adversarial round on N1 and fix cycle 3 (`0c4b65d`: a failed first vault read hid a new rejection, contradicting
+  CONTRACTS; a failed read stuck in the renewal schedule and the holder map; five planted defects nobody caught now
+  have tests).
+- **Published.** PR #308 squash-merged as `50ce27e`; tag `v0.6.82`; release run 40132237488 green; 25 assets;
+  `latest.json` 0.6.82 (21:45 UTC). Plugin `switchboard@switchboard` updated 0.6.80 to 0.6.82 locally
+  (`claude plugin list`); the desktop app and its CLI take it by their own 5-minute check (the CLI read 0.6.81 right
+  after publishing).
+- **Decided (the operator's review, 2026-10-24).** Coding sessions (running, handed over, stopped on a limit, ended)
+  live in Fabric Dashboards' new Sessions mode (Dashboards 0.8.0, FD-103), and later in Fabric, the operator's main app
+  (FD-105, asked on the board as Q-1, thread `1ddb20ce`). So SB-190 (sessions in this window) is superseded; the
+  window keeps none. Requests from Dashboards' review: SB-196 (settle a stop when its workflow is handed over), SB-197
+  (`sessions --all` home path and Terminal window identity), SB-198 (refuse a claim on a claimed stop).
+- **Tidied.** Every merged branch removed from `origin` (24) and locally; the iteration's worktrees removed (their
+  commits are in `50ce27e`).
+- **Checks run.** `./scripts/check.sh` exit 0 at `0c4b65d`; `scripts/check_docs.py` exit 0 at `6a09b1f`. Not run:
+  live provider, a real Windows run.
+- **Exact next task.** After 2026-10-25 12:30 UTC: the SB-174/SB-163 read (`control_slow`, `vault_slow` in
+  switchboard.log) as the 0.6.81 entry says; confirm the installed app and CLI read 0.6.82. Then SB-198 (P2, a
+  correctness hole a second host can hit), SB-196, then SB-183 (the shell hook).
+
 ## 2026-10-24: 0.6.82, release iteration over the whole product (SB-187, SB-188)
 
 - **Objective.** The operator's ask: «прогнал итерацию, UI UX и улучшение всего продукта». Run by
