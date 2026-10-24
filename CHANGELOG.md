@@ -6,6 +6,19 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.82 (2026-10-24)
+
+A release made from a review of the whole product: the window, its words, the CLI, the MCP server and the background owner ([iteration record](docs/runs/2026-10-24-iteration-ui-ux/canvas.md)).
+
+- **Nothing is counted before you answer (issue #128).** Usage counts are still on by default, but Switchboard now sends nothing, not even the install, until you have answered the question it shows once in the window (or the switch in About). Turning them off holds while the switch shared by PassionCode.ai tools stays off. `switchboard uninstall` forgets the answer.
+- **One word for one thing.** The window, the CLI, MCP and notifications say **group** for a set of folders with accounts of its own, **automatic switching** for what was also called rotation, and **API keys** for the page that was called Tokens. A set of accounts with no folders reads "Group {id} · no folders". Commands, flags, tool names and JSON fields are unchanged.
+- **No more dead ends in the window.** A failed read offers Retry instead of "Reading…" forever; Refresh reads statistics again; results stay in view at the bottom of the window; keyboard focus comes back after a dialog; Restore asks first; removing the selected account offers to disable and remove it; an empty page has one Add button, not two.
+- **A calmer, more consistent look.** One heading size, two control heights, selects drawn like inputs, a visible chosen state, chart colours that differ in both themes, long account labels that stay inside their card, and wide tables that show they scroll.
+- **Faster answers to Fabric.** Recovery no longer reads the Keychain again after every folder that joins a group, a failed Keychain read is never remembered as "no sign-in needed", and quota checks read the Keychain outside the account list's lock.
+- **Recovery records stay small.** Stops older than 7 days leave the record, at most 512 are kept, finished ones go first, and a stop already pruned is not registered again.
+- **CLI.** A command group named alone prints its commands (`switchboard accounts`); help names the Linux data and backup folders; the OpenRouter key error points to the API keys page.
+- **A clearer log.** The owner's version is in `owner_started` and in `status`; quota check failures have their own codes instead of `other`; lines that changed nothing (`claude_binding`, unchanged update checks while an update waits) are written once.
+
 ## 0.6.81 (2026-10-24)
 
 - **No more waits of up to a minute while a stored sign-in is read (SB-185).** Reading one account's sign-in from the Keychain held every other read of the account list until it finished, so a slow read made the status, recovery and hand-over answers that Fabric and its dashboards ask for wait 5 to 82 seconds. Now only that read waits. A read of a second or more is written to the log as `vault_slow`.
