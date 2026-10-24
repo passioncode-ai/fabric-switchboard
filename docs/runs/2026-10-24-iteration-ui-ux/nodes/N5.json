@@ -459,5 +459,5 @@
   "N2": "28 changed backend sentences read from sb-iter-n2-cli N2.json; window-facing ones (3 OpenRouter/key refusals incl. KEY_POOL_INVALID, 2 launch refusals) are verbatim in safeErrors, the old ones stay mapped so the table holds before and after merge.",
   "N3": "style.css and tokens.css untouched; new classes only in src/window.css, imported after style.css."
  },
- "commit": "PENDING"
+ "commit": "32940d3", "commits": ["c4d9325", "78383bf", "d050670", "32940d3"]
 }
