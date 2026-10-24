@@ -19,7 +19,7 @@ use switchboard_runtime::{
     name = "switchboard",
     version,
     about = "Manage Claude and Codex accounts with Fabric Switchboard",
-    after_help = "Start with: switchboard accounts list. Each command group prints its own commands when run alone (switchboard accounts).\nGroups: `project` commands manage groups of repositories with accounts of their own; a `pool` argument takes the group id `project list` prints (`default` for the default group).\nSecrets: pipe a token or auth JSON to accounts add --secret-stdin. Never put secrets in arguments.\nLogin and launch: keep the desktop app or switchboard serve running in another terminal.\nManaged sessions switch identity at the next request; existing streams are not replayed.\nData folder: ~/Library/Application Support/ai.passioncode.fabric-switchboard (macOS), %LOCALAPPDATA%\\ai.passioncode.fabric-switchboard (Windows), ~/.local/share/ai.passioncode.fabric-switchboard or $XDG_DATA_HOME (Linux)."
+    after_help = "Start with: switchboard accounts list. A command group run without its command prints its commands (switchboard accounts); recovery, handovers and agents hermes list instead.\nGroups: `project` commands manage groups of repositories with accounts of their own; a `pool` argument takes the group id `project list` prints (`default` for the default group).\nSecrets: pipe a token or auth JSON to accounts add --secret-stdin. Never put secrets in arguments.\nLogin and launch: keep the desktop app or switchboard serve running in another terminal.\nManaged sessions switch identity at the next request; existing streams are not replayed.\nData folder: ~/Library/Application Support/ai.passioncode.fabric-switchboard (macOS), %LOCALAPPDATA%\\ai.passioncode.fabric-switchboard (Windows), $XDG_DATA_HOME/ai.passioncode.fabric-switchboard, by default ~/.local/share/ai.passioncode.fabric-switchboard (Linux)."
 )]
 struct Cli {
     /// Emit machine-readable JSON. Errors go to stderr.
@@ -61,7 +61,7 @@ enum Command {
     #[command(alias = "activity")]
     Events,
     /// What the proxy relayed: requests, outcomes and the provider's token counts by group,
-    /// project, account, coding agent and day. Reads only.
+    /// folder (repository), account, coding agent and day. Reads only.
     #[command(alias = "statistics")]
     Stats {
         /// Days back, 1 to 90.
@@ -186,7 +186,7 @@ enum Command {
     },
     /// Encrypted backups (accounts, groups, rules, settings) in the "Fabric Switchboard Backups"
     /// folder: in ~/Library/Application Support on macOS, %APPDATA% on Windows and
-    /// ~/.local/share on Linux (this machine's key).
+    /// $XDG_DATA_HOME (by default ~/.local/share) on Linux (this machine's key).
     Backup {
         #[command(subcommand)]
         command: Backup,

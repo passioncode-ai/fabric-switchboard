@@ -12,12 +12,12 @@ between them when one runs out, and gives coding agents its tools over MCP.
    you work in one). It answers `steps` in order, each with an `id`, a `state`, a `summary`
    and `next`. `complete: true` means you are done.
 2. For each step that is not `done`:
-   - `todo` — run `next.command` yourself (or, for `proving_call`, call the MCP tool
+   - `todo`: run `next.command` yourself (or, for `proving_call`, call the MCP tool
      `next.tool`).
-   - `needs_person` — tell the person `next.person` in your own words. When `next.command` is
+   - `needs_person`: tell the person `next.person` in your own words. When `next.command` is
      present, you may run it to start the step for them (for example, it opens the sign-in in a
      Terminal window), then wait for them.
-   - `optional` — not required to finish; follow its `next` only when you have not already
+   - `optional`: not required to finish; follow its `next` only when you have not already
      completed it.
 3. Run `switchboard onboard --status --json` again after every step. It reads the computer each
    time and writes nothing, so it is always safe to repeat.

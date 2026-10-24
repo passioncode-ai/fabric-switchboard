@@ -126,7 +126,7 @@ pub fn steps(probe: &Probe) -> Value {
             format!(
                 "{} belongs to the project “{}”.",
                 folder.display(),
-                project["name"].as_str().unwrap_or("—")
+                project["name"].as_str().unwrap_or("-")
             ),
             Value::Null,
         ),
