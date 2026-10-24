@@ -549,6 +549,41 @@ check(() => {
   assert.match(main, /let termsDismissed = termsNoticeDismissed\(noticeStore\(\)\);/, 'the stored choice is read at start');
 });
 
+// Issue #128 (SCN-073, SCN-044): nothing is sent before the person answers the usage switch once.
+// The window asks only when the build can send, the switch is on and this app has no answer; the
+// tour waits for the question (and for the status read) so one first-run card shows at a time.
+check(() => {
+  const ask = { available: true, enabled: true, disclosed: false, sent_before: false };
+  assert.equal(logic.usageQuestion(ask), true, 'first start of a release build: asked');
+  assert.equal(logic.usageQuestion({ ...ask, disclosed: true }), false, 'answered: never asked again');
+  assert.equal(logic.usageQuestion({ ...ask, enabled: false }), false, 'switched off (here or by another app): nothing to ask');
+  assert.equal(logic.usageQuestion({ ...ask, available: false }), false, 'a development build sends nothing and asks nothing');
+  assert.equal(logic.usageQuestion({ available: true, enabled: true }), false, 'an older backend without the field: no question');
+  assert.equal(logic.usageQuestion(null), false, 'unread or unreadable: no question');
+  assert.equal(logic.usageQuestionText(ask), 'Nothing has been sent yet. Nothing is sent until you answer.');
+  assert.equal(logic.usageQuestionText({ ...ask, sent_before: true }), 'An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.', 'an upgraded install is not told nothing was sent');
+  assert.equal(logic.tourWaits(null, false), true, 'the tour waits for the status read');
+  assert.equal(logic.tourWaits(null, true), false, 'a failed read never holds the tour');
+  assert.equal(logic.tourWaits(ask, false), true, 'the question comes first');
+  assert.equal(logic.tourWaits({ ...ask, disclosed: true }, false), false, 'answered: the tour shows');
+  i18n.setLocale('ru');
+  assert.equal(logic.usageQuestionText(ask), 'Пока ничего не отправлено. До вашего ответа ничего не отправится.');
+  i18n.setLocale('en');
+});
+// The wiring: the question sits above every page but About, where the panel asks the same thing;
+// both answer through setAnalytics with the one choice; Escape never ends a tour that is not shown.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /if \(page !== 'about' && usageQuestion\(analyticsState\)\) main\.append\(usageQuestionCard\(\)\);/, 'the question above the page');
+  const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
+  assert.match(about, /if \(usageQuestion\(analyticsState\)\) \{/, 'About asks while unanswered');
+  assert.match(about, /usageQuestionText\(analyticsState\)/, 'with the same line on what was sent');
+  assert.match(about, /answerUsage\('analytics'\)/, 'and Continue answers it');
+  assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the answer goes to the backend');
+  assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the question');
+  assert.match(main, /event\.key === 'Escape' && !openMenu && tourShown\(\)/, 'Escape ends only a tour on screen');
+});
+
 // Launch (operator decision 2026-10-09): managed only for the pool's selected account while the
 // proxy runs; every other launch is isolated. Folders come from the picker, each once.
 check(() => {

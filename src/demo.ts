@@ -85,7 +85,9 @@ export function createDemoAdapter(): Adapter {
   const signInRequired = new Set(['demo-claude-meadow']);
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false };
-  const analytics = { available: true, enabled: true };
+  // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
+  const usage = new URLSearchParams(location.search).get('usage');
+  const analytics = { available: true, enabled: true, disclosed: usage !== 'ask' && usage !== 'sent', sent_before: usage === 'sent' };
   // SB-120: the agents a synthetic computer has.
   type CatalogAgent = { id: string; name: string; maker?: string | null; url: string; install?: string | null; binary?: string | null; mcp: { supported: boolean }; openrouter?: unknown };
   const catalogAgents = (agentCatalogData as unknown as { agents: CatalogAgent[] }).agents;
@@ -393,7 +395,7 @@ export function createDemoAdapter(): Adapter {
     async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },
     async checkForUpdates() { await pause(); update.checked_at = now(); return { ...update }; },
     async analytics() { return { ...analytics }; },
-    async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; return { ...analytics }; },
+    async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; analytics.disclosed = true; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
     async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage', id, 'observed'); return structuredClone(usage); },

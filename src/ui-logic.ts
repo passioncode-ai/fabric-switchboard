@@ -496,6 +496,29 @@ export function termsNoticeOn(page: string, dismissed: boolean): 'banner' | 'pan
 }
 
 /**
+ * Usage counts: nothing is sent before the person has answered the switch once in this app
+ * (issue #128, operator decision 2026-10-08, Fabric ADR-0127; docs/ANALYTICS.md). The window asks
+ * when the build can send (`available`), the shared switch is on and this app has no answer yet
+ * (`disclosed === false`). A status that is missing, unreadable or from an older backend without
+ * `disclosed` asks nothing: the backend still sends nothing until it is answered.
+ */
+export interface UsageStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
+export function usageQuestion(status: UsageStatus | null | undefined): boolean {
+  return !!status && status.available && status.enabled && status.disclosed === false;
+}
+/** What the question says about what has left so far: an install from 0.6.81 or earlier may already have sent counts. */
+export function usageQuestionText(status: UsageStatus | null | undefined): string {
+  return status?.sent_before
+    ? t('An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.')
+    : t('Nothing has been sent yet. Nothing is sent until you answer.');
+}
+/** The first-run tour waits while the usage question is open or its status is still being read. */
+export function tourWaits(status: UsageStatus | null | undefined, statusFailed: boolean): boolean {
+  if (statusFailed) return false;
+  return status == null || usageQuestion(status);
+}
+
+/**
  * How an account launches (operator decision 2026-10-09): every session starts in a folder chosen
  * with the picker, and a box makes it isolated — in the account's own home. A managed session, through
  * the local proxy, is open only to the account selected in its pool while the proxy runs; otherwise
