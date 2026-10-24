@@ -14,7 +14,7 @@ and Linux (x64 and ARM), built by
 [Installation](docs/INSTALL.md) · [Release notes](CHANGELOG.md) ·
 [Product page](https://passioncode.ai/switchboard/)
 
-![Fabric Switchboard 0.6.13 Accounts screen with current sign-ins, quota and separate account pools](docs/evidence/screenshots/accounts-0.6.13.png)
+![Fabric Switchboard 0.6.13 Accounts screen with current sign-ins and quota](docs/evidence/screenshots/accounts-0.6.13.png)
 
 *Current interface, shown with synthetic demo accounts. [Screenshot provenance](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
 
@@ -24,7 +24,8 @@ and Linux (x64 and ARM), built by
 |---|---|
 | Keep work and personal accounts separate | Groups of projects with accounts of their own (a project is a repository with its worktrees and clones; one project may be in several groups), project rules and isolated session homes |
 | See where accounts and tokens go | Statistics: requests and the provider's own token counts by group, project, account, coding agent and day, with a daily chart |
-| Give agents on API keys a key per project | Tokens: the machine's OpenRouter key and a key per group, picked by the folder an agent starts in |
+| Know which company an account belongs to | Organizations: companies with their e-mail domains; an account belongs by your choice, its team at the provider or its address; a group of an organization runs only on that organization's accounts; the list can be read from PassionCode.ai |
+| Give agents on API keys a key per project | API keys: the machine's OpenRouter key and a key per group, picked by the folder an agent starts in |
 | See when another account is needed | Reported usage, reset countdowns and explicit unknown or expired states |
 | Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
 | Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |
@@ -40,11 +41,10 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 ## Release status
 
 **Latest published:** [the latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)
-(its number is on that page; installed copies update themselves). Recent changes: 0.6.77 keeps
-`switchboard` commands and agents' tools answering while Switchboard updates itself, and a
-sign-in renewal no longer holds your changes; 0.6.74 and 0.6.75 start using Switchboard on two
-computers (an account used on another one, settings that move without a password); 0.6.65 and
-0.6.66 tie groups to organizations and link them to PassionCode.ai. Release notes for each version are in
+(its number is on that page; installed copies update themselves). Recent changes: 0.6.81 no longer
+makes everything wait while one account's sign-in is read slowly from the vault; 0.6.80 shows
+which organization a session works for; 0.6.79 keeps a sign-in that was being renewed when you
+quit or Switchboard updated. Release notes for each version are in
 [CHANGELOG.md](CHANGELOG.md).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,
@@ -164,21 +164,31 @@ demo has no real accounts, no CLI launch and no network calls to providers.
 
 ## Using it
 
-1. **Add account**: official sign-in in a separate profile, an API key, a Claude setup
+1. **+ Add account**: official sign-in in a separate profile, an API key, a Claude setup
    token, or explicitly imported OAuth JSON. Switchboard reads the current Claude Code and Codex
    sign-in to show which saved account is in use, but never saves or switches it without you.
-2. Set a label and a pool, for example `work` or `personal`. The pool is the routing
-   boundary; accounts of different providers are not interchangeable.
-3. **Select**: choose the account for the next managed requests.
-4. **Launch…**: pick the project folder with the system folder picker and start the CLI
-   there. Cleared, the **Isolated session** box sends it through the local proxy as a managed
-   session (the pool's selected account; the app or `switchboard serve` must stay open; one
-   managed home per provider/pool). Ticked, it runs in the account's own home with a direct
-   connection to the provider, and later **Select** actions do not affect it.
+   The account Claude Code or Codex already uses is added with **Add to Switchboard** under
+   *In use now*.
+2. A new account is in the default group. To keep work and personal accounts apart, create a
+   group (**Groups** → **+ New group**) with its project folders and its accounts: sessions in
+   those folders use only the group's accounts. Accounts of different providers are not
+   interchangeable.
+3. **Switch** moves the ordinary Claude Code on this computer to the account; **Select**
+   chooses the account for the next managed requests.
+4. **Launch…** (in the account's ⋯ menu): pick the project folder with the system folder
+   picker and start the CLI there. Cleared, the **Isolated session** box sends it through the
+   local proxy as a managed session (the group's selected account; the app or
+   `switchboard serve` must stay open; one managed session home per provider and group).
+   Ticked, it runs in the account's own home with a direct connection to the provider, and
+   later **Select** actions do not affect it.
+5. **Folders** are always chosen with the system folder picker, never typed.
 6. **Check usage**: quota is checked in the background (every 3 minutes for accounts in use or
-   in a rotation pool, every 10 minutes otherwise); **Check usage** asks at once. An API key does
-   not report a reliable subscription quota; an unknown quota is never shown as zero.
-7. **Language**: the window speaks English or Russian, following the operating system;
+   in a group with automatic switching, every 10 minutes otherwise); **Check usage** asks at
+   once. An API key does not report a reliable subscription quota; an unknown quota is never
+   shown as zero.
+7. **Automatic switching** (**Turn on for Claude Code** on Accounts): when the account in use
+   nears its limit, Switchboard moves to the saved account with the most quota left.
+8. **Language**: the window speaks English or Russian, following the operating system;
    About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041--use-switchboard-in-russian)).
 
 Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can

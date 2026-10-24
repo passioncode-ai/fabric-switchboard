@@ -9,4 +9,4 @@ Keywords: no search-volume claims; use the product glossary
 Dead idioms: "ship it" -> "выпустить"; avoid literal English calls to action
 Legal differences: keep the license identifier and the same commercial-license destination
 
-Use the terminology in [the project glossary](../terminology.md) and interface wording in `src/i18n.ts`. The Russian README covers the same download, account-boundary and release-signing claims as the English introduction; linked technical reference documents may remain in English.
+Use the terminology in [the project glossary](../terminology.md) (группа, автоматическое переключение, API-ключи) and the interface wording in [src/locales/ru.ts](../../../src/locales/ru.ts); `src/i18n.ts` only chooses the language and looks entries up. README.ru.md covers the same tasks, download, account-boundary and release-signing claims as README.md and names buttons as the Russian window does; linked technical reference documents may remain in English.

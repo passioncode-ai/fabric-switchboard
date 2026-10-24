@@ -2,5 +2,14 @@ Contract: brand-contract v1
 # Brand pack
 Sources:
   ui: src/*.ts
+  locales: src/locales/*.ts
 
-Local desktop only. Marketing, store listing, robots and localization are absent from this release, so those source categories are intentionally omitted.
+A local desktop app, its CLI and MCP server. The window ships in English and Russian since 0.6.10
+(2026-10-07, SB-76; [CHANGELOG](../../CHANGELOG.md), "Switchboard in Russian"): every string it
+shows is a `t('English source')` key with a Russian entry in [src/locales/ru.ts](../../src/locales/ru.ts),
+checked by `node scripts/check-locale.mjs`. Marketing pages, store listings and robots live
+outside this repository (the product page is https://passioncode.ai/switchboard/), so those
+source categories are omitted here.
+
+Pack: [voice](voice.md), [terminology](terminology.md) (group, automatic switching, API keys),
+[facts](facts.md), [channels](channels.md), [interface strings](strings.md), [Russian](locales/ru.md).
