@@ -434,11 +434,11 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
  * again in place — same account, label and pool — so it is never announced as added.
  */
 export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
-  // D-1: the group's name or Default, never a pool id alone.
-  const group = poolName(account.pool, projects);
+  // D-1: the group by its name or the default group, never a pool id alone.
+  const where = inGroup(account.pool, projects);
   const head = account.signed_in_again
-    ? t('{label} is signed in again in {provider} · {group}.', { label: account.label, provider: providerLabel, group })
-    : t('{label} added to {provider} · {group}.', { label: account.label, provider: providerLabel, group });
+    ? t('{label} is signed in again in {provider} {where}.', { label: account.label, provider: providerLabel, where })
+    : t('{label} added to {provider} {where}.', { label: account.label, provider: providerLabel, where });
   return account.login_cleanup === 'pending'
     ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
@@ -618,7 +618,7 @@ export function sessionStateLabel(state: SessionInfo['state']): string {
   return state === 'running' ? t('Running') : state === 'starting' ? t('Starting') : state === 'ended' ? t('Ended') : t('State unknown');
 }
 export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'pool'>, projects: { pool: string; name: string }[] = []): string {
-  const mode = session.mode === 'managed' ? t('Managed · follows {group}', { group: poolName(session.pool, projects) }) : t('Isolated');
+  const mode = session.mode === 'managed' ? t('Managed · follows the selection {where}', { where: inGroup(session.pool, projects) }) : t('Isolated');
   return session.in_place ? t('{mode} · in an embedded terminal', { mode }) : t('{mode} · in Terminal', { mode });
 }
 /** SB-98: what a limit row says — a hidden limit (refused while the usage figures showed room) first. */
@@ -704,11 +704,11 @@ export function statTokens(c: StatCounts): number {
 export function statTrouble(c: StatCounts): number | null {
   return c.requests ? Math.round(((c.limited + c.failed) * 100) / c.requests) : null;
 }
-/** The trouble share as text: a few failures among many requests read as under 1%, never 0%. */
 /** VIS-23: limits and errors are an alert from 1 % of requests, measured exactly (statTrouble rounds). */
 export function statAlert(c: StatCounts): boolean {
   return c.requests > 0 && (c.limited + c.failed) * 100 >= c.requests;
 }
+/** The trouble share as text: a few failures among many requests read as under 1%, never 0%. */
 export function statTroubleText(c: StatCounts): string {
   const share = statTrouble(c);
   if (share === null) return '–';
@@ -820,10 +820,16 @@ export function nextStatSort(current: StatSort | null, column: number, isCount: 
  * inside a class is a syntax error and the whole check is silently dropped; the hyphen is escaped.
  */
 export const POOL_PATTERN = '[a-z0-9_\\-]+';
-/** D-1, D-5: a pool as a person reads it: its group's name, the default group, or the id of a group without folders. */
+/** D-1, D-5: a pool as a label: its group's name, the default group, or a group without folders, never a bare id. */
 export function poolName(pool: string, projects: { pool: string; name: string }[] = []): string {
   if (pool === 'default') return t('Default group');
-  return projects.find((p) => p.pool === pool)?.name ?? pool;
+  return projects.find((p) => p.pool === pool)?.name ?? t('Group {id} · no folders', { id: pool });
+}
+/** The same pool after "in", for sentences (Russian takes the locative: «в группе по умолчанию»). */
+export function inGroup(pool: string, projects: { pool: string; name: string }[] = []): string {
+  if (pool === 'default') return t('in the default group');
+  const name = projects.find((p) => p.pool === pool)?.name;
+  return name !== undefined ? t('in group “{name}”', { name }) : t('in group {id} (no folders)', { id: pool });
 }
 export interface PoolChoice { pool: string; name: string; group: boolean }
 /**

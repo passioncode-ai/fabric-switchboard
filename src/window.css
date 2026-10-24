@@ -4,6 +4,8 @@
  */
 /* UX-07: an action's result stays in sight wherever the control was. */
 .notice.toast { position: fixed; z-index: 45; right: var(--space-5); bottom: var(--space-5); max-width: min(560px, calc(100vw - 2 * var(--space-5))); margin: 0; box-shadow: var(--shadow-1); border: 1px solid var(--border-strong); }
+/* Unit tier H: while the tour card is open the toast sits at the top, away from the card's corner. */
+.notice.toast.beside-tour { top: var(--space-5); bottom: auto; }
 /* UX-06: the last list stays on screen under a line that says its re-read failed. */
 .notice.stale-list { margin-bottom: var(--space-3); }
 /* VIS-13: provider terms and active folder rules share one compact block. */

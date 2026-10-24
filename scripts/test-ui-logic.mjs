@@ -97,9 +97,9 @@ check(() => {
   assert.equal(logic.sessionStateLabel('starting'), 'Starting');
   assert.equal(logic.sessionStateLabel('ended'), 'Ended');
   assert.equal(logic.sessionStateLabel('unknown'), 'State unknown');
-  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows work · in Terminal');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows the selection in group work (no folders) · in Terminal');
   assert.equal(logic.sessionHow({ mode: 'isolated', in_place: true, pool: 'default' }), 'Isolated · in an embedded terminal');
-  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'alpha' }, [{ pool: 'alpha', name: 'Alpha Web' }]), 'Managed · follows Alpha Web · in Terminal', 'a group by its name (D-1)');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'alpha' }, [{ pool: 'alpha', name: 'Alpha Web' }]), 'Managed · follows the selection in group “Alpha Web” · in Terminal', 'a group by its name (D-1)');
 });
 // SB-93: the Agents panel's setup facts — registration per agent, then whether an agent has called.
 check(() => {
@@ -410,11 +410,11 @@ check(() => {
 
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
 check(() => {
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code · work.');
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code · Default group.');
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code · Alpha Web.');
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code · work.');
-  assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code · work\. Switchboard could not remove its temporary sign-in folder yet/);
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code in group work (no folders).');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code in the default group.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code in group “Alpha Web”.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code in group work (no folders).');
+  assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code in group work \(no folders\)\. Switchboard could not remove its temporary sign-in folder yet/);
 });
 
 // L10N-01…04 (fabric-workspace knowledge/localization.md): language, Russian plurals, placeholders.
@@ -447,7 +447,7 @@ check(() => {
   // L10N-04: a backend refusal is compared in English and shown in Russian.
   assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
   assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
-  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code · work\)\.$/);
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code\) в группе work \(без папок\)\.$/);
   i18n.setLocale('en');
 });
 // A backend sentence with a name in it is shown, and translated by its template (L10N-04).
@@ -736,7 +736,12 @@ check(() => {
   assert.deepEqual(logic.poolChoices([], [], 'legacy').map((c) => c.pool), ['default', 'legacy'], 'the current pool stays offered');
   assert.equal(logic.poolName('alpha', projects), 'Alpha Web');
   assert.equal(logic.poolName('default', projects), 'Default group');
-  assert.equal(logic.poolName('work', projects), 'work');
+  assert.equal(logic.poolName('work', projects), 'Group work · no folders', 'a pool with no group is never a bare id (D-5)');
+  assert.equal(logic.inGroup('default', projects), 'in the default group');
+  assert.equal(logic.inGroup('alpha', projects), 'in group “Alpha Web”');
+  assert.equal(logic.inGroup('work', projects), 'in group work (no folders)');
+  // Statistics names: a group by its name, the default pool as the default group, never "No group".
+  assert.equal(logic.poolName('default', [{ pool: 'default', name: null }].filter((g) => g.name)), 'Default group');
 });
 // VIS-12: the tour card sits beside its target, never on it, and inside the window.
 check(() => {
@@ -772,5 +777,11 @@ check(() => {
   assert.equal(logic.statAlert(c(1000, 5, 4)), false, '0.9 % is not an alert, although it rounds to 1');
   assert.equal(logic.statAlert(c(1000, 6, 4)), true);
   assert.equal(logic.statAlert(c(0, 0, 0)), false);
+});
+// Product round 1: no Russian sentence reads «группе Группа» (a label put where a locative belongs).
+check(() => {
+  const ru = readFileSync(new URL('../src/locales/ru.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(ru, /группе Группа|группы Группа|в Группа/, 'a group phrase, not a group label, after a preposition');
+  assert.doesNotMatch(ru, /в группе \{group\}|группы \{group\}/, 'sentences take {where} (inGroup), not {group}');
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

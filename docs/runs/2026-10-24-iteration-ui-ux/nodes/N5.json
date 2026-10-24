@@ -459,5 +459,203 @@
   "N2": "28 changed backend sentences read from sb-iter-n2-cli N2.json; window-facing ones (3 OpenRouter/key refusals incl. KEY_POOL_INVALID, 2 launch refusals) are verbatim in safeErrors, the old ones stay mapped so the table holds before and after merge.",
   "N3": "style.css and tokens.css untouched; new classes only in src/window.css, imported after style.css."
  },
- "commit": "32940d3", "commits": ["c4d9325", "78383bf", "d050670", "32940d3"]
+ "commit": "32940d3",
+ "commits": [
+  "c4d9325",
+  "78383bf",
+  "d050670",
+  "32940d3"
+ ],
+ "round1": {
+  "worktree": "sb-iter-n5-fix (branch iter/0.6.82-n5-fix, from the integration branch at 0a2008c)",
+  "product_tier": [
+   {
+    "id": "P-1 poolName never a bare id; Statistics use it",
+    "evidence": [
+     "src/ui-logic.ts:824",
+     "src/main.ts:1656",
+     "src/main.ts:1789",
+     "scripts/test-ui-logic.mjs:740",
+     "WebKit: pool headings and Statistics rows read 'Group work · no folders' / «Группа work · без папок»; no 'No group' on the page"
+    ]
+   },
+   {
+    "id": "P-2 group phrase after a verb (locative)",
+    "evidence": [
+     "src/ui-logic.ts:829 inGroup",
+     "scripts/test-ui-logic.mjs:781 (no «группе Группа», no «в группе {group}»)",
+     "WebKit ru Select notice: «… выбран для следующего управляемого запроса в группе personal (без папок).»"
+    ]
+   },
+   {
+    "id": "P-3 D-6 recorded; running-text «ID группы» -> «идентификатор группы»",
+    "evidence": [
+     "docs/brand/terminology.md:24",
+     "src/locales/ru.ts (only the label 'Group id' keeps «ID группы»)"
+    ]
+   },
+   {
+    "id": "P-4 terminology 'until the window copy lands' replaced",
+    "evidence": [
+     "docs/brand/terminology.md:20-22"
+    ]
+   },
+   {
+    "id": "P-5 strings.md resynced",
+    "evidence": [
+     "docs/brand/strings.md (count 1256 = check-locale)",
+     "registry check: every quoted string in 'Registry by surface' is in node scripts/check-locale.mjs --list, except native strings named with their src-tauri file (residency.rs tray, suggestions.rs notifications): 0 missing"
+    ]
+   },
+   {
+    "id": "P-6 READMEs folder rules / key per group",
+    "evidence": [
+     "README.md:25,28",
+     "README.ru.md:24,27"
+    ]
+   },
+   {
+    "id": "P-7 scenarios quotes",
+    "evidence": [
+     "docs/ux/scenarios.md SCN-055 step 4, SCN-062 errors, SCN-067 step 3 and alt paths"
+    ]
+   },
+   {
+    "id": "P-8 Add to Switchboard notice",
+    "evidence": [
+     "src/main.ts:1583 ('… added to Claude Code in the default group.')"
+    ]
+   },
+   {
+    "id": "P-9 plugin prose folder rule",
+    "evidence": [
+     "plugins/switchboard/skills/switching-accounts/SKILL.md:8,10,110,158,177",
+     "plugins/switchboard/README.md:11"
+    ]
+   }
+  ],
+  "unit_tier": [
+   {
+    "id": "A hidden id field blocks the form",
+    "evidence": [
+     "src/main.ts:1532",
+     "WebKit en/ru: add dialog invalid with 'Work' as a new id, valid after switching back to the default group; policy dialog valid after switching back"
+    ]
+   },
+   {
+    "id": "B Statistics focus",
+    "evidence": [
+     "src/main.ts:1625",
+     "WebKit: keyboard to Statistics -> activeElement page-title; range change -> stats-7; a Retry that worked falls back to page-title (code path; the demo cannot fail a statistics read)"
+    ]
+   },
+   {
+    "id": "C stale range dropped",
+    "evidence": [
+     "src/main.ts:1625"
+    ]
+   },
+   {
+    "id": "D Refresh reads stamped",
+    "evidence": [
+     "src/main.ts:214"
+    ]
+   },
+   {
+    "id": "E disabled but not removed",
+    "evidence": [
+     "src/main.ts:2334"
+    ]
+   },
+   {
+    "id": "F Kimi watch only for an unusable row; lifecycle row",
+    "evidence": [
+     "src/main.ts:1324",
+     "AGENTS.md:78"
+    ]
+   },
+   {
+    "id": "G tour scrolls only on step change; Connect heading as fallback target",
+    "evidence": [
+     "src/main.ts:66"
+    ]
+   },
+   {
+    "id": "H toast beside the tour",
+    "evidence": [
+     "src/main.ts:311",
+     "src/window.css (.notice.toast.beside-tour)"
+    ]
+   },
+   {
+    "id": "I '· default' notice and untranslated placeholder",
+    "evidence": [
+     "src/main.ts:1583",
+     "src/main.ts:1529"
+    ]
+   },
+   {
+    "id": "J small: CLI retry stamped, focus on In use now; Restore asks with Cancel focused; statAlert comment",
+    "evidence": [
+     "src/main.ts:1590",
+     "src/main.ts:1961",
+     "src/ui-logic.ts statTroubleText keeps its comment"
+    ]
+   }
+  ],
+  "checks": [
+   {
+    "cmd": "npm run build",
+    "exit": 0
+   },
+   {
+    "cmd": "node scripts/test-ui-logic.mjs",
+    "exit": 0,
+    "out": "60 cases"
+   },
+   {
+    "cmd": "node scripts/test-read-deadline.mjs",
+    "exit": 0
+   },
+   {
+    "cmd": "node scripts/check-locale.mjs",
+    "exit": 0,
+    "out": "1256 interface strings, all in Russian."
+   },
+   {
+    "cmd": "node scripts/check-error-vocabulary.mjs",
+    "exit": 0
+   },
+   {
+    "cmd": "node scripts/check-brand.mjs",
+    "exit": 0
+   },
+   {
+    "cmd": "python3 scripts/check_docs.py",
+    "exit": 0,
+    "out": "101 Markdown files, 815 relative links, 0 errors"
+   },
+   {
+    "cmd": "python3 scripts/check_plugin.py",
+    "exit": 0,
+    "out": "0 errors"
+   },
+   {
+    "cmd": "Playwright WebKit 1.64.1, 1100 px, en and ru, demo",
+    "exit": 0,
+    "out": "0 page and console errors; screenshots in /Users/sshlg/DATA/_worktrees/sb-iter-shots/n5/round1/"
+   }
+  ],
+  "not_done": [
+   {
+    "id": "strings registry check as a committed gate",
+    "reason": "run as a one-off script for this round (every registered string in --list); not added to scripts/ to keep this cycle's change small. Suggested board row."
+   }
+  ],
+  "merge_notes": "main.ts, ru.ts, window.css and scenarios.md are also edited by N6: my edits replace lines in place (Russian entries rewritten on their own lines, new ones next to related ones); no reformatting.",
+  "commits": [
+   "0ea87cd",
+   "d681d7a"
+  ]
+ }
 }
