@@ -674,9 +674,9 @@ pub struct Runtime {
     openrouter_models: Mutex<agent_settings::ModelCache>,
     /// What the project folders' Claude Code route was last synced for (SB-118).
     bindings_key: Mutex<Option<u64>>,
-    /// PRD-13: the folders with the person's own `ANTHROPIC_*` values at the last sync, so an
-    /// unchanged set is not logged again (`binding_changed`).
-    binding_user_values: Mutex<Option<Vec<String>>>,
+    /// PRD-13: the folders with the person's own `ANTHROPIC_*` values and the folders skipped at
+    /// the last sync, so unchanged sets are not logged again (`binding_changed`).
+    binding_user_values: Mutex<Option<BindingSets>>,
     /// The bindings pass and a capability rotation write the same files: one at a time, without
     /// the owner transaction (a pass over 200 folders held it up to 13 s, 2026-10-18).
     bindings_lock: tokio::sync::Mutex<()>,
@@ -2446,20 +2446,27 @@ fn canonical_near(path: &Path) -> PathBuf {
     }
     path.to_owned()
 }
-/// Whether a bindings sync is worth a `claude_binding` line (SB-155): a folder bound, removed
-/// or skipped, or the set of folders holding the person's own values changed since `last`, the
-/// set at the previous sync (PRD-13: an unchanged set logged every sync). The first sync logs a
-/// non-empty set once.
-fn binding_changed(report: &bindings::Report, last: &mut Option<Vec<String>>) -> bool {
-    let mut users = report.user_values_present.clone();
-    users.sort();
-    users.dedup();
-    let users_changed = match last.as_ref() {
-        Some(previous) => *previous != users,
-        None => !users.is_empty(),
+/// What the previous bindings sync left as it was (PRD-13): the folders holding the person's own
+/// `ANTHROPIC_*` values and the folders skipped, each sorted.
+type BindingSets = (Vec<String>, Vec<String>);
+/// Whether a bindings sync is worth a `claude_binding` line (SB-155): a folder bound or removed,
+/// or a change in the set of folders skipped or holding the person's own values since `last`,
+/// the sets at the previous sync (PRD-13: an unchanged set logged every sync; N1 round 1: the
+/// skipped set too). The first sync logs non-empty sets once.
+fn binding_changed(report: &bindings::Report, last: &mut Option<BindingSets>) -> bool {
+    let sorted = |list: &[String]| {
+        let mut list = list.to_vec();
+        list.sort();
+        list.dedup();
+        list
     };
-    *last = Some(users);
-    users_changed || report.bound + report.removed + report.skipped.len() > 0
+    let sets = (sorted(&report.user_values_present), sorted(&report.skipped));
+    let sets_changed = match last.as_ref() {
+        Some(previous) => *previous != sets,
+        None => !sets.0.is_empty() || !sets.1.is_empty(),
+    };
+    *last = Some(sets);
+    sets_changed || report.bound + report.removed > 0
 }
 /// The fields of `owner_started`: the process, the proxy's port and the owner's version (PRD-12).
 fn owner_started_fields(pid: u32, proxy_port: u16) -> [(&'static str, oplog::Field); 3] {
@@ -2699,10 +2706,11 @@ async fn execute(
         Operation::Snapshot => {
             serde_json::to_value(store.snapshot()?).map_err(|_| "Snapshot unavailable.".into())
         }
-        // PRD-12: `owner_version` names the build that answered (the client's may differ) and
-        // `online` says whether an owner runs, beside the display string `live_mode`.
+        // PRD-12: `owner_version` names the owner build that answered (the client's may differ;
+        // null offline, where no owner answered) and `online` says whether an owner runs,
+        // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": env!("CARGO_PKG_VERSION"), "online": runtime.is_some()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "online": runtime.is_some()}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -2920,7 +2928,7 @@ async fn execute(
         }
         Operation::RecoveryFinish { event, resumed } => {
             needs_owner()?;
-            recovery::finish(root, &event, resumed)?;
+            recovery::finish(root, &event, resumed, monitor::now())?;
             Ok(json!({"recorded": true}))
         }
         Operation::RecoveryHook {
@@ -5512,6 +5520,24 @@ mod owner_tests {
             ..Default::default()
         };
         assert!(binding_changed(&bound, &mut last), "a folder bound");
+        // N1 round 1 (seam tier): a folder whose settings cannot be read is skipped at every
+        // sync; the same skipped set is not a change either.
+        let skipped = |folders: &[&str]| bindings::Report {
+            skipped: folders.iter().map(|f| (*f).to_owned()).collect(),
+            ..Default::default()
+        };
+        assert!(
+            binding_changed(&skipped(&["/c"]), &mut last),
+            "first skipped"
+        );
+        assert!(
+            !binding_changed(&skipped(&["/c"]), &mut last),
+            "skipped again"
+        );
+        assert!(
+            binding_changed(&skipped(&["/c", "/d"]), &mut last),
+            "another skipped"
+        );
     }
 
     #[tokio::test]
@@ -5527,6 +5553,17 @@ mod owner_tests {
             "{status}"
         );
         assert_eq!(status["online"], true, "{status}");
+        // N1 round 1 (seam tier): without an owner no owner answered, so no owner's version is
+        // named (the CLI's own build is not the owner's).
+        let offline = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let status = execute(store, offline.path(), None, Operation::Status)
+            .await
+            .unwrap();
+        assert_eq!(status["owner_version"], Value::Null, "{status}");
+        assert_eq!(status["online"], false, "{status}");
         let started = owner_started_fields(7, 8080);
         assert!(started.iter().any(|(name, field)| *name == "version"
             && matches!(field, oplog::Field::Code(v) if *v == env!("CARGO_PKG_VERSION"))));

@@ -98,5 +98,135 @@
    "exit": 0
   }
  ],
- "commit": "a42f8d5"
+ "commit": "a42f8d5",
+ "round1": {
+  "commit": "d3d90aa",
+  "fixed": [
+   {
+    "id": "unit-1 BREAKS sign_in_required cached a failed vault read",
+    "evidence": [
+     "a_failed_vault_read_is_not_cached_and_does_not_hide_a_needed_sign_in",
+     "crates/switchboard-runtime/src/refresh.rs (sign_in_required: cache only when every read succeeded or found no account; a failed read keeps the previous answer)",
+     "crates/switchboard-core/src/lib.rs (pub const ACCOUNT_NOT_FOUND)"
+    ]
+   },
+   {
+    "id": "unit-2 RISK vault reads under the metadata lock in usage_health_generation and observe_generation",
+    "evidence": [
+     "a_quota_checks_generation_read_does_not_hold_the_metadata",
+     "a_credential_written_after_the_generation_read_is_still_seen (guards the re-read when credential_changes moved; on the old code it would deadlock rather than fail)",
+     "crates/switchboard-core/src/lib.rs (generation_read, same_generation)"
+    ]
+   },
+   {
+    "id": "unit-3 RISK literals in observe_generation",
+    "evidence": [
+     "crates/switchboard-core/src/lib.rs: VAULT_UNAVAILABLE and OBSERVATION_CREDENTIAL_CHANGED used through same_generation; no literal of either left in the file"
+    ]
+   },
+   {
+    "id": "unit-4 RISK the row just written could be pruned; finish did not prune",
+    "evidence": [
+     "the_stop_just_written_is_kept_however_the_rows_are_dated",
+     "finishing_a_stop_prunes_the_file_too",
+     "crates/switchboard-runtime/src/recovery.rs (prune keeps `written`; finish takes `now` and goes through current/keep)"
+    ]
+   },
+   {
+    "id": "seam-1 BREAKS docs promised a 1024-row bound with no eviction",
+    "evidence": [
+     "docs/CLI.md (recovery section)",
+     "docs/packets/sb-114-capacity-recovery.md",
+     "docs/CONTRACTS.md (Retention)",
+     "a_pruned_event_replayed_is_not_a_new_stop (pruned ids kept in recovery-pruned.json: register replay stores nothing, finish is a no-op, claim answers not ready)",
+     "crates/switchboard-runtime/src/uninstall.rs (recovery-pruned.json owned)",
+     "grep -nE 'never silent eviction|refuses new registrations rather than evicting|bounded at 1024 records' docs/CLI.md docs/packets/sb-114-capacity-recovery.md: exit 1, no output"
+    ]
+   },
+   {
+    "id": "seam-2 RISK renew_due and RefreshState::holder keyed on Store::changes",
+    "evidence": [
+     "a_project_save_does_not_rebuild_the_token_holders",
+     "a_project_save_does_not_reread_the_renewal_schedule",
+     "crates/switchboard-runtime/src/refresh.rs (credentials_key; holder builds its map outside its lock)",
+     "crates/switchboard-runtime/src/monitor.rs (renew_due keyed on credentials_key, reads in blocking::run)"
+    ]
+   },
+   {
+    "id": "seam-3 RISK binding_changed counted any skipped folder",
+    "evidence": [
+     "a_sync_that_changed_nothing_is_not_logged_again (extended with the skipped set)"
+    ]
+   },
+   {
+    "id": "seam-4 RISK offline status named the CLI build as owner_version",
+    "evidence": [
+     "status_and_the_start_line_name_the_owners_version (extended: offline owner_version null, online false)"
+    ]
+   },
+   {
+    "id": "D-1 wording in switchboard_project_apply answers",
+    "evidence": [
+     "rule_answers_say_group (failed on the old messages, passes now)",
+     "crates/switchboard-runtime/src/projects.rs"
+    ]
+   }
+  ],
+  "changed_sentences": [
+   {
+    "old": "The project rule is paused. Switchboard keeps its current selection and rotation.",
+    "new": "The group's rule is paused. Switchboard keeps its current selection and automatic switching."
+   },
+   {
+    "old": "The project rule has expired. Switchboard keeps its current selection and rotation.",
+    "new": "The group's rule has expired. Switchboard keeps its current selection and automatic switching."
+   },
+   {
+    "old": "No project rule for this folder. Switchboard keeps its current selection and rotation.",
+    "new": "No group rule for this folder. Switchboard keeps its current selection and automatic switching."
+   },
+   {
+    "old": "This session is isolated to one account; project rules do not change it. Launch a managed session to follow rules.",
+    "new": "This session is isolated to one account; group rules do not change it. Launch a managed session to follow rules."
+   },
+   {
+    "old": "This session routes the {pool} pool; the rule's account is in {pool2}. Launch a managed session in {pool2} to use it.",
+    "new": "This session routes group {pool}; the rule's account is in group {pool2}. Launch a managed session in group {pool2} to use it."
+   },
+   {
+    "old": "{label} already handles the next request in the {pool} pool.",
+    "new": "{label} already handles the next request in group {pool}."
+   },
+   {
+    "old": "{label} handles the next request in the {pool} pool. A response already streaming keeps its account.",
+    "new": "{label} handles the next request in group {pool}. A response already streaming keeps its account."
+   }
+  ],
+  "window_reach": "None of these sentences appears in src/ (grep of src, src-tauri/src): they reach MCP and CLI answers only, so src/formatted-errors.ts needs no change. crates/switchboard-cli/src/mcp.rs:340 ('This session routes the {session_pool} pool; that account is in {pool}...') and plugins/switchboard/skills/switching-accounts/references/tools.md:231 still carry the old wording: N2's files.",
+  "notes": [
+   "The shared target dir race recurred on almost every build (another worktree's switchboard-core overwrote this one's rlib); every run here touched crates/switchboard-core/src/lib.rs first and the doctest step needed three tries. No result above comes from a raced build."
+  ],
+  "checks": [
+   {
+    "cmd": "cargo fmt --all",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo clippy -p switchboard-core -p switchboard-runtime --all-targets --locked -- -D warnings",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo test -p switchboard-core -p switchboard-runtime --locked (unit and integration: runtime 485 passed, core storage 39 passed)",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo test -p switchboard-core -p switchboard-runtime --locked --doc",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo test -p switchboard-proxy -p switchboard-cli --locked",
+    "exit": 0
+   }
+  ]
+ }
 }
