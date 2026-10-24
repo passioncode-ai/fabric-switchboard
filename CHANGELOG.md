@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.81 (2026-10-24)
+
+- **No more waits of up to a minute while a stored sign-in is read (SB-185).** Reading one account's sign-in from the Keychain held every other read of the account list until it finished, so a slow read made the status, recovery and hand-over answers that Fabric and its dashboards ask for wait 5 to 82 seconds. Now only that read waits. A read of a second or more is written to the log as `vault_slow`.
+- **A new session joins its group again when Switchboard is busy (SB-186).** The plugin's session start hook gives up after 1.5 seconds. It used to wait behind Switchboard's background work and give up; now a session in a folder already in its group, or in no group, is answered at once.
+
 ## 0.6.80 (2026-10-24)
 
 - **A session knows which organization it works for (SB-110).** Every Claude Code and Codex session Switchboard starts now records its context: personal, or the organization whose group or account it runs on. Activity → *Sessions* shows the organization's badge beside the session, `switchboard sessions` names it after the account, and the session itself can read it as `SWITCHBOARD_CONTEXT`. Nothing about how sessions run changes; this is the first step towards a separate home per organization ([design](docs/research/session-home-per-context-2026-10-24.md)).

@@ -2,6 +2,26 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: 0.6.81, slow owner reads and the session start hook (SB-185, SB-186)
+
+- **Found.** switchboard.log on this Mac: after SB-182's cache, `recovery` still answered in 5.2
+  to 18.6 s on 0.6.79 (11:55 to 12:11 UTC) and `project_suggest` in 5.4 and 9.8 s on 0.6.80;
+  on 2026-10-24 03:20 to 03:22 `recovery`, `handovers` and `agents_overview` were slow together,
+  so one shared lock. `Store::stored_credential` held the metadata lock across the vault read,
+  and the proxy reads a credential per managed request (SB-185). The start hook's
+  `ProjectSuggest` waited for the owner transaction (SB-186).
+- **Done.** The lock covers the account lookup only; `vault_slow` logs the slowest read of 1 s
+  or more per background pass. `ProjectSuggest` answers without the transaction when it writes
+  nothing. Tests (each fails without its fix, checked by reverting it):
+  `a_slow_credential_read_does_not_hold_the_metadata`,
+  `a_session_start_in_its_groups_folder_is_answered_while_a_step_holds_the_transaction`.
+  CONTRACTS, OPERATIONS (log events, `control_slow` was missing there) and the backlog say so.
+- **Machine.** Disk at 1.4 GB free during the build; `target/debug/incremental` (2.0 GB, this
+  repository's) removed; the worktree builds into the main clone's `target`.
+- **Next task.** After a day on 0.6.81 (2026-10-25 12:30 UTC or later): read `control_slow` and
+  `vault_slow` in switchboard.log and Fabric Dashboards' daily "no answer within 10 s"; if quiet,
+  close SB-174 and SB-163, else open what `vault_slow` shows. Then SB-183 (the shell hook).
+
 ## 2026-10-24: 0.6.80, a session's context recorded (SB-110 phase 1, SB-111)
 
 - **Done.** `Snapshot::session_context` (core), `context` in `.session.json` and
