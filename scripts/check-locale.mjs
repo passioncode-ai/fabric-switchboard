@@ -83,9 +83,9 @@ for (const file of sources) {
       if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && node.left.getText(sf).startsWith('coreErrors[')) {
         const text = literal(node.right); if (text) add(text, 'src/adapter.ts coreErrors');
       }
-      if (ts.isReturnStatement(node) || ts.isConditionalExpression(node)) {
-        // The generic fallback sentence: the last string in safeError's return.
-        node.forEachChild((child) => { const text = literal(child); if (text && /^The operation could not be completed/.test(text)) add(text, 'src/adapter.ts fallback'); });
+      // The fallback sentences, one per kind of operation (UX-08).
+      if (ts.isVariableDeclaration(node) && node.name.getText(sf) === 'fallbackErrors' && node.initializer && ts.isObjectLiteralExpression(node.initializer)) {
+        for (const prop of node.initializer.properties) if (ts.isPropertyAssignment(prop)) { const text = literal(prop.initializer); if (text) add(text, 'src/adapter.ts fallbackErrors'); }
       }
     }
     ts.forEachChild(node, visit);
@@ -123,6 +123,10 @@ for (const [key, value] of Object.entries(RU)) {
   }
 }
 for (const [key] of keys) if (key.includes('\u2014')) problems.push(`em dash in an interface string: ${JSON.stringify(key)}`);
+// CPY-10 (docs/brand/strings.md, 2026-10-12): a Russian state names the process, never Switchboard as
+// «мы» or «я»: «Загрузка …», «Поиск …», «Ожидание …», not «Читаю», «Ищу», «Ищем», «Ждём», «Загружаем».
+const FIRST_PERSON = /(^|[\s«(])(Читаю|Читаем|Ищу|Ищем|Жду|Ждём|Загружаем|Загружаю|Проверяем|Проверяю|Сохраняем|Сохраняю)(?=[\s.…,»)])/;
+for (const [key, value] of Object.entries(RU)) if (keys.has(key) && FIRST_PERSON.test(String(value))) problems.push(`first person in a Russian state: ${JSON.stringify(value)}`);
 const unused = Object.keys(RU).filter((k) => !keys.has(k));
 if (LIST) for (const [key] of keys) console.log(key);
 if (MISSING) { console.log(JSON.stringify(missing, null, 1)); process.exit(0); }
