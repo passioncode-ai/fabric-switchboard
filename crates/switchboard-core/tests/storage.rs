@@ -1696,3 +1696,394 @@ fn a_slow_credential_read_does_not_hold_the_metadata() {
     let _ = store.take_slowest_read();
     assert_eq!(store.take_slowest_read(), 0);
 }
+
+/// PRD-01 (iteration 2026-10-24): `credential_changes` moves on a credential stored or removed
+/// and never on a project save, which `changes` counts too.
+#[test]
+fn only_credential_writes_move_the_credential_count() {
+    let (_root, _vault, store) = setup();
+    let start = store.credential_changes();
+    let account = add(&store, "synthetic-counted");
+    let added = store.credential_changes();
+    assert!(added > start, "a stored credential is counted");
+    let work = TempDir::new().unwrap();
+    let folder = work.path().canonicalize().unwrap();
+    let changes = store.changes();
+    store
+        .save_project(None, "Synthetic group", &[folder], &[])
+        .unwrap();
+    assert!(
+        store.changes() > changes,
+        "a project save is a backup change"
+    );
+    assert_eq!(
+        store.credential_changes(),
+        added,
+        "and not a credential write"
+    );
+    store.remove(&account.id).unwrap();
+    assert!(
+        store.credential_changes() > added,
+        "a removed credential is counted"
+    );
+}
+
+/// PRD-17 (iteration 2026-10-24): 15 quota checks in 48 h were logged `usage_check
+/// outcome=other`: a check whose answer the store refused to keep (older than what it holds,
+/// a credential renewed while it ran) carried the store's text and no code. Each refusal of
+/// `observe_credential` now has one.
+#[test]
+fn each_refusal_of_a_usage_observation_has_a_log_code() {
+    let (_root, _vault, store) = setup();
+    let credential = Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        r#"{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic-refresh","expiresAt":2000000000000}}"#,
+    )
+    .unwrap();
+    let a = store
+        .add(
+            "Synthetic".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            credential.clone(),
+        )
+        .unwrap();
+    let usage = |at: i64, percent: f64| Usage {
+        windows: vec![],
+        used_percent: percent,
+        observed_at: at,
+        resets_at: Some(at + 7200),
+        source: "claude_oauth".into(),
+    };
+    let code = |e: String| Store::usage_refusal_code(&e);
+    store
+        .observe_credential(&a.id, &credential, usage(now(), 10.0))
+        .unwrap();
+    let older = store
+        .observe_credential(&a.id, &credential, usage(now() - 60, 10.0))
+        .unwrap_err();
+    assert_eq!(code(older), Some("superseded"));
+    let invalid = store
+        .observe_credential(&a.id, &credential, usage(now(), 200.0))
+        .unwrap_err();
+    assert_eq!(code(invalid), Some("invalid_observation"));
+    let mut renewed = credential.clone();
+    renewed.access_token = "synthetic-other".into();
+    let changed = store
+        .observe_credential(&a.id, &renewed, usage(now() + 1, 10.0))
+        .unwrap_err();
+    assert_eq!(code(changed), Some("credential_changed"));
+    let gone = store
+        .observe_credential(
+            "00000000-0000-4000-8000-000000000000",
+            &credential,
+            usage(now() + 2, 10.0),
+        )
+        .unwrap_err();
+    assert_eq!(code(gone), Some("account_gone"));
+    assert_eq!(
+        Store::usage_refusal_code("Credential storage unavailable"),
+        Some("vault")
+    );
+    assert_eq!(
+        Store::usage_refusal_code("Account store unavailable"),
+        Some("store")
+    );
+    assert_eq!(Store::usage_refusal_code("anything else"), None);
+}
+
+/// N1 round 1 (unit tier): a quota check's answer and its failure are stored only if the
+/// credential the provider answered is still the stored one, and that was read from the vault
+/// under the metadata lock: every background check could stall `snapshot()` behind a slow
+/// Keychain read, as SB-185 found for `stored_credential`.
+#[test]
+fn a_quota_checks_generation_read_does_not_hold_the_metadata() {
+    for path in ["observe", "health"] {
+        let root = TempDir::new().unwrap();
+        let (reading, read_started) = std::sync::mpsc::sync_channel(1);
+        let vault = Arc::new(HeldVault {
+            inner: MemoryVault::default(),
+            hold: std::sync::Mutex::new(false),
+            released: std::sync::Condvar::new(),
+            reading,
+        });
+        let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+        let credential = Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            r#"{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic-refresh","expiresAt":2000000000000}}"#,
+        )
+        .unwrap();
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential.clone(),
+            )
+            .unwrap();
+        *vault.hold.lock().unwrap() = true;
+        while read_started.try_recv().is_ok() {}
+        let writer = {
+            let store = store.clone();
+            let id = account.id.clone();
+            let credential = credential.clone();
+            std::thread::spawn(move || {
+                let at = now();
+                if path == "observe" {
+                    store.observe_credential(
+                        &id,
+                        &credential,
+                        Usage {
+                            windows: vec![],
+                            used_percent: 10.0,
+                            observed_at: at,
+                            resets_at: Some(at + 7200),
+                            source: "claude_oauth".into(),
+                        },
+                    )
+                } else {
+                    store.usage_health_credential(&id, &credential, "failed", at, at + 600)
+                }
+            })
+        };
+        read_started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(store.snapshot().map(|s| s.accounts.len()));
+            });
+        }
+        let answered = rx.recv_timeout(std::time::Duration::from_secs(2));
+        *vault.hold.lock().unwrap() = false;
+        vault.released.notify_all();
+        assert_eq!(answered.expect(path), Ok(1), "{path}");
+        assert_eq!(writer.join().unwrap(), Ok(()), "{path}");
+    }
+}
+
+/// N1 round 1: a credential written between the check's vault read (now outside the lock) and
+/// the store's lock is still seen: the count of credential writes moved, so the store reads the
+/// credential again and refuses the answer as another credential's.
+struct RacingVault {
+    inner: MemoryVault,
+    store: std::sync::OnceLock<std::sync::Weak<Store>>,
+    replacement: std::sync::Mutex<Option<Credential>>,
+}
+impl switchboard_core::Vault for RacingVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        let read = self.inner.get(id);
+        let replacement = self.replacement.lock().unwrap().take();
+        if let Some(replacement) = replacement {
+            // Another writer replaces the credential right after this read returned.
+            self.inner.delete(id).unwrap();
+            let store = self.store.get().unwrap().upgrade().unwrap();
+            assert!(store.restore_missing_credential(id, &replacement).unwrap());
+        }
+        read
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+#[test]
+fn a_credential_written_after_the_generation_read_is_still_seen() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(RacingVault {
+        inner: MemoryVault::default(),
+        store: Default::default(),
+        replacement: Default::default(),
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    vault.store.set(Arc::downgrade(&store)).unwrap();
+    let parse = |token: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(r#"{{"claudeAiOauth":{{"accessToken":"{token}","refreshToken":"r","expiresAt":2000000000000}}}}"#),
+        )
+        .unwrap()
+    };
+    let account = store
+        .add(
+            "Synthetic".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            parse("old"),
+        )
+        .unwrap();
+    *vault.replacement.lock().unwrap() = Some(parse("new"));
+    let at = now();
+    let refused = store
+        .usage_health_credential(&account.id, &parse("old"), "failed", at, at + 600)
+        .unwrap_err();
+    assert_eq!(
+        Store::usage_refusal_code(&refused),
+        Some("credential_changed"),
+        "{refused}"
+    );
+}
+
+/// Adversarial round (PRD-01): a refused write or removal may still have changed the item and
+/// is counted; a credential a backup restores is counted.
+#[test]
+fn refused_and_restored_credential_writes_move_the_credential_count() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    let account = add(&store, "synthetic-restored");
+    // The item left the vault outside the store (a removed Keychain item).
+    vault.memory.delete(&account.id).unwrap();
+    let before = store.credential_changes();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    assert!(store
+        .restore_missing_credential(&account.id, &token("synthetic-restored"))
+        .is_err());
+    assert!(
+        store.credential_changes() > before,
+        "a refused write is counted"
+    );
+    vault.fail_put.store(false, Ordering::SeqCst);
+    let before = store.credential_changes();
+    assert!(store
+        .restore_missing_credential(&account.id, &token("synthetic-restored"))
+        .unwrap());
+    assert!(
+        store.credential_changes() > before,
+        "a restored credential is counted"
+    );
+    let before = store.credential_changes();
+    vault.fail_delete.store(true, Ordering::SeqCst);
+    assert!(store.remove(&account.id).is_err());
+    assert!(
+        store.credential_changes() > before,
+        "a refused removal is counted"
+    );
+}
+
+/// Adversarial round (PRD-01 with N1 round 1's lock-free generation read): a credential write
+/// in flight while a quota check reads its generation (the vault item not yet replaced) is seen
+/// under the lock. `credential_changes` must move after the item is written, never before: a
+/// count taken before the item changed would leave the stale read trusted.
+#[derive(Default)]
+struct PutGateVault {
+    inner: MemoryVault,
+    hold_put: std::sync::Mutex<bool>,
+    released: std::sync::Condvar,
+    in_put: AtomicBool,
+    put_entered: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    read_during_put: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+}
+impl Vault for PutGateVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        let read = self.inner.get(id);
+        if self.in_put.load(Ordering::SeqCst) {
+            if let Some(tx) = self.read_during_put.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+        read
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        let mut held = self.hold_put.lock().unwrap();
+        if *held {
+            self.in_put.store(true, Ordering::SeqCst);
+            if let Some(tx) = self.put_entered.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+            while *held {
+                held = self.released.wait(held).unwrap();
+            }
+        }
+        drop(held);
+        let result = self.inner.put(id, value);
+        self.in_put.store(false, Ordering::SeqCst);
+        result
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+#[test]
+fn a_write_in_flight_during_the_generation_read_is_still_seen() {
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(PutGateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let parse = |token: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(r#"{{"claudeAiOauth":{{"accessToken":"{token}","refreshToken":"r-{token}","expiresAt":2000000000000}}}}"#),
+        )
+        .unwrap()
+    };
+    let account = store
+        .upsert(
+            "Synthetic".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            parse("old"),
+            Some(switchboard_core::ExternalIdentity {
+                account_id: Some("synthetic-inflight".into()),
+                organization_id: None,
+                email: Some("synthetic-inflight@example.invalid".into()),
+            }),
+        )
+        .unwrap();
+    let (entered_tx, entered) = std::sync::mpsc::channel();
+    let (read_tx, read) = std::sync::mpsc::channel();
+    *vault.put_entered.lock().unwrap() = Some(entered_tx);
+    *vault.read_during_put.lock().unwrap() = Some(read_tx);
+    *vault.hold_put.lock().unwrap() = true;
+    let writer = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store.upsert(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                parse("new"),
+                Some(switchboard_core::ExternalIdentity {
+                    account_id: Some("synthetic-inflight".into()),
+                    organization_id: None,
+                    email: Some("synthetic-inflight@example.invalid".into()),
+                }),
+            )
+        })
+    };
+    entered
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the write is in flight");
+    let checker = {
+        let store = store.clone();
+        let id = account.id.clone();
+        std::thread::spawn(move || {
+            let at = now();
+            store.usage_health_credential(&id, &parse("old"), "failed", at, at + 600)
+        })
+    };
+    read.recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the check read the old item while the write was in flight");
+    *vault.hold_put.lock().unwrap() = false;
+    vault.released.notify_all();
+    let saved = writer.join().unwrap().unwrap();
+    assert_eq!(saved.id, account.id, "the same account");
+    let refused = checker.join().unwrap().unwrap_err();
+    assert_eq!(
+        Store::usage_refusal_code(&refused),
+        Some("credential_changed"),
+        "{refused}"
+    );
+}

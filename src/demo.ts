@@ -2,6 +2,7 @@ import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
+import { version } from '../package.json';
 import type { PassioncodeStatus, Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
@@ -83,8 +84,10 @@ export function createDemoAdapter(): Adapter {
   }
   const signInRequired = new Set(['demo-claude-meadow']);
   const loginItem = { available: true, enabled: true };
-  const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, checked_at: now(), error: null, needs_permission: false };
-  const analytics = { available: true, enabled: true };
+  const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false };
+  // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
+  const usage = new URLSearchParams(location.search).get('usage');
+  const analytics = { available: true, enabled: true, disclosed: usage !== 'ask' && usage !== 'sent', sent_before: usage === 'sent' };
   // SB-120: the agents a synthetic computer has.
   type CatalogAgent = { id: string; name: string; maker?: string | null; url: string; install?: string | null; binary?: string | null; mcp: { supported: boolean }; openrouter?: unknown };
   const catalogAgents = (agentCatalogData as unknown as { agents: CatalogAgent[] }).agents;
@@ -365,8 +368,8 @@ export function createDemoAdapter(): Adapter {
     // SB-79: a synthetic key; the demo keeps only its metadata, as the app does.
     async openrouterStatus() { return structuredClone(openrouter); },
     async openrouterKeyStatus(pool) { await pause(); if (!pool) return structuredClone(openrouter); const k = projectKeys.get(pool); return { service: 'openrouter' as const, saved: !!k, saved_at: k?.saved_at ?? null, model: k?.model ?? null, credit: k ? { label: 'demo', limit: 20, limit_remaining: 17.4, limit_reset: 'monthly', usage: 2.6, usage_daily: 0.41, is_free_tier: false } : null, credit_error: null }; },
-    async openrouterSave(key, model, pool) { await pause(); if (!key.startsWith('sk-or-')) throw new Error('That is not an OpenRouter key: it starts with sk-or-.'); if (pool) { if (!(state.projects ?? []).some((p) => p.pool === pool)) throw new Error('That pool is not a project. Choose a project, or none for the key every folder uses.'); projectKeys.set(pool, { saved_at: now(), model: model ?? projectKeys.get(pool)?.model ?? null }); log('agent_key', '', 'saved'); return; } Object.assign(openrouter, { saved: true, saved_at: now(), model: model ?? openrouter.model, credit: { label: 'demo', limit: 5, limit_remaining: 5, limit_reset: 'daily', usage: 0, usage_daily: 0, is_free_tier: false }, credit_error: null }); log('agent_key', '', 'saved'); },
-    async openrouterModel(model, pool) { await pause(); if (pool) { const own = projectKeys.get(pool); if (!own) throw new Error('No OpenRouter key is saved. Add one under Agents.'); own.model = model; return; } if (!openrouter.saved) throw new Error('No OpenRouter key is saved. Add one under Agents.'); openrouter.model = model; },
+    async openrouterSave(key, model, pool) { await pause(); if (!key.startsWith('sk-or-')) throw new Error('That is not an OpenRouter key: it starts with sk-or-.'); if (pool) { if (!(state.projects ?? []).some((p) => p.pool === pool)) throw new Error('That group id names no group. Choose a group, or none for the key every folder uses.'); projectKeys.set(pool, { saved_at: now(), model: model ?? projectKeys.get(pool)?.model ?? null }); log('agent_key', '', 'saved'); return; } Object.assign(openrouter, { saved: true, saved_at: now(), model: model ?? openrouter.model, credit: { label: 'demo', limit: 5, limit_remaining: 5, limit_reset: 'daily', usage: 0, usage_daily: 0, is_free_tier: false }, credit_error: null }); log('agent_key', '', 'saved'); },
+    async openrouterModel(model, pool) { await pause(); if (pool) { const own = projectKeys.get(pool); if (!own) throw new Error('No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.'); own.model = model; return; } if (!openrouter.saved) throw new Error('No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.'); openrouter.model = model; },
     async openrouterRemove(pool) { await pause(); if (pool) { projectKeys.delete(pool); log('agent_key', '', 'removed'); return; } Object.assign(openrouter, { saved: false, saved_at: null, model: null, credit: null, credit_error: null }); log('agent_key', '', 'removed'); },
     async openrouterKeys() { const keys = [...(openrouter.saved ? [{ pool: null, project: null, saved_at: openrouter.saved_at ?? now(), model: openrouter.model }] : []), ...[...projectKeys].map(([pool, k]) => ({ pool, project: (state.projects ?? []).find((p) => p.pool === pool)?.name ?? null, saved_at: k.saved_at, model: k.model }))]; return { service: 'openrouter' as const, keys, projects: (state.projects ?? []).map((p) => ({ pool: p.pool, name: p.name, own: projectKeys.has(p.pool) })) }; },
     // SB-80: a synthetic Hermes configuration; changes stay in the demo.
@@ -392,7 +395,7 @@ export function createDemoAdapter(): Adapter {
     async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },
     async checkForUpdates() { await pause(); update.checked_at = now(); return { ...update }; },
     async analytics() { return { ...analytics }; },
-    async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; return { ...analytics }; },
+    async setAnalytics(enabled, question) { await pause(); if (!(enabled && question !== undefined && question !== analytics.enabled)) analytics.enabled = enabled; analytics.disclosed = true; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
     async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage', id, 'observed'); return structuredClone(usage); },

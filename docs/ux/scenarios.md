@@ -29,7 +29,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-019 | Import Claude Swap profiles | validated |
 | SCN-020 | Distinguish native identity and managed selection | validated |
 | SCN-021 | Inspect quota windows and failed checks | validated |
-| SCN-022 | Configure and stop automatic rotation | validated |
+| SCN-022 | Configure and stop automatic switching | validated |
 | SCN-023 | Recognize Switchboard across desktop surfaces | validated |
 | SCN-024 | Open the app and recover a delayed startup | validated |
 | SCN-025 | Keep an optional project rule in sight | draft |
@@ -80,13 +80,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-070 | Keep a group's work on its organization's accounts | draft |
 | SCN-071 | Keep organizations current from PassionCode.ai | draft |
 | SCN-072 | Keep an account signed in on another machine out of this one | draft |
+| SCN-073 | Answer the usage question before anything is sent | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Open the app → An empty account list explains how to add an account.
+1. Open the app → An empty account list explains how to add an account, and is the page's one primary action: the header carries no second *+ Add account* (0.6.82, UX-01). When a CLI is signed in to an account Switchboard has not saved, the text points at *Add to Switchboard* in In use now; when neither CLI is signed in, it says so and points at *+ Add account* (UX-18).
 **Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** An empty account list explains how to add an account.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
@@ -104,7 +105,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Choose provider and kind, enter label, pool and secret; submit → One account appears; secret field is cleared.
+1. Choose provider and kind, enter label, choose the group (Default first, then each group by name, then any other group as “Group {id} · no folders” (D-5); *New id…* opens a *Group id* field for an id of lowercase letters, numbers, hyphens or underscores, checked in the field, also in WebKit) and enter the secret; submit → One account appears; secret field is cleared (0.6.82, UX-17, VIS-03).
 **Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** One account appears; secret field is cleared.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
@@ -250,12 +251,12 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Choose Remove, inspect confirmation, confirm → Unselected account and its vault entry are removed.
+1. Choose Remove, inspect confirmation, confirm → the account and its vault entry are removed. A selected account offers *Disable and remove* instead: the dialog says that disabling clears its selection and that managed requests in its group fail until another account is selected (0.6.82, UX-29).
 **Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
-**Expected result:** Unselected account and its vault entry are removed.
+**Expected result:** The account and its vault entry are removed; a selected one is disabled first, which clears its selection.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
 **States covered:** loading, empty, error, success
-**Errors & recovery:** Selected account refuses deletion; cancellation changes nothing.
+**Errors & recovery:** A refusal stays in the dialog; cancellation changes nothing.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
 **Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
@@ -268,7 +269,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
 **Entry point:** SCR-01 Accounts or SCR-02 Activity
 **Steps:**
-1. Open Activity → Bounded journal shows account IDs and operation outcomes without tokens or prompts.
+1. Open Activity → Bounded journal shows account IDs and operation outcomes without tokens or prompts. Every word the core records has a name in both languages (a test reads `event_valid`); a word this window does not know yet reads “Other event ({code})”, translated, never bare (0.6.82, UX-26).
 **Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.”
 **Expected result:** Bounded journal shows account IDs and operation outcomes without tokens or prompts.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
@@ -307,6 +308,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Navigate with keyboard, open/cancel dialog; resize window → Focus visible and restored; actions remain available.
 2. Leave focus anywhere (navigation, heading, Retry, Stop, a quota disclosure) while the 60-second background refresh runs → focus stays on the same control; when nothing changed the page is not re-rendered at all (0.4, B-15).
 3. From + Add account choose Import from Claude Swap → it runs with no dialog (since 0.5) and focus returns to + Add account; each dialog that does open has its own title and description ids (0.4, B-16).
+4. Open a dialog from a ⋯ menu (Launch, Move, Rename, Remove, Organization) and close it → focus returns to that row's ⋯ (0.6.82, UX-05). A dialog with a text field opens on its first field (*Group name*), not on *Cancel* (VIS-15). A destructive item in a ⋯ menu sits under a separator (VIS-27).
+5. While an action runs (a Switch waiting for Claude Code's lock, a restore), navigation, Refresh and view controls (sorting, filters, quota disclosures, the tour) stay usable; only controls that change something wait (UX-24). A Refresh pressed meanwhile never puts back a list from before the action.
+6. An action's result appears as a notice fixed at the bottom of the window, in sight wherever the control was (UX-07); it is still announced to screen readers.
 **Alt paths:** Cancel a local edit → return without mutation. Cancelling an official sign-in ends its Terminal session the way closing its window would, then cleans the staged profile (SB-83); a Terminal that has not started the sign-in yet reads “The sign-in is still opening in Terminal. Cancel again in a moment.” A background refresh that started before a Select, Edit, Remove or other change never overwrites the result of that change (0.4, B-05).
 **Expected result:** Focus visible and restored; actions remain available; the shown selection is the latest one the user made.
 **UI elements:** navigation, account list, labelled actions, dialog, status/error message.
@@ -462,15 +466,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-022 — Configure and stop automatic rotation
+## SCN-022 — Configure and stop automatic switching
 **Persona:** P-01
 **Goal:** Persist an explicit quota policy for one provider, pool and target.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
 **Entry point:** SCR-01 Accounts
 **Steps:**
 1. With two or more switchable Claude accounts and no native policy on, the Automatic switching bar offers Turn on for Claude Code → one click enables the `claude_cli` policy for the pool holding most of them with the defaults below, and the bar reads “Automatic switching is on” with the latest decision (0.5). Stop turns it off in one click.
-2. For other boundaries, the ⚙ menu → New policy… or Edit … → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, pool and managed/native Claude target; enable and save → the saved policy is shown.
-**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop (Stop {pool} when several pools switch) → the saved policy is disabled in one action. Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and native rotation holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
+2. For other groups, the ⚙ menu → *New automatic switching…* or *Edit {provider} in {group} ({target})…* → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, group (by name, as in SCN-002) and managed/native Claude target; enable and *Save* → the bar names each setting as “{provider} · {group} · {target}”, a group by its name and the default pool as “Default group”, never a bare pool id (0.6.82, D-1, CPY-07).
+**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop (*Stop in {group}* when several groups switch) → the saved policy is disabled in one action: “Automatic switching stopped for {provider} in {group}.” Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and automatic switching of Claude Code holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
 **Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
 **UI elements:** Automatic switching bar, Turn on / Stop, ⚙ settings menu, policy dialog with numeric fields, enabled checkbox and target selector, latest decision.
 **States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
@@ -511,7 +515,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Switchboard → account metadata and runtime status load; native CLI identity loads independently.
 2. If a metadata read stops responding → loading ends with an actionable error and Retry.
-**Alt paths:** A delayed current-account read leaves the main account list usable and reports identity unavailable. Mutation completion is never inferred from a timeout.
+**Alt paths:** A delayed or failed current-account read leaves the main account list usable; In use now reads “Could not read the sign-in” with *Retry*, which reads the CLIs again (0.6.82, UX-04: before, a read that timed out read “Reading…” for good). Mutation completion is never inferred from a timeout.
 **Expected result:** No indefinite startup spinner. A package smoke check requires frontend render and native round trips from the built executable.
 **UI elements:** loading state, account list, current identity, Retry.
 **States covered:** loading, empty, ready, unavailable, retry
@@ -522,19 +526,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-025 — Keep an optional project rule in sight
+## SCN-025 — Keep an optional folder rule in sight
 **Persona:** P-01
 **Goal:** Start one project on a chosen account without forgetting that the rule exists.
 **Preconditions:** At least one enabled account; rules are off unless saved (PLAN-0.4 D-2).
-**Entry point:** SCR-01 Accounts → strip “N project rules are active” → Projects; or Projects in navigation.
+**Entry point:** SCR-01 Accounts → the notices block “N folder rules are active” → *Review rules*, which opens Groups with focus on the *Folder rules* heading (0.6.82, UX-14); or Groups in navigation.
 **Steps:**
-1. Open Projects → without rules, an empty state explains that selection and rotation apply everywhere.
+1. Open Groups → *Folder rules* → without rules, an empty state explains that selection and automatic switching apply everywhere.
 2. Add rule → folder, account, target (managed sessions, or the Claude Code login for Claude OAuth profiles only), expiry (default 8 hours).
-3. Return to Accounts → the strip names each active rule, its account and expiry; navigation shows the count.
-4. Pause, Resume (asks for a new expiry), Edit or Remove a rule on Projects.
+3. Return to Accounts → the notices block (shared with the provider terms, VIS-13) names each active rule, its account and expiry; navigation shows the count.
+4. Pause, Resume (asks for a new expiry), Edit or Remove a rule on Groups.
 **Alt paths:** An expired or paused rule stays listed with its state and never applies; removing an account removes its rules.
-**Expected result:** A rule applies only when an agent or `switchboard project apply` asks, only to that session, and never turns rotation off.
-**UI elements:** rules strip, nav count, rule cards, rule dialog.
+**Expected result:** A rule applies only when an agent or `switchboard project apply` asks, only to that session, and never turns automatic switching off.
+**UI elements:** notices block, nav count, rule cards, rule dialog.
 **States covered:** empty, active, paused, expired, error.
 **Errors & recovery:** Relative or missing folders, past expiry and ineligible targets are refused with the backend's fixed messages.
 **Status:** draft
@@ -626,10 +630,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** About → Backups; CLI `switchboard backup`.
 **Steps:**
 1. Use Switchboard as usual → an encrypted backup appears in `~/Library/Application Support/Fabric Switchboard Backups` after changes and daily; About lists the newest five.
-2. After a reinstall (or `switchboard uninstall` and a new install) → at its first start Switchboard restores the newest backup this Mac can open by itself: accounts, projects, project rules, managed selections and the open-at-login and auto-update settings come back, and the notice says “Switchboard found your backup from {date} and restored it: …”. An empty account list with a backup beside it also offers Restore from backup; About → Backups → Restore restores any listed backup.
+2. After a reinstall (or `switchboard uninstall` and a new install) → at its first start Switchboard restores the newest backup this Mac can open by itself: accounts, projects, project rules, managed selections and the open-at-login and auto-update settings come back, and the notice says “Switchboard found your backup from {date} and restored it: …”. An empty account list with a backup beside it also offers Restore from backup; About → Backups → *Restore…* asks first: “Restore the backup from {date}?”, how many accounts it holds, and that accounts, groups, rules and settings in it come back, including any removed since; *Restore* in that dialog restores it (0.6.82, UX-22).
 **Alt paths:** Back up now writes one at once. A backup from another Mac or after the Keychain was erased reads “This backup was made with another key and cannot be opened on this machine.” A restored account whose sign-in has since rotated shows Sign in again.
 **Expected result:** Accounts, projects, rules, selections and settings are back; nothing newer and no choice made on this install is overwritten; policies return switched off. A person who removed their accounts keeps them removed: only a new data folder restores on its own.
-**UI elements:** Backups panel (folder, limit note, list, Restore, Back up now), notice.
+**UI elements:** Backups panel (folder, limit note, list, *Restore…* with its confirmation, Back up now), notice.
 **States covered:** no backups, list, last automatic backup failed, restored, foreign key.
 **Errors & recovery:** every refusal is a fixed sentence naming the next step.
 **Status:** draft
@@ -701,20 +705,20 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-28, LC-09
 
-## SCN-034 — Keep a project on its own accounts
+## SCN-034 — Keep a group on its own accounts
 **Persona:** P-01
 **Goal:** Attach accounts to a project — one or more related repositories — so that only sessions from those folders use them, and agents in other projects never switch to them.
 **Preconditions:** saved accounts; the project's folders exist on this computer.
-**Entry point:** Projects → + New project.
+**Entry point:** Groups → + New group (the empty state's *+ New group* while there is none, VIS-21).
 **Steps:**
-1. + New project → name, folders (each added with *Add folder…*, the system picker; removable with ×), check the accounts → Create project → “Project “{name}” created. Launch its accounts from its folders.” The accounts move into the project's pool; the Accounts page groups them under “Project · {name}”, and their button is Select, not Switch.
-2. Launch one of them (isolated or managed) from any of its folders or subfolders → the session starts; managed rotation moves only among the project's accounts.
-3. From a folder outside the project → refused: “This account belongs to a project. Launch it from one of the project's folders.”
-4. Inside the project's folders, an account of another pool for a provider the project has → refused: “This folder belongs to a project. Launch one of the project's accounts.”
-5. Edit → add a folder (*Add folder…*), change one (*Change…* opens the system picker at it; the new folder takes its place) or remove one (×) — every folder is chosen with the system picker, never typed (SB-131) — and change accounts; an account left out goes back to the default pool. A card with more than six folders shows the first six and *Show all {n} folders*. Delete → the accounts stay in their pool, no longer reserved.
+1. + New group → focus on *Group name*; folders start empty (0.6.82, UX-23: a folder picked for something else is not offered), each added with *Add folder…*, the system picker, removable with ×; check the accounts → *Create group* → “Group “{name}” created. Launch its accounts from its folders.” The accounts move into the group; the Accounts page lists them under “Group · {name}”, and their button is Select, not Switch. The account list in the dialog scrolls with the dialog, not on its own (VIS-15).
+2. Launch one of them (isolated or managed) from any of its folders or subfolders → the session starts; managed automatic switching moves only among the project's accounts.
+3. From a folder outside the group → refused: “This account belongs to a group. Launch it from one of the group's folders.”
+4. Inside the group's folders, an account outside it for a provider the group has → refused: “This folder belongs to a group. Launch one of the group's accounts.”
+5. Edit → add a folder (*Add folder…*), change one (*Change…* opens the system picker at it; the new folder takes its place) or remove one (×); every folder is chosen with the system picker, never typed (SB-131); and change accounts; an account left out goes back to Default. A card with more than six repositories shows the first six and *Show all repositories ({n})*. Delete → the accounts stay saved, no longer reserved for it. The *Folders* help says what joins by itself: worktrees and clones of the group's repositories; any other repository is added here or from *Repositories on disk* (0.6.82, UX-09; SB-171 removed joining by work).
 **Alt paths:** The account the ordinary Claude Code or Codex is signed in to cannot join (“…Switch the CLI to another account first…”). A folder already in another project is refused. Switching the ordinary Claude Code to a project account, a native rule or native rotation on a project pool are refused: the ordinary Claude Code serves every folder. A provider the project has no account for keeps using the other accounts in its folders.
-**Expected result:** a project's accounts serve only its folders; other projects' sessions, rotation and switches never reach them.
-**UI elements:** Projects section, project dialog, project cards, “Project · {name}” pool heading.
+**Expected result:** a group's accounts serve only its folders; other groups' sessions, automatic switching and switches never reach them.
+**UI elements:** Groups section, group dialog, group cards, “Group · {name}” heading on Accounts; a pool that holds accounts but no folders reads “Group {id} · no folders”, the default pool “Default group” (D-5).
 **States covered:** none, created, edited, deleted, refused (CLI account, overlapping folder, outside folder, foreign account inside).
 **Errors & recovery:** every refusal names what to change; nothing moves on a refusal.
 **Status:** draft
@@ -732,10 +736,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. “Welcome to Switchboard” — what it is for.
 2. “Add your accounts” — + Add account is outlined.
 3. “Switch, by hand or automatically” — the automatic switching bar is outlined.
-4. “Give a project its own accounts” — Projects opens, + New project is outlined.
-5. “Agents, and it keeps running” — Agents opens with *Copy* beside the prompt for a coding agent outlined (SB-93: the agent sets Switchboard up, SCN-050); the menu-bar icon is named. Start using Switchboard ends it.
-**Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never.
-**Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains.
+4. “Give a group its own accounts”: Groups opens, + New group is outlined (the empty state's one while there is no group).
+5. “Agents, and it keeps running”: Agents opens with *Copy* beside the prompt for a coding agent outlined (SB-93: the agent sets Switchboard up, SCN-050); the menu-bar icon is named. When the prompt is not on the page yet (setup still reading or failed), the *Connect an agent* panel is outlined instead (0.6.82, UX-30). Start using Switchboard ends it.
+**Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never. While the usage question is open (SCN-073), or its status is still being read, the tour waits and starts once it is answered; Escape does not end a tour that is not on screen (issue #128).
+**Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains: the card sits below, above or beside its target, never on it, and the target is scrolled into sight first, also when it appears only after its page has read (Agents) or lies off screen, never otherwise on a background refresh; a result line moves aside only while the tour is on screen (0.6.82, VIS-12; checked at 740 and 1100 px).
 **UI elements:** tour card (non-modal), outlined target, step dots.
 **States covered:** first start, each step, skipped, finished, shown again.
 **Errors & recovery:** none; storage failure only means the tour shows again.
@@ -871,19 +875,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-76, SB-66, RM-25 (fabric-workspace roadmap), L10N-01…06
 
-## SCN-042 — Delete a project or remove a rule only after confirming
+## SCN-042 — Delete a group or remove a rule only after confirming
 
 **Persona:** P-01
 **Goal:** Never lose a project or a project rule to a stray click.
-**Preconditions:** at least one project or rule (Projects screen).
-**Entry point:** Projects → a project's *Delete*, or a rule's *Remove*.
+**Preconditions:** at least one group or rule (Groups screen).
+**Entry point:** Groups → a group's *Delete*, or a rule's *Remove*.
 **Steps:**
-1. Press *Delete* on a project → a dialog “Delete project?” says what happens: “Delete “{name}”. Its accounts stay in the pool {pool}, no longer reserved; sessions in its folders use the usual selection again.”, with *Cancel* (focused) and *Delete project*.
-2. Press *Delete project* → the project goes; notice “Project “{name}” deleted. Its accounts stay in the pool {pool}, no longer reserved.”
+1. Press *Delete* on a group → a dialog “Delete group?” says what happens: “Delete “{name}”. Its accounts stay saved and are no longer reserved for it; sessions in its folders use the usual selection again.”, with *Cancel* (focused) and *Delete group*.
+2. Press *Delete group* → the group goes; notice “Group “{name}” deleted. Its accounts stay saved and are no longer reserved for it.” (0.6.82, D-1: no pool id in the sentence.)
 3. Press *Remove* on a rule → “Remove rule?”: “Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.”, with *Cancel* (focused) and *Remove rule* → “Rule removed.”
 **Alt paths:** *Cancel* or Escape closes the dialog and changes nothing; a refusal from the backend stays in the dialog with its text, the dialog open.
-**Expected result:** a project or rule disappears only after the second, explicit press; *Pause* stays the one-step reversible choice for a rule.
-**UI elements:** dialogs “Delete project?” / “Remove rule?”, buttons *Delete project*, *Remove rule* (danger), *Cancel*.
+**Expected result:** a group or rule disappears only after the second, explicit press; *Pause* stays the one-step reversible choice for a rule.
+**UI elements:** dialogs “Delete group?” / “Remove rule?”, buttons *Delete group*, *Remove rule* (danger), *Cancel*.
 **States covered:** asking, cancelled, deleted / removed, refused (error in the dialog).
 **Errors & recovery:** the dialog keeps the error and the person can retry or cancel.
 **Status:** draft
@@ -899,14 +903,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the native app's reads fail or time out (the owner restarting, a store error).
 **Entry point:** any screen.
 **Steps:**
-1. A screen's read fails → an error state titled for that screen — “Unable to load accounts”, “Unable to load projects” or “Unable to load activity” — with the reason and *Retry*.
-2. An action succeeds but the list cannot be re-read → the action's notice stays, and “The action completed, but the list could not be refreshed. Retry loading accounts.” (or “…accounts could not be refreshed. Retry loading the account list.”) explains that nothing was undone.
+1. A screen's first read fails → an error state titled for that screen: “Unable to load accounts”, “Unable to load groups”, “Unable to load organizations” or “Unable to load activity”, with the reason and *Retry*.
+2. An action succeeds but the list cannot be re-read → the action's notice stays, the last list stays on screen, and a line above it says “The action completed, but the list could not be refreshed. Retry loading accounts.” with *Retry* (0.6.82, UX-06: before, the page was replaced by “Unable to load accounts”). A later Refresh that fails keeps the last list the same way.
+2a. A refusal the window has no sentence for names the kind of operation and its next step: a change (“Switchboard could not finish this change. Try again; if it fails again, restart Switchboard.”), a read (“…Press Refresh to try again…”), a launch (“The session did not start. Launch it again…”) or a sign-in (UX-08). `scripts/check-error-vocabulary.mjs` keeps every backend sentence in the vocabulary, so this is the rare path.
 3. A sign-in's *Finish* fails → the sign-in banner keeps the error and waits for *Retry* instead of repeating on every tick; when the owner forgot the sign-in, the banner offers *Try again*, which starts over only after the old sign-in was cancelled (SB-67).
 4. The interface is opened in an ordinary browser (not the app, not the demo) → “Open the native app”: this window has no access to accounts.
 **Alt paths:** a native app that does not answer within the read deadline reads “The native app did not respond. Close and reopen Switchboard, then retry.”
 **Expected result:** every failure names its screen and its next step; no failure shows as an empty account list.
 **UI elements:** error states with *Retry*; the partial-success notice; the sign-in banner's *Retry* / *Try again*; the plain-browser page.
-**States covered:** read failed (accounts, projects, activity), read timed out, action done but refresh failed, finish failed, sign-in forgotten, plain browser.
+**States covered:** read failed (accounts, groups, organizations, activity), list kept after a failed re-read, read timed out, action done but refresh failed, finish failed, sign-in forgotten, plain browser.
 **Errors & recovery:** *Retry* re-reads; nothing is repeated automatically under the owner's lock.
 **Status:** draft
 **Meaning:** UX audit 2026-10-06 (SB-69): an activity read failure was titled “Unable to load accounts”; these states had no scenario.
@@ -921,25 +926,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the installed app (only release builds carry the analytics key).
 **Entry point:** About → *Usage analytics*.
 **Steps:**
-1. Read what is sent: counts of installs, days of use and saved accounts by provider and type — never names, e-mail addresses, sign-ins or pool names (docs/ANALYTICS.md).
+1. Read what is sent: counts of installs, days of use and saved accounts by provider and type; never names, e-mail addresses, sign-ins or group names (docs/ANALYTICS.md).
 2. Uncheck *Share anonymous usage counts* → “Anonymous usage analytics are off for every PassionCode.ai tool on this computer.”; check it → “Anonymous usage analytics are on.”
-**Alt paths:** a development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
-**Expected result:** one switch, shared by every PassionCode.ai tool on the machine, and the person sees its state.
-**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to every PassionCode.ai tool on this computer.”
-**States covered:** on, off, unavailable (build), reading, read failed, save failed.
+**Alt paths:** not answered yet (issue #128, SCN-073): the panel says the same as the first-run question (“Nothing has been sent yet. Nothing is sent until you answer.”, or for an upgraded install “An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.”), the switch changes only the choice, and *Continue* answers it with the success line of step 2; afterwards the switch applies at once. Unanswered while another PassionCode.ai tool already turned the shared switch off: no question, the plain switch shows off, and checking it turns counting on for every tool, answers the question and reads “Anonymous usage analytics are on.” (round 2; the line always says what is now true). A development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
+**Expected result:** one switch, shared by every PassionCode.ai tool on the machine, and the person sees its state; nothing is sent before the person has answered it once, here or in the first-run question.
+**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to every PassionCode.ai tool on this computer.”; while unanswered, the line on what was sent and *Continue*.
+**States covered:** unanswered, unanswered with the shared switch already off, on, off, unavailable (build), reading, read failed, save failed.
 **Errors & recovery:** a failed save keeps the old state and can be retried.
 **Status:** draft
 **Meaning:** a privacy control without a scenario (UX audit 2026-10-06, SB-69).
-**Coverage:** docs/ANALYTICS.md and its planted-identifier test; src/main.ts `analyticsPanel`.
+**Coverage:** docs/ANALYTICS.md and its planted-identifier test; the issue #128 tests in `crates/switchboard-runtime/src/analytics.rs` (`about_turns_the_switch_on_when_another_app_turned_it_off_before_any_answer`); src/main.ts `analyticsPanel`; `scripts/test-ui-logic.mjs` (the About panel asks while unanswered; its notice goes through `usageAnswerText`).
 **Product:** unobserved
-**Traces:** SB-69
+**Traces:** SB-69, SCN-073
 
 ## SCN-045 — Save one OpenRouter key for agents
 
 **Persona:** P-01
 **Goal:** Keep one OpenRouter key that agents launched by Switchboard run on, and see what it may still spend — without the key ever appearing in a file, a command line or a log.
 **Preconditions:** an OpenRouter key (starts `sk-or-`); the app, the CLI or an MCP client.
-**Entry point:** Tokens → *Machine key · OpenRouter* (moved from Agents in 0.6.48; Agents links to it) · `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
+**Entry point:** API keys (called Tokens until 0.6.82, D-2) → *Machine key · OpenRouter* (moved from Agents in 0.6.48; Agents links to it with *Open API keys*) · `switchboard agents openrouter set --key-stdin` (the key on stdin, never an argument) · MCP `switchboard_openrouter_status`.
 **Steps:**
 1. Save the key with a default model: `switchboard agents openrouter set --key-stdin --model moonshotai/kimi-k2 < key.txt` (the key is piped on stdin, never an argument; interactive input is refused) → “OpenRouter key saved · model moonshotai/kimi-k2”, and the remaining credit OpenRouter reports.
 2. Ask the status later: `switchboard agents openrouter status` (or the MCP tool) → saved date, default model, `limit_remaining` and `usage_daily` from OpenRouter itself; never the key.
@@ -947,7 +952,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 4. Remove the key: `switchboard agents openrouter remove` → the metadata goes first, then the vault item.
 **Alt paths:** a malformed key (“That is not an OpenRouter key: it starts with sk-or-.”) or model id is refused before anything is written; a key OpenRouter refuses is named as such and stays saved, its balance marked with the refusal; an unreachable OpenRouter leaves the key saved with “its balance shows when OpenRouter answers”; a failed save leaves nothing behind — no metadata row, no vault item; after reinstalling Switchboard an encrypted backup puts the key back with its model (SCN-030).
 **Expected result:** the key's value exists only in the OS vault; metadata names the service, the saved time and the model; the journal records `agent_key saved|removed`; the value leaves the vault only into a launched agent's environment (`switchboard agents key --service openrouter`, CLI only).
-**UI elements:** the *Machine key · OpenRouter* panel on Tokens — before a key: *No key is saved.* and *Add OpenRouter key*; after: the default model, the balance line (“$3.25 of $5.00 left, resets daily · spent today $1.75”, or the refusal), *Change model*, *Replace key*, *Remove key* (asks first); the key field is a password field cleared on submit and never filled again. The journal names the action “Agent key”.
+**UI elements:** the *Machine key · OpenRouter* panel on API keys. Before a key: *No key is saved.* and *Add OpenRouter key*; after: the default model, the balance line (“$3.25 of $5.00 left, resets daily · spent today $1.75”, or the refusal), *Change model*, *Replace key*, *Remove key* (asks first); the key field is a password field cleared on submit and never filled again. The journal names the action “Agent key”.
 **States covered:** reading, read failed (with *Retry*), no key saved, saved with credit, saved with no spending limit, saved with the credit refused or unreachable, invalid key, invalid model, failed save, removed.
 **Errors & recovery:** every refusal names the fix (the key shape, the model id shape, openrouter.ai/settings/keys); a refused or unreachable balance does not delete the key.
 **Status:** draft
@@ -965,7 +970,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open the agent's setup, enter the folder and, if needed, a model other than the default; choose *Launch on OpenRouter* → Terminal opens in the folder and the agent starts on that model; the notice reads “Terminal launch requested for Hermes on OpenRouter.”
 2. From the CLI: `switchboard agents launch hermes --openrouter --dir ~/src/app --model moonshotai/kimi-k2` → the same, with no running app needed.
-**Alt paths:** no key saved → the agent's setup says to save one first, the CLI answers “No OpenRouter key is saved. Add one under Agents.”; no model given and no default → “Choose a model for this launch, or set the default model…”; a malformed model id → the model refusal; Crush → its setup says it picks the model in its own interface, and it starts with the key only; OpenClaw and Cline → no OpenRouter section, the CLI refuses (“This agent cannot launch on the OpenRouter key…”); the agent not installed → “Hermes is not installed. Install it first, then launch it again.”; a relative folder → the absolute-folder hint; the session cannot read the key when it starts (removed meanwhile, vault locked) → the Terminal prints “Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.” and the agent does not start.
+**Alt paths:** no key saved → the agent's setup says “Save an OpenRouter key under API keys first; then {agent} launches on it.” with *Open API keys*, which closes the dialog and opens that page (0.6.82, UX-12); the CLI answers “No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.”; no model given and no default → “Choose a model for this launch, or set the key's default model on the API keys page or with switchboard agents openrouter model.”; a malformed model id → the model refusal; Crush → its setup says it picks the model in its own interface, and it starts with the key only; OpenClaw and Cline → no OpenRouter section, the CLI refuses (“This agent cannot launch on the OpenRouter key…”); the agent not installed → “Hermes is not installed. Install it first, then launch it again.”; a relative folder → the absolute-folder hint; the session cannot read the key when it starts (removed meanwhile, vault locked) → the Terminal prints “Switchboard could not read the OpenRouter key. Check it on the API keys page, then launch again.” and the agent does not start.
 **Expected result:** the agent runs on the key and model; the key exists in the agent's process environment only — not in the session script, an argument, the agent's own config or a log; agents whose own saved login would win (Hermes, pi, omp, Qwen Code) start in their own home under Switchboard's data folder.
 **UI elements:** the folder field, *On the OpenRouter key* with *Model for this launch* (default named), the agent's caveat from the catalog. With a key saved, *Launch on OpenRouter* is the dialog's primary action (Enter) and *Launch through the proxy* the secondary one — except Kimi Code, which runs on its subscription by default (operator, 2026-10-08): there *Launch on OpenRouter* sits in the section and leaves Kimi's login and config untouched.
 **States covered:** no key, key with default model, key without default model, agent picks its own model, not installed, invalid folder, invalid model, key unreadable at start.
@@ -986,6 +991,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. *Add Kimi Code account*, optionally a label and the service, *Open sign-in* → Terminal runs `kimi login`; confirm the code in the browser signed in to that account → the dialog saves it on its own when Terminal reports success: “Kimi Code account saved.”
 2. Read the row → the label, tier and service, and “5 hours 64%, resets in 1h 10m · 7 days 31% · Month 42%”, asked of Kimi at each refresh.
 3. *Launch…* (a small row button; *Sign in again* and *Remove…* are in the row's ⋯ menu) and a folder from the system picker → Terminal starts `kimi` on that account in the folder (SB-86).
+3a. *Sign in again* (or *Sign in* on a signed-out row) → “Sign in to {label} in Terminal. The row updates when you finish.”; the window reads the Kimi accounts every 3 seconds for up to 5 minutes and updates the row with “{label} is signed in again.” as soon as Kimi reads it signed in, with no Refresh (0.6.82, UX-28).
 4. The line above the rows names the ordinary `kimi`'s sign-in and its usage; it is never changed. Its login is the slot `config.toml` names (`[providers."managed:kimi-code".oauth]` `key`, `oauth_host`), read as `kimi` 2.1 reads it — a stale `region` marker or an old kimi.com tombstone no longer reads a kimi.ai login as signed out (SB-84).
 **Alt paths:** `kimi` not installed → the section says so and offers no sign-in; the sign-in's Terminal closes without success → “This Kimi Code sign-in is no longer waiting. Start it again.” (SB-83: a closed Terminal now reads ended instead of waiting forever); *Open sign-in* is offered again after that, so a new sign-in starts from the same dialog; the account could not be saved after Terminal reported success → the error stays in the dialog and *Save the account* tries again (SB-104); Escape or *Cancel* while it waits → Switchboard ends `kimi login` in Terminal and the sign-in folder goes; a failed cancel keeps the dialog watching; Kimi refuses a saved login → the row says so and offers *Sign in again*; the login waits for Kimi to renew it → “Kimi renews this sign-in the next time it runs. Launch the account once, then refresh.”; Kimi unreachable → “Kimi did not answer. Try again in a minute.”, the account stays; *Remove* asks first and deletes the account's login folder. A session already runs on the account → *Launch*, *Sign in again* and *Remove* answer “A Kimi Code session still runs on this account. Close it in Terminal first.” (SB-99). A plan window at 100 % → the row reads “Limit reached · resets in {time}” with a red dot until that reset; a window whose reset has passed reads “reset, refresh to see it” (SB-100). Kimi answers 404, 429, an unreadable page or no figures → the row says which (SB-100); the figures carry “checked {time} ago”; a refresh that fails says so above the rows while the last figures stay; the ordinary `kimi` line reads “Not signed in. Run kimi login in Terminal.” or “Run kimi once in Terminal to renew its sign-in, then refresh.”.
 **Expected result:** each login exists only in its own folder under Switchboard's data, written and renewed only by the official `kimi`; the store keeps the label, region, nickname and tier; no token, e-mail or phone reaches the store, the window, a backup or a log.
@@ -1055,7 +1061,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 7. The agent re-reads the status after every step and, when it is complete, tells the person what is set up.
 **Alt paths:** the agent is not recognised → `mcp` asks for `--host claude|codex`; no data folder yet → no accounts and no project, and nothing is created by reading; a relative `--folder` is refused.
 **Expected result:** a person who never opened the tour has accounts, the MCP server and a proved call, having done only the sign-in and the app start themselves.
-**UI elements:** the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`; in the window, Agents → *Connect an agent* → *Set up with your coding agent*: the prompt (“Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.”) with *Copy*, then one line per agent — “Claude Code: Switchboard tools registered.” / “… not registered.”, the same for Codex CLI — and “An agent has called Switchboard: {client}.” or “No agent has called Switchboard yet.”; *Or register the tools yourself* keeps the commands. The tour's last step outlines the prompt's *Copy* (SCN-035).
+**UI elements:** the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`; in the window, Agents → *Connect an agent* → *Set up with your coding agent*: the prompt (“Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.”) with *Copy*, then one line per agent; “Claude Code: Switchboard tools registered.” / “… not registered.”, the same for Codex CLI; and “An agent has called Switchboard: {client}.” or “No agent has called Switchboard yet.”; *Or register the tools yourself* keeps the commands. The tour's last step outlines the prompt's *Copy* (SCN-035). Every *Copy* reads *Copied* for two seconds after it copied, beside the screen-reader announcement (0.6.82, UX-19).
 **States covered:** fresh machine, partly set up, complete, unknown agent, server registered but not yet loaded.
 **Errors & recovery:** every step is read again on each run; a half-written agent config reads as not registered and is right on the next run.
 **Status:** draft
@@ -1153,10 +1159,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. A coding agent opens a Git repository in no group → nothing is created: it stays in the default group and is listed under Repositories on disk (SB-146; REQ-002 used to make a group of its own for it, which scattered repositories that belonged together).
 2. An agent creates a worktree of an existing project repository, clones one of its repositories again, or clones a new repository of the project's source; or a Claude Code session starts in such a folder → within one background pass (30 s), or at once from the session's hook, Switchboard adds the folder to that existing project (SB-121); its accounts serve it from the next session.
 3. An agent working in a group's folder changes another repository → nothing happens: that repository stays where it is, in no group or in its own groups (SB-171, operator 2026-10-22: a folder never moves into a group by itself; SB-131's "joins by work", 0.6.34 to 0.6.67, is gone).
-4. One system notification per addition: “Folder added to a project — {folder} is now part of {project}.” (several at once: “{n} folders added ({projects}).”). Nothing is asked: no question, no banner, no tray count.
+4. One system notification per addition, titled “Folder added to a group”, saying “{folder} is now part of {project}.” (several at once: “Folders added to groups”, “{n} folders added ({groups}).”; native, src-tauri/src/suggestions.rs). Nothing is asked: no question, no banner, no tray count.
 5. A session started there by the hook gets one line in its context only when its folder joined a group; a repository in no group gets none.
 **Alt paths:** Re-entry returns `in_project` and creates nothing. The person removes a project or folder → it is never created or added back, whatever agents do there. Existing identity matches still attach; two projects matching equally is a conflict, never a guessed new project. Creation is refused by the ordinary `save_project` bounds and overlap checks. A refused existing-project add is retried every ten minutes and logs `project_suggestion add: refused`; the hook's line says it “could not be added yet; Switchboard tries again by itself”. Questions left by 0.6.30/0.6.31 are added by the first pass after the update. A folder in a temporary or cache location (`/tmp`, `$TMPDIR`, `~/.cache`, `~/Library/Caches`), a tool's own folder, the home folder, a filesystem root or a non-Git folder never joins or creates. A worktree of a project repository kept in a tool folder (`~/.codex/worktrees/…`) still joins as a worktree. A repository agents of two projects work in (an organisation wiki, a common docs repository) belongs to neither: if it joined one project by work and another project's agent then works in it, it leaves the first one, and it is never added by work again (log `worked: shared`). A folder the person added is never taken out this way. Saving an Edit dialog opened before a folder joined keeps that folder. A folder already in a project or one containing another project's folder is never added or created. Read: Claude Code sessions and their subagents; Codex sessions and sessions Switchboard launches isolated are not read yet (SB-132). For a provider with an enabled account in the project, accounts of other pools are refused there (SCN-034); a provider with no enabled project account keeps its existing launch fallback, while automatic `--provider` selection still requires the project's selected account. The CLI shows what was added (`switchboard project suggestions` → `added`).
-**Expected result:** every new folder of an existing group (worktree, clone, a repository its agents create or work in) joins that group once, by itself; a repository in no group stays in the default group, and no group is ever made for it.
+**Expected result:** every new folder of an existing group (a worktree or clone of its repositories) joins that group once, by itself; a repository its agents only work in does not (SB-171); a repository in no group stays in the default group, and no group is ever made for it.
 **UI elements:** system notification and one SessionStart context line only.
 **States covered:** unassigned left in the default group, existing attached, re-entry idempotent, removed not recreated, conflict refused, non-Git or broad folder refused, added (found, worked in), several added, added then removed by the person, add refused (retried, never asked), temporary or hidden folder ignored, two projects' work, questions left by an older version.
 **Errors & recovery:** a refused existing-project add is retried every ten minutes; an unreadable suggestions file adds or creates nothing and is logged; the SessionStart hook always exits 0, and when the owner does not answer within 1.5 s it says nothing and lets the session start (the background pass adds the folder within 30 s; SB-149).
@@ -1252,7 +1258,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** Launch OpenRouter agents on a good model without hunting through hundreds of ids.
 **Preconditions:** an OpenRouter key saved, or about to be.
-**Entry point:** Agents → OpenRouter key → *Add OpenRouter key* or *Change model*; or Set up → launch on the OpenRouter key on an agent's row.
+**Entry point:** API keys → *Machine key · OpenRouter* → *Add OpenRouter key* or *Change model*, or a group's key; or Agents → Set up → launch on the OpenRouter key on an agent's row.
 **Steps:**
 1. The picker lists **Recommended models** first: MiMo V2.6 Pro, Claude Haiku 5.5, Gemini 3.8 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash, each with its maker, context and input price per 1M tokens; pressing one fills the model field.
 2. Typing in the model field suggests every OpenRouter model that can call tools (“N OpenRouter models that can call tools: type to search, or enter any id.”).
@@ -1288,38 +1294,37 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-5
 
-## SCN-062 — Move an account to another pool from its card
+## SCN-062 — Move an account to another group from its card
 **Persona:** P-01
 **Goal:** Put an account into a project's pool, or back into the default pool, without opening the project and restating its whole account set (operator 2026-10-18: «аккаунты между пулами перемещать через UI, три точки, контекстное меню, добавить в пул, выбор»; CALL-07).
 **Preconditions:** at least one saved account; projects are optional.
-**Entry point:** an account card's ⋯ menu → *Move to another pool…*.
+**Entry point:** an account card's ⋯ menu → *Move to another group…*.
 **Steps:**
-1. Open ⋯ on the card → *Move to another pool…* → a dialog lists *Default pool* first, then each project by name; the pool the account is in now is marked “(now)” and chosen.
+1. Open ⋯ on the card → *Move to another group…* → a dialog lists *Default group* first, then each group by name (a group's name in a radio label is no tab stop of its own, UX-20); the pool the account is in now is marked “(now)” and chosen.
 2. Choose another one → *Move* becomes available.
-3. *Move* → the account leaves its old pool (a project gives it up) and joins the chosen one; the notice says where: “{label} moved to project “{name}”.” or “{label} moved to the default pool.”
-**Alt paths:** the account is the one the ordinary Claude Code or Codex is signed in to → projects are shown but cannot be chosen, and the note says to switch the CLI to another account first; the default pool stays available. No projects yet → only the default pool, and a note says to create a project under Projects. An account left in a deleted project's pool has no “(now)” option; *Default pool* takes it back. The same move from an agent: `switchboard accounts move <id> --pool <pool>` or MCP `switchboard_account_move`.
+3. *Move* → the account leaves its old pool (a project gives it up) and joins the chosen one; the notice says where: “{label} moved to group “{name}”.” or “{label} moved to the default group.”
+**Alt paths:** the account is the one the ordinary Claude Code or Codex is signed in to → groups are shown but cannot be chosen, and the note says to switch the CLI to another account first; the default group stays available. No groups yet → only the default group, and a note says to create a group under Groups. An account left in a deleted group's pool has no “(now)” option; *Default group* takes it back. The same move from an agent: `switchboard accounts move <id> --pool <pool>` or MCP `switchboard_account_move`.
 **Expected result:** the card shows the new pool at once; a managed route the account held in its old pool no longer applies there.
 **UI elements:** ⋯ menu item, radio list, *Move* button, notice, dialog error.
 **States covered:** into a project, project to project, back to default, from a deleted project's pool, CLI account, no projects, refused.
-**Errors & recovery:** a second copy of the same login already in the chosen pool → “This account is already saved in that pool. Remove the other copy first.”; a project deleted while the dialog was open → “No project uses that pool. Choose a project, or Default.”; the dialog stays open with the error and nothing moves.
+**Errors & recovery:** a second copy of the same login already in the chosen group → “This account is already saved in that group. Remove the other copy first.”; a group deleted while the dialog was open → “That group no longer exists. Choose a group, or the default group.”; the dialog stays open with the error and nothing moves.
 **Status:** draft
 **Meaning:** operator request 2026-10-18 (SB-122).
 **Coverage:** core `an_account_left_in_a_deleted_projects_pool_returns_to_default`; owner `an_account_moves_between_projects_and_back_to_default`; MCP `accounts_rotation_activity_and_queues_are_reachable_over_mcp`; `scripts/test-ui-logic.mjs` (`moveTargets`).
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-122
 
-## SCN-063 — See a project's repositories with their worktrees under them
+## SCN-063 — See a group's repositories with their worktrees under them
 **Persona:** P-01
 **Goal:** A project reads as its repositories: the main checkout once, its worktrees and clones under it, not as peers (operator 2026-10-16 and 2026-10-18: «вместо того чтобы делать так все репы, ты мог сделать главную, а остальные со звёздочкой, все ворктри»).
 **Preconditions:** a project whose folders include a repository's main checkout and one or more of its worktrees (often added by themselves, SCN-055).
-**Entry point:** Projects page.
+**Entry point:** Groups page.
 **Steps:**
-1. Open Projects → each repository shows once, at its main folder, followed by “+2 worktrees and clones”.
-2. *Show all folders* → the worktrees and clones appear under their root by name, with their kind and branch (“alpha-web-wt-login · worktree · login”).
+1. Open Groups → each card lists its repositories, each with its folder count, its main folder and, indented under it, its worktrees and clones by name with their kind and branch (“alpha-web-wt-login · worktree · login”); past six repositories *Show all repositories ({n})* (SB-147; the “+2 worktrees and clones” line is gone).
 3. *Edit* → the dialog lists them under their root; × on the root removes it together with them (its label says so), × on one of them removes only that one.
 **Alt paths:** a folder that is no Git checkout is a root of its own; a repository whose main checkout is not in the project keeps its first listed folder as root; a clone (same `origin`, its own `.git`) goes under the main checkout as *clone*; the tree cannot be read (Git files unreadable) → the flat list as before. Agents read the same tree in `project list` and MCP `switchboard_projects` (`roots`).
 **Expected result:** a project with a dozen worktrees reads as its few repositories; removing a repository leaves none of its worktrees behind.
-**UI elements:** project card rows, `+n` note, *Show all folders*, dialog folder rows (indented), × with its label.
+**UI elements:** group card rows, *Show all repositories ({n})*, dialog folder rows (indented), × with its label.
 **States covered:** root with worktrees, root with a clone, no main checkout, non-Git folder, tree unreadable.
 **Errors & recovery:** none of its own; a save refused for another reason keeps the dialog open with the error (SCN-034).
 **Status:** draft
@@ -1328,19 +1333,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-135
 
-## SCN-064 — Find repositories on disk and put each in its project
+## SCN-064 — Find repositories on disk and put each in its group
 **Persona:** P-01
 **Goal:** See every repository on disk with its project, and put a loose one in a project or move one with its worktrees to another, without editing folder lists by hand (operator 2026-10-16: «папки на диске должны быть указаны в Switchboard — какая к какому проекту относится, менять это в интерфейсе»).
 **Preconditions:** at least one project exists; repositories sit under a folder such as `~/DATA`.
-**Entry point:** Projects page → *Repositories on disk*.
+**Entry point:** Groups page → *Repositories on disk*.
 **Steps:**
-1. *Show repositories* → the repositories under `~/DATA` (else the home folder) are listed; *Not in a project (n)* is chosen, so only loose ones show, each with its name, branch and full path.
+1. *Show repositories* → the repositories under `~/DATA` (else the home folder) are listed; *Not in a group (n)* is chosen, so only loose ones show, each with its name, branch and full path.
 2. *Add folder…* (system picker, starts at the last folder chosen) → the list is read again under the chosen folders; × next to one stops looking there; the choice is remembered across restarts.
-3. *Add to project…* on a loose repository → a dialog lists the projects; choose one, *Add* → “beta-cli added to project “Alpha Web”.”, the row leaves the loose list; its worktrees join by themselves (SCN-055).
-4. *All (n)* → every repository with its project; *Move…* on one of a project's folders → choose another project, *Move* → it and its worktrees and clones are now that project's.
-**Alt paths:** a repository inside a project folder reads “Inside a folder of “P”” and has no action (it moves with that folder); the project's only repository cannot move (“This is the project's only repository…”), the project keeps it; no projects yet → the dialog says to create one first; more than 2,000 repositories or 20,000 folders → the first ones and a note to choose a narrower folder. Agents: `switchboard project map`, `switchboard project move-root`, MCP `switchboard_repository_map` and `switchboard_project_move_root`.
+3. *Add to group…* on a loose repository → a dialog lists the groups; choose one, *Add* → “beta-cli added to group “Alpha Web”.”, the row leaves the loose list; its worktrees join by themselves (SCN-055).
+4. *All (n)* → every repository with its groups; *Move…* on one of a group's folders → choose another group, *Move* → it and its worktrees and clones are now that group's.
+**Alt paths:** a repository inside a group's folder reads “Inside a folder of “P”” and has no action (it moves with that folder); the group's only repository cannot move (“This is the group's only repository…”), the group keeps it; no groups yet → the dialog says to create one first; more than 2,000 repositories or 20,000 folders → the first ones and a note to choose a narrower folder. Agents: `switchboard project map`, `switchboard project move-root`, MCP `switchboard_repository_map` and `switchboard_project_move_root`.
 **Expected result:** every repository on disk is either in a project or visibly loose, and one action puts it where it belongs with its whole tree.
-**UI elements:** section heading, *Show repositories* toggle, folder list with × and *Add folder…*, *Look again*, filter (*Not in a project*, *All*), repository rows (name, place, branch, path, one action), move dialog (radio list, current marked “(now)”).
+**UI elements:** section heading, *Show repositories* toggle, folder list with × and *Add folder…*, *Look again*, filter (*Not in a group*, *All*), repository rows (name, place, branch, path, one action), move dialog (radio list, current marked “(now)”).
 **States covered:** closed, loading, empty (nothing loose / no repositories), list, truncated, error (a folder cannot be read), dialog success and refusal.
 **Errors & recovery:** a refused move keeps the dialog open with the reason; when the second save of a move is refused, the first is undone, so nothing is half moved.
 **Status:** draft
@@ -1349,19 +1354,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-065 — Give a project its own API key for agents
+## SCN-065 — Give a group its own API key for agents
 **Persona:** P-01
 **Goal:** An agent on an API key spends the key of the project it works for, picked by the folder it starts in, while every other folder keeps the machine's key, and nothing waits on a choice (operator 2026-10-19: «гермес в одном проекте подключался к open-router одного токена, в другом проекте … к другому»; «мы делаем по тому, откуда запустился агент»).
 **Preconditions:** a project; an OpenRouter key for it (`sk-or-`).
-**Entry point:** Tokens → *Project keys* · `switchboard agents openrouter set --key-stdin --pool <pool>` · MCP `switchboard_openrouter_status` (lists `keys` and `projects`).
+**Entry point:** API keys → *Group keys* · `switchboard agents openrouter set --key-stdin --pool <pool>` · MCP `switchboard_openrouter_status` (lists `keys` and `projects`).
 **Steps:**
-1. Open Tokens → *Machine key · OpenRouter* and *Project keys*: each project reads “Own key · model”, “Uses the machine's key”, or “No key: agents here cannot start on OpenRouter”.
+1. Open API keys → *Machine key · OpenRouter* and *Group keys*: each group reads “Own key · model”, “Uses the machine's key”, or “No key: agents here cannot start on OpenRouter”.
 2. *Add key…* on a project → the key (a password field) and a default model → “Key saved for “Alpha Web”. Agents started in its folders run on it.”
 3. Launch Hermes, OpenCode or any agent on OpenRouter from a folder of that project → it runs on the project's key and model; from a folder of another project, or of none, on the machine's key. Two agents in two projects run at the same time, each on its own key.
 4. *Change model*, *Replace key* or *Remove key* on the project → after removal its agents use the machine's key again.
-**Alt paths:** a pool that is no project is refused (“That pool is not a project…”); deleting a project deletes its key, so a later project of the same pool never inherits it; a backup brings a project's key back only together with its project; an agent's key command names its folder (`switchboard agents key --service openrouter --dir <folder>`; without `--dir`, the current folder).
+**Alt paths:** an id that names no group is refused (CLI: “That group id names no group. Choose a group, or none for the key every folder uses.”); deleting a project deletes its key, so a later project of the same pool never inherits it; a backup brings a project's key back only together with its project; an agent's key command names its folder (`switchboard agents key --service openrouter --dir <folder>`; without `--dir`, the current folder).
 **Expected result:** the key used is decided at each launch from the launch folder; the key's value never appears in the window, a file, an argument or a log.
-**UI elements:** Tokens page in the navigation, *Machine key · OpenRouter* panel, *Project keys* list (project, state, *Add key…* / *Change model* / *Replace key* / *Remove key*), key dialog titled with the project's name, notices naming the project; on Agents an *OpenRouter keys* panel with *Open Tokens*.
+**UI elements:** API keys page in the navigation (0.6.82, D-2: Statistics keeps “tokens” for counted usage), *Machine key · OpenRouter* panel, *Group keys* list (group, state, *Add key…* / *Change model* / *Replace key* / *Remove key*), key dialog titled with the project's name, notices naming the project; on Agents an *OpenRouter keys* panel with *Open API keys*.
 **States covered:** reading, no projects, project with its own key, project on the machine's key, no key at all, saved, replaced, removed, refused pool.
 **Errors & recovery:** every refusal names the fix; a failed save leaves no metadata row and no vault item.
 **Status:** draft
@@ -1374,13 +1379,13 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** A Codex session started in a project's folder runs on that project's Codex account, exactly like Claude Code there, while Codex anywhere else keeps the person's own sign-in (operator 2026-10-19: «кодекс не атрибуцирован»).
 **Preconditions:** a project with an enabled Codex account (the account the ordinary Codex CLI is signed in to cannot join a project).
-**Entry point:** Projects → *Codex in project folders* · `switchboard project codex on` · MCP `switchboard_codex_route`.
+**Entry point:** Groups → *Codex in group folders* · `switchboard project codex on` · MCP `switchboard_codex_route`.
 **Steps:**
 1. Read the section → “Off: Codex uses your own sign-in in every folder.” and the projects that have a Codex account.
 2. *Turn on* → “Codex sessions in project folders now use their projects' Codex accounts. Start a new Codex session to pick it up.”; the state reads “On: Codex goes through Switchboard.”
 3. Start `codex` in a folder of that project → its requests run on the project's account (Activity journals them under it); start it in any other folder → it runs on the person's own sign-in.
 4. *Turn off* → Codex's settings lose Switchboard's lines; the person's own lines were never touched.
-**Alt paths:** Codex already has another `model_provider` → the section names the line, *Turn on* is disabled, nothing is written; Codex's settings do not parse → nothing is written, the reason is shown; no project has a Codex account → the section says to move one in first; Switchboard quits → its lines leave Codex's settings and a new Codex uses the person's sign-in; it starts again → they come back.
+**Alt paths:** the read fails → the reason and *Retry*; the section reads Codex's settings again on Refresh and whenever the groups or the Codex accounts in them change (0.6.82, UX-03); Codex already has another `model_provider` → the section names the line, *Turn on* is disabled, nothing is written; Codex's settings do not parse → nothing is written, the reason is shown; no project has a Codex account → the section says to move one in first; Switchboard quits → its lines leave Codex's settings and a new Codex uses the person's sign-in; it starts again → they come back.
 **Expected result:** which account a Codex session uses follows the folder it runs in, with no per-folder file.
 **UI elements:** section heading, explanation, state line, projects line, conflict line, *Turn on* / *Turn off*.
 **States covered:** reading, off, on and applied, on but not applied, conflict, unreadable, no project with a Codex account.
@@ -1398,16 +1403,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** sidebar → *Statistics* · `switchboard stats --days 30` · MCP `switchboard_statistics`.
 **Steps:**
 1. Open *Statistics* → the 30-day range is chosen; five tiles read requests (and how many were answered), tokens (sent and received), the share of input read from the cache, tokens per request, and limits and errors with their share.
-2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By project*, *By account* and *By agent*, one under another at full width so long names fit: requests, tokens, and limits and errors; the busiest first.
+2. The chart under the tiles shows tokens per day stacked by group (the five busiest, the rest as “Other groups”); *Requests* switches it to requests; a bar names its day and each group's value on hover. Then *By group*, *By repository*, *By account* and *By agent*, one under another at full width so long names fit: requests, tokens, and limits and errors; the busiest first.
 2a. A click on a column title sorts that table by it (a count largest first, a name A to Z); a second click reverses it; the title shows ↑ or ↓ and the table keeps its order until the window closes (SB-153).
-3. Read *Who works where* → one row per project, group, account and agent that worked together; *By project* names each project's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “No folder recorded” holds requests counted before 0.6.53 and, until 0.6.72, requests that named no group folder (since 0.6.72 such a folder counts under the repository that holds it, SB-157); a project keeps its counts and its name after the checkout they came from is removed (SB-156).
-3a. *API keys* lists each saved OpenRouter key (every folder's, and each group's own) with its model and OpenRouter's spend today, in all and its limit: agents on OpenRouter (Hermes, OpenCode, Pi) are counted there; none saved → “No OpenRouter key is saved. Add one under Tokens.” A note at the end says what is counted where, Kimi Code's usage being on its account card (SB-156).
+3. Read *Who works where* → one row per repository, group, account and agent that worked together; *By repository* names each repository's groups under it; a project is a repository with its worktrees and clones, or a folder outside Git; “No folder recorded” holds requests counted before 0.6.53 and, until 0.6.72, requests that named no group folder (since 0.6.72 such a folder counts under the repository that holds it, SB-157); a project keeps its counts and its name after the checkout they came from is removed (SB-156).
+3a. *API keys* lists each saved OpenRouter key (every folder's, and each group's own) with its model and OpenRouter's spend today, in all and its limit: agents on OpenRouter (Hermes, OpenCode, Pi) are counted there; none saved → “No OpenRouter key is saved. Add one under API keys.” A note at the end says what is counted where, Kimi Code's usage being on its account card (SB-156).
 4. Choose *7 days* or *90 days* → every table and tile shows that range; *By day* lists one row per day with traffic, newest first.
-**Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “No project”; the read fails → “Statistics are unavailable. Refresh to retry.”; a few failures among many requests read “<1%”, never “0%”.
+**Alt paths:** nothing counted yet → “Nothing counted yet” and what will appear; an account that was removed reads “Removed account”, the default pool “Default group”, a pool with no group “Group {id} · no folders”, a request with no folder “No folder recorded”; the read fails → “Statistics are unavailable. Refresh to retry.” with *Retry*, and Refresh in the header does read them again (0.6.82, UX-02: before, only changing the range did); the limits-and-errors cell is marked as an alert from exactly 1 % of requests (VIS-23); a few failures among many requests read “<1%”, never “0%”.
 **Expected result:** where requests and tokens went over the chosen range is visible without reading a transcript.
 **UI elements:** range control, four tiles, five tables, the note on what is counted.
 **States covered:** reading, empty, filled, read failed, removed account, default pool.
-**Errors & recovery:** a failed read keeps the page and says to refresh.
+**Errors & recovery:** a failed read keeps the page and offers *Retry*; the header's Refresh re-reads too.
 **Status:** draft
 **Meaning:** operator request 2026-10-19 (SB-145). Counts only, from the provider's own `usage`; a session that bypasses Switchboard is not counted, and the page says so.
 **Coverage:** proxy `statistics_count_each_request_and_the_providers_own_token_usage_only` (folder by the request's `Working directory`), `stats::tests::*` (`a_request_names_its_folder_without_its_body_being_kept`); runtime `statistics::tests::*` (two checkouts are one project; a 0.6.52 key reads); MCP handshake; ui-logic SB-145 and SB-147 cases (chart days and series, axis, cache share); WebKit demo (ru, 1180 and 960 wide, no overflow, no table scrolling). ui-logic SB-153 case (sort by name and count, second click reverses, B for billions); WebKit demo (tables stacked, sort clicks).
@@ -1420,8 +1425,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** at least one group.
 **Entry point:** sidebar → *Groups*; a group's name anywhere (its card, a pool heading on Accounts, the move dialogs).
 **Steps:**
-1. Hover or focus a group's name → a tooltip lists “{n} projects” and their names: one per repository, never a worktree, a clone or a subfolder.
-1a. A group's card lists its projects, each with its folder count and its folders: the repository's folder, then its worktrees and clones under it (SB-147); past six projects *Show all projects (n)*. A project is named by its folder in the person's disk (the main checkout's folder), never by a renamed remote; two projects with one name read as `research-agent (ssheleg)` and `research-agent (prowl-ai)`; a subfolder of a listed folder is part of that folder's project (SB-155).
+1. Hover or focus a group's name → a tooltip lists “{n} repositories” and their names: one per repository, never a worktree, a clone or a subfolder. Escape closes it until the pointer or focus leaves; a name is a tab stop only where it has a tooltip, and never inside a radio's label (0.6.82, UX-20, WCAG 1.4.13).
+1a. A group's card lists its projects, each with its folder count and its folders: the repository's folder, then its worktrees and clones under it (SB-147); past six repositories *Show all repositories (n)*. A project is named by its folder in the person's disk (the main checkout's folder), never by a renamed remote; two projects with one name read as `research-agent (ssheleg)` and `research-agent (prowl-ai)`; a subfolder of a listed folder is part of that folder's project (SB-155).
 2. *Groups* → *Repositories on disk* → *All* → a repository in several groups reads “Groups «A», «B»”.
 3. *Also add…* on a repository → a dialog lists only the groups it is not in yet → *Add* → “{name} added to group «B».”; it stays in its other groups.
 4. *Move…* on a repository in several groups → it leaves the group shown and joins the chosen one.
@@ -1491,7 +1496,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 3. Each organization of the person appears on *Organizations* with its name and domains and a *PassionCode.ai* mark; one with the same name or a shared domain that the person had typed is linked rather than duplicated, keeping its accounts.
 4. Switchboard reads them again at start and every 6 hours; a renamed organization or a new domain shows up by itself, and accounts on the new domain get its badge.
 5. *Disconnect* → the token is deleted from the vault; the organizations stay as local ones.
-**Alt paths:** *Deny* in the browser → “PassionCode.ai was not connected: access was denied.”; no answer within 5 minutes or *Cancel* → nothing changes; the person left an organization on PassionCode.ai → it stays as a local organization, no longer marked; PassionCode.ai unreachable → the last copy stays in force and the panel says when it was read; the grant ended or was revoked → “Sign in to PassionCode.ai again” with *Connect…*; the person has not signed in through their identity provider for a while → “Sign in to PassionCode.ai in your browser, then read again”.
+**Alt paths:** *Deny* in the browser → “PassionCode.ai was not connected: access was denied.”; no answer within 5 minutes or *Cancel* → nothing changes, and a cancel reads as a plain notice, not an error; a cancel that itself fails is reported (0.6.82, UX-21); the state line wraps and carries its full text as a title (VIS-11); the person left an organization on PassionCode.ai → it stays as a local organization, no longer marked; PassionCode.ai unreachable → the last copy stays in force and the panel says when it was read; the grant ended or was revoked → “Sign in to PassionCode.ai again” with *Connect…*; the person has not signed in through their identity provider for a while → “Sign in to PassionCode.ai in your browser, then read again”.
 **Expected result:** the organizations Switchboard uses are the person's PassionCode.ai memberships, current within 6 hours; nothing about accounts leaves the computer (only the read of the person's own memberships goes out).
 **UI elements:** the PassionCode.ai panel on *Organizations* (state line, *Connect…*, *Read now*, *Disconnect*), the waiting line with *Cancel*, the *PassionCode.ai* mark on a linked organization's card.
 **States covered:** not connected; waiting for the browser; connected and current; read failed (unreachable); sign in again; provider sign-in needed; disconnected.
@@ -1508,7 +1513,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** at least one saved account.
 **Entry point:** *Accounts* → an account's ⋯ → *Used on another machine*; CLI `switchboard accounts update ID --elsewhere true`; MCP `switchboard_account_update` with `elsewhere`.
 **Steps:**
-1. ⋯ → *Used on another machine* → “{label} is marked as used on another machine. This computer no longer renews, rotates to or switches to it.”; the card shows *On another machine* (its title says why) and *Use here* in place of *Switch*.
+1. ⋯ → *Used on another machine* → “{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.”; the card shows *On another machine* (its title says why) and *Use here* in place of *Switch*.
 2. Rotation skips the account; its selection in any pool is cleared; a switch to it (CLI, MCP, a project rule) is refused with “This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.”
 3. *Use here* (or enabling the account) → “{label} is used on this computer again.”; the account is enabled and chosen as before.
 **Alt paths:** an encrypted backup restored on this machine keeps the mark; removing the account removes the mark.
@@ -1521,3 +1526,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `an_account_used_on_another_machine_is_never_chosen_here`, backup `a_reinstall_gets_organizations_their_accounts_and_groups_back`, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-168, SB-175
+
+## SCN-073: Answer the usage question before anything is sent
+
+**Persona:** P-01
+**Goal:** Know what Switchboard would count and choose before any count leaves the computer.
+**Preconditions:** the installed release app (it carries the analytics key); the shared switch is on; this app has not been answered yet (a first start, or an install from 0.6.81 or earlier).
+**Entry point:** automatic, above every page but About, from the first time the window opens; About → *Usage analytics* is the other way to answer (SCN-044).
+**Steps:**
+1. Open the window → above the page: “Share anonymous usage counts?”, what is counted (installs, days of use, saved accounts by provider and type; never names, e-mail addresses, sign-ins, group names or what you do with your accounts; one random installation number shared by the PassionCode.ai tools), “Nothing has been sent yet. Nothing is sent until you answer.”, the switch *Share anonymous usage counts* (on), *Continue*, and “This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.”
+2. *Continue* with the switch on → “Anonymous usage analytics are on.”; the question goes, focus returns to the page title, and the five-step tour (SCN-035) starts.
+3. Or clear the switch, then *Continue* → “Anonymous usage analytics are off for every PassionCode.ai tool on this computer.”; the question goes and is not asked again.
+**Alt paths:** another PassionCode.ai tool turns the shared switch off while the question is open: the window reads the status again every minute and when it is shown, and the question goes; if *Continue* with the switch on comes first, the switch stays off for every tool and the line reads “Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.”; an install that sent counts before 0.6.82 reads “An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.” instead of “Nothing has been sent yet.”; a save failure shows the error, keeps the question and sends nothing; a background start (login item) or a window never opened sends nothing; a development or demo build asks nothing (demo: `?demo=1&usage=ask` or `&usage=sent` shows the question).
+**Expected result:** no event, `app_installed` included, leaves before the answer; after an answer of on, only that run's start (and, for a fresh install, the install) is reported, never an account change from before the answer, and the day's activity at the next background pass; after an answer of off, nothing while the shared switch stays off (another PassionCode.ai tool turning it back on resumes counting, Fabric ADR-0127 Amendment 2); uninstalling forgets the answer.
+**UI elements:** the question card (heading, two paragraphs, switch, *Continue*, note).
+**States covered:** first start, upgraded install, answered on, answered off, answered on after another tool turned the switch off, save failed, background start.
+**Errors & recovery:** a failed save leaves the question open; *Continue* again.
+**Status:** draft
+**Meaning:** operator decision 2026-10-08, issue #128 (Fabric ADR-0127, audit A7-012): on by default, nothing before the answer.
+**Coverage:** `crates/switchboard-runtime/src/analytics.rs` tests `nothing_is_queued_or_sent_before_the_answer_not_even_from_a_background_start`, `an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it`, `an_answer_of_off_sends_nothing_then_or_after_a_restart`, `the_answer_is_this_apps_own_and_never_written_to_the_shared_file`, `an_upgraded_install_asks_once_and_is_not_counted_as_new`, `an_unreadable_state_asks_again_and_never_reports_a_second_install`, `answering_on_after_another_app_turned_the_switch_off_keeps_it_off`, `an_answer_of_off_holds_while_the_shared_switch_stays_off`, `through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day`; uninstall `uninstall_forgets_the_usage_answer`; `scripts/test-ui-logic.mjs` (`usageQuestion`, `usageQuestionText`, `usageAnswerText`, `tourWaits`, the wiring, the background status read); browser demo 2026-10-24 (WebKit, 740 and 1100 px, light and dark, English and Russian).
+**Product:** unobserved
+**Traces:** SCN-044, SCN-035, SB-69

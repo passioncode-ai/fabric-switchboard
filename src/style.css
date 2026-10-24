@@ -16,11 +16,11 @@ h1, h2, p { margin: 0; }
 .navigation { display: grid; gap: var(--space-1); }
 .nav-item { border: 0; display: flex; gap: var(--space-3); align-items: center; padding: var(--space-3); border-radius: var(--r-control); color: var(--muted); background: transparent; text-align: left; }
 .nav-item.active { background: var(--accent-weak); color: var(--accent-text); font-weight: 600; }
-.nav-item:not(.active):hover:not(:disabled) { background: var(--panel-2); }
+.nav-item:not(.active):hover:not(:disabled) { background: var(--hover-bg); color: var(--ink); }
 .nav-icon { width: 16px; font-size: var(--t-card); }
 .sidebar-foot { margin-top: auto; padding-top: var(--space-6); color: var(--muted); font-size: var(--t-label); }
 .sidebar-foot p { margin: var(--space-2) 0; }
-.version { font-family: var(--font-data); font-size: var(--t-chip); }
+.version { display: block; font-family: var(--font-data); font-size: var(--t-chip); overflow-wrap: anywhere; }
 .main { flex: 1; min-width: 0; max-width: 1480px; padding: var(--space-6); }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-5); }
 .eyebrow { font-size: var(--t-chip); letter-spacing: .12em; color: var(--muted); font-weight: 600; }
@@ -29,8 +29,10 @@ h1:focus { outline: none; }
 .subtitle, .surface-note { color: var(--muted); }
 .header-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .page-header > :first-child { flex: 1; min-width: 0; }
-.button { padding: var(--space-2) var(--space-3); min-height: 36px; border: 1px solid var(--border-strong); color: var(--ink); background: var(--panel); border-radius: var(--r-control); white-space: nowrap; font-weight: 550; }
-.button:hover:not(:disabled) { background: var(--panel-2); border-color: var(--muted); }
+/* VIS-09: two heights. --control-h for header, panel and dialog actions; .row-button, .text-button
+   and .icon-button are --control-h-compact. Line height 1.25 so the minimum height is the height. */
+.button { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); color: var(--ink); background: var(--panel); border-radius: var(--r-control); white-space: nowrap; font-weight: 550; }
+.button:hover:not(:disabled) { background: var(--hover-bg); border-color: var(--muted); }
 .button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 .button.quiet { background: transparent; }
@@ -55,15 +57,19 @@ h1:focus { outline: none; }
 .usage-unknown { display: block; font-size: var(--t-label); font-weight: 500; color: var(--muted); }
 .usage-caption { display: block; font-size: var(--t-chip); color: var(--muted); }
 .usage-error { color: var(--danger); font-size: var(--t-chip); margin-top: var(--space-1); }
-.text-button { border: 0; background: transparent; padding: var(--space-1) 0; min-height: 28px; color: var(--muted); font-size: var(--t-label); white-space: nowrap; }
+.text-button { border: 0; background: transparent; padding: var(--space-1) 0; min-height: var(--control-h-compact); color: var(--muted); font-size: var(--t-label); white-space: nowrap; }
 .text-button:hover:not(:disabled) { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .danger-text { color: var(--danger); }
 .surface-note { font-size: var(--t-label); line-height: 1.65; margin-top: var(--space-4); max-width: 800px; }
 .operation-progress { color: var(--muted); margin-bottom: var(--space-3); }
-.notice { display: flex; justify-content: space-between; gap: var(--space-4); align-items: center; border-radius: var(--r-control); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); }
-.notice.success { background: var(--ok-weak); }
+/* VIS-14: one notice. Every strip above a page (result, error, terms, active rules, a found folder,
+   a sign-in waiting) is the same box: 1 px line, control radius, the same padding, body text with a
+   12 px second line; only the tone changes (neutral, success, error, info, accent). */
+.notice, .login-banner { display: flex; justify-content: space-between; gap: var(--space-4); align-items: center; border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); font-size: var(--t-body); }
+.notice.success { background: var(--ok-weak); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .notice.error, .dialog-error:not(:empty) { background: var(--danger-weak); color: var(--danger); }
-.demo-banner { border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--warn-weak); color: var(--ink); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-5); font-size: var(--t-chip); }
+.notice.error { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
+.demo-banner { border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: var(--r-control); background: var(--warn-weak); color: var(--ink); padding: var(--space-2) var(--space-4); margin-bottom: var(--space-5); font-size: var(--t-label); }
 .empty-state { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); text-align: center; padding: var(--space-6); border: 1px dashed var(--border-strong); border-radius: var(--r-card); }
 .empty-state h2 { font-size: var(--t-section); font-weight: 600; }
 .empty-state p { max-width: 470px; color: var(--muted); }
@@ -80,7 +86,7 @@ h1:focus { outline: none; }
 .event-row p { color: var(--muted); margin-top: var(--space-1); }
 .event-id { font-family: var(--font-data); color: var(--muted); font-size: var(--t-chip); overflow-wrap: anywhere; }
 .about-panel { max-width: 980px; border: 1px solid var(--border); background: var(--panel); border-radius: var(--r-card); padding: var(--space-5); }
-.about-panel h2 { font-size: var(--t-section); margin-bottom: var(--space-3); }
+.about-panel h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; margin-bottom: var(--space-3); }
 .about-panel > p { color: var(--muted); }
 .definitions { display: grid; grid-template-columns: 130px 1fr; gap: var(--space-4); margin: var(--space-5) 0 0; }
 .definitions dt { font-weight: 600; }
@@ -88,15 +94,17 @@ h1:focus { outline: none; }
 .about-panel + .about-panel { margin-top: var(--space-4); }
 .openrouter-facts { margin: var(--space-3) 0; display: grid; gap: var(--space-1); }
 .appearance-options { display: flex; flex-wrap: wrap; gap: var(--space-2); border: 0; margin: 0; padding: 0; }
-.appearance-option { display: flex; align-items: center; gap: var(--space-2); min-height: 36px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); cursor: pointer; }
-.appearance-option:has(input:checked) { background: var(--accent-weak); border-color: var(--accent-text); font-weight: 600; }
+.appearance-option { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h); line-height: 1.25; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); cursor: pointer; }
+.appearance-option:hover:not(:has(input:disabled)) { background: var(--hover-bg); }
+.appearance-option:has(input:checked) { background: var(--chosen-bg); border-color: var(--chosen-border); color: var(--chosen-ink); font-weight: 600; }
 .move-options { flex-direction: column; flex-wrap: nowrap; max-height: 320px; overflow-y: auto; }
 .derived-folder { padding-left: var(--space-4); }
 .folder-note { color: var(--muted); font-weight: 400; }
 .appearance-option:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
 .block { display: block; }
-.address { display: inline-block; margin-top: var(--space-1); font-family: var(--font-data); font-size: var(--t-chip); color: var(--link); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
-a.address { text-decoration: underline; text-underline-offset: 3px; user-select: auto; -webkit-user-select: auto; }
+.address { display: inline-block; margin-top: var(--space-1); font-family: var(--font-data); font-size: var(--t-chip); color: var(--ink); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
+/* VIS-26: only a real link takes the link colour; a path or a command is ink in the data face. */
+a.address { color: var(--link); text-decoration: underline; text-underline-offset: 3px; user-select: auto; -webkit-user-select: auto; }
 .dialog { width: min(540px, calc(100vw - 32px)); border: 1px solid var(--border-strong); background: var(--panel); color: var(--ink); border-radius: var(--r-card); padding: 0; box-shadow: var(--shadow-1); max-height: calc(100vh - 40px); }
 .dialog::backdrop { background: var(--bg); opacity: .8; }
 .dialog-header { padding: var(--space-5) var(--space-5) 0; }
@@ -108,7 +116,11 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .field { display: flex; flex-direction: column; gap: var(--space-2); }
 .field-label { font-size: var(--t-label); font-weight: 600; }
 .field-help, .form-note { color: var(--muted); font-size: var(--t-label); }
-.field input, .field select, .field textarea { background: var(--panel); border: 1px solid var(--border-strong); color: var(--ink); border-radius: var(--r-control); width: 100%; min-height: 38px; padding: var(--space-2) var(--space-3); }
+.field input, .field select, .field textarea { background: var(--panel); border: 1px solid var(--border-strong); color: var(--ink); border-radius: var(--r-control); width: 100%; min-height: var(--control-h); padding: var(--space-2) var(--space-3); line-height: 1.25; }
+/* VIS-07: a native select draws at 22 px and ignores padding; drawn like an input instead, with a
+   chevron made of two gradients in the muted role (no image, no literal colour). */
+.field select { -webkit-appearance: none; appearance: none; padding-right: calc(var(--space-3) * 2 + 10px); background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - var(--space-3) - 8px) 50%, calc(100% - var(--space-3) - 3px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
+.field select:hover:not(:disabled) { border-color: var(--muted); }
 .field textarea { resize: vertical; font-family: var(--font-data); font-size: var(--t-label); }
 .field input::placeholder, .field textarea::placeholder { color: var(--muted); opacity: 1; }
 .form-note { margin-top: var(--space-3); }
@@ -135,8 +147,11 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
   .sidebar { width: 168px; padding: var(--space-5) var(--space-3); }
   .sidebar-foot .eyebrow { letter-spacing: 0; }
   .main { padding: var(--space-4); }
-  .page-header { align-items: flex-start; }
-  .header-actions { flex-direction: column-reverse; align-items: stretch; }
+  /* VIS-29: the actions stay one row beside the title; when the title needs the width they move
+     under it as a row, never as a stack of full-width buttons. */
+  .page-header { align-items: flex-start; flex-wrap: wrap; row-gap: var(--space-3); }
+  /* The title and its subtitle keep the whole width; the actions take the row under them. */
+  .page-header > :first-child { flex: 1 1 100%; }
 }
 @media (max-width: 590px) {
   .shell { display: block; }
@@ -161,9 +176,11 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 /* Current identity uses the information role; next-request selection uses gold. */
 .current-section { margin-top: var(--space-4); }
 .section-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-2); }
-.section-heading h2 { font-size: var(--t-label); font-weight: 600; }
+.section-heading h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
 .current-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-.current-card { min-width: 0; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+/* VIS-01, VIS-30: one rule. The identity takes the free width and wraps between words; the
+   "Saved as" line wraps below it when both do not fit, two lines at most, and nothing leaves the card. */
+.current-card { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
 .current-badge { color: var(--info); border-color: var(--info); background: var(--info-weak); }
 .policy-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
 .policy-row strong { font-size: var(--t-label); }
@@ -183,25 +200,26 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .quota-window strong { color: var(--ink); font-weight: 500; }
 .management-actions { flex-wrap: wrap; }
 @media (min-width: 821px) { .header-actions { flex-wrap: nowrap; } }
-@media (max-width: 820px) { .header-actions { flex-wrap: wrap; } }
+@media (max-width: 820px) { .header-actions { flex-wrap: wrap; justify-content: flex-start; } }
 .management-actions { display: flex; gap: var(--space-4); }
+/* VIS-25: a row of actions under a list (Kimi Code's Add and Refresh) does not touch the list. */
+.account-list + .management-actions, .form-note + .management-actions { margin-top: var(--space-3); }
 @media (max-width: 820px) { .current-grid { grid-template-columns: 1fr; } .policy-row { align-items: flex-start; } }
 @media (max-width: 590px) { .policy-row { flex-direction: column; } .policy-actions { flex-direction: row; gap: var(--space-4); } .header-actions .button { white-space: normal; } }
 
 .nav-count { margin-left: auto; min-width: 1.5rem; padding: 0 .4rem; border-radius: 999px; background: var(--accent); color: var(--accent-ink, var(--bg)); font-size: .75rem; font-weight: 700; text-align: center; }
 .rules-strip { align-items: center; }
 /* SB-117: a folder found for a project stays above every page until it is answered. */
-.suggestion-strip { align-items: center; background: var(--accent-weak); border: 1px solid var(--accent); }
+.suggestion-strip { align-items: center; background: var(--accent-weak); border-color: var(--accent-text); }
 .suggestion-text { min-width: 0; overflow-wrap: anywhere; }
 
 /* 0.5 Accounts: compact rows grouped by provider and pool; one primary action, the rest in a menu. */
 .status-dot.unavailable { background: var(--warn); }
 .proxy-status { display: inline-flex; align-items: center; gap: var(--space-2); margin-left: auto; font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); }
-.current-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); }
-.current-copy { display: grid; min-width: 0; }
+.current-copy { display: grid; flex: 1 1 12rem; min-width: 0; }
 .current-provider { font-size: var(--t-chip); color: var(--muted); }
-.current-identity { font-size: var(--t-label); font-weight: 600; overflow-wrap: anywhere; }
-.current-state { font-size: var(--t-chip); color: var(--info); white-space: nowrap; }
+.current-identity { font-size: var(--t-label); font-weight: 600; overflow-wrap: break-word; }
+.current-state { flex: 0 1 auto; min-width: 0; max-width: 100%; font-size: var(--t-chip); color: var(--info); overflow-wrap: break-word; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .muted-text { color: var(--muted); font-weight: 500; }
 .rotation-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
 .rotation-copy { display: grid; gap: 2px; min-width: 0; }
@@ -209,7 +227,7 @@ a.address { text-decoration: underline; text-underline-offset: 3px; user-select:
 .rotation-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .account-group { margin-top: var(--space-4); }
 .group-heading { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
-.group-heading h2 { font-size: var(--t-label); font-weight: 650; letter-spacing: .02em; }
+.group-heading h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
 .pool-heading { margin: var(--space-3) 0 var(--space-1); font-size: var(--t-chip); font-weight: 600; color: var(--muted); letter-spacing: .04em; }
 .account-group .account-list { gap: 0; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
 .account-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(176px, 248px) 92px 32px; align-items: center; column-gap: var(--space-3); padding: var(--space-2) var(--space-3); min-height: 48px; border-top: 1px solid var(--border); position: relative; }
@@ -258,22 +276,22 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .usage-meter.is-failed::-webkit-progress-value { background: var(--muted); }
 .usage-meter.is-failed::-moz-progress-bar { background: var(--muted); }
 .row-primary { justify-self: end; }
-.row-button { min-height: 30px; padding: var(--space-1) var(--space-3); font-size: var(--t-label); }
+.row-button { min-height: var(--control-h-compact); padding: var(--space-1) var(--space-3); font-size: var(--t-label); }
 .row-state { font-size: var(--t-chip); font-weight: 600; color: var(--info); white-space: nowrap; }
 .account-row.is-selected:not(.is-current) .row-state { color: var(--accent-text); }
 .row-details { grid-column: 2 / -1; padding: var(--space-2) 0 var(--space-1); font-size: var(--t-chip); color: var(--muted); }
 .row-error { grid-column: 2 / -1; color: var(--danger); font-size: var(--t-chip); }
 .menu-root { position: relative; justify-self: end; }
-.icon-button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: var(--muted); font-size: var(--t-card); line-height: 1; }
-.icon-button:hover:not(:disabled), .icon-button[aria-expanded="true"] { background: var(--panel-2); border-color: var(--border-strong); color: var(--ink); }
+.icon-button { width: var(--control-h-compact); height: var(--control-h-compact); display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--r-control); background: transparent; color: var(--muted); font-size: var(--t-card); line-height: 1; }
+.icon-button:hover:not(:disabled), .icon-button[aria-expanded="true"] { background: var(--hover-bg); border-color: var(--border-strong); color: var(--ink); }
 .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 236px; display: grid; padding: var(--space-1); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); box-shadow: var(--shadow-1); }
 .menu-item { border: 0; background: transparent; color: var(--ink); text-align: left; padding: var(--space-2) var(--space-3); border-radius: var(--r-control); font-size: var(--t-label); white-space: nowrap; }
-.menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--panel-2); outline-offset: -2px; }
+.menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--hover-bg); outline-offset: -2px; }
 .menu-item.danger-text { color: var(--danger); }
-.login-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); border: 1px solid var(--info); border-radius: var(--r-card); background: var(--info-weak); }
+.login-banner { border-color: var(--info); background: var(--info-weak); }
 .login-banner.is-error { border-color: var(--danger); background: var(--danger-weak); }
-.login-copy { display: grid; gap: 2px; font-size: var(--t-label); }
-.login-copy span { color: var(--muted); }
+.login-copy { display: grid; gap: 2px; }
+.login-copy span { color: var(--muted); font-size: var(--t-label); }
 .login-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
 @media (max-width: 820px) {
   .account-row { grid-template-columns: 28px minmax(0, 1fr) 88px 32px; row-gap: 2px; }
@@ -287,22 +305,24 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .backup-list { margin: var(--space-3) 0; }
 
 /* Quota date and elapsed wait use the existing operational token layer. */
-.account-sort-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); color: var(--muted); font-size: var(--t-chip); }
+.account-sort-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: nowrap; gap: var(--space-2); margin-top: var(--space-4); color: var(--muted); font-size: var(--t-chip); }
+.account-sort-note > :first-child { flex: 1 1 auto; min-width: 0; }
+.account-sort-note > .text-button { flex: none; }
 .reset-display { display: inline-flex; flex-wrap: wrap; column-gap: var(--space-2); white-space: normal; overflow-wrap: anywhere; color: var(--muted); }
 .reset-display .reset-remaining::before { content: "·"; margin-right: var(--space-2); color: var(--muted); }
 .reset-remaining { font-variant-numeric: tabular-nums; color: var(--ink); }
 .login-option { width: fit-content; margin-top: var(--space-2); }
 /* Projects (0.6). */
 .project-section { margin-bottom: var(--space-6); }
-.section-heading { font-size: var(--t-card); font-weight: 650; margin: var(--space-2) 0 var(--space-2); }
+h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; margin: var(--space-2) 0 var(--space-2); }
 .section-heading-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .project-folders { list-style: none; margin: var(--space-1) 0; padding: 0; display: grid; gap: 2px; }
-.project-folders li { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-chip); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-folders li { font-family: var(--font-mono); font-size: var(--t-chip); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-accounts { border: 0; padding: 0; margin: var(--space-3) 0 0; display: grid; gap: var(--space-2); max-height: 240px; overflow: auto; }
 .project-accounts .login-option { width: auto; margin-top: 0; }
 /* First-run tour (0.6): a card beside the screen it explains, with the control to press outlined. */
 .tour-card { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 40; width: min(380px, calc(100vw - 2 * var(--space-5))); display: grid; gap: var(--space-2); padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); box-shadow: var(--shadow-1); }
-.tour-card h2 { font-size: var(--t-card); font-weight: 650; }
+.tour-card h2 { font-size: var(--t-heading); font-weight: 650; }
 .tour-card h2:focus { outline: none; }
 .tour-card p { color: var(--muted); font-size: var(--t-label); line-height: 1.45; }
 .tour-card .eyebrow { color: var(--accent-text); }
@@ -320,13 +340,13 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .agent-setup { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
 .agent-setup > .button { justify-self: start; }
 .agent-setup code.address { white-space: pre-wrap; word-break: break-all; }
-/* SB-81: a Kimi Code account — name, plan windows, actions. */
+/* SB-81: a Kimi Code account: name, plan windows, actions. */
 .account-row .provider-icon.kimi { font-weight: 700; font-size: var(--t-label); }
 .kimi-usage .usage-sub, .kimi-usage .usage-error { overflow-wrap: anywhere; white-space: normal; font-size: var(--t-label); }
 .kimi-usage .usage-line { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Folders are chosen with the system picker, never typed (2026-10-09). */
 .folder-picker { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.folder-path { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-path { flex: 1; min-width: 0; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); font-family: var(--font-mono); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .folder-picker.is-empty .folder-path, .folder-path.is-empty { color: var(--muted); font-family: inherit; }
 .folder-picker-list { display: grid; gap: var(--space-2); justify-items: start; }
 .folder-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); width: 100%; }
@@ -334,13 +354,12 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 /* SB-131: a project an agent works in gathers dozens of folders; the editor's list scrolls on its own. */
 .folder-picker-list .folder-list { max-height: min(50vh, 420px); overflow-y: auto; }
 .project-folder-block { display: grid; justify-items: start; }
-.terms-notice { background: var(--panel-2); border: 1px solid var(--border); }
 
-/* SB-119/120: the Agents page — default-agent chips, agent rows, model picker. */
+/* SB-119/120: the Agents page: default-agent chips, agent rows, model picker. */
 .choice-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 var(--space-3); }
-.choice-chip { padding: var(--space-1) var(--space-3); min-height: 36px; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
-.choice-chip:hover:not(:disabled) { background: var(--panel-2); }
-.choice-chip.is-on { background: var(--accent-weak); border-color: var(--accent); }
+.choice-chip { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
+.choice-chip:hover:not(:disabled):not(.is-on) { background: var(--hover-bg); }
+.choice-chip.is-on { background: var(--chosen-bg); border-color: var(--chosen-border); color: var(--chosen-ink); font-weight: 600; }
 .agents-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 .agents-head h2 { margin-bottom: 0; }
 .agents-head .button { margin-left: auto; }
@@ -354,19 +373,22 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .agent-controls { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .agent-controls .badge { white-space: nowrap; }
 .default-slot, .default-badge, .agent-controls .text-button { display: inline-flex; justify-content: center; width: 132px; box-sizing: border-box; }
-.default-badge { color: var(--ink); background: var(--accent-weak); border-color: var(--accent); }
+.default-badge { color: var(--chosen-ink); background: var(--chosen-bg); border-color: var(--chosen-border); }
+/* VIS-10: the track is control height (30 px segments, 2 px inset, 1 px line); the segment that is on
+   takes the chosen language: gold-tinted fill, a 1 px gold line (3:1 or more on the track, measured by
+   check-brand) and ink text in semibold, so it reads without colour too. */
 .segmented { display: inline-flex; padding: 2px; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel-2); }
-.segment { border: 0; background: transparent; padding: var(--space-1) var(--space-3); min-height: 30px; border-radius: calc(var(--r-control) - 2px); color: var(--muted); font-size: var(--t-label); font-weight: 550; }
-.segment.is-on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .12); }
-.segment:hover:not(.is-on) { color: var(--ink); }
+.segment { border: 0; background: transparent; padding: var(--space-1) var(--space-3); min-height: var(--control-h-compact); border-radius: calc(var(--r-control) - 2px); color: var(--muted); font-size: var(--t-label); font-weight: 550; }
+.segment.is-on { background: var(--chosen-bg); color: var(--chosen-ink); box-shadow: inset 0 0 0 1px var(--chosen-border); font-weight: 650; }
+.segment:hover:not(.is-on):not(:disabled) { color: var(--ink); background: var(--hover-bg); }
 .agent-more { padding: 0 0 var(--space-3); }
 .agent-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-label); }
 .available-list > summary { padding: var(--space-2) 0; }
 .model-picker { display: grid; gap: var(--space-2); }
 .model-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2); }
 .model-card { display: grid; gap: 2px; text-align: left; padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel); color: var(--ink); }
-.model-card:hover:not(:disabled) { border-color: var(--muted); }
-.model-card.is-on { border-color: var(--accent); background: var(--accent-weak); }
+.model-card:hover:not(:disabled):not(.is-on) { border-color: var(--muted); background: var(--hover-bg); }
+.model-card.is-on { background: var(--chosen-bg); border-color: var(--chosen-border); color: var(--chosen-ink); }
 @media (max-width: 760px) {
   .agent-row { flex-direction: column; align-items: stretch; }
   .agent-controls { flex-wrap: wrap; }
@@ -381,12 +403,15 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .repository-map .repository-row .text-button { flex: none; }
 /* SB-142: a pool heading says which account its sessions use. */
 .pool-heading { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: var(--space-3); }
+/* A sub-heading inside a card ranks below the card's h2 (--t-heading). */
+h3 { font-size: var(--t-label); font-weight: 600; margin: var(--space-4) 0 var(--space-2); }
 .pool-heading h3 { margin: 0; font-size: inherit; font-weight: inherit; }
 .group-note { color: var(--muted); font-size: var(--t-label); }
 .pool-heading .group-note { font-weight: 400; letter-spacing: 0; }
 /* SB-145: Statistics. */
 .stat-bar { margin-bottom: var(--space-4); }
-.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); max-width: 980px; }
+/* VIS-22: five tiles fit one row from about 790 px of content (1100 px window); at 740 they are 3 + 2. */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); max-width: 980px; }
 .stat-tile { display: flex; flex-direction: column; gap: var(--space-1); border: 1px solid var(--border); background: var(--panel); border-radius: var(--r-card); padding: var(--space-4); }
 .stat-label { color: var(--muted); font-size: var(--t-label); }
 .stat-value { font-family: var(--font-data); font-size: var(--t-section); font-variant-numeric: tabular-nums; }
@@ -398,11 +423,18 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .stat-table thead th { color: var(--muted); font-weight: 550; font-family: var(--font-ui); }
 .stat-table tbody th { font-weight: 550; white-space: normal; }
 .stat-table .num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
-.stat-table .is-trouble { color: var(--warn); }
+/* VIS-23: a count of limits and errors is information, not an alarm; it is ink, not orange.
+   Colouring only a share worth attention needs the window to mark that share (N3 report). */
+.stat-table .is-trouble { color: var(--ink); }
+.stat-table .is-trouble.is-alert { color: var(--warn); font-weight: 600; }
 .stat-table tbody tr:last-child th, .stat-table tbody tr:last-child td { border-bottom: 0; }
 /* SB-146: a group's projects on hover or focus. */
 .group-hint { position: relative; display: inline-flex; align-items: center; cursor: help; border-radius: 4px; }
-.group-hint-name { text-decoration: underline dotted var(--border-strong); text-underline-offset: 3px; }
+/* VIS-28: a group name is plain text, not a link; a small info mark says it has details, and the
+   dotted line appears only while the pointer or focus is on it. */
+.group-hint-name { text-decoration: none; text-underline-offset: 3px; }
+.group-hint::after { content: "ⓘ"; content: "ⓘ" / ""; margin-left: var(--space-1); color: var(--muted); font-size: var(--t-chip); font-weight: 400; }
+.group-hint:hover .group-hint-name, .group-hint:focus-visible .group-hint-name { text-decoration: underline dotted var(--muted); }
 .group-hint:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
 .group-tip { display: none; position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; min-width: 220px; max-width: 360px; max-height: 320px; overflow-y: auto; padding: var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); box-shadow: 0 6px 24px rgb(0 0 0 / .18); color: var(--ink); font-size: var(--t-label); font-weight: 400; text-align: left; white-space: normal; cursor: default; }
 .group-hint:hover .group-tip, .group-hint:focus .group-tip, .group-hint:focus-within .group-tip { display: block; }
@@ -424,7 +456,13 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
 .stat-chart-head h2 { margin: 0; }
 .stat-chart-svg { display: block; width: 100%; height: auto; }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
-.chart-axis { fill: var(--muted); font-family: var(--font-data); font-size: 11px; }
+/* VIS-05: the chart is drawn in a 900-unit viewBox and scaled to the panel, so a fixed 11 px label
+   shrank to about 6 px at the 740 px window. The panel is a size container and the label's size in
+   viewBox units follows 9900 / width (11 px times 900 / width), as the larger of three chords of that
+   curve (300, 450, 650 and 1000 px wide), so it renders at 11 to 12 px at any width. */
+.stat-panel:has(> .stat-chart-svg) { container-type: inline-size; }
+.stat-chart-svg { overflow: visible; }
+.chart-axis { fill: var(--muted); font-family: var(--font-data); font-size: 11px; font-size: max(55px - 7.333cqw, 37.23px - 3.385cqw, 25.13px - 1.523cqw); }
 .chart-bar { transition: opacity var(--dur-hover) var(--motion-ease); }
 g:hover > .chart-bar { opacity: .82; }
 .chart-s0 { fill: var(--chart-1); background: var(--chart-1); }
@@ -466,7 +504,7 @@ g:hover > .chart-bar { opacity: .82; }
 .org-card { display: grid; gap: var(--space-2); align-content: start; padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--r-card, var(--r-control)); background: var(--panel); }
 .org-card-head { display: flex; align-items: flex-start; gap: var(--space-2); }
 .org-card-title { display: grid; gap: 2px; flex: 1; min-width: 0; }
-.org-card-title h2 { margin: 0; font-size: var(--t-section); }
+.org-card-title h2 { margin: 0; font-size: var(--t-heading); font-weight: 650; }
 .org-card-title .row-sub { overflow-wrap: anywhere; }
 .org-card-actions { display: flex; align-items: center; gap: var(--space-1); }
 .org-members { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
@@ -484,7 +522,18 @@ g:hover > .chart-bar { opacity: .82; }
 /* Group key rows read as prose: the body face, the name strong, the state muted. */
 .key-list .repository-row { font-family: var(--font-ui); font-size: var(--t-label); }
 /* Statistics tables keep their columns on a narrow window and scroll sideways instead. */
-.stat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* VIS-04: a table wider than its panel shows that it scrolls: a shade on the edge that has more
+   (the classic local/scroll background pair: the panel-coloured covers travel with the content and
+   hide the shade at the start and the end), and a thin scrollbar that stays visible in WebKit,
+   where overlay scrollbars otherwise hide until the person scrolls. */
+.stat-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; background:
+  linear-gradient(to right, var(--panel) 30%, transparent) left center / 32px 100% no-repeat local,
+  linear-gradient(to left, var(--panel) 30%, transparent) right center / 32px 100% no-repeat local,
+  linear-gradient(to right, color-mix(in srgb, var(--ink) 16%, transparent), transparent) left center / 14px 100% no-repeat scroll,
+  linear-gradient(to left, color-mix(in srgb, var(--ink) 16%, transparent), transparent) right center / 14px 100% no-repeat scroll; }
+.stat-scroll::-webkit-scrollbar { height: 8px; }
+.stat-scroll::-webkit-scrollbar-track { background: transparent; }
+.stat-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--r-pill); }
 .stat-scroll .stat-table { min-width: 440px; }
 @media (max-width: 820px) {
   .stat-table th, .stat-table td { padding-inline: var(--space-2); }

@@ -24,12 +24,17 @@ const OWNED: &[&str] = &[
     "usage-holds.json",
     "limit-evidence.json",
     "recovery.json",
+    // Events pruned from recovery.json lately, ids only (N1 round 1).
+    "recovery-pruned.json",
     "project-suggestions.json",
     "claude-bindings.json",
     "pool-salts.json",
     "capability-migration.json",
     "agents-settings.json",
     "statistics.json",
+    // Usage analytics' own state, the person's answer included (issue #128): uninstalling
+    // forgets the answer, and the question returns at the next first start.
+    "analytics-state.json",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
     // Folders taken out of their group lately (SB-172).
@@ -353,6 +358,13 @@ mod tests {
         assert!(vault.get(&id).is_ok(), "credential untouched");
     }
 
+    #[test]
+    fn uninstall_forgets_the_usage_answer() {
+        // Issue #128 round 1: the answer lives in this app's analytics state, which is ours.
+        assert!(OWNED.contains(&crate::analytics::STATE_FILE));
+    }
+
+    // Unix only: it links the CLI with `std::os::unix::fs::symlink` (round 2, item 3).
     #[cfg(unix)]
     #[test]
     fn apply_removes_owned_things_and_keeps_the_persons_files() {

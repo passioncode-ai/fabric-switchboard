@@ -7,7 +7,7 @@ Falsifier: user cannot tell which account handles the next request, or cannot re
 ## SCR-01 — Accounts
 Status: designed
 States: empty, loading, error, populated, add dialog, login dialog, removal confirmation.
-Elements: provider filter, proxy status, add action, per-account quota age, selection and launch controls. Secret inputs only in addition.
+Elements (since 0.6.82): one notices block (provider terms, active folder rules), In use now with proxy status, the automatic switching bar, the organization filter when organizations exist, accounts grouped by provider and then by group (“Group · {name}”, “Default group”, “Group {id} · no folders”), per-account quota age, one primary action per row and a ⋯ menu. The provider filter of 0.1 is gone. Secret inputs only in addition.
 Scenarios: SCN-001 through SCN-010, SCN-012, SCN-013.
 Coverage: [verification](../evidence/verification.md); browser inspected, historical 0.1 state; native 0.2 inspection is recorded in [0.2 evidence](../evidence/release-0.2.md).
 Figma: not used
@@ -36,3 +36,15 @@ SCN-021, SCN-032. Within provider/pool groups, fresh remaining quota precedes kn
 
 ### Provider terms notice — 2026-10-08
 SCN-049. Accounts opens with a neutral banner (panel-2 background, border, the text and a *Dismiss* text button) above the project-rules strip, in every state Accounts renders, including the empty first-account state; it stays until dismissed (`switchboard.terms-notice` in window storage). About carries a *Provider terms* panel with the same text, right after *A local account workbench*. Existing tokens and components; no animation. Checked in the browser demo 2026-10-08 in English and Russian.
+
+## Window behaviour and words (0.6.82, node N5)
+Scenarios: SCN-001, 002, 010, 011, 013, 022, 024, 025, 030, 034, 035, 042, 043, 045, 046, 047, 050, 055, 059, 062 to 068, 071.
+- Words (D-1, D-2, D-5): the person reads **group** and **automatic switching**; a pool id shows only as a group's id (*Group id* field, “Group {id} · no folders”). The navigation page of keys is **API keys** («API-ключи»); Statistics keeps “tokens” for counted usage. Folder rules are **folder rules**.
+- One primary action per screen: while Accounts, Groups or Organizations shows its empty state, the header has no second primary button (VIS-21, UX-01).
+- Accounts: the provider terms and active folder rules share one notices block (VIS-13; the first account row moved up 52 px at 740 px and 57 px at 1100 px in the demo). In use now keeps a failed read as “Could not read the sign-in” with *Retry* (UX-04).
+- Results of actions are a notice fixed at the bottom of the window (UX-07); a failed re-read after a successful action keeps the last list under a line with *Retry* (UX-06).
+- Dialogs open on their first field; a dialog scrolls as one, its actions stay at its bottom; commands break between words where they can (VIS-15, VIS-16). A ⋯ menu returns focus to its trigger after a dialog and sets destructive items under a separator (UX-05, VIS-27).
+- Sidebar icons are one inline SVG set on a 16 px grid with a 1.5 px stroke (VIS-19).
+- The tour card sits beside its target, never over it (VIS-12).
+- New classes live in `src/window.css`; `src/style.css` and `src/tokens.css` are the visual system's.
+Evidence: screenshots in `~/DATA/_worktrees/sb-iter-shots/n5/` (local, not in Git), checks listed in `docs/runs/2026-10-24-iteration-ui-ux/nodes/N5.json`.

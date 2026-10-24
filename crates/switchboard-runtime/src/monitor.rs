@@ -109,6 +109,7 @@ pub(crate) struct Pass {
 /// store's credentials changed — not by reading every credential on every pass (LC-08).
 #[derive(Default)]
 struct RenewSchedule {
+    /// `refresh::credentials_key` when `due_at` was read.
     changes: Option<u64>,
     due_at: Vec<(String, i64)>,
     retry_at: std::collections::HashMap<String, i64>,
@@ -388,6 +389,26 @@ fn failure_delay(previous: Option<(i64, i64)>, rate_limited: Option<Option<i64>>
     }
 }
 
+/// The `usage_check` outcome of a failed check: the proxy's own code, else the store's code
+/// for a refusal to keep the answer (PRD-17: `superseded`, `credential_changed`,
+/// `invalid_observation`, `account_gone`, `vault`, `store`), else `no_windows` for an answer
+/// without a quota window, else `other`.
+fn failure_code(failure: &switchboard_proxy::ProbeFailure) -> &'static str {
+    match failure.kind() {
+        "other" => Store::usage_refusal_code(&failure.message).unwrap_or(
+            if failure.message == NO_WINDOWS {
+                "no_windows"
+            } else {
+                "other"
+            },
+        ),
+        code => code,
+    }
+}
+/// `switchboard_proxy::parse_usage`'s refusal of an answer with no quota window, which the
+/// proxy gives no code (pinned by
+/// `a_failed_check_the_store_or_an_empty_answer_refused_has_its_own_code`).
+const NO_WINDOWS: &str = "Provider returned no usage windows.";
 /// The provider's usage endpoint, sent `credential`; a test gate may name a synthetic one.
 async fn probe_provider(
     store: Arc<Store>,
@@ -469,13 +490,13 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
                 Some(status) => crate::oplog::event(
                     "usage_check",
                     &[
-                        ("outcome", crate::oplog::Field::Code(failure.kind())),
+                        ("outcome", crate::oplog::Field::Code(failure_code(&failure))),
                         ("status", crate::oplog::Field::Number(i64::from(status))),
                     ],
                 ),
                 None => crate::oplog::event(
                     "usage_check",
-                    &[("outcome", crate::oplog::Field::Code(failure.kind()))],
+                    &[("outcome", crate::oplog::Field::Code(failure_code(&failure)))],
                 ),
             }
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
@@ -558,21 +579,40 @@ const CHECK_DEADLINE: Duration = Duration::from_secs(25);
 /// between checks. At most two grants per pass. Credentials are read only when the store's
 /// credentials changed; an account whose renewal did not happen waits a minute.
 async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
-    let changes = runtime.store.changes();
-    if schedule.changes != Some(changes) {
-        let Ok(snapshot) = runtime.store.snapshot() else {
-            return;
-        };
-        schedule.due_at = snapshot
-            .accounts
-            .iter()
-            .filter(|a| a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
-            .filter_map(|a| {
-                let credential = runtime.store.stored_credential(&a.id).ok()?;
-                crate::refresh::due_at(&credential).map(|at| (a.id.clone(), at))
-            })
-            .collect();
-        schedule.changes = Some(changes);
+    let Ok(snapshot) = runtime.store.snapshot() else {
+        return;
+    };
+    // N1 round 1 (seam tier): keyed on what the schedule reads, not on `Store::changes`, which
+    // every project save moves; the reads run off the async worker (`blocking::run`).
+    // N1 round 3: the key is kept only when every read succeeded or found no account; a read
+    // that failed (a `security` timeout, a locked keychain) keeps the account's earlier due time
+    // for this pass and is read again at the next one, never dropped until a credential is written.
+    let key = crate::refresh::credentials_key(&runtime.store, &snapshot);
+    if schedule.changes != Some(key) {
+        let previous = std::mem::take(&mut schedule.due_at);
+        let (due_at, certain) = crate::blocking::run(|| {
+            let mut certain = true;
+            let due_at = snapshot
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth
+                })
+                .filter_map(|a| match runtime.store.stored_credential(&a.id) {
+                    Ok(credential) => {
+                        crate::refresh::due_at(&credential).map(|at| (a.id.clone(), at))
+                    }
+                    Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => None,
+                    Err(_) => {
+                        certain = false;
+                        previous.iter().find(|(id, _)| *id == a.id).cloned()
+                    }
+                })
+                .collect();
+            (due_at, certain)
+        });
+        schedule.due_at = due_at;
+        schedule.changes = certain.then_some(key);
     }
     let mut done = 0;
     for (id, due_at) in schedule.due_at.clone() {
@@ -905,6 +945,157 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
 mod tests {
     use super::*;
     use switchboard_core::{Credential, MemoryVault};
+    struct CountingVault {
+        inner: MemoryVault,
+        gets: std::sync::atomic::AtomicUsize,
+    }
+    impl switchboard_core::Vault for CountingVault {
+        fn get(&self, id: &str) -> Result<Credential, String> {
+            self.gets.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// N1 round 1 (seam tier): the renewal schedule read every Claude account's credential
+    /// from the vault whenever `Store::changes` moved, which every project save does.
+    #[tokio::test]
+    async fn a_project_save_does_not_reread_the_renewal_schedule() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault {
+            inner: MemoryVault::default(),
+            gets: Default::default(),
+        });
+        let runtime = Runtime::open(root.path().to_owned(), vault.clone())
+            .await
+            .unwrap();
+        let mut credential = crate::fixtures::credential("synthetic-a");
+        credential.expires_at = Some(now() + 86_400);
+        credential.refresh_token = Some("synthetic-a-refresh".into());
+        runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential,
+                Some(crate::fixtures::identity("synthetic-a")),
+            )
+            .unwrap();
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, now(), &mut schedule).await;
+        assert_eq!(schedule.due_at.len(), 1);
+        let reads = vault.gets.load(std::sync::atomic::Ordering::SeqCst);
+        let work = tempfile::tempdir().unwrap();
+        let mut folders = Vec::new();
+        for n in 0..5 {
+            let folder = work.path().join(format!("repo-{n}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            folders.push(folder.canonicalize().unwrap());
+            runtime
+                .store
+                .save_project(Some("app"), "App", &folders, &[])
+                .or_else(|_| runtime.store.save_project(None, "App", &folders, &[]))
+                .unwrap();
+            renew_due(&runtime, now(), &mut schedule).await;
+        }
+        assert_eq!(vault.gets.load(std::sync::atomic::Ordering::SeqCst), reads);
+        // Disabling the account is seen without a credential write.
+        let id = schedule.due_at[0].0.clone();
+        runtime.store.update_fields(&id, None, Some(false)).unwrap();
+        renew_due(&runtime, now(), &mut schedule).await;
+        assert!(schedule.due_at.is_empty());
+    }
+    /// N1 round 3 (adversarial): a vault read that failed while the renewal schedule was built (a
+    /// locked keychain, a `security` timeout) must not drop the account from the schedule until
+    /// some credential is written: the next pass reads it again.
+    #[tokio::test]
+    async fn a_failed_read_does_not_stick_in_the_renewal_schedule() {
+        #[derive(Default)]
+        struct FlakyGets {
+            inner: MemoryVault,
+            fail: std::sync::atomic::AtomicBool,
+        }
+        impl switchboard_core::Vault for FlakyGets {
+            fn get(&self, id: &str) -> Result<Credential, String> {
+                if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err("Credential storage unavailable".into());
+                }
+                self.inner.get(id)
+            }
+            fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+                self.inner.put(id, value)
+            }
+            fn delete(&self, id: &str) -> Result<(), String> {
+                self.inner.delete(id)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(FlakyGets::default());
+        let runtime = Runtime::open(root.path().to_owned(), vault.clone())
+            .await
+            .unwrap();
+        let mut credential = crate::fixtures::credential("synthetic-a");
+        credential.expires_at = Some(now() + 86_400);
+        credential.refresh_token = Some("synthetic-a-refresh".into());
+        runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential,
+                Some(crate::fixtures::identity("synthetic-a")),
+            )
+            .unwrap();
+        let mut schedule = RenewSchedule::default();
+        vault.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        renew_due(&runtime, now(), &mut schedule).await;
+        vault.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        renew_due(&runtime, now(), &mut schedule).await;
+        assert_eq!(
+            schedule.due_at.len(),
+            1,
+            "the account came back once the vault answered"
+        );
+    }
+    /// PRD-17 (iteration 2026-10-24): 15 quota checks in 48 h were logged `usage_check
+    /// outcome=other`. The store's refusals of the answer (`Store::usage_refusal_code`) and an
+    /// answer with no quota window had no code; each has one now, and the provider's own codes
+    /// stay as they were.
+    #[test]
+    fn a_failed_check_the_store_or_an_empty_answer_refused_has_its_own_code() {
+        use switchboard_proxy::ProbeFailure;
+        let code = |message: &str| failure_code(&ProbeFailure::from(message));
+        assert_eq!(
+            code("Usage observation is older than the stored observation"),
+            "superseded"
+        );
+        assert_eq!(
+            code("Credential changed during usage check"),
+            "credential_changed"
+        );
+        assert_eq!(code("Invalid usage observation"), "invalid_observation");
+        assert_eq!(code("Account not found"), "account_gone");
+        // The empty answer's text, as the proxy writes it today.
+        let empty =
+            switchboard_proxy::parse_usage_at(Provider::Claude, &serde_json::json!({}), 1_000_000)
+                .unwrap_err();
+        assert_eq!(code(&empty), "no_windows");
+        assert_eq!(code(switchboard_proxy::REJECTED), "rejected");
+        let vault = ProbeFailure {
+            code: Some("vault"),
+            ..ProbeFailure::from("Keychain says no")
+        };
+        assert_eq!(failure_code(&vault), "vault");
+        assert_eq!(code("anything else"), "other");
+    }
     #[test]
     fn schedule_written_before_the_clock_moved_back_is_due_now() {
         let account = |checked_at: i64, next_check_at: i64| switchboard_core::Account {

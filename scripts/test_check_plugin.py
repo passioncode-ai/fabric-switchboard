@@ -174,7 +174,7 @@ class PlantedDefects(Fixture):
         self.assertFlags(".mcp.json")
 
     def test_missing_reference_link(self):
-        self.edit(SKILL, "- `references/cli.md` — read", "- `references/cli-missing.md` — read")
+        self.edit(SKILL, "- `references/cli.md`: read", "- `references/cli-missing.md`: read")
         self.assertFlags("cli-missing.md does not exist")
 
 

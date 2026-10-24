@@ -1,0 +1,44 @@
+/*
+ * Window behaviour classes of 0.6.82 (node N5). Styled with the existing tokens; src/style.css and
+ * src/tokens.css own the visual system and are not edited here.
+ */
+/* UX-07: an action's result stays in sight wherever the control was. */
+.notice.toast { position: fixed; z-index: 45; right: var(--space-5); bottom: var(--space-5); max-width: min(560px, calc(100vw - 2 * var(--space-5))); margin: 0; box-shadow: var(--shadow-1); border: 1px solid var(--border-strong); }
+/* Unit tier H: while the tour card is open the toast sits at the top, away from the card's corner. */
+.notice.toast.beside-tour { top: var(--space-5); bottom: auto; }
+/* UX-06: the last list stays on screen under a line that says its re-read failed. */
+.notice.stale-list { margin-bottom: var(--space-3); }
+/* VIS-13: provider terms and active folder rules share one compact block. */
+.status-stack { display: grid; gap: var(--space-1); margin-bottom: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-control); background: var(--panel-2); font-size: var(--t-label); }
+.status-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.status-item + .status-item { padding-top: var(--space-1); border-top: 1px solid var(--border); }
+/* VIS-12: placed beside its target by the window (tourPlacement), not pinned to a corner. */
+.tour-card.is-placed { right: auto; bottom: auto; }
+/* VIS-27: a line before a destructive menu item. */
+.menu-separator { height: 1px; margin: var(--space-1) var(--space-2); background: var(--border); }
+/* VIS-19: one icon set in the sidebar. */
+.nav-icon .nav-svg { display: block; width: 16px; height: 16px; }
+/* UX-19: a copy button says Copied for two seconds. */
+.is-copied { color: var(--ok, var(--accent-text)); }
+/* UX-20: Escape closes a group's tooltip until the pointer or focus leaves it. */
+.group-hint.is-dismissed .group-tip { display: none !important; }
+/* VIS-11: a line that may be long wraps instead of being cut. */
+.row-sub.wraps { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+/* VIS-15: a dialog scrolls as one; its account list is not a second scroller. */
+.dialog .project-accounts { max-height: none; overflow: visible; }
+/* VIS-16: commands break between words where they can, and the actions stay at the bottom of the dialog. */
+.agent-setup code.address { word-break: normal; overflow-wrap: anywhere; }
+.dialog .dialog-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
+.pool-field { display: grid; gap: var(--space-3); }
+.pool-field > [hidden] { display: none; }
+/* Inside the shared status block the terms notice is one line of it, not a box in a box. */
+.status-stack .terms-notice { border: 0; padding: 0; margin: 0; background: none; }
+/* Issue #128 (SCN-073): the usage question on first start, above the page, until it is answered. */
+.usage-question { max-width: 980px; display: grid; gap: var(--space-2); margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); }
+.usage-question h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
+.usage-question > p { margin: 0; color: var(--muted); }
+.usage-question > p.usage-question-sent { color: inherit; font-weight: 600; }
+.usage-question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-1); }
+.usage-question-actions .login-option { margin-top: 0; }
+.about-panel > p.usage-question-sent { margin-top: var(--space-3); color: inherit; font-weight: 600; }
+.about-panel > .usage-question-actions { margin-top: var(--space-2); }

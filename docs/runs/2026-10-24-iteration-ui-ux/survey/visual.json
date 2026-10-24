@@ -1,0 +1,513 @@
+{
+ "area": "visual",
+ "pages_walked": [
+  "accounts",
+  "tokens",
+  "groups (projects)",
+  "groups empty state",
+  "organizations (empty state)",
+  "agents",
+  "activity",
+  "statistics",
+  "about",
+  "tour steps 1-5",
+  "menu: add account",
+  "menu: account row",
+  "menu: automatic switching settings",
+  "dialog: add API key or token (and empty submit)",
+  "dialog: launch",
+  "dialog: move to another pool",
+  "dialog: remove account",
+  "dialog: automatic switching",
+  "dialog: rename or disable (long label)",
+  "dialog: new group",
+  "dialog: delete group",
+  "dialog: add project rule",
+  "dialog: add organization",
+  "dialog: OpenRouter key",
+  "dialog: set up agent",
+  "repositories on disk (expanded)",
+  "sign-in pending banner"
+ ],
+ "method": "Playwright 1.64.1 WebKit, vite demo http://127.0.0.1:5199/?demo=1, widths 740 and 1100, colorScheme light and dark (System appearance follows prefers-color-scheme, src/main.ts:17-21). Screenshots under /Users/sshlg/DATA/_worktrees/sb-iter-shots/ (s/ full pages, d/ dialogs and states, c-*.png crops).",
+ "not_reached": [
+  "accounts empty state (demo always has 13 accounts; not removed one by one)",
+  "Kimi add and launch dialogs (demo throws \"cannot open a terminal\")",
+  "Tab-key focus order: WebKit default skips buttons on Tab; focus rings verified with programmatic focus after a key press"
+ ],
+ "findings": [
+  {
+   "id": "VIS-01",
+   "severity": "P1",
+   "title": "In use now card breaks with a long account label: the e-mail wraps four characters per line and the \"Saved as\" text runs out of the card",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-longlabel-current.png",
+    "src/style.css:200",
+    "src/style.css:203",
+    "src/style.css:204",
+    "src/main.ts:1459"
+   ],
+   "page": "accounts",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Let .current-copy take the free width (flex: 1) and give .current-state min-width: 0 with an ellipsis and a title holding the full label, or move the state under the identity line."
+  },
+  {
+   "id": "VIS-02",
+   "severity": "P1",
+   "title": "Dark theme chart draws two groups in the same yellow, so the legend cannot tell \"Alpha Web\" from \"personal\"",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/c-dark-chart.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-dark-stats.png",
+    "src/tokens.css:34",
+    "src/tokens.css:37",
+    "brand/passioncode/tokens.css:16"
+   ],
+   "page": "stats",
+   "width": 1100,
+   "theme": "dark",
+   "proposal": "--chart-4 maps to --pc-link, which equals --pc-accent in dark; give the chart its own six-step palette per theme (or map chart-4 to a distinct hue) and check that every pair differs."
+  },
+  {
+   "id": "VIS-03",
+   "severity": "P2",
+   "title": "Pool field pattern is an invalid regular expression in WebKit, so pool validation is silently off",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/errors.json",
+    "src/main.ts:1422",
+    "src/main.ts:2215"
+   ],
+   "page": "accounts (Add an API key dialog, Automatic switching dialog)",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Escape the hyphen for the v-flag pattern syntax ([a-z0-9_\\-]+) and add a test that the pattern compiles with the v flag."
+  },
+  {
+   "id": "VIS-04",
+   "severity": "P2",
+   "title": "\"Who works where\" table is wider than its panel at 1100 px; the last column (\"Limits and errors\") is cut with no visible scroll cue (macOS overlay scrollbars)",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-stats.png",
+    "src/style.css:395",
+    "src/style.css:487",
+    "src/style.css:488"
+   ],
+   "page": "stats",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Drop or merge a column (Sent and Received into one Tokens cell) so it fits at the window's minimum width, or add an edge fade that shows more content lies to the right."
+  },
+  {
+   "id": "VIS-05",
+   "severity": "P2",
+   "title": "Chart axis labels scale with the SVG and render at about 6 px at 740 px (about 9.5 px at 1100)",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/c-740-stats-top.png",
+    "src/style.css:427",
+    "src/main.ts:1526",
+    "src/main.ts:1531"
+   ],
+   "page": "stats",
+   "width": 740,
+   "theme": "light",
+   "proposal": "Size the viewBox to the rendered width (ResizeObserver) or draw the axis labels in HTML outside the SVG so they stay at 11 px."
+  },
+  {
+   "id": "VIS-06",
+   "severity": "P2",
+   "title": "Light theme: the first chart series (gold) has 1.34:1 contrast against the panel, below the 3:1 non-text minimum",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-stats.png",
+    "src/tokens.css:34",
+    "brand/passioncode/tokens.css:57"
+   ],
+   "page": "stats",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "In light use the readable gold-brown (--pc-link) or a darker gold for series 1 and keep the bright accent for dark only."
+  },
+  {
+   "id": "VIS-07",
+   "severity": "P2",
+   "title": "Native selects in dialogs render 22 px tall next to 39 px inputs in the same form grid",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-dlg-addkey.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-dlg-policy.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-dlg-setup.png",
+    "src/style.css:111"
+   ],
+   "page": "dialogs (Add an API key, Automatic switching, Set up agent)",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Give .field select appearance: none with a drawn chevron (or -webkit-appearance: menulist-button) so min-height, padding and border apply like inputs."
+  },
+  {
+   "id": "VIS-08",
+   "severity": "P2",
+   "title": "Section heading size changes per page: 12 px on Accounts, 16 px on Groups, 22 px on Tokens, Agents, Activity, Statistics and About",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-projects.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-tokens.png",
+    "src/style.css:164",
+    "src/style.css:83",
+    "src/style.css:48"
+   ],
+   "page": "all",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Pick one section level (for example 16 px semibold) for every page and keep 22 px only where a page has a single panel, so the same element looks the same everywhere."
+  },
+  {
+   "id": "VIS-09",
+   "severity": "P2",
+   "title": "Seven button heights in use (28, 30, 34, 36, 38, 39 and 55 px); row actions, header actions, panel actions and the Kimi \"Launch...\" button all differ",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-agents.png",
+    "src/style.css:32",
+    "src/style.css:261",
+    "src/style.css:58"
+   ],
+   "page": "accounts, agents, stats",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Reduce to two sizes (default 36 px, compact 30 px) and map every button class onto one of them."
+  },
+  {
+   "id": "VIS-10",
+   "severity": "P2",
+   "title": "Segmented control (Enabled/Disabled, Tokens/Requests, repository filter) barely shows which side is on: light selected fill is 1.08:1 against the track, dark selected is darker than the track",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/light-state-segmented.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/dark-state-segmented.png",
+    "src/style.css:358",
+    "src/style.css:360"
+   ],
+   "page": "agents, stats, groups",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Use the gold selection language the rest of the app uses for \"on\" (accent-weak fill plus accent-text border) or a raised white/ink thumb with a clear border."
+  },
+  {
+   "id": "VIS-11",
+   "severity": "P2",
+   "title": "Truncated text with no way to read it: the PassionCode.ai line on Organizations and long account labels are cut with an ellipsis and carry no title",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-orgs.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/740-dark-orgs.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-longlabel.png",
+    "src/style.css:231",
+    "src/style.css:232",
+    "src/style.css:470",
+    "src/main.ts:2088",
+    "src/main.ts:1292"
+   ],
+   "page": "orgs, accounts",
+   "width": 740,
+   "theme": "dark",
+   "proposal": "The override at style.css:470 never wins over nowrap at :232; let .org-card-title .row-sub wrap (white-space: normal), and set title on truncated labels."
+  },
+  {
+   "id": "VIS-12",
+   "severity": "P2",
+   "title": "Tour card sits fixed bottom-right and covers the control it highlights (step 3 hides \"Turn on for Claude Code\" at 740 px)",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/740-dark-tour2.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-tour1.png",
+    "src/style.css:304",
+    "src/main.ts:61"
+   ],
+   "page": "accounts (tour)",
+   "width": 740,
+   "theme": "dark",
+   "proposal": "Place the card next to the target rectangle (above or below, whichever has room) and scroll the target into the visible area outside the card."
+  },
+  {
+   "id": "VIS-13",
+   "severity": "P2",
+   "title": "Accounts page stacks five blocks (demo banner, terms notice, rule strip, In use now, automatic switching) before the first account; at 800 px the list starts near y 590 and at 740 px below the fold",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-signin-pending.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/740-light-accounts.png",
+    "src/main.ts:76",
+    "src/main.ts:291"
+   ],
+   "page": "accounts",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Fold the terms notice and the rule strip into one compact status line under the header, and let the dismissed terms notice stay gone."
+  },
+  {
+   "id": "VIS-14",
+   "severity": "P2",
+   "title": "Notice components disagree: the terms notice is a bordered panel in 14 px, the active rule strip has the same padding but no background or border, the sign-in banner uses 12 px",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-signin-pending.png",
+    "src/style.css:63",
+    "src/style.css:192",
+    "src/style.css:337"
+   ],
+   "page": "accounts",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Give every notice one container (panel-2 fill, border, 12 to 13 px text) and vary only the tone colour."
+  },
+  {
+   "id": "VIS-15",
+   "severity": "P2",
+   "title": "New group dialog opens with focus on Cancel, and its account list is a 320 px scroller inside an already scrolling dialog",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-dlg-group.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/740-light-dlg-group.png",
+    "src/style.css:93",
+    "src/main.ts:517",
+    "src/main.ts:1903"
+   ],
+   "page": "groups (New group dialog)",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Focus the Group name field on open; drop the inner max-height so the dialog body is the only scroller."
+  },
+  {
+   "id": "VIS-16",
+   "severity": "P2",
+   "title": "Set up agent dialog breaks commands mid-word (\"<pro ject folder>\") and pushes its actions below the viewport",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-dlg-setup.png",
+    "src/style.css:322",
+    "src/style.css:100"
+   ],
+   "page": "agents (Set up dialog)",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Use overflow-wrap: anywhere only as a fallback (word-break: normal) and keep the dialog footer sticky at the bottom of the scrolling dialog."
+  },
+  {
+   "id": "VIS-17",
+   "severity": "P2",
+   "title": "Selected state uses three different visuals on one page: gold chip for the default agent, gold pill \"Default\", grey segmented thumb for Enabled; About uses real radios inside chips",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/c-740-agents-top.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-about.png",
+    "src/style.css:92",
+    "src/style.css:360"
+   ],
+   "page": "agents, about",
+   "width": 740,
+   "theme": "light",
+   "proposal": "Define one \"chosen\" token pair (accent-weak fill, accent-text border, check mark) and apply it to chips, pills and segments alike."
+  },
+  {
+   "id": "VIS-18",
+   "severity": "P3",
+   "title": "Light hover states are nearly invisible: nav hover is white on #f7f5f8 (1.08:1) and buttons get lighter, not darker, on hover",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/light-state-switch-hover.png",
+    "src/style.css:19",
+    "src/style.css:33",
+    "brand/passioncode/tokens.css:56"
+   ],
+   "page": "all",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "In light, hover to a slightly darker tint (for example color-mix of ink 6 percent into panel) instead of panel-raised white."
+  },
+  {
+   "id": "VIS-19",
+   "severity": "P3",
+   "title": "Navigation icons are mixed Unicode glyphs with uneven size and weight (diamond and circle large, wave and plug tiny)",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "src/main.ts:239",
+    "src/style.css:20"
+   ],
+   "page": "sidebar",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Replace them with one icon set drawn on a 16 px grid at one stroke weight (inline SVG)."
+  },
+  {
+   "id": "VIS-20",
+   "severity": "P3",
+   "title": "Groups nav badge counts active project rules in the gold notification style and stays when no group exists",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-groups-empty.png",
+    "src/main.ts:243",
+    "src/style.css:191"
+   ],
+   "page": "sidebar",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Use a neutral badge or move the rule count to the Project rules section, so a gold count does not read as unread items about groups."
+  },
+  {
+   "id": "VIS-21",
+   "severity": "P3",
+   "title": "Duplicate primary actions and inconsistent labels: header \"+ New organization\" and empty-state \"+ New organization\" side by side; Groups header \"+ New group\" but empty state \"New group\"",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-orgs.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-groups-empty.png",
+    "src/main.ts:260",
+    "src/main.ts:261"
+   ],
+   "page": "orgs, groups",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "While the empty state shows, make the header action secondary or hide it, and use one label for both."
+  },
+  {
+   "id": "VIS-22",
+   "severity": "P3",
+   "title": "Statistics tiles leave the fifth tile alone on a second row at 1100 px",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-stats.png",
+    "src/style.css:389",
+    "src/style.css:416"
+   ],
+   "page": "stats",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Use a fixed 5-column grid above about 900 px of content width, or merge \"Per request\" into the Tokens tile."
+  },
+  {
+   "id": "VIS-23",
+   "severity": "P3",
+   "title": "\"Limits and errors\" cells are warning-coloured for any non-zero count, including under 1 percent, so every row looks alarming",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-stats.png",
+    "src/style.css:401"
+   ],
+   "page": "stats",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Colour only rows above a threshold (for example 1 percent or any 429 burst) and keep the rest muted."
+  },
+  {
+   "id": "VIS-24",
+   "severity": "P3",
+   "title": "Dialogs and menus appear and disappear with no transition; only the tour outline and group tip animate",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-light-menu-row.png",
+    "src/style.css:100",
+    "src/style.css:269",
+    "src/style.css:412"
+   ],
+   "page": "dialogs, menus",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Add a 120 to 180 ms fade and 4 px rise on dialog[open] and .menu using the existing --dur-state token, disabled under reduced motion."
+  },
+  {
+   "id": "VIS-25",
+   "severity": "P3",
+   "title": "Kimi Code footer buttons sit flush against the account card with no gap",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-accounts.png",
+    "src/style.css:187",
+    "src/main.ts:1197"
+   ],
+   "page": "accounts",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Give .management-actions a top margin of --space-3 when it follows a list."
+  },
+  {
+   "id": "VIS-26",
+   "severity": "P3",
+   "title": "Non-clickable paths and commands use the link colour (gold-brown in light, gold in dark), so they read as links",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-activity.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-about.png",
+    "src/style.css:98"
+   ],
+   "page": "activity, agents, about",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Keep --link for real links only and render paths and commands in --ink or --muted mono."
+  },
+  {
+   "id": "VIS-27",
+   "severity": "P3",
+   "title": "Row menu puts the destructive \"Remove...\" directly under ordinary items with no separator",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/d/1100-dark-menu-row.png",
+    "src/style.css:272",
+    "src/main.ts:1331"
+   ],
+   "page": "accounts",
+   "width": 1100,
+   "theme": "dark",
+   "proposal": "Add a divider before destructive items in .menu."
+  },
+  {
+   "id": "VIS-28",
+   "severity": "P3",
+   "title": "Group names carry a dotted underline (tooltip hint) and look like links",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-projects.png",
+    "src/style.css:405"
+   ],
+   "page": "groups",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Show the hint through an info icon or on hover only; keep the title plain."
+  },
+  {
+   "id": "VIS-29",
+   "severity": "P3",
+   "title": "At 820 px and below the header actions stack into two full-width buttons and the sidebar version line wraps; \"Pause countdown\" drops onto its own line",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/740-light-accounts.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/740-dark-orgs.png",
+    "src/style.css:139",
+    "src/style.css:23"
+   ],
+   "page": "all",
+   "width": 740,
+   "theme": "light",
+   "proposal": "Keep header actions in a row (wrap only below 590 px), and let the version line ellipsize."
+  },
+  {
+   "id": "VIS-30",
+   "severity": "P3",
+   "title": "Token drift in CSS: --font-mono is used but never defined (falls back), and .current-card is declared twice",
+   "evidence": [
+    "src/style.css:300",
+    "src/style.css:329",
+    "src/style.css:166",
+    "src/style.css:200"
+   ],
+   "page": "groups, accounts",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Use var(--font-data) and merge the two .current-card rules."
+  },
+  {
+   "id": "VIS-31",
+   "severity": "P3",
+   "title": "Demo fixture says \"Version 0.6.0 is the latest\" while the sidebar shows v0.6.80",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/s/1100-light-about.png",
+    "src/demo.ts:86"
+   ],
+   "page": "about",
+   "width": 1100,
+   "theme": "light",
+   "proposal": "Read the version from package.json in the demo update fixture."
+  }
+ ],
+ "console_errors": [
+  {
+   "kind": "warning",
+   "text": "Pattern attribute value '[a-z0-9_-]+' is not a valid regular expression.",
+   "where": "Add an API key dialog and Automatic switching dialog, every width and theme (10 occurrences)"
+  },
+  {
+   "kind": "pageerror",
+   "text": "none observed"
+  }
+ ]
+}

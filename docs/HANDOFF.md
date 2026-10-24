@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: 0.6.82, release iteration over the whole product (SB-187, SB-188)
+
+- **Objective.** The operator's ask: «прогнал итерацию, UI UX и улучшение всего продукта». Run by
+  task-pipeline `iteration`; record in [runs/2026-10-24-iteration-ui-ux](runs/2026-10-24-iteration-ui-ux/run.md).
+- **Done.** Survey of 102 findings (4 read-only audits, survey/*.json), canvas with decisions D-1
+  to D-6 ([canvas.md](runs/2026-10-24-iteration-ui-ux/canvas.md)), six nodes built in parallel
+  worktrees and merged into `iter/0.6.82-ui-ux`: N1 owner reliability, N2 CLI and MCP words, N3
+  visual system, N4 docs and brand, N5 window behaviour and words, N6 analytics consent (issue
+  #128). Node reports with evidence in [nodes/](runs/2026-10-24-iteration-ui-ux/nodes/).
+- **Verification.** Blind tiers per risk class: N1 and N6 (R3) unit, seam and an adversarial
+  round each; N2 unit and seam; N3 visual; N4 product; N5 unit and product. Round 1 found real
+  defects (a failed Keychain read cached as "no sign-in needed", a hidden field blocking a form,
+  focus lost on Statistics, a stale analytics question able to re-enable the shared switch); each
+  was fixed with a test seen failing first; a confirming round ran on the integrated branch.
+- **Machine.** The shared `target/` reached 25 GB with six worktrees building (cap 10 GB, LC-15):
+  `cargo clean --profile dev` removed 30.8 GiB once, the disk having reached 0 bytes free.
+- **Next task.** The next pool is SB-189 to SB-194 and the canvas's *Next pool* section; another
+  session (fabric-switchboard-f6) plans the next release from it (handovers and sessions UX).
+  After a day on 0.6.81/0.6.82: read `control_slow` and `vault_slow` in switchboard.log, then
+  close SB-174 and SB-163 or open what they show.
+
 ## 2026-10-24: 0.6.81, slow owner reads and the session start hook (SB-185, SB-186)
 
 - **Found.** switchboard.log on this Mac: after SB-182's cache, `recovery` still answered in 5.2

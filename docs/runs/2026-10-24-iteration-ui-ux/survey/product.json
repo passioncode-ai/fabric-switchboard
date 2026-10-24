@@ -1,0 +1,403 @@
+{
+  "area": "product",
+  "findings": [
+    {
+      "id": "PRD-01",
+      "severity": "P1",
+      "title": "recovery still answers in 5 to 30 s on 0.6.79 and 0.6.80 although SB-182 is marked done",
+      "evidence": [
+        "log: 10 control_slow operation=recovery after 0.6.79 started (2026-10-24T04:12:57Z): 11:55:49 17664 ms, 11:57:27 18638, 12:00:37 14907, 12:11:54 5190, 12:30:54 5373, 12:32:45 29772, 12:34:32 24628, 12:35:54 17739, 12:38:00 6105, 12:40:29 6030",
+        "log: the 12:28 to 12:40 burst interleaves project_folder_gone (12:28:55, 12:33:28) and project_suggestion added (12:33:49, 12:34:49, 12:39:27)",
+        "crates/switchboard-runtime/src/refresh.rs:383-404 (sign_in_required cache keyed by store.changes())",
+        "crates/switchboard-core/src/lib.rs:880-886 (changes() increments on any backup-relevant change)",
+        "crates/switchboard-core/src/projects.rs:523 (save_project_in calls changed()); crates/switchboard-runtime/src/lib.rs:1345, 2193, 2249 (folder vanish, found and worked joins call save_project)",
+        "crates/switchboard-core/src/lib.rs:1215-1225 (stored_credential holds the store mutex across the vault read)",
+        "crates/switchboard-runtime/src/lib.rs:2800-2814 (Operation::Recovery runs sign_in_required on an async worker, not in blocking::run)",
+        "crates/switchboard-runtime/src/control.rs:344-356 (client gives up after 30 s; recovery took 82831 ms and 60155 ms at 2026-10-24T03:00 to 03:01)",
+        "docs/evidence/backlog.md SB-182 row: done in 0.6.79"
+      ],
+      "backlog": "SB-182",
+      "agent_closable": true,
+      "proposal": "Key the sign-in cache on a credential-only counter (bumped only where a credential is stored or removed), so the 700 folder joins and leaves in 48 h stop invalidating it; read the vault without holding the store mutex and inside blocking::run. Reopen SB-182 with a test that joins a folder between two recovery calls and asserts no second vault read."
+    },
+    {
+      "id": "PRD-02",
+      "severity": "P2",
+      "title": "transaction_held for usage_renewal reports checks: 0 and leaves the whole hold unattributed",
+      "evidence": [
+        "log: 2026-10-24T12:38:21Z transaction_held step=usage_renewal millis=14706 checks=0; 11:39:13Z usage_renewal millis=5269 checks=0",
+        "crates/switchboard-runtime/src/refresh.rs:466-469 (held.phase(\"checks\") is called before reserve_due runs, so it records 0 ms)",
+        "crates/switchboard-runtime/src/lib.rs:2433-2440 (a phase ends at its mark; the time after the last mark is never logged)"
+      ],
+      "backlog": "SB-163",
+      "agent_closable": true,
+      "proposal": "Mark \"checks\" after reserve_due returns and log the remainder after the last mark as its own phase on Drop, so SB-163's day of evidence names where 14 s went; add the case to a_long_hold_names_where_its_time_went."
+    },
+    {
+      "id": "PRD-03",
+      "severity": "P2",
+      "title": "recovery.json is never pruned; at 1024 rows every new stop is refused with a misleading message",
+      "evidence": [
+        "switchboard --json recovery (2026-10-24): 120 sessions, 86 waiting, 37 ready; ~/Library/Application Support/ai.passioncode.fabric-switchboard/recovery.json: 120 rows (86 waiting, 34 resumed), oldest 9.5 days",
+        "crates/switchboard-runtime/src/recovery.rs:14 (MAX_ROWS 1024), 161-164 (new_row refuses when full), 17 (INVALID: 'The recovery record is invalid or conflicts with an existing stop.')",
+        "crates/switchboard-runtime/src/recovery.rs:45-50 (states Waiting, Claimed, Resumed, Cancelled; no expiry), no retain or prune in the file",
+        "log: 42 recovery_hook registered in 48 h (about 21 a day: the file fills in about 43 days)"
+      ],
+      "backlog": "SB-115",
+      "agent_closable": true,
+      "proposal": "Drop resumed and cancelled rows after 7 days and expire waiting rows older than a bound (with a test), and give a full file its own message and log code instead of INVALID, so a stop is never silently lost."
+    },
+    {
+      "id": "PRD-04",
+      "severity": "P2",
+      "title": "The MCP tool reference documents 18 of 45 tools and says sign-in is not exposed",
+      "evidence": [
+        "plugins/switchboard/skills/switching-accounts/references/tools.md:7 ('No tool accepts or returns a credential; login and launch are not exposed.')",
+        "crates/switchboard-cli/src/mcp.rs:79 (switchboard_login), :90 (switchboard_kimi_login), :76 (switchboard_recovery)",
+        "27 tools served by mcp.rs and absent from tools.md: switchboard_account_move, _account_update, _agent_set, _backup_now, _backups, _codex_route, _events, _handovers, _handovers_set, _kimi_login, _kimi_rename, _login, _openrouter_models, _organization_set, _organizations, _project_bindings, _project_edit, _project_move_root, _project_sources, _project_suggestion, _project_suggestions, _projects, _recovery, _repository_map, _rotation, _rotation_set, _statistics",
+        "docs/CLI.md:156 (calls tools.md 'the tool reference')"
+      ],
+      "backlog": "SB-63",
+      "agent_closable": true,
+      "proposal": "Bring tools.md to all 45 tools (sections by read and write, as now) and add a test beside mcp_parity that fails when a tool name from mcp::tools() is missing from tools.md; fix the 'login and launch are not exposed' sentence to 'launch is not exposed; sign-in is begun, the person signs in'."
+    },
+    {
+      "id": "PRD-05",
+      "severity": "P2",
+      "title": "docs/CLI.md says a restart loses pending sign-ins; since SB-65 they are taken back",
+      "evidence": [
+        "docs/CLI.md:104 ('App/server restart invalidates pending in-memory login IDs')",
+        "crates/switchboard-runtime/src/launch.rs:1002 (pub fn adopt_logins), crates/switchboard-runtime/src/lib.rs:1491 (Runtime::adopt_logins, SB-65)",
+        "docs/CLI.md:3 ('Reference ... as of 0.6.18'; the installed CLI is 0.6.80)"
+      ],
+      "backlog": "SB-65",
+      "agent_closable": true,
+      "proposal": "Replace the sentence with what adopt_logins does (an open or completed sign-in survives an owner restart and finishes) and the header version with the current one."
+    },
+    {
+      "id": "PRD-06",
+      "severity": "P3",
+      "title": "OPERATIONS.md's log event list misses 12 events the code writes",
+      "evidence": [
+        "docs/OPERATIONS.md:108 (the list of events)",
+        "crates/switchboard-runtime/src/control.rs:275 control_slow; control.rs:195 control_refused; lib.rs:973 claude_binding; statistics.rs:141 statistics_saved; src-tauri/src/updates.rs:798 update_download; updates.rs:1307 update_relaunch_helper; lib.rs:3768 vesta_connect; monitor.rs:163 vesta_read; handovers.rs:210 handover; lib.rs:4021 move_root; lib.rs:805 codex_route; oplog.rs:254 probe",
+        "crates/switchboard-runtime/src/monitor.rs:499 (step usage_renewal, not in the transaction_held step list at OPERATIONS.md:108, nor the phase fields)"
+      ],
+      "backlog": "SB-63",
+      "agent_closable": true,
+      "proposal": "Add the missing events with their codes, and a docs test that collects oplog event names from the sources and fails when one is not named in OPERATIONS.md."
+    },
+    {
+      "id": "PRD-07",
+      "severity": "P2",
+      "title": "A missing subcommand prints only 'Invalid arguments. Run switchboard --help.'",
+      "evidence": [
+        "switchboard accounts (and switchboard --json accounts) on 0.6.80: 'Invalid arguments. Run switchboard --help.', exit 2",
+        "crates/switchboard-cli/src/main.rs:2487-2511 (every clap error but help and version is replaced by one generic line, to never reflect a typed secret)",
+        "switchboard --help lists 'accounts  List and manage accounts' without naming 'list'"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "For clap's MissingSubcommand and DisplayHelpOnMissingArgumentOrSubcommand kinds (which reflect no typed value) print that subcommand's help, and name the subcommand in the generic line ('Run switchboard accounts --help.'); keep the generic line for every kind that could echo an argument."
+    },
+    {
+      "id": "PRD-08",
+      "severity": "P1",
+      "title": "Issue #128 is not on the board, and analytics still sends at every start, background starts included",
+      "evidence": [
+        "gh issue 128 (open since 2026-10-08): nothing queued or sent until the person answered the switch",
+        "docs/evidence/backlog.md: no row names #128, A7-012 or ADR-0127",
+        "log: 91 analytics_flush outcome=sent in 48 h; one at each owner_started, e.g. 2026-10-23T02:35:47Z right after a background update restart",
+        "crates/switchboard-runtime/src/lib.rs:1561-1576 (enable_analytics_with calls started() and flushes at once)",
+        "crates/switchboard-runtime/src/analytics.rs:363-386 (started() sends app_installed and app_started), :76-85 (analytics on by default), :195-201 (an unreadable state file reads as default: app_installed again)",
+        "src/main.ts:39-68 (first-run tour has no analytics step), src/main.ts:1790-1800 (the only switch is in About)"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "File the row (P1, privacy, operator decision 2026-10-08) and build issue_128_plan below; scenario first (SCN-044 plus a first-run notice scenario)."
+    },
+    {
+      "id": "PRD-09",
+      "severity": "P1",
+      "title": "Fallback chains exist in the CLI and MCP but not in the window",
+      "evidence": [
+        "crates/switchboard-cli/src/main.rs PARITY: chain list, chain set, chain clear map to switchboard_chain_get and switchboard_chain_set",
+        "src/main.ts:37 (Page type has no chains page); src/main.ts:632, 649 mention chains only in prose on the Agents page",
+        "docs/evidence/backlog.md SB-71: 'Left: the app screen (scenario first)'"
+      ],
+      "backlog": "SB-71",
+      "agent_closable": true,
+      "proposal": "Scenario first (super-ux), then a Chains section on the Agents page: the chain that applies per scope, presets, and add or reorder executors through the existing set_chain operation; SB-73's status (last hand-over and why) can share it."
+    },
+    {
+      "id": "PRD-10",
+      "severity": "P2",
+      "title": "Stopped sessions and the hand-over setting are reachable from the CLI and MCP only",
+      "evidence": [
+        "switchboard --json recovery: 86 waiting stops, 15 limited accounts; the window has no view of them (grep -ci recovery src/main.ts = 0)",
+        "CLI handovers set and MCP switchboard_handovers_set exist (main.rs PARITY); no window control (grep -ci 'hand-over' src/main.ts = 0)",
+        "docs/evidence/backlog.md SB-65: Left: acting on a session, Kimi sessions, active requests"
+      ],
+      "backlog": "SB-65",
+      "agent_closable": true,
+      "proposal": "Add a read-only Stops list to Activity (state, account, folder, ready or next probe) over Operation::Recovery, and an 'Open hand-overs in Fabric' switch on the Agents page over HandoverSetting."
+    },
+    {
+      "id": "PRD-11",
+      "severity": "P3",
+      "title": "The window says Groups and Automatic switching; the CLI and MCP say project, pool and rotation",
+      "evidence": [
+        "src/main.ts:239, 253 ('Groups'); 'Automatic switching' 3 times in src/main.ts",
+        "switchboard project ..., switchboard rotation ...; MCP switchboard_projects, switchboard_project_edit, switchboard_rotation, switchboard_rotation_set",
+        "docs/brand/terminology.md:3 defines Pool but neither Group nor Project"
+      ],
+      "backlog": "SB-66",
+      "agent_closable": true,
+      "proposal": "Record Group (window) = project (CLI and MCP) = pool (its routing id) and Automatic switching = rotation in terminology.md, and say 'group' in the CLI's project help (an alias `switchboard group` is optional)."
+    },
+    {
+      "id": "PRD-12",
+      "severity": "P3",
+      "title": "Neither status nor the log names the owner's version",
+      "evidence": [
+        "switchboard --json status on 0.6.80: {live_mode: 'Next request · HTTP/SSE', platform, proxy_address} only (crates/switchboard-runtime/src/lib.rs:2630)",
+        "plugins/switchboard/skills/switching-accounts/references/tools.md:36 (MCP status has runtime.online; the CLI's has a display string instead)",
+        "crates/switchboard-runtime/src/control.rs (the handshake already carries owner_version; malformed_refusal uses it)",
+        "log: owner_started carries pid and proxy_port only; 12 restarts into new releases in 48 h cannot be told apart"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "Add owner_version and a boolean online to the status answer and version to owner_started, so a client skew and an event's release are readable."
+    },
+    {
+      "id": "PRD-13",
+      "severity": "P3",
+      "title": "claude_binding is logged on syncs that changed nothing, against SB-155",
+      "evidence": [
+        "log: 522 of 1082 claude_binding lines in 48 h have bound=0, removed=0, skipped=0, user_values=1",
+        "crates/switchboard-runtime/src/lib.rs:966-971 (user_values_present counts as a change, so one folder with a user value logs every sync)"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "Log user_values only when its set changes from the previous sync, as SB-155 intended."
+    },
+    {
+      "id": "PRD-14",
+      "severity": "P3",
+      "title": "While an update waits, an unchanged check is logged every 5 minutes, not once",
+      "evidence": [
+        "log: 77 of 89 update_check outcome=current lines carry waiting=yes, 5 minutes apart",
+        "src-tauri/src/updates.rs:583-592 (logs_check: nothing new logged once), ~:630-640 (the recheck while waiting logs unconditionally)",
+        "AGENTS.md:76 ('a check that finds nothing new is logged once')"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "Route the waiting recheck through logs_check, or state in AGENTS.md that a waiting update's checks are logged each time."
+    },
+    {
+      "id": "PRD-15",
+      "severity": "P3",
+      "title": "CLI help and CLI.md omit the Linux data and backup folders",
+      "evidence": [
+        "crates/switchboard-cli/src/main.rs:186-187 (backup help names macOS and Windows only)",
+        "docs/CLI.md:15 (data root for macOS and Windows only)",
+        "docs/OPERATIONS.md:7 (Linux data root and backups folder, SB-88)"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "Add the Linux paths to the backup help and CLI.md:15."
+    },
+    {
+      "id": "PRD-16",
+      "severity": "P2",
+      "title": "Seven open rows already shipped, and one done row recurred",
+      "evidence": [
+        "docs/evidence/backlog.md: SB-109 (done in 0.6.65), SB-110 (phase 1 done in 0.6.80; rest is SB-183/SB-184), SB-111 (done in 0.6.80), SB-131 (released v0.6.34), SB-134 (part 3 done in 0.6.52, every_cli_command_has_an_mcp_tool_or_a_reason), SB-63 (left SB-66 and SB-68; SB-68 done 2026-10-07), SB-133 (released v0.6.40, live check only)",
+        "SB-182 marked done in 0.6.79 while PRD-01's log shows the same pattern"
+      ],
+      "backlog": "SB-63",
+      "agent_closable": true,
+      "proposal": "Close the shipped rows with their existing receipts under an agent-sync lease, split their leftovers into the rows already named, and reopen SB-182."
+    },
+    {
+      "id": "PRD-17",
+      "severity": "P2",
+      "title": "15 quota checks failed with usage_check outcome=other in 48 h despite SB-127",
+      "evidence": [
+        "log: usage_check in 48 h: 49 rate_limited, 15 unreachable, 15 other, 11 rejected, 1 http_error status=502, 1 interrupted",
+        "docs/OPERATIONS.md:108 ('other is only a message no layer gives a code, SB-127')",
+        "docs/evidence/backlog.md SB-127 (done 2026-10-15: the known paths got codes)"
+      ],
+      "backlog": "SB-127",
+      "agent_closable": true,
+      "proposal": "Find the path that still returns an uncoded ProbeFailure (as SB-127 did, with a test per path) and give it a code."
+    },
+    {
+      "id": "PRD-18",
+      "severity": "P3",
+      "title": "Update restarts interrupt managed sessions several times a day",
+      "evidence": [
+        "log 48 h: 12 update_install, 7 update_waiting reason=request_in_flight, 10 update_restart outcome=drained with millis 3004 to 44300 (proxy answers 503 Retry-After 5 meanwhile)",
+        "log: owner_stopped outcome=abandoned 2026-10-23T00:04:58Z (2067 ms) and 02:35:34Z (9033 ms), hard_exit 02:35:45Z; none since 0.6.77 (14:32 UTC 2026-10-23)"
+      ],
+      "backlog": null,
+      "agent_closable": false,
+      "proposal": "No defect after 0.6.77; watch hard_exit and abandoned drains for another day and treat release cadence (12 restarts in 48 h) as a cost when batching releases."
+    },
+    {
+      "id": "PRD-19",
+      "severity": "P2",
+      "title": "The pool capability still sits as a literal in settings.local.json (SB-139 left)",
+      "evidence": [
+        "docs/evidence/backlog.md SB-139: 'open: keep the value out of files agents routinely read (an apiKeyHelper in place of the literal token), measured against Claude Code before choosing'",
+        "log: 549 claude_binding lines with bound>0 in 48 h (folders rewritten with the value)"
+      ],
+      "backlog": "SB-139",
+      "agent_closable": true,
+      "proposal": "Measure apiKeyHelper against the installed Claude Code with a local stub (as SB-183 measured ANTHROPIC_AUTH_TOKEN), then write the helper instead of the literal."
+    },
+    {
+      "id": "PRD-20",
+      "severity": "P2",
+      "title": "The brand strings registry still lists retired strings (SB-66 left)",
+      "evidence": [
+        "docs/evidence/backlog.md SB-66: 'Open: a full strings.md resync against the UI (older sections still list retired strings)'",
+        "docs/brand/strings.md vs src/main.ts t(...) calls"
+      ],
+      "backlog": "SB-66",
+      "agent_closable": true,
+      "proposal": "Generate the list of t('...') strings from src/main.ts and reconcile strings.md section by section (copywriting route), with brand-lint as the check."
+    },
+    {
+      "id": "PRD-21",
+      "severity": "P2",
+      "title": "SB-183 shell hook is buildable now",
+      "evidence": [
+        "docs/evidence/backlog.md SB-183: plain claude 2.1.299 starts in a home without a sign-in when settings.json env carries a placeholder ANTHROPIC_AUTH_TOKEN (measured 2026-10-24); next: scenario, then the hook and a proxy test",
+        "docs/HANDOFF.md:13-14 (next task after the SB-174/SB-163 read)"
+      ],
+      "backlog": "SB-183",
+      "agent_closable": true,
+      "proposal": "Write the scenario, then `switchboard shell init zsh|bash|fish` and the proxy test that such a request is served by the folder capability alone."
+    },
+    {
+      "id": "PRD-22",
+      "severity": "P3",
+      "title": "A start failure in the window gives no next step beyond reopening",
+      "evidence": [
+        "src-tauri/src/main.rs:50 (STARTUP_FAILED: 'Switchboard could not start its account service. Retry; if it keeps failing, quit and reopen Switchboard.')"
+      ],
+      "backlog": null,
+      "agent_closable": true,
+      "proposal": "Name the log file (~/Library/Logs/Fabric Switchboard/switchboard.log, per platform) and `switchboard status` as the next step after a second failure."
+    },
+    {
+      "id": "PRD-23",
+      "severity": "P3",
+      "title": "SB-07: two integration tests fail once in a full gate and pass alone",
+      "evidence": [
+        "docs/evidence/backlog.md SB-07 (project_rules_are_optional_visible_and_applied_on_request; managed_session_reads_usage_and_switches_only_inside_its_pool)"
+      ],
+      "backlog": "SB-07",
+      "agent_closable": true,
+      "proposal": "Run the two tests in a loop under the full workspace's parallelism to capture the printed tool message, then fix the race it names."
+    }
+  ],
+  "issue_128_plan": "No first-run disclosure exists today: the window has only the five-step tour (src/main.ts:39-68, localStorage key switchboard.tour) and the About panel switch (src/main.ts:1790-1800, analyticsPanel); the log shows analytics_flush sent right after every owner start, background starts included. Implementing #128 touches: (1) crates/switchboard-runtime/src/analytics.rs: State (around line 160) gains disclosed_at (this app's analytics-state.json, never the shared PassionCode/installation.json); track() (261), started() (363) and tick() (388) return before queueing while disclosed_at is absent; set_enabled() (237) records disclosed_at for either answer and, when the answer is on, reports the held app_installed/app_started after it; Analytics::new() (195-201) must tell an absent state file (fresh install) from an unreadable one (ask again, send nothing, never re-send app_installed); an upgraded state (installed true, no disclosed_at) asks once and is not counted as a new install; status() (229) returns disclosed. (2) crates/switchboard-runtime/src/lib.rs: enable_analytics_with (1561-1576) still builds the client but sends nothing before disclosure; analytics_status (1581) and set_analytics (1588) carry disclosed; monitor.rs:255-257 tick stays silent. (3) src-tauri/src/main.rs:888-896 (analytics_status, set_analytics) pass the new field; a --background start shows nothing and sends nothing until the window opens. (4) src/types.ts:136-147 (analytics() currently typed as LoginItem {available, enabled}: needs its own type with disclosed), src/adapter.ts:89-90, src/demo.ts (demo adapter), src/main.ts: a first-run notice card shown before the tour when available && !disclosed (what is counted, 'nothing has been sent yet', the switch on, Continue), and the About note in analyticsPanel; Russian strings in src/locales/ru.ts. (5) Tests in analytics.rs against the existing synthetic server helper (serve, line 579): nothing reaches the server before the answer, including app_installed and a background start; an upgraded state is not a new install; an unreadable state asks again; plus a ui-logic test for when the notice shows. (6) Docs in the same change: docs/ANALYTICS.md (what is sent and when), docs/ux/scenarios.md SCN-044 and a new first-run notice scenario, docs/brand/strings.md, the backlog row for #128.",
+  "log_48h": {
+    "window": "2026-10-22T12:45Z to 2026-10-24T12:45Z (last line), ~/Library/Logs/Fabric Switchboard/switchboard.log, 2850 lines, codes and numbers only",
+    "control_slow": {
+      "total": 74,
+      "by_operation": {
+        "recovery": 59,
+        "project_suggest": 9,
+        "handovers": 5,
+        "agents_overview": 1
+      },
+      "max_ms": 82831,
+      "after_0_6_79_start_2026_10_24T04_12_57Z": {
+        "recovery": 10,
+        "project_suggest": 2,
+        "max_ms": 29772
+      }
+    },
+    "transaction_held": {
+      "total": 29,
+      "by_step": {
+        "suggest_found": 7,
+        "rotate": 6,
+        "source_sync": 6,
+        "renewal": 4,
+        "vanish": 3,
+        "usage_renewal": 2,
+        "worked": 1
+      },
+      "max_ms": 51969,
+      "max_step": "worked (2026-10-22T14:20:44Z)",
+      "after_0_6_79": 4
+    },
+    "control_refused": 0,
+    "usage_check_failures": {
+      "total": 92,
+      "rate_limited": 49,
+      "unreachable": 15,
+      "other": 15,
+      "rejected": 11,
+      "http_error_502": 1,
+      "interrupted": 1
+    },
+    "hard_exit": 1,
+    "owner_stopped": {
+      "drained": 11,
+      "abandoned": 2
+    },
+    "owner_started": 13,
+    "update_check": {
+      "current": 89,
+      "current_while_waiting": 77,
+      "ready": 12,
+      "check_failed": 4
+    },
+    "update_download": {
+      "started": 12,
+      "done": 12
+    },
+    "update_install": {
+      "installed": 12
+    },
+    "update_waiting": {
+      "request_in_flight": 7,
+      "window_visible": 5
+    },
+    "update_restart": {
+      "drained": 10,
+      "idle": 2,
+      "exiting": 3,
+      "launch_background": 12
+    },
+    "update_relaunch_helper": {
+      "started": 12
+    },
+    "recovery_hook": {
+      "again": 243,
+      "registered": 42
+    },
+    "project_suggestion": 502,
+    "project_folder_gone": 239,
+    "claude_binding": {
+      "total": 1082,
+      "no_change_but_logged": 522
+    },
+    "statistics_saved": 208,
+    "analytics_flush": {
+      "sent": 91
+    },
+    "credential_source": {
+      "claude_available": 13,
+      "codex_available": 13
+    },
+    "login_item": {
+      "enabled": 13
+    }
+  }
+}

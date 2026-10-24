@@ -19,7 +19,7 @@ use switchboard_runtime::{
     name = "switchboard",
     version,
     about = "Manage Claude and Codex accounts with Fabric Switchboard",
-    after_help = "Secrets: pipe a token or auth JSON to accounts add --secret-stdin. Never put secrets in arguments.\nLogin and launch: keep the desktop app or switchboard serve running in another terminal.\nManaged sessions switch identity at the next request; existing streams are not replayed."
+    after_help = "Start with: switchboard accounts list. A command group run without its command prints its commands (switchboard accounts); recovery, handovers and agents hermes list instead.\nGroups: `project` commands manage groups of repositories with accounts of their own; a `pool` argument takes the group id `project list` prints (`default` for the default group).\nSecrets: pipe a token or auth JSON to accounts add --secret-stdin. Never put secrets in arguments.\nLogin and launch: keep the desktop app or switchboard serve running in another terminal.\nManaged sessions switch identity at the next request; existing streams are not replayed.\nData folder: ~/Library/Application Support/ai.passioncode.fabric-switchboard (macOS), %LOCALAPPDATA%\\ai.passioncode.fabric-switchboard (Windows), $XDG_DATA_HOME/ai.passioncode.fabric-switchboard, by default ~/.local/share/ai.passioncode.fabric-switchboard (Linux)."
 )]
 struct Cli {
     /// Emit machine-readable JSON. Errors go to stderr.
@@ -33,21 +33,20 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// List and manage accounts. No command prints credentials.
+    /// List and manage accounts (`accounts list` shows them). No command prints credentials.
     Accounts {
         #[command(subcommand)]
         command: Accounts,
     },
-    /// Organizations accounts belong to (SB-158): by your word, by the provider organization (a
-    /// Claude Team, a ChatGPT workspace) or by the address's domain. Nothing changes until one
-    /// exists.
+    /// Organizations accounts belong to: by your word, by the provider organization (a Claude
+    /// Team, a ChatGPT workspace) or by the address's domain. Nothing changes until one exists.
     #[command(alias = "organizations")]
     Org {
         #[command(subcommand)]
         command: Org,
     },
-    /// Settings that move to another machine (SB-176): groups by their repositories,
-    /// organizations, the agents' settings and rotation policies. No account or credential.
+    /// Settings that move to another machine: groups by their repositories, organizations, the
+    /// agents' settings and automatic switching. No account or credential.
     Settings {
         #[command(subcommand)]
         command: SettingsCmd,
@@ -61,8 +60,8 @@ enum Command {
     /// Recent sanitized activity.
     #[command(alias = "activity")]
     Events,
-    /// What the proxy relayed (SB-145): requests, outcomes and the provider's token counts by
-    /// project, account, coding agent and day. Reads only.
+    /// What the proxy relayed: requests, outcomes and the provider's token counts by group,
+    /// folder (repository), account, coding agent and day. Reads only.
     #[command(alias = "statistics")]
     Stats {
         /// Days back, 1 to 90.
@@ -72,7 +71,7 @@ enum Command {
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// Sessions Switchboard launched (Claude Code, Codex) that are starting or running: account,
-    /// provider, pool, mode, folder and times. Reads only.
+    /// provider, group, mode, folder and times. Reads only.
     Sessions {
         /// Also list sessions that ended (their homes keep the last launch's record).
         #[arg(long)]
@@ -80,7 +79,8 @@ enum Command {
     },
     /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
     Current,
-    /// Configure quota-based switching while the desktop or serve is running.
+    /// Automatic switching: move to the group's next account as one nears its quota. Works while
+    /// the desktop app or serve is running.
     Rotation {
         #[command(subcommand)]
         command: Rotation,
@@ -90,21 +90,21 @@ enum Command {
         #[command(subcommand)]
         command: Login,
     },
-    /// Launch an isolated or managed provider CLI in a project directory: in a new Terminal
-    /// window, or with --in-place in this terminal (for an embedded console). Requires a running
-    /// desktop app or serve.
+    /// Launch an isolated or managed provider CLI in a folder: in a new Terminal window, or with
+    /// --in-place in this terminal (for an embedded console). Requires a running desktop app or
+    /// serve.
     Launch {
         /// The account id (`switchboard accounts list`); or give --provider instead.
         id: Option<String>,
-        /// Use the account Switchboard would use for this folder: its project's selected account,
-        /// else the folder's rule, else the default pool's selected account.
+        /// Use the account Switchboard would use for this folder: its group's selected account,
+        /// else the folder's rule, else the default group's selected account.
         #[arg(long, value_enum, conflicts_with = "id")]
         provider: Option<ProviderArg>,
         /// `isolated`: the account's private home, straight to the provider. `managed`: through
-        /// the local proxy, which follows the pool's selected account.
+        /// the local proxy, which follows the group's selected account.
         #[arg(long, value_enum, default_value = "isolated")]
         mode: Mode,
-        /// The project folder the session starts in (absolute).
+        /// The folder the session starts in (absolute).
         #[arg(long)]
         working_directory: PathBuf,
         /// Run the session in this terminal instead of opening Terminal (needs a terminal on
@@ -115,11 +115,11 @@ enum Command {
         #[arg(last = true)]
         args: Vec<String>,
     },
-    /// Continue an Observatory workflow whose executor ran out of its limit on another account —
+    /// Continue an Observatory workflow whose executor ran out of its limit on another account:
     /// of the same provider, or of another agent (Claude Code, Codex, a saved Kimi Code account,
-    /// or Hermes or OpenCode on the saved OpenRouter key) with the same context: reads the workflow, offers
-    /// it (reason `limit`) and launches the account's session, which accepts the handoff itself.
-    /// Requires a running desktop app or serve.
+    /// or Hermes or OpenCode on the saved OpenRouter key) with the same context. Reads the
+    /// workflow, offers it (reason `limit`) and launches the account's session, which accepts the
+    /// handoff itself. Requires a running desktop app or serve.
     Continue {
         /// The workflow id, `wf_` and 16 hex digits (`project-observatory full workflow list`).
         workflow_id: String,
@@ -136,7 +136,7 @@ enum Command {
         #[arg(long)]
         dir: PathBuf,
         /// Run the continuing session in this terminal instead of opening Terminal (needs a
-        /// terminal on stdin and stdout) — for an embedded console such as Fabric's (SB-108).
+        /// terminal on stdin and stdout), for an embedded console such as Fabric's.
         #[arg(long, conflicts_with = "to_console")]
         in_place: bool,
         /// Leave the prepared session for Fabric's console instead of opening Terminal
@@ -165,38 +165,40 @@ enum Command {
         #[command(subcommand)]
         command: Option<RecoveryCommand>,
     },
-    /// Hand-overs waiting for a console (SB-108): with "Open hand-overs in Fabric" on, the
-    /// automatic fallback prepares each continuing session and leaves it here for Fabric's
-    /// console; one no console takes within two minutes opens in Terminal.
+    /// Hand-overs waiting for a console: with "Open hand-overs in Fabric" on, the automatic
+    /// fallback prepares each continuing session and leaves it here for Fabric's console; one no
+    /// console takes within two minutes opens in Terminal.
     Handovers {
         #[command(subcommand)]
         command: Option<HandoversCommand>,
     },
     /// Fallback chains: which agents continue a workflow, in what order, when its accounts run
-    /// out — per machine, per project or per task. None applies until you set one.
+    /// out (per machine, per group or per task). None applies until you set one.
     Chain {
         #[command(subcommand)]
         command: ChainCommand,
     },
-    /// Projects (folders that reserve their own accounts) and optional project rules.
+    /// Groups (repositories with accounts of their own) and optional folder rules. The command
+    /// is named `project`; a group's id is its `pool`.
     Project {
         #[command(subcommand)]
         command: Project,
     },
-    /// Encrypted backups (accounts, projects, rules, settings) in the "Fabric Switchboard Backups"
-    /// folder: ~/Library/Application Support on macOS, %APPDATA% on Windows (this machine's key).
+    /// Encrypted backups (accounts, groups, rules, settings) in the "Fabric Switchboard Backups"
+    /// folder: in ~/Library/Application Support on macOS, %APPDATA% on Windows and
+    /// $XDG_DATA_HOME (by default ~/.local/share) on Linux (this machine's key).
     Backup {
         #[command(subcommand)]
         command: Backup,
     },
     /// The guide a coding agent follows to set Switchboard up; with --status, where the setup
-    /// stands — each step done, the agent's to do (with its command), the person's, or
-    /// optional. Reads only; safe to repeat.
+    /// stands: each step done, the agent's to do (with its command), the person's, or optional.
+    /// Reads only; safe to repeat.
     Onboard {
         /// Report the steps instead of printing the guide.
         #[arg(long)]
         status: bool,
-        /// The project folder the agent works in (absolute); default: the current folder.
+        /// The folder the agent works in (absolute); default: the current folder.
         #[arg(long)]
         folder: Option<PathBuf>,
         /// The coding agent being set up; default: the one this command runs inside, when known.
@@ -205,8 +207,9 @@ enum Command {
     },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
-        /// List only the ten tools that read: status, accounts, usage, sessions, onboarding, project
-        /// context, fallback chains, the OpenRouter key's status, Kimi accounts, Hermes's model.
+        /// List only the tools that read: status, accounts, usage, sessions, setup steps, groups
+        /// and folder context, automatic switching, fallback chains, the OpenRouter key's status,
+        /// Kimi accounts, Hermes's model and the rest that change nothing.
         #[arg(long)]
         read_only: bool,
     },
@@ -242,8 +245,8 @@ impl From<HostArg> for onboarding::Host {
 }
 #[derive(Subcommand)]
 enum Project {
-    /// Projects (folders and reserved accounts), then every saved rule with its state: active,
-    /// paused or expired.
+    /// Groups (their id, folders and reserved accounts), then every saved folder rule with its
+    /// state: active, paused or expired.
     List,
     /// The rule that applies to a folder (default: the current folder).
     Show {
@@ -251,7 +254,7 @@ enum Project {
         #[arg(long)]
         path: Option<PathBuf>,
     },
-    /// Save a rule for a folder and its subfolders. Rules never stop rotation.
+    /// Save a rule for a folder and its subfolders. Rules never stop automatic switching.
     Set {
         /// An absolute folder; default: the current folder.
         #[arg(long)]
@@ -279,103 +282,102 @@ enum Project {
         #[arg(long, value_enum)]
         provider: ProviderArg,
     },
-    /// Codex sessions in a project's folders use the project's Codex accounts (SB-143): `on`
-    /// writes one provider into Codex's own config.toml that points at the local proxy, `off`
-    /// takes it out, nothing shows the state. Another model_provider of yours is never replaced.
+    /// Codex sessions in a group's folders use the group's Codex accounts: `on` writes one
+    /// provider into Codex's own config.toml that points at the local proxy, `off` takes it out,
+    /// nothing shows the state. Another model_provider of yours is never replaced.
     Codex {
         /// `on` or `off`; without it, the state only.
         #[arg(value_enum)]
         state: Option<OnOff>,
     },
-    /// Rotate the capability a project's folders carry (their `.claude/settings.local.json`):
-    /// the old one is refused at once and the new one is written into every folder of the pool.
-    /// For an exposure. Other pools and managed sessions keep theirs.
+    /// Replace the capability a group's folders carry (their `.claude/settings.local.json`):
+    /// the old one is refused at once and the new one is written into every folder of the group.
+    /// For an exposure. Other groups and managed sessions keep theirs.
     RotateCapability {
-        /// The project's pool (`switchboard project list`).
+        /// The group id (`switchboard project list`).
         #[arg(long)]
         pool: String,
     },
-    /// Change a project by delta (SB-134): add or take out accounts and folders, rename it, or
-    /// bind it to an organization (SB-109). Everything not named stays as it is; naming something
-    /// the project does not hold is refused.
+    /// Change a group by delta: add or take out accounts and folders, rename it, or bind it to
+    /// an organization. Everything not named stays as it is; naming something the group does not
+    /// hold is refused.
     Edit {
-        /// The project's pool (`switchboard project list`).
+        /// The group id (`switchboard project list`).
         #[arg(long)]
         pool: String,
-        /// A new name for the project.
+        /// A new name for the group.
         #[arg(long)]
         name: Option<String>,
-        /// An account to reserve for the project; repeat for each.
+        /// An account to reserve for the group; repeat for each.
         #[arg(long = "add-account")]
         add_accounts: Vec<String>,
-        /// An account to give back to the `default` pool; repeat for each.
+        /// An account to give back to the default group; repeat for each.
         #[arg(long = "remove-account")]
         remove_accounts: Vec<String>,
         /// An absolute folder to add; repeat for each.
         #[arg(long = "add-folder")]
         add_folders: Vec<PathBuf>,
-        /// A folder of the project to take out; repeat for each. It is not added back by itself.
+        /// A folder of the group to take out; repeat for each. It is not added back by itself.
         #[arg(long = "remove-folder")]
         remove_folders: Vec<PathBuf>,
-        /// The organization whose accounts the project runs on (its id or name from `switchboard
-        /// org list`), or `personal`. With an organization defined, a project takes only accounts
+        /// The organization whose accounts the group runs on (its id or name from `switchboard
+        /// org list`), or `personal`. With an organization defined, a group takes only accounts
         /// of its own organization, or personal ones when it has none.
         #[arg(long)]
         organization: Option<String>,
     },
-    /// Move a project's repository (its root folder), with the worktrees and clones under it,
-    /// into another project in one step (SB-135); a repository in no project joins the named one.
-    /// A project keeps at least one folder.
+    /// Move a group's repository (its root folder), with the worktrees and clones under it,
+    /// into another group in one step; a repository in no group joins the named one. A group
+    /// keeps at least one folder.
     MoveRoot {
         /// The repository's folder; default: the current folder.
         #[arg(long)]
         folder: Option<PathBuf>,
-        /// The project to move it to (`switchboard project list`).
+        /// The group id to move it to (`switchboard project list`).
         #[arg(long)]
         pool: String,
-        /// SB-146: add it to this group and keep it in its other groups.
+        /// Add it to this group and keep it in its other groups.
         #[arg(long)]
         also: bool,
-        /// SB-146: the group it leaves, when it is in several.
+        /// The group id it leaves, when it is in several.
         #[arg(long, conflicts_with = "also")]
         from: Option<String>,
     },
-    /// The Git repositories on disk, each with the project it belongs to or none (SB-135). Looks
-    /// up to three folders deep and not into a repository, a hidden folder or dependencies.
+    /// The Git repositories on disk, each with the group it belongs to or none. Looks up to
+    /// three folders deep and not into a repository, a hidden folder or dependencies.
     Map {
         /// A folder to look under; repeat for each. Default: `~/DATA` when it exists, else the
         /// home folder.
         #[arg(long)]
         under: Vec<PathBuf>,
     },
-    /// Create or update a project: its folders (repositories) and the accounts reserved for
-    /// them. The listed accounts are the project's whole set; one left out goes back to the
-    /// `default` pool. To change a few, use `project edit`.
+    /// Create or update a group: its folders (repositories) and the accounts reserved for them.
+    /// The listed accounts are the group's whole set; one left out goes back to the default
+    /// group. To change a few, use `project edit`.
     Save {
-        /// Update the project with this pool; without it, a new project is created.
+        /// Update the group with this id; without it, a new group is created.
         #[arg(long)]
         pool: Option<String>,
-        /// The project's name, as the app shows it.
+        /// The group's name, as the app shows it.
         #[arg(long)]
         name: String,
-        /// An absolute folder of the project (a repository); repeat for each.
+        /// An absolute folder of the group (a repository); repeat for each.
         #[arg(long = "folder", required = true)]
         folders: Vec<PathBuf>,
-        /// An account reserved for the project; repeat for each.
+        /// An account reserved for the group; repeat for each.
         #[arg(long = "account")]
         accounts: Vec<String>,
     },
-    /// Delete a project. Its accounts stay in its pool, no longer reserved.
+    /// Delete a group. Its accounts keep its group id, no longer reserved.
     Delete {
-        /// The project's pool (`switchboard project list`).
+        /// The group id (`switchboard project list`).
         #[arg(long)]
         pool: String,
     },
-    /// Add a folder to the project it belongs to now (SB-117/SB-121): a worktree or clone of a
-    /// project repository, or a repository of the project's sources. Nothing is asked; the
-    /// background pass does the same within 30 s, and also adds repositories a project's agents
-    /// work in (SB-131). With --from-hook it reads Claude Code's hook input on stdin and always
-    /// exits 0.
+    /// Add a folder to the group it belongs to now: a worktree or clone of a group's repository,
+    /// or a repository of the group's sources. Nothing is asked; the background pass does the
+    /// same within 30 s, and also adds repositories a group's agents work in. With --from-hook
+    /// it reads Claude Code's hook input on stdin and always exits 0.
     Suggest {
         /// The folder; default: the current folder.
         #[arg(long, conflicts_with = "from_hook")]
@@ -384,26 +386,26 @@ enum Project {
         #[arg(long)]
         from_hook: bool,
     },
-    /// Folders added to projects or taken out as deleted in the last day, and folders still
-    /// being added (retried every ten minutes, never asked; SB-131).
+    /// Folders added to groups or taken out as deleted in the last day, and folders still being
+    /// added (retried every ten minutes, never asked).
     Suggestions,
-    /// The project folders whose ordinary Claude Code sessions use the project's accounts
-    /// (SB-118): Switchboard keeps the route in each folder's `.claude/settings.local.json`.
+    /// The group folders whose ordinary Claude Code sessions use the group's accounts:
+    /// Switchboard keeps the route in each folder's `.claude/settings.local.json`.
     Bindings,
     /// Add a folder that is still being added now.
     Accept {
         /// The folder, as `project suggestions` lists it.
         folder: String,
     },
-    /// Never add this folder to its project.
+    /// Never add this folder to its group.
     Dismiss {
         /// The folder, as `project suggestions` lists it.
         folder: String,
     },
-    /// The repository owners whose new repositories a project is offered, as host/owner
+    /// The repository owners whose new repositories join a group, as host/owner
     /// (`github.com/example`). Without --add or --remove, prints them.
     Source {
-        /// The project's pool (`switchboard project list`).
+        /// The group id (`switchboard project list`).
         #[arg(long)]
         pool: String,
         /// An owner to watch; repeat for each.
@@ -446,7 +448,7 @@ enum SettingsCmd {
         #[arg(long)]
         under: Vec<PathBuf>,
         /// Do it: add the organizations, the groups (with no accounts: give them this
-        /// machine's own), the agents' settings and the rotation policies.
+        /// machine's own), the agents' settings and the automatic switching settings.
         #[arg(long)]
         apply: bool,
     },
@@ -455,8 +457,8 @@ enum SettingsCmd {
 enum Org {
     /// The organizations, then every account with the organization it belongs to and why.
     List,
-    /// Connect PassionCode.ai (SB-159): sign in in the browser, then your organizations there
-    /// arrive here with their names and domains and are read again every 6 hours.
+    /// Connect PassionCode.ai: sign in in the browser, then your organizations there arrive
+    /// here with their names and domains and are read again every 6 hours.
     Connect,
     /// Read your PassionCode.ai organizations again now.
     Read,
@@ -500,7 +502,7 @@ enum Org {
 
 #[derive(Subcommand)]
 enum Accounts {
-    /// Saved accounts with their provider, kind, pool, state and usage. No credentials.
+    /// Saved accounts with their provider, kind, group, state and usage. No credentials.
     List,
     /// Save the current CLI authorization; no new sign-in is started.
     Capture {
@@ -510,13 +512,13 @@ enum Accounts {
         /// A name for it; default: its e-mail.
         #[arg(long)]
         label: Option<String>,
-        /// The pool it joins.
+        /// The group id it joins (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
     },
     /// Import existing Claude Swap backups into the native credential vault.
     ImportClaudeSwap {
-        /// The pool the imported accounts join.
+        /// The group id the imported accounts join (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
     },
@@ -536,7 +538,7 @@ enum Accounts {
         /// A name for the account.
         #[arg(long)]
         label: String,
-        /// The pool it joins.
+        /// The group id it joins (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
         /// Read one token or auth JSON from piped stdin, limited to 64 KiB.
@@ -553,18 +555,18 @@ enum Accounts {
         /// `true` or `false`. A disabled account is never selected or switched to.
         #[arg(long, action = clap::ArgAction::Set)]
         enabled: Option<bool>,
-        /// `true`: the account is used on another machine, so this one never renews, rotates to
-        /// or switches to it (disabled here); `false`: it is used here again (SB-175).
+        /// `true`: the account is used on another machine, so this one never renews it or
+        /// switches to it, automatically or not (disabled here); `false`: it is used here again.
         #[arg(long, action = clap::ArgAction::Set)]
         elsewhere: Option<bool>,
     },
-    /// Move an account into a project's pool, or back to `default`. Joining or leaving a project
-    /// is that project's change (`project edit`); the account the ordinary Claude Code or Codex is
-    /// signed in to stays in `default`.
+    /// Move an account into a group, or back to the default group. Joining or leaving a group
+    /// is that group's change (`project edit`); the account the ordinary Claude Code or Codex is
+    /// signed in to stays in the default group.
     Move {
         /// The account id (`switchboard accounts list`).
         id: String,
-        /// A project's pool (`switchboard project list`), or `default`.
+        /// A group id (`switchboard project list`), or `default`.
         #[arg(long)]
         pool: String,
     },
@@ -573,32 +575,32 @@ enum Accounts {
         /// The account id (`switchboard accounts list`).
         id: String,
     },
-    /// Make an account the one the pool's managed sessions use, from their next request.
+    /// Make an account the one the group's managed sessions use, from their next request.
     Select {
         /// The account id (`switchboard accounts list`).
         id: String,
         /// The account's provider.
         #[arg(long, value_enum)]
         provider: ProviderArg,
-        /// The pool whose managed sessions follow it.
+        /// The group id whose managed sessions follow it (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
     },
 }
 #[derive(Subcommand)]
 enum Rotation {
-    /// Show persisted policies and the scheduler's latest decisions.
+    /// Show the saved automatic switching settings and the latest decisions.
     Status,
-    /// Save a policy; omitted flags keep the saved values (new policy: off, 90, 10, 1800, 300).
-    /// Existing responses are never replayed or interrupted.
+    /// Save automatic switching for one provider and group; omitted flags keep the saved values
+    /// (new: off, 90, 10, 1800, 300). Existing responses are never replayed or interrupted.
     Set {
-        /// The provider the policy is for.
+        /// The provider it is for.
         #[arg(long, value_enum)]
         provider: ProviderArg,
-        /// The pool it switches within.
+        /// The group id it switches within (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
-        /// `managed`: the pool's managed sessions. `claude-cli`: the ordinary Claude Code login.
+        /// `managed`: the group's managed sessions. `claude-cli`: the ordinary Claude Code login.
         #[arg(long, value_enum, default_value = "managed")]
         target: RotationTarget,
         /// `true` or `false`: switch automatically or not.
@@ -647,8 +649,8 @@ enum RecoveryCommand {
         #[arg(long)]
         account: String,
     },
-    /// Claude Code's `StopFailure` hook (SB-115): reads the hook's JSON on stdin and registers
-    /// the session's own stop. Always exits 0, so the hook never fails the session.
+    /// Claude Code's `StopFailure` hook: reads the hook's JSON on stdin and registers the
+    /// session's own stop. Always exits 0, so the hook never fails the session.
     Hook,
     /// Record the host's outcome; this command does not run a session.
     Finish {
@@ -688,12 +690,12 @@ enum OnOff {
 }
 #[derive(Subcommand)]
 enum ChainCommand {
-    /// Every chain set, the presets, and the chain that applies to a workflow or a project.
+    /// Every chain set, the presets, and the chain that applies to a workflow or a group.
     List {
         /// A workflow id (`wf_` and 16 hex digits): show the chain that applies to it.
         #[arg(long)]
         workflow: Option<String>,
-        /// A project's pool: show the chain that applies to it.
+        /// A group id: show the chain that applies to it.
         #[arg(long)]
         pool: Option<String>,
     },
@@ -701,7 +703,7 @@ enum ChainCommand {
     /// pinned: `codex@ACCOUNT_ID` runs on that account, `kimi-code#project/env/NAME` on a paid
     /// key named in the Observatory vault. Without a pin Switchboard picks an account at the switch.
     Set {
-        /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
+        /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
         #[arg(long, default_value = "machine")]
         scope: String,
         /// A ready-made order instead of a list: `subscriptions-first` (claude-code, codex,
@@ -713,7 +715,7 @@ enum ChainCommand {
     },
     /// Remove the chain of a scope.
     Clear {
-        /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
+        /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
         #[arg(long, default_value = "machine")]
         scope: String,
     },
@@ -727,7 +729,7 @@ fn chain_scope(text: &str) -> Result<switchboard_core::ChainScope, String> {
             Ok(ChainScope::Project { pool: pool.into() })
         }
         Some(("workflow", id)) if !id.is_empty() => Ok(ChainScope::Workflow { id: id.into() }),
-        _ => Err("Scope is machine, project:<pool> or workflow:<wf_id>.".into()),
+        _ => Err("Scope is machine, project:<group id> or workflow:<wf_id>.".into()),
     }
 }
 /// `agent`, `agent@ACCOUNT_ID` or `agent#project/env/NAME`.
@@ -750,7 +752,7 @@ enum AgentsCommand {
     /// Every agent in the catalog with what it supports: mcp, proxy or launch.
     List,
     /// Which agents are installed here, which take over work, the default agent and the
-    /// command Switchboard runs for each (SB-120).
+    /// command Switchboard runs for each.
     Status,
     /// Let Switchboard hand work to this agent (fallback chains, `continue`).
     Enable {
@@ -774,19 +776,19 @@ enum AgentsCommand {
     Connect {
         /// The agent's catalog id (`switchboard agents list`), for example `hermes`.
         agent: String,
-        /// The pool whose API-key account its proxy requests use.
+        /// The group id whose API-key account its proxy requests use.
         #[arg(long, default_value = "default")]
         pool: String,
     },
     /// Print the agents' proxy key, for an agent's key command. Not a provider credential.
-    /// With `--service openrouter`, the saved OpenRouter key instead — for a session script's
+    /// With `--service openrouter`, the saved OpenRouter key instead: for a session script's
     /// `export`, never to paste anywhere.
     Key {
         /// `openrouter`: the key agents run on (`switchboard agents openrouter set`).
         #[arg(long, value_enum)]
         service: Option<KeyService>,
         /// With --service: the folder the agent starts in (default: the current folder); the
-        /// key of its project wins over the machine's (SB-144).
+        /// key of its group wins over the machine's.
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -801,12 +803,12 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: Option<HermesCommand>,
     },
-    /// Start an agent in a folder in Terminal: on the pool's API-key account through the proxy,
-    /// or with `--openrouter` on the saved OpenRouter key.
+    /// Start an agent in a folder in Terminal: on the group's API-key account through the
+    /// proxy, or with `--openrouter` on the saved OpenRouter key.
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
         agent: String,
-        /// The pool whose API-key account it uses (not with `--openrouter`).
+        /// The group id whose API-key account it uses (not with `--openrouter`).
         #[arg(long, default_value = "default", conflicts_with = "openrouter")]
         pool: String,
         /// The absolute folder it starts in; default: the current folder.
@@ -898,14 +900,14 @@ enum OpenrouterCommand {
         /// Read the key from piped stdin. Interactive input is refused (no echo).
         #[arg(long, required = true)]
         key_stdin: bool,
-        /// A project's pool: the key agents in its folders run on (SB-144). Without it, the key
-        /// every other folder uses.
+        /// A group id: the key agents in its folders run on. Without it, the key every other
+        /// folder uses.
         #[arg(long)]
         pool: Option<String>,
     },
     /// Whether a key is saved, its default model and what it may still spend (asks OpenRouter).
     Status {
-        /// A project's pool; without it, the machine's key.
+        /// A group id; without it, the machine's key.
         #[arg(long)]
         pool: Option<String>,
     },
@@ -913,17 +915,17 @@ enum OpenrouterCommand {
     Model {
         /// An OpenRouter model id, for example `anthropic/claude-sonnet-4.5`.
         model: String,
-        /// A project's pool; without it, the machine's key.
+        /// A group id; without it, the machine's key.
         #[arg(long)]
         pool: Option<String>,
     },
     /// Remove the key from Switchboard and the OS vault.
     Remove {
-        /// A project's pool; without it, the machine's key.
+        /// A group id; without it, the machine's key.
         #[arg(long)]
         pool: Option<String>,
     },
-    /// Every saved key with the project it is for, and the projects without one (SB-144).
+    /// Every saved key with the group it is for, and the groups without one.
     List,
 }
 #[derive(Subcommand)]
@@ -948,7 +950,7 @@ enum Login {
         /// Defaults to the email of the account that signs in.
         #[arg(long, default_value = "")]
         label: String,
-        /// The pool the account joins.
+        /// The group id the account joins (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
     },
@@ -1217,7 +1219,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 })
                 .map(|p| serde_json::from_value::<RotationPolicy>(p.clone()))
                 .transpose()
-                .map_err(|_| "Saved rotation policy is unreadable.")?;
+                .map_err(|_| "Saved automatic switching settings are unreadable.")?;
             let mut policy = saved.unwrap_or(RotationPolicy {
                 provider,
                 pool: pool.clone(),
@@ -1810,11 +1812,11 @@ async fn project_suggest_hook_and_exit(root: &std::path::Path) -> ! {
     // SB-146: a repository in no group stays in the default group; nothing to say.
     if value["added"] == true {
         println!(
-            "Switchboard: this folder was added to the project \"{project}\"; its sessions use the project's accounts from their next start."
+            "Switchboard: this folder was added to the group \"{project}\"; its sessions use the group's accounts from their next start."
         );
     } else if value["suggested"] == true {
         println!(
-            "Switchboard: this folder looks like part of the project \"{project}\" but could not be added yet; Switchboard tries again by itself."
+            "Switchboard: this folder looks like part of the group \"{project}\" but could not be added yet; Switchboard tries again by itself."
         );
     }
     std::process::exit(0)
@@ -1856,7 +1858,7 @@ async fn project_sources(
     let project = snapshot["projects"]
         .as_array()
         .and_then(|ps| ps.iter().find(|p| p["pool"] == pool))
-        .ok_or("Project not found.")?;
+        .ok_or("Group not found.")?;
     let mut sources: Vec<String> = project["sources"]
         .as_array()
         .map(|s| {
@@ -1916,18 +1918,20 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
     switchboard_runtime::call(root, operation).await
 }
+/// What an empty cell of the CLI's text output shows: a plain hyphen, never a dash.
+const PLACEHOLDER: &str = "-";
 fn utc(value: &Value) -> String {
     value
         .as_i64()
         .and_then(rfc3339)
-        .unwrap_or_else(|| "—".into())
+        .unwrap_or_else(|| PLACEHOLDER.into())
 }
 fn print_result(value: &Value, cli: &Cli) {
     if cli.json {
         print_value(value, true);
         return;
     }
-    let text = |v: &Value| v.as_str().unwrap_or("—").to_string();
+    let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
     match &cli.command {
         Command::Org { command: Org::List } => {
             let organizations = value["organizations"]
@@ -1981,7 +1985,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 let label = s["label"]
                     .as_str()
                     .or(s["account_id"].as_str())
-                    .unwrap_or("—");
+                    .unwrap_or(PLACEHOLDER);
                 // SB-110: a session in an organization's context names it after the account.
                 let label = match s["context_name"].as_str() {
                     Some(name) => format!("{label} ({name})"),
@@ -1994,7 +1998,10 @@ fn print_result(value: &Value, cli: &Cli) {
                     text(&s["mode"]),
                     label,
                     text(&s["working_directory"]),
-                    utc(&s["started_at"]).replace('—', "not started"),
+                    s["started_at"]
+                        .as_i64()
+                        .and_then(rfc3339)
+                        .unwrap_or_else(|| "not started".into()),
                 );
             }
         }
@@ -2066,7 +2073,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 return;
             }
             println!(
-                "ID                                    PROVIDER  POOL          STATE      LABEL"
+                "ID                                    PROVIDER  GROUP         STATE      LABEL"
             );
             for a in accounts {
                 let selected = value["routes"]
@@ -2171,7 +2178,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 return;
             };
             if projects.is_empty() {
-                println!("No projects. `switchboard project save` reserves accounts for a project's folders.");
+                println!("No groups. `switchboard project save` creates one.");
             }
             for project in projects {
                 let accounts: Vec<String> = project["accounts"]
@@ -2181,7 +2188,7 @@ fn print_result(value: &Value, cli: &Cli) {
                     .map(|a| format!("{} ({})", text(&a["label"]), text(&a["provider"])))
                     .collect();
                 println!(
-                    "{}  pool {}  {}",
+                    "{}  group id {}  {}",
                     text(&project["name"]),
                     text(&project["pool"]),
                     if accounts.is_empty() {
@@ -2196,7 +2203,7 @@ fn print_result(value: &Value, cli: &Cli) {
             }
             if rules.is_empty() {
                 println!(
-                    "No project rules. Switchboard follows your selection and rotation everywhere."
+                    "No folder rules. Switchboard follows your selection and automatic switching everywhere."
                 );
             }
             for rule in rules {
@@ -2361,7 +2368,7 @@ fn print_result(value: &Value, cli: &Cli) {
             match value["effective"].is_object() {
                 true => println!("\napplies: {}", line(&value["effective"])),
                 false if !chains.is_empty() => {
-                    println!("\napplies: none for this workflow or project")
+                    println!("\napplies: none for this workflow or group")
                 }
                 false => {}
             }
@@ -2484,6 +2491,35 @@ fn main() -> ExitCode {
         }
     }
 }
+/// The command groups the arguments name, as the tree spells them (an alias resolves to its
+/// command's name). Only names found in the tree come back, so a typed value is never echoed.
+fn command_path(args: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<String> {
+    let root = <Cli as clap::CommandFactory>::command();
+    let mut here = &root;
+    let mut path = Vec::new();
+    let mut skip_value = false;
+    for arg in args {
+        let Some(arg) = arg.to_str().map(str::to_owned) else {
+            continue;
+        };
+        if std::mem::take(&mut skip_value) {
+            continue;
+        }
+        if arg.starts_with('-') {
+            // The only global option that takes a separate value.
+            skip_value = arg == "--data-dir";
+            continue;
+        }
+        match here.find_subcommand(&arg) {
+            Some(sub) => {
+                path.push(sub.get_name().to_owned());
+                here = sub;
+            }
+            None => break,
+        }
+    }
+    path
+}
 async fn start() -> ExitCode {
     // Parse before resolving app data or creating any files. Even parsing failures
     // are generic: never reflect a user accidentally typing a secret as an argument.
@@ -2497,6 +2533,38 @@ async fn start() -> ExitCode {
         {
             let _ = error.print();
             return ExitCode::SUCCESS;
+        }
+        // A command group named without its command (`switchboard accounts`): its help, which
+        // holds only the tree's own names, never a typed value.
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                    | clap::error::ErrorKind::MissingSubcommand
+            ) =>
+        {
+            let path = command_path(std::env::args_os().skip(1));
+            let hint = format!(
+                "Name a command. Run switchboard {}--help.",
+                path.iter()
+                    .map(|name| format!("{name} "))
+                    .collect::<String>()
+            );
+            if std::env::args_os().any(|a| a == "--json") {
+                eprintln!("{}", json!({"ok":false,"error":hint}));
+            } else {
+                let mut command = <Cli as clap::CommandFactory>::command();
+                // Built, so each subcommand's usage line names its whole path.
+                command.build();
+                for name in &path {
+                    match command.find_subcommand(name).cloned() {
+                        Some(sub) => command = sub,
+                        None => break,
+                    }
+                }
+                eprintln!("{}", command.render_help());
+            }
+            return ExitCode::from(2);
         }
         Err(_) => {
             if std::env::args_os().any(|a| a == "--json") {
@@ -2574,6 +2642,97 @@ mod help_tests {
         let mut missing = Vec::new();
         walk(&super::Cli::command(), "switchboard", &mut missing);
         assert!(missing.is_empty(), "no help text: {missing:#?}");
+    }
+
+    /// What a person must not read in help or a tool's description: a backlog id (CPY-09), an
+    /// em dash or a double or spaced hyphen used as one (CPY-08). Text in backticks is a literal
+    /// (`-- --resume`) and is skipped.
+    pub(crate) fn wording_faults(text: &str) -> Vec<&'static str> {
+        let mut plain = String::new();
+        for (i, part) in text.split('`').enumerate() {
+            if i % 2 == 0 {
+                plain.push_str(part);
+                plain.push(' ');
+            }
+        }
+        let mut faults = Vec::new();
+        if plain.contains('\u{2014}') {
+            faults.push("em dash");
+        }
+        let id = |prefix: &str| {
+            plain.match_indices(prefix).any(|(at, _)| {
+                plain[at + prefix.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+            })
+        };
+        if id("SB-") || id("REQ-") {
+            faults.push("backlog id");
+        }
+        for dash in [" -- ", " - ", " --\n", " -\n"] {
+            if plain.contains(dash) {
+                faults.push("hyphen used as a dash");
+            }
+        }
+        faults
+    }
+
+    #[test]
+    fn help_carries_no_backlog_id_and_no_dash() {
+        fn walk(command: &clap::Command, path: &str, found: &mut Vec<String>) {
+            let mut texts: Vec<String> = [
+                command.get_about(),
+                command.get_long_about(),
+                command.get_after_help(),
+                command.get_after_long_help(),
+            ]
+            .into_iter()
+            .flatten()
+            .map(|t| t.to_string())
+            .collect();
+            for arg in command.get_arguments() {
+                texts.extend(
+                    [arg.get_help(), arg.get_long_help()]
+                        .into_iter()
+                        .flatten()
+                        .map(|t| t.to_string()),
+                );
+            }
+            for text in texts {
+                for fault in wording_faults(&text) {
+                    found.push(format!("{path}: {fault}: {text}"));
+                }
+            }
+            for sub in command.get_subcommands() {
+                walk(sub, &format!("{path} {}", sub.get_name()), found);
+            }
+        }
+        let mut found = Vec::new();
+        walk(&super::Cli::command(), "switchboard", &mut found);
+        assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn the_wording_check_finds_what_it_names() {
+        assert_eq!(wording_faults("Ran out \u{2014} of it"), ["em dash"]);
+        assert_eq!(wording_faults("Groups (SB-146): add"), ["backlog id"]);
+        assert_eq!(wording_faults("one -- two"), ["hyphen used as a dash"]);
+        assert!(wording_faults("after `--` (for example `-- --resume <id>`)").is_empty());
+        assert!(wording_faults("--in-place, 1-90, wf_ and SB-ish").is_empty());
+    }
+
+    /// PRD-07: a group named alone resolves to its path, and a typed value never comes back.
+    #[test]
+    fn a_command_group_named_alone_resolves_to_its_own_names() {
+        let path = |args: &[&str]| super::command_path(args.iter().map(Into::into));
+        assert_eq!(path(&["accounts"]), ["accounts"]);
+        assert_eq!(path(&["--json", "organizations"]), ["org"]);
+        assert_eq!(
+            path(&["--data-dir", "/tmp/accounts", "agents", "openrouter"]),
+            ["agents", "openrouter"]
+        );
+        assert!(path(&["fixture-never-echo"]).is_empty());
     }
 }
 
@@ -2750,5 +2909,54 @@ mod mcp_parity {
         }
         let covered = PARITY.iter().filter(|(_, o)| matches!(o, Tool(_))).count();
         assert!(covered * 2 > PARITY.len(), "most commands have a tool");
+    }
+
+    /// PRD-04: the skill's tool reference names every tool the server lists, with a section of
+    /// its own, and no longer says sign-in is unavailable.
+    #[test]
+    fn every_mcp_tool_is_in_the_skill_reference() {
+        let reference = include_str!(
+            "../../../plugins/switchboard/skills/switching-accounts/references/tools.md"
+        );
+        let missing: Vec<String> = crate::mcp::tools()
+            .into_iter()
+            .map(|(_, t)| t["name"].as_str().unwrap().to_owned())
+            .filter(|name| !reference.contains(&format!("### `{name}`")))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "tools.md has no section for {missing:?}"
+        );
+        assert!(
+            !reference.contains("login and launch are not exposed"),
+            "switchboard_login exists"
+        );
+    }
+
+    /// CPY-08, CPY-09: tool titles, descriptions and the server's instructions carry no backlog
+    /// id and no dash.
+    #[test]
+    fn mcp_wording_carries_no_backlog_id_and_no_dash() {
+        fn strings(value: &serde_json::Value, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::String(s) => out.push(s.clone()),
+                serde_json::Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+                serde_json::Value::Object(map) => map.values().for_each(|v| strings(v, out)),
+                _ => {}
+            }
+        }
+        let mut texts = vec![crate::mcp::INSTRUCTIONS.to_owned()];
+        for (_, tool) in crate::mcp::tools() {
+            strings(&tool, &mut texts);
+        }
+        let found: Vec<String> = texts
+            .iter()
+            .flat_map(|t| {
+                crate::help_tests::wording_faults(t)
+                    .into_iter()
+                    .map(move |f| format!("{f}: {t}"))
+            })
+            .collect();
+        assert!(found.is_empty(), "{found:#?}");
     }
 }

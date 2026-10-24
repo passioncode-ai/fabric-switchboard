@@ -97,8 +97,9 @@ check(() => {
   assert.equal(logic.sessionStateLabel('starting'), 'Starting');
   assert.equal(logic.sessionStateLabel('ended'), 'Ended');
   assert.equal(logic.sessionStateLabel('unknown'), 'State unknown');
-  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows the work pool · in Terminal');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows the selection in group work (no folders) · in Terminal');
   assert.equal(logic.sessionHow({ mode: 'isolated', in_place: true, pool: 'default' }), 'Isolated · in an embedded terminal');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'alpha' }, [{ pool: 'alpha', name: 'Alpha Web' }]), 'Managed · follows the selection in group “Alpha Web” · in Terminal', 'a group by its name (D-1)');
 });
 // SB-93: the Agents panel's setup facts — registration per agent, then whether an agent has called.
 check(() => {
@@ -255,7 +256,8 @@ check(() => {
 // and main.ts must decide through loginOutcome rather than its own string comparisons.
 check(() => {
   const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
-  for (const message of [logic.LOGIN_FORGOTTEN, logic.LOGIN_SAVED_CLEANUP]) assert(adapter.includes(`  '${message}',`), `verbatim: ${message}`);
+  assert(adapter.includes(`  '${logic.LOGIN_FORGOTTEN}',`), `verbatim: ${logic.LOGIN_FORGOTTEN}`);
+  assert(adapter.includes(`  '${logic.LOGIN_SAVED_CLEANUP}': '${logic.LOGIN_SAVED_CLEANUP_SHOWN}',`), 'the cleanup sentence is mapped to the one loginOutcome reads (CPY-05)');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert(!main.includes(logic.LOGIN_FORGOTTEN) && !main.includes(logic.LOGIN_SAVED_CLEANUP), 'main.ts classifies sign-in errors through loginOutcome');
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
@@ -408,9 +410,11 @@ check(() => {
 
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
 check(() => {
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code · work.');
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code · work.');
-  assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code · work\. Switchboard could not remove its temporary sign-in folder yet/);
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code in group work (no folders).');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code in the default group.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code in group “Alpha Web”.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code in group work (no folders).');
+  assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code in group work \(no folders\)\. Switchboard could not remove its temporary sign-in folder yet/);
 });
 
 // L10N-01…04 (fabric-workspace knowledge/localization.md): language, Russian plurals, placeholders.
@@ -443,7 +447,7 @@ check(() => {
   // L10N-04: a backend refusal is compared in English and shown in Russian.
   assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
   assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
-  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code · work\)\.$/);
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code\) в группе work \(без папок\)\.$/);
   i18n.setLocale('en');
 });
 // A backend sentence with a name in it is shown, and translated by its template (L10N-04).
@@ -464,7 +468,7 @@ check(() => {
   assert.equal(logic.eventAction('account_added'), 'Account added');
   assert.equal(logic.eventDetail('rate_limited'), 'rate limited');
   assert.equal(logic.eventDetail('4xx'), 'HTTP 4xx');
-  assert.equal(logic.eventAction('future_action'), 'future action', 'an unknown action shows as recorded');
+  assert.equal(logic.eventAction('future_action'), 'Other event (future action)', 'an unknown action shows as recorded, framed (UX-26)');
   assert.equal(logic.eventDetail('some_new_outcome'), 'some new outcome');
   i18n.setLocale('ru');
   assert.equal(logic.eventAction('usage'), 'Проверка использования');
@@ -479,9 +483,10 @@ check(() => {
   assert.ok(words.length > 40, 'event_valid vocabulary found');
   for (const word of words) {
     if (/^[2-5]xx$/.test(word)) continue;
-    const named = logic.eventAction(word) !== word.replaceAll('_', ' ') || logic.eventDetail(word) !== word.replaceAll('_', ' ');
+    const named = logic.eventAction(word) !== i18n.t('Other event ({code})', { code: word.replaceAll('_', ' ') }) || logic.eventDetail(word) !== word.replaceAll('_', ' ');
     assert.ok(named, `journal word without a label: ${word}`);
   }
+  assert.match(logic.eventAction('brand_new'), /brand new/, 'an unknown word is framed, not dropped (UX-26)');
   i18n.setLocale('en');
 });
 
@@ -537,11 +542,56 @@ check(() => {
 // first-account state; About draws the panel; the banner's Dismiss remembers the choice.
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /function renderAccounts\(main: HTMLElement\) \{\n  termsBanner\(main\);/, 'renderAccounts starts with the banner');
+  assert.match(main, /function renderAccounts\(main: HTMLElement\) \{\n(?:  \/\/[^\n]*\n)?  const status = el\('section', 'status-stack'\);[^\n]*\n  termsBanner\(status\);/, 'renderAccounts starts with the banner, in the status block (VIS-13)');
   assert.match(main, /function renderAbout\(main: HTMLElement\) \{[\s\S]*?main\.append\(section, termsPanel\(\),/, 'About carries the panel');
   assert.match(main, /termsNoticeOn\(page, termsDismissed\) !== 'banner'/, 'the banner follows termsNoticeOn');
   assert.match(main, /dismissTermsNotice\(noticeStore\(\)\); termsDismissed = true;/, 'Dismiss stores the choice');
   assert.match(main, /let termsDismissed = termsNoticeDismissed\(noticeStore\(\)\);/, 'the stored choice is read at start');
+});
+
+// Issue #128 (SCN-073, SCN-044): nothing is sent before the person answers the usage switch once.
+// The window asks only when the build can send, the switch is on and this app has no answer; the
+// tour waits for the question (and for the status read) so one first-run card shows at a time.
+check(() => {
+  const ask = { available: true, enabled: true, disclosed: false, sent_before: false };
+  assert.equal(logic.usageQuestion(ask), true, 'first start of a release build: asked');
+  assert.equal(logic.usageQuestion({ ...ask, disclosed: true }), false, 'answered: never asked again');
+  assert.equal(logic.usageQuestion({ ...ask, enabled: false }), false, 'switched off (here or by another app): nothing to ask');
+  assert.equal(logic.usageQuestion({ ...ask, available: false }), false, 'a development build sends nothing and asks nothing');
+  assert.equal(logic.usageQuestion({ available: true, enabled: true }), false, 'an older backend without the field: no question');
+  assert.equal(logic.usageQuestion(null), false, 'unread or unreadable: no question');
+  assert.equal(logic.usageQuestionText(ask), 'Nothing has been sent yet. Nothing is sent until you answer.');
+  assert.equal(logic.usageQuestionText({ ...ask, sent_before: true }), 'An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.', 'an upgraded install is not told nothing was sent');
+  assert.equal(logic.tourWaits(null, false), true, 'the tour waits for the status read');
+  assert.equal(logic.tourWaits(null, true), false, 'a failed read never holds the tour');
+  assert.equal(logic.tourWaits(ask, false), true, 'the question comes first');
+  assert.equal(logic.tourWaits({ ...ask, disclosed: true }, false), false, 'answered: the tour shows');
+  // Round 1: an "on" answered after another tool turned the shared switch off stays off, and says so.
+  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: true, disclosed: true }), 'Anonymous usage analytics are on.');
+  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: false, disclosed: true }), 'Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.');
+  assert.equal(logic.usageAnswerText(false, { ...ask, enabled: false, disclosed: true }), 'Anonymous usage analytics are off for every PassionCode.ai tool on this computer.');
+  i18n.setLocale('ru');
+  assert.equal(logic.usageQuestionText(ask), 'Пока ничего не отправлено. До вашего ответа ничего не отправится.');
+  i18n.setLocale('en');
+});
+// The wiring: the question sits above every page but About, where the panel asks the same thing;
+// both answer through setAnalytics with the one choice; Escape never ends a tour that is not shown.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /if \(page !== 'about' && usageQuestion\(analyticsState\)\) main\.append\(usageQuestionCard\(\)\);/, 'the question above the page');
+  const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
+  assert.match(about, /if \(usageQuestion\(analyticsState\)\) \{/, 'About asks while unanswered');
+  assert.match(about, /usageQuestionText\(analyticsState\)/, 'with the same line on what was sent');
+  assert.match(about, /answerUsage\('analytics', shown\)/, 'and Continue answers it, with the switch it showed');
+  assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the answer goes to the backend');
+  assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the question');
+  assert.match(main, /event\.key === 'Escape' && !openMenu && tourShown\(\)/, 'Escape ends only a tour on screen');
+  // Round 1: the status is read again in the background (every minute and when the window is shown),
+  // so a question drawn before another tool turned the switch off is dropped, not answered with a stale "on".
+  const refresh = main.slice(main.indexOf('function backgroundRefresh() {'), main.indexOf('setInterval(backgroundRefresh, 60_000);'));
+  assert.match(refresh, /adapter\.analytics\(\)\.then\(\(value\) => \{ if \(clock\.accepts\(stamp\)\) \{ analyticsState = value;/, 'backgroundRefresh reads the analytics status');
+  assert.match(main, /document\.addEventListener\('visibilitychange', \(\) => \{ if \(!document\.hidden\) backgroundRefresh\(\); \}\);/, 'and so does showing the window');
+  assert.match(main, /\(\) => usageAnswerText\(wanted, analyticsState\)/, 'the answer reports what is now true');
 });
 
 // Launch (operator decision 2026-10-09): managed only for the pool's selected account while the
@@ -713,5 +763,117 @@ check(() => {
   assert.match(logic.passioncodeLine({ connected: true, state: 'provider_sign_in' }).key, /in your browser/);
   assert.deepEqual(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: 5 }).values, { date: 5 });
   assert.match(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: null }).key, /yet/);
+});
+// VIS-03: the pool pattern compiles under the v flag WebKit applies to `pattern`, and still says what it said.
+check(() => {
+  const exact = new RegExp(`^(?:${logic.POOL_PATTERN})$`, 'v');
+  for (const ok of ['default', 'work', 'a-b_1', 'client-alpha']) assert.ok(exact.test(ok), ok);
+  for (const bad of ['Work', 'a b', '', 'é', 'a/b']) assert.ok(!exact.test(bad), bad);
+});
+// UX-17 (D-1): the group field offers existing pools by name, the default first, and never a pool the person never made.
+check(() => {
+  const accounts = [{ pool: 'work' }, { pool: 'default' }, { pool: 'alpha' }, { pool: 'work' }];
+  const projects = [{ pool: 'alpha', name: 'Alpha Web' }, { pool: 'zeta', name: 'Beta' }];
+  const choices = logic.poolChoices(accounts, projects);
+  assert.deepEqual(choices.map((c) => c.pool), ['default', 'alpha', 'zeta', 'work']);
+  assert.deepEqual(choices.map((c) => c.group), [false, true, true, false]);
+  assert.equal(choices[1].name, 'Alpha Web');
+  assert.deepEqual(logic.poolChoices([], [], 'legacy').map((c) => c.pool), ['default', 'legacy'], 'the current pool stays offered');
+  assert.equal(logic.poolName('alpha', projects), 'Alpha Web');
+  assert.equal(logic.poolName('default', projects), 'Default group');
+  assert.equal(logic.poolName('work', projects), 'Group work · no folders', 'a pool with no group is never a bare id (D-5)');
+  assert.equal(logic.inGroup('default', projects), 'in the default group');
+  assert.equal(logic.inGroup('alpha', projects), 'in group “Alpha Web”');
+  assert.equal(logic.inGroup('work', projects), 'in group work (no folders)');
+  // Statistics names: a group by its name, the default pool as the default group, never "No group".
+  assert.equal(logic.poolName('default', [{ pool: 'default', name: null }].filter((g) => g.name)), 'Default group');
+});
+// VIS-12: the tour card sits beside its target, never on it, and inside the window.
+check(() => {
+  const viewport = { width: 740, height: 560 }; const card = { width: 320, height: 200 };
+  const overlaps = (a, b) => a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
+  for (const target of [{ left: 400, top: 40, width: 200, height: 40 }, { left: 30, top: 420, width: 300, height: 60 }, { left: 500, top: 250, width: 200, height: 40 }]) {
+    const at = logic.tourPlacement(target, card, viewport);
+    assert.ok(!overlaps({ ...at, ...card }, target), JSON.stringify({ target, at }));
+    assert.ok(at.left >= 0 && at.top >= 0 && at.left + card.width <= viewport.width && at.top + card.height <= viewport.height, JSON.stringify(at));
+  }
+  assert.equal(logic.tourPlacement(null, card, viewport).side, 'corner', 'a step without a target keeps the corner');
+});
+// UX-18: the first-run sentence points at a button that is on the page.
+check(() => {
+  assert.equal(logic.firstRunHint(null), 'reading');
+  assert.equal(logic.firstRunHint({ claude: { status: 'missing' }, codex: { status: 'missing' } }), 'sign_in');
+  assert.equal(logic.firstRunHint({ claude: { status: 'unavailable' }, codex: { status: 'missing' } }), 'sign_in');
+  assert.equal(logic.firstRunHint({ claude: { status: 'available', identity: { email: 'a@b' } }, codex: { status: 'missing' } }), 'add_current');
+});
+// CPY-05: the window shows the rewritten cleanup sentence, and the banner still reads it as saved.
+check(() => {
+  assert.equal(logic.loginOutcome(logic.LOGIN_SAVED_CLEANUP_SHOWN), 'saved_with_cleanup');
+  assert.notEqual(logic.LOGIN_SAVED_CLEANUP_SHOWN, logic.LOGIN_SAVED_CLEANUP);
+});
+// UX-24: a running action leaves navigation, Refresh and view-only controls usable.
+check(() => {
+  for (const key of ['nav-accounts', 'refresh', 'dismiss-notice', 'countdown-toggle', 'org-filter-all', 'quota-x', 'chart-tokens', 'stats-30', 'stat-groups-sort-1', 'folders-alpha', 'disk-map-toggle', 'review-rules', 'open-api-keys', 'tour-next', 'stats-retry']) assert.ok(logic.usableWhileBusy(key), key);
+  for (const key of ['primary-x', 'menu-x', 'backup-now', 'restore-x', '', 'auto-on', 'menu-add']) assert.ok(!logic.usableWhileBusy(key), key);
+});
+// VIS-23: the limits-and-errors cell is an alert from exactly 1 % of requests.
+check(() => {
+  const c = (requests, limited, failed) => ({ requests, ok: requests - limited - failed, limited, failed, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
+  assert.equal(logic.statAlert(c(1000, 5, 4)), false, '0.9 % is not an alert, although it rounds to 1');
+  assert.equal(logic.statAlert(c(1000, 6, 4)), true);
+  assert.equal(logic.statAlert(c(0, 0, 0)), false);
+});
+// Product round 1: no Russian sentence reads «группе Группа» (a label put where a locative belongs).
+check(() => {
+  const ru = readFileSync(new URL('../src/locales/ru.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(ru, /группе Группа|группы Группа|в Группа/, 'a group phrase, not a group label, after a preposition');
+  assert.doesNotMatch(ru, /в группе \{group\}|группы \{group\}/, 'sentences take {where} (inGroup), not {group}');
+});
+// Round 2 (N6): About's switch is a deliberate choice and always sets the shared switch; only the
+// question's answer carries the switch it showed, and both notices say what is now true.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const answer = main.slice(main.indexOf('function answerUsage('), main.indexOf('function usageQuestionCard() {'));
+  assert.match(answer, /adapter\.setAnalytics\(wanted, shown\)/, 'the answer names the switch the question showed');
+  const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
+  assert.match(about, /box\.addEventListener\('change', \(\) => \{ const wanted = box\.checked; void mutate\(async \(\) => \{ analyticsState = await adapter\.setAnalytics\(wanted\); \}, \(\) => usageAnswerText\(wanted, analyticsState\), 'analytics'\); \}\);/, "About's notice reports what is now true");
+  assert.doesNotMatch(about, /wanted \? t\('Anonymous usage analytics are on\.'\)/, 'never a fixed "on"');
+});
+// Round 2: N5's window fixes keep their regression checks (unit tier A to D, G).
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /const sync = \(\) => \{ const fresh = picker\.value === '__new'; [^}]*typed\.disabled = !fresh; typed\.dataset\.locked = String\(!fresh\);/, 'a hidden group id is disabled and marked locked');
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const stats = main.slice(main.indexOf('async function loadStats() {'), main.indexOf('async function loadStats() {') + 600);
+  assert.match(stats, /const days = statsDays;[\s\S]*adapter\.statistics\(days\)[\s\S]*if \(days !== statsDays\) return;/, 'an answer for a range the person left is dropped');
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const reload = main.slice(main.indexOf('async function reload() {'), main.indexOf('async function reload() {') + 2000);
+  for (const read of ['loadOpenrouter', 'loadKimi', 'loadSessions', 'loadBackups']) assert.match(reload, new RegExp(`void ${read}\\(readStamp\\);`), `${read} takes the Refresh's stamp`);
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const place = main.slice(main.indexOf('function placeTour('), main.indexOf("window.addEventListener('resize', () => placeTour());"));
+  assert.match(place, /^function placeTour\(scroll = false\) \{/, 'placeTour scrolls only when asked or needed');
+  assert.doesNotMatch(place, /if \(target\) target\.scrollIntoView/, 'never an unconditional scroll on a background render');
+  const scrolls = place.match(/scrollIntoView/g) ?? [];
+  const gated = place.match(/if \(target && move[^)]*\) \{? ?target\.scrollIntoView/g) ?? [];
+  assert.equal(scrolls.length, 2); assert.equal(gated.length, scrolls.length, 'every scroll is behind move');
+  assert.match(main, /if \(tourStep !== null\) placeTour\(\); return true;/, 'a render places the card without asking to scroll');
+  assert.match(main, /restoreFocus\('tour-title'\); placeTour\(true\);/, 'a step change scrolls');
+});
+// Round 2: on a step whose target appears late (Agents loads after the step shows) or lies off
+// screen, the card scrolls to it once; the toast moves aside only while the tour is on screen.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const place = main.slice(main.indexOf('function placeTour('), main.indexOf("window.addEventListener('resize', () => placeTour());"));
+  assert.match(place, /const move = target !== null && \(scroll \|\| firstFound \|\| offScreen\);/, 'scroll when asked, first found or off screen');
+  assert.match(place, /const firstFound = target !== null && \(tourFound\?\.step !== tourStep \|\| tourFound\.selector !== selector\);/, 'the target is remembered per step');
+  assert.match(place, /tourFound = target \? \{ step: tourStep, selector \} : null;/, 'and remembered once placed');
+  assert.match(main, /\$\{tourShown\(\) \? ' beside-tour' : ''\}/, 'the toast moves aside only beside a tour on screen');
+  assert.doesNotMatch(main, /tourStep !== null \? ' beside-tour'/);
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

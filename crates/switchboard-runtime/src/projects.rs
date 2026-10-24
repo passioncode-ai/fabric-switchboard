@@ -363,9 +363,9 @@ pub(crate) fn apply(
         }
         let Some(rule) = effective else {
             let (action, message) = match nearest {
-                Some(rule) if !rule.enabled => ("rule_paused", "The project rule is paused. Switchboard keeps its current selection and rotation.".to_string()),
-                Some(_) => ("rule_expired", "The project rule has expired. Switchboard keeps its current selection and rotation.".to_string()),
-                None => ("no_rule", "No project rule for this folder. Switchboard keeps its current selection and rotation.".to_string()),
+                Some(rule) if !rule.enabled => ("rule_paused", "The group's rule is paused. Switchboard keeps its current selection and automatic switching.".to_string()),
+                Some(_) => ("rule_expired", "The group's rule has expired. Switchboard keeps its current selection and automatic switching.".to_string()),
+                None => ("no_rule", "No group rule for this folder. Switchboard keeps its current selection and automatic switching.".to_string()),
             };
             results.push(outcome(provider, action, None, message));
             continue;
@@ -384,22 +384,22 @@ pub(crate) fn apply(
                 provider,
                 "other_session",
                 Some(account),
-                "This session is isolated to one account; project rules do not change it. Launch a managed session to follow rules.".into(),
+                "This session is isolated to one account; group rules do not change it. Launch a managed session to follow rules.".into(),
             ),
             ("managed", Session::Managed { pool, .. }) if *pool != account.pool => outcome(
                 provider,
                 "other_pool",
                 Some(account),
-                format!("This session routes the {pool} pool; the rule's account is in {}. Launch a managed session in {} to use it.", account.pool, account.pool),
+                format!("This session routes group {pool}; the rule's account is in group {}. Launch a managed session in group {} to use it.", account.pool, account.pool),
             ),
             ("managed", Session::Managed { .. }) => {
                 if snapshot.routes.get(&format!("{}:{}", provider.as_str(), account.pool)) == Some(&account.id) {
-                    outcome(provider, "already_in_effect", Some(account), format!("{} already handles the next request in the {} pool.", account.label, account.pool))
+                    outcome(provider, "already_in_effect", Some(account), format!("{} already handles the next request in group {}.", account.label, account.pool))
                 } else {
                     match store.select_with_cooldown(provider, &account.pool, &account.id, now) {
                         Ok(()) => {
                             store.record_rule_applied(&account.id)?;
-                            outcome(provider, "selected", Some(account), format!("{} handles the next request in the {} pool. A response already streaming keeps its account.", account.label, account.pool))
+                            outcome(provider, "selected", Some(account), format!("{} handles the next request in group {}. A response already streaming keeps its account.", account.label, account.pool))
                         }
                         Err(error) => outcome(provider, "failed", Some(account), error),
                     }
@@ -810,6 +810,45 @@ mod tests {
         let resolved = resolve(&store, &alpha, monitor::now()).unwrap();
         assert_eq!(resolved["rules"][0]["nearest"]["state"], "paused");
         assert!(resolved["rules"][0]["effective"].is_null());
+    }
+
+    /// N1 round 1 (D-1): a person reads group, never pool or project, and automatic switching,
+    /// never rotation, in the answers of `switchboard_project_apply`.
+    #[test]
+    fn rule_answers_say_group() {
+        let (data, projects, store) = fixture();
+        let first = add(&store, "work", "synthetic-first");
+        let other = add(&store, "home", "synthetic-other");
+        let alpha = project_dir(data.path(), projects.path()).unwrap();
+        let session = Session::Managed {
+            provider: Provider::Claude,
+            pool: "work".into(),
+        };
+        let mut messages = Vec::new();
+        let mut answer = |store: &Store| {
+            let value = apply(store, None, &alpha, &session, false).unwrap();
+            messages.push(value["results"][0]["message"].as_str().unwrap().to_owned());
+        };
+        answer(&store);
+        store
+            .set_rule(&alpha, &first.id, "managed", true, None)
+            .unwrap();
+        answer(&store);
+        answer(&store);
+        store
+            .set_rule(&alpha, &other.id, "managed", true, None)
+            .unwrap();
+        answer(&store);
+        for message in &messages {
+            let lower = message.to_lowercase();
+            assert!(
+                !lower.contains("pool")
+                    && !lower.contains("project")
+                    && !lower.contains("rotation"),
+                "{message}"
+            );
+        }
+        assert!(messages[1].contains("group work"), "{}", messages[1]);
     }
 
     #[test]

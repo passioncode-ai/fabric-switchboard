@@ -32,6 +32,37 @@ fn help_and_invalid_arguments_do_not_create_storage_or_echo_values() {
     assert!(!root.exists());
 }
 #[test]
+fn a_command_group_named_alone_prints_its_help_or_a_json_error() {
+    // PRD-07 (iteration 2026-10-24): `switchboard accounts` printed only "Invalid arguments".
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("not-created");
+    let output = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .arg("accounts")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Usage: switchboard accounts"));
+    for args in [["--json", "accounts"], ["accounts", "--json"]] {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(&root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["ok"], false);
+        assert_eq!(
+            error["error"],
+            "Name a command. Run switchboard accounts --help."
+        );
+    }
+    assert!(!root.exists());
+}
+#[test]
 fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
     // SB-108 / FD-62: Fabric polls `switchboard handovers --json`; the setting is off until set.
     let tmp = tempfile::tempdir().unwrap();
@@ -203,7 +234,7 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     let said = hooked(&hook.to_string());
-    assert!(said.contains("added to the project \"App\""), "{said}");
+    assert!(said.contains("added to the group \"App\""), "{said}");
     assert_eq!(said.lines().count(), 1);
     let (_, listed, _) = run(&["project", "suggestions"], None);
     // The clone the person removed is declined now; the new repository is the one added.

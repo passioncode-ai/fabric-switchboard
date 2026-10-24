@@ -592,6 +592,18 @@ fn logs_check(code: &'static str) -> bool {
     !repeat
 }
 
+/// The same rule for the checks made while an update waits (PRD-14, iteration 2026-10-24): one
+/// line when nothing newer is found, not one every five minutes until the restart.
+static LAST_RECHECK_LOGGED: Mutex<Option<&'static str>> = Mutex::new(None);
+fn logs_recheck(code: &'static str) -> bool {
+    let Ok(mut last) = LAST_RECHECK_LOGGED.lock() else {
+        return true;
+    };
+    let repeat = code == "current" && *last == Some("current");
+    *last = Some(code);
+    !repeat
+}
+
 /// The end of a check that ran while an update waited (SB-105). Nothing newer, or a check or
 /// download that failed, leaves the waiting update as it was; a newer verified release takes its
 /// place — unless a restart into the waiting one is already under way. A swap that failed or stalled leaves the bundle in an unknown state, so the waiting
@@ -630,13 +642,15 @@ fn recheck_done(
         Err(_) => ("check_failed", Phase::Failed),
     };
     drop(inner);
-    event(
-        "update_check",
-        &[
-            ("outcome", Field::Code(code)),
-            ("waiting", Field::Code("yes")),
-        ],
-    );
+    if logs_recheck(code) {
+        event(
+            "update_check",
+            &[
+                ("outcome", Field::Code(code)),
+                ("waiting", Field::Code("yes")),
+            ],
+        );
+    }
     // Failed: the loop retries within the hour; the waiting update (if kept) still starts.
     phase
 }
@@ -1647,6 +1661,14 @@ mod tests {
         assert!(logs_check("failed"));
         assert!(logs_check("current"));
         assert!(logs_check("ready"));
+    }
+
+    #[test]
+    fn a_check_that_finds_nothing_while_an_update_waits_is_logged_once() {
+        assert!(logs_recheck("current"));
+        assert!(!logs_recheck("current"));
+        assert!(logs_recheck("check_failed"));
+        assert!(logs_recheck("current"));
     }
 
     #[test]
