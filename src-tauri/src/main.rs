@@ -885,7 +885,8 @@ fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
     }
     launch
 }
-/// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled}`.
+/// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled, disclosed, sent_before}`;
+/// `set_analytics` is also the person's answer that lets anything be sent (issue #128).
 #[tauri::command]
 async fn analytics_status(slot: State<'_, Slot>) -> Result<Value, String> {
     Ok(slot.runtime().await?.analytics_status())

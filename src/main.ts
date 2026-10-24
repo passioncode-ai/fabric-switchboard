@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -57,6 +57,8 @@ function tourGo(step: number | null) {
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
   page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour(true);
 }
+/** The tour waits for the usage question (issue #128): one first-run card at a time, the question first. */
+function tourShown(): boolean { return tourStep !== null && (native || demo) && !tourWaits(analyticsState, analyticsError); }
 /** The first selector of a step that is on the page (UX-30: the setup prompt may still be reading). */
 function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
   for (const selector of tour()[step].target) { const found = scope.querySelector<HTMLElement>(selector); if (found) return found; }
@@ -91,6 +93,32 @@ function tourCard(step: number) {
 }
 /** Provider terms (operator decision 2026-10-08, SCN-049): a banner on Accounts until dismissed, always in About. */
 const noticeStore = () => { try { return localStorage; } catch { return null; } };
+/**
+ * Usage counts (issue #128, operator decision 2026-10-08; docs/ANALYTICS.md, SCN-073): on by
+ * default, but nothing is sent until the person answers once, here or in About. Both show what is
+ * counted and the same switch; the choice waits in `usageChoice` until Continue.
+ */
+let usageChoice = true;
+const USAGE_COUNTED = () => t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
+function usageSwitch(focus: string) {
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = usageChoice; box.dataset.focus = focus;
+  box.addEventListener('change', () => { usageChoice = box.checked; });
+  option.append(box, el('span', '', t('Share anonymous usage counts')));
+  return option;
+}
+function answerUsage(focus: string) {
+  const wanted = usageChoice;
+  // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
+  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted, analyticsState), focus);
+}
+function usageQuestionCard() {
+  const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
+  const title = el('h2', '', t('Share anonymous usage counts?')); title.id = 'usage-question-title';
+  const actions = el('div', 'usage-question-actions');
+  actions.append(usageSwitch('usage-switch'), button(t('Continue'), () => answerUsage('page-title'), 'button primary', 'usage-continue'));
+  card.append(title, el('p', '', USAGE_COUNTED()), el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.')));
+  return card;
+}
 let termsDismissed = termsNoticeDismissed(noticeStore());
 function termsBanner(main: HTMLElement) {
   if (termsNoticeOn(page, termsDismissed) !== 'banner') return;
@@ -128,7 +156,7 @@ let loginItem: LoginItem | null = null;
 let loginItemError = false;
 let updateState: UpdateStatus | null = null;
 let updateError = false;
-let analyticsState: LoginItem | null = null;
+let analyticsState: AnalyticsStatus | null = null;
 let analyticsError = false;
 let backupError = false;
 let busy = false;
@@ -233,13 +261,13 @@ async function reload() {
     }
   });
 }
-async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string, operation: Operation = 'change') {
+async function mutate(action: () => Promise<unknown>, success: string | (() => string), focusKey?: string, accountId?: string, operation: Operation = 'change') {
   busy = true; notice = ''; clock.begin(); render();
   try {
     await action();
     await refreshContext();
     if (accountId) usageErrors.delete(accountId);
-    showNotice(restoredText || success); restoredText = '';
+    showNotice(restoredText || (typeof success === 'function' ? success() : success)); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
@@ -262,7 +290,7 @@ function render(options: { background?: boolean } = {}): boolean {
     lastRendered = markup; root.replaceChildren(shell); syncCountdown(); if (tourStep !== null) placeTour(); return true;
   };
   const withTour = () => {
-    if (tourStep !== null && (native || demo)) {
+    if (tourStep !== null && tourShown()) {
       tourTarget(shell, tourStep)?.classList.add('tour-target');
       shell.append(tourCard(tourStep));
     }
@@ -310,6 +338,7 @@ function render(options: { background?: boolean } = {}): boolean {
   }
   if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourStep !== null ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
+  if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
@@ -1926,9 +1955,15 @@ function updateControls(panel: HTMLElement) {
 function analyticsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
   const heading = el('h2', '', t('Usage analytics')); heading.id = 'analytics-heading';
-  panel.append(heading, el('p', '', t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.')));
+  panel.append(heading, el('p', '', USAGE_COUNTED()));
   if (analyticsError) { panel.append(el('p', 'form-note', t('The analytics setting is unavailable. Refresh to retry.'))); return panel; }
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
+  // Issue #128: not answered yet. The same choice as the first-run question; Continue answers it.
+  if (usageQuestion(analyticsState)) {
+    const actions = el('div', 'usage-question-actions'); actions.append(usageSwitch('analytics'), button(t('Continue'), () => answerUsage('analytics'), 'button', 'usage-continue-about'));
+    panel.append(el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer.')));
+    return panel;
+  }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for every PassionCode.ai tool on this computer.'), 'analytics'); });
   option.append(box, el('span', '', t('Share anonymous usage counts')));
@@ -2404,11 +2439,14 @@ void reload();
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
 // Menus close on Escape and on a click anywhere outside them.
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !openMenu && tourStep !== null && !document.querySelector('dialog[open]')) { tourGo(null); return; } if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !openMenu && tourShown() && !document.querySelector('dialog[open]')) { tourGo(null); return; } if (event.key === 'Escape' && openMenu) { const key = openMenu; openMenu = null; render(); restoreFocus(`menu-${key}`); } });
 document.addEventListener('click', (event) => { if (openMenu && !(event.target as HTMLElement | null)?.closest('.menu-root')) { openMenu = null; render(); } });
 function backgroundRefresh() {
   if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
   refreshing = true; const stamp = clock.stamp();
+  // Issue #128 round 1: another PassionCode.ai tool may have turned the shared switch off since
+  // the usage question was drawn; a fresh status drops a question that no longer applies.
+  void adapter.analytics().then((value) => { if (clock.accepts(stamp)) { analyticsState = value; analyticsError = false; backgroundRender(); } }, () => { /* the next pass reads it again */ });
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;

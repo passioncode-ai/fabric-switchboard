@@ -80,6 +80,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-070 | Keep a group's work on its organization's accounts | draft |
 | SCN-071 | Keep organizations current from PassionCode.ai | draft |
 | SCN-072 | Keep an account signed in on another machine out of this one | draft |
+| SCN-073 | Answer the usage question before anything is sent | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -737,7 +738,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 3. “Switch, by hand or automatically” — the automatic switching bar is outlined.
 4. “Give a group its own accounts”: Groups opens, + New group is outlined (the empty state's one while there is no group).
 5. “Agents, and it keeps running”: Agents opens with *Copy* beside the prompt for a coding agent outlined (SB-93: the agent sets Switchboard up, SCN-050); the menu-bar icon is named. When the prompt is not on the page yet (setup still reading or failed), the *Connect an agent* panel is outlined instead (0.6.82, UX-30). Start using Switchboard ends it.
-**Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never.
+**Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never. While the usage question is open (SCN-073), or its status is still being read, the tour waits and starts once it is answered; Escape does not end a tour that is not on screen (issue #128).
 **Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains: the card sits below, above or beside its target, never on it, and the target is scrolled into sight first (0.6.82, VIS-12; checked at 740 and 1100 px).
 **UI elements:** tour card (non-modal), outlined target, step dots.
 **States covered:** first start, each step, skipped, finished, shown again.
@@ -925,18 +926,18 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the installed app (only release builds carry the analytics key).
 **Entry point:** About → *Usage analytics*.
 **Steps:**
-1. Read what is sent: counts of installs, days of use and saved accounts by provider and type — never names, e-mail addresses, sign-ins or pool names (docs/ANALYTICS.md).
+1. Read what is sent: counts of installs, days of use and saved accounts by provider and type; never names, e-mail addresses, sign-ins or group names (docs/ANALYTICS.md).
 2. Uncheck *Share anonymous usage counts* → “Anonymous usage analytics are off for every PassionCode.ai tool on this computer.”; check it → “Anonymous usage analytics are on.”
-**Alt paths:** a development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
-**Expected result:** one switch, shared by every PassionCode.ai tool on the machine, and the person sees its state.
-**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to every PassionCode.ai tool on this computer.”
-**States covered:** on, off, unavailable (build), reading, read failed, save failed.
+**Alt paths:** not answered yet (issue #128, SCN-073): the panel says the same as the first-run question (“Nothing has been sent yet. Nothing is sent until you answer.”, or for an upgraded install “An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.”), the switch changes only the choice, and *Continue* answers it with the success line of step 2; afterwards the switch applies at once. A development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
+**Expected result:** one switch, shared by every PassionCode.ai tool on the machine, and the person sees its state; nothing is sent before the person has answered it once, here or in the first-run question.
+**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to every PassionCode.ai tool on this computer.”; while unanswered, the line on what was sent and *Continue*.
+**States covered:** unanswered, on, off, unavailable (build), reading, read failed, save failed.
 **Errors & recovery:** a failed save keeps the old state and can be retried.
 **Status:** draft
 **Meaning:** a privacy control without a scenario (UX audit 2026-10-06, SB-69).
-**Coverage:** docs/ANALYTICS.md and its planted-identifier test; src/main.ts `analyticsPanel`.
+**Coverage:** docs/ANALYTICS.md and its planted-identifier test; the issue #128 tests in `crates/switchboard-runtime/src/analytics.rs`; src/main.ts `analyticsPanel`; `scripts/test-ui-logic.mjs` (the About panel asks while unanswered).
 **Product:** unobserved
-**Traces:** SB-69
+**Traces:** SB-69, SCN-073
 
 ## SCN-045 — Save one OpenRouter key for agents
 
@@ -1525,3 +1526,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `an_account_used_on_another_machine_is_never_chosen_here`, backup `a_reinstall_gets_organizations_their_accounts_and_groups_back`, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-168, SB-175
+
+## SCN-073: Answer the usage question before anything is sent
+
+**Persona:** P-01
+**Goal:** Know what Switchboard would count and choose before any count leaves the computer.
+**Preconditions:** the installed release app (it carries the analytics key); the shared switch is on; this app has not been answered yet (a first start, or an install from 0.6.81 or earlier).
+**Entry point:** automatic, above every page but About, from the first time the window opens; About → *Usage analytics* is the other way to answer (SCN-044).
+**Steps:**
+1. Open the window → above the page: “Share anonymous usage counts?”, what is counted (installs, days of use, saved accounts by provider and type; never names, e-mail addresses, sign-ins, group names or what you do with your accounts; one random installation number shared by the PassionCode.ai tools), “Nothing has been sent yet. Nothing is sent until you answer.”, the switch *Share anonymous usage counts* (on), *Continue*, and “This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.”
+2. *Continue* with the switch on → “Anonymous usage analytics are on.”; the question goes, focus returns to the page title, and the five-step tour (SCN-035) starts.
+3. Or clear the switch, then *Continue* → “Anonymous usage analytics are off for every PassionCode.ai tool on this computer.”; the question goes and is not asked again.
+**Alt paths:** another PassionCode.ai tool turns the shared switch off while the question is open: the window reads the status again every minute and when it is shown, and the question goes; if *Continue* with the switch on comes first, the switch stays off for every tool and the line reads “Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.”; an install that sent counts before 0.6.82 reads “An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.” instead of “Nothing has been sent yet.”; a save failure shows the error, keeps the question and sends nothing; a background start (login item) or a window never opened sends nothing; a development or demo build asks nothing (demo: `?demo=1&usage=ask` or `&usage=sent` shows the question).
+**Expected result:** no event, `app_installed` included, leaves before the answer; after an answer of on, only that run's start (and, for a fresh install, the install) is reported, never an account change from before the answer, and the day's activity at the next background pass; after an answer of off, nothing while the shared switch stays off (another PassionCode.ai tool turning it back on resumes counting, Fabric ADR-0127 Amendment 2); uninstalling forgets the answer.
+**UI elements:** the question card (heading, two paragraphs, switch, *Continue*, note).
+**States covered:** first start, upgraded install, answered on, answered off, answered on after another tool turned the switch off, save failed, background start.
+**Errors & recovery:** a failed save leaves the question open; *Continue* again.
+**Status:** draft
+**Meaning:** operator decision 2026-10-08, issue #128 (Fabric ADR-0127, audit A7-012): on by default, nothing before the answer.
+**Coverage:** `crates/switchboard-runtime/src/analytics.rs` tests `nothing_is_queued_or_sent_before_the_answer_not_even_from_a_background_start`, `an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it`, `an_answer_of_off_sends_nothing_then_or_after_a_restart`, `the_answer_is_this_apps_own_and_never_written_to_the_shared_file`, `an_upgraded_install_asks_once_and_is_not_counted_as_new`, `an_unreadable_state_asks_again_and_never_reports_a_second_install`, `answering_on_after_another_app_turned_the_switch_off_keeps_it_off`, `an_answer_of_off_holds_while_the_shared_switch_stays_off`, `through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day`; uninstall `uninstall_forgets_the_usage_answer`; `scripts/test-ui-logic.mjs` (`usageQuestion`, `usageQuestionText`, `usageAnswerText`, `tourWaits`, the wiring, the background status read); browser demo 2026-10-24 (WebKit, 740 and 1100 px, light and dark, English and Russian).
+**Product:** unobserved
+**Traces:** SCN-044, SCN-035, SB-69

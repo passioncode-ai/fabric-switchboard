@@ -1,0 +1,331 @@
+{
+ "node": "N6",
+ "issue": "https://github.com/passioncode-ai/fabric-switchboard/issues/128",
+ "done": [
+  {
+   "item": "disclosed_at kept in this app's own <data>/analytics-state.json (Unix seconds); the shared PassionCode installation.json carries only the switch; another app's answer does not answer for Switchboard",
+   "evidence": [
+    "the_answer_is_this_apps_own_and_never_written_to_the_shared_file",
+    "crates/switchboard-runtime/src/analytics.rs:165",
+    "crates/switchboard-runtime/src/analytics.rs:294"
+   ]
+  },
+  {
+   "item": "While the switch is on and disclosed_at is absent nothing is queued or sent (app_installed, app_started, app_active, account_added/removed, project_changed, account_switched, bare events); flush drops anything waiting; a background start and a second background start send nothing",
+   "evidence": [
+    "nothing_is_queued_or_sent_before_the_answer_not_even_from_a_background_start",
+    "crates/switchboard-runtime/src/analytics.rs:270",
+    "crates/switchboard-runtime/src/analytics.rs:444"
+   ]
+  },
+  {
+   "item": "An answer of on reports the held start of that run once (app_installed for a fresh install, app_started with its launch); nothing from before the answer is kept or sent later; a restart is answered already",
+   "evidence": [
+    "an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it",
+    "crates/switchboard-runtime/src/analytics.rs:294"
+   ]
+  },
+  {
+   "item": "An answer of off sends nothing then or after a restart, and the question is not asked again",
+   "evidence": [
+    "an_answer_of_off_sends_nothing_then_or_after_a_restart"
+   ]
+  },
+  {
+   "item": "Upgraded install (installed, no disclosed_at) asks once, says an earlier version may already have sent counts, is not counted as a new install; an unreadable state asks again and never re-sends app_installed",
+   "evidence": [
+    "an_upgraded_install_asks_once_and_is_not_counted_as_new",
+    "an_unreadable_state_asks_again_and_never_reports_a_second_install",
+    "crates/switchboard-runtime/src/analytics.rs:182"
+   ]
+  },
+  {
+   "item": "Planted-identifier test kept; it now answers the switch after a background start and still proves no id, label, e-mail or pool leaves",
+   "evidence": [
+    "events_carry_counts_and_the_installation_id_never_an_identity",
+    "crates/switchboard-runtime/src/analytics.rs:785"
+   ]
+  },
+  {
+   "item": "Status carries disclosed and sent_before (runtime analytics_status, Tauri passes it through)",
+   "evidence": [
+    "crates/switchboard-runtime/src/lib.rs analytics_status",
+    "src-tauri/src/main.rs analytics_status",
+    "src/types.ts AnalyticsStatus"
+   ]
+  },
+  {
+   "item": "First-run question above every page but About: what is counted, nothing sent yet (or the upgraded-install line), the switch on by default, Continue; the tour waits for it and Escape never ends a hidden tour; About asks the same while unanswered and its Continue answers",
+   "evidence": [
+    "src/main.ts:112 usageQuestionCard",
+    "src/main.ts:337",
+    "src/main.ts:1943 analyticsPanel",
+    "src/main.ts:61 tourShown",
+    "src/ui-logic.ts:506 usageQuestion, :510 usageQuestionText, :516 tourWaits",
+    "scripts/test-ui-logic.mjs:552 (two checks)"
+   ]
+  },
+  {
+   "item": "New CSS only in src/window.css; Russian entries for the five new strings",
+   "evidence": [
+    "src/window.css (usage-question classes)",
+    "src/locales/ru.ts",
+    "node scripts/check-locale.mjs: 1256 interface strings, all in Russian"
+   ]
+  },
+  {
+   "item": "Demo shows the question: ?demo=1&usage=ask, and ?demo=1&usage=sent for an upgraded install",
+   "evidence": [
+    "src/demo.ts:88"
+   ]
+  },
+  {
+   "item": "WebKit check at 740 and 1100 px, light and dark, English and Russian: question shown, tour hidden while asking, About asks the same, answering off removes the question, shows the success line, focuses the page title and starts the tour; no page errors (24 runs)",
+   "evidence": [
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n6/ask-740-light-en.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n6/sent-1100-dark-ru.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n6/about-sent-1100-light-ru.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n6/answered-off-740-dark-en.png",
+    "/Users/sshlg/DATA/_worktrees/sb-iter-shots/n6/ (40 screenshots)"
+   ]
+  },
+  {
+   "item": "Docs in the same change: ANALYTICS.md section 'Nothing before the answer' and the event table; scenarios SCN-073 (new, index row), SCN-044 (unanswered state), SCN-035 (tour waits); brand strings registry",
+   "evidence": [
+    "docs/ANALYTICS.md:15",
+    "docs/ux/scenarios.md:1530",
+    "docs/brand/strings.md (About section)"
+   ]
+  }
+ ],
+ "not_done": [
+  "CHANGELOG entry (the orchestrator writes it).",
+  "Backlog row for #128 in docs/evidence/backlog.md not touched (guarded register under agent-sync; the orchestrator closes it with the release).",
+  "No live release-build acceptance: only release builds carry the App Key, so the end-to-end path is proven against the synthetic server, not analytics.passioncode.ai.",
+  "Observed, not fixed (blocks nothing here): at 740 px the success toast (N5, UX-07) can sit over the first tour card right after an answer; a board row candidate for the window's toast and tour placement."
+ ],
+ "decisions": [
+  "Upgraded installs (installed, no disclosed_at) are treated as not disclosed and asked once, per the issue's item 4; they are never counted as new installs.",
+  "An unreadable or unparsable state file is read as installed and not disclosed: it asks again, sends nothing before the answer and never re-sends app_installed; its notice uses the 'may already have sent' line (sent_before true) because nothing can be assumed about the past.",
+  "Answering off clears what waits and the held start; a later switch on (About) sends from that moment, and app_installed then goes at the next start (the person chose on).",
+  "Accounts and days seen before the answer are counted locally only (known updated, active_day not marked), so nothing from before the answer is reported after it, matching the task's rule.",
+  "The question sits above every page but About (About asks the same in its panel); it is not modal and does not take focus when it appears; the five-step tour waits for it and for the status read, so one first-run card shows at a time.",
+  "An older or unreadable status (no disclosed field, read failure) shows no question; the backend still sends nothing until answered.",
+  "disclosed is an atomic beside state.disclosed_at so the state lock is never taken twice; a start racing the answer is resolved under the held slot (lock order held, then state)."
+ ],
+ "checks": [
+  {
+   "cmd": "cargo fmt --all",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo test -p switchboard-runtime --locked analytics",
+   "exit": 0,
+   "note": "17 passed"
+  },
+  {
+   "cmd": "cargo test -p fabric-switchboard --locked",
+   "exit": 0,
+   "note": "29 passed"
+  },
+  {
+   "cmd": "npm run build",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/test-ui-logic.mjs",
+   "exit": 0,
+   "note": "61 cases"
+  },
+  {
+   "cmd": "node scripts/check-locale.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-error-vocabulary.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "node scripts/check-brand.mjs",
+   "exit": 0
+  },
+  {
+   "cmd": "python3 scripts/check_docs.py",
+   "exit": 0
+  },
+  {
+   "cmd": "Playwright WebKit on http://127.0.0.1:5196/?demo=1&usage=ask|sent (740/1100, light/dark, en/ru)",
+   "exit": 0,
+   "note": "24 runs, no page errors; vite and browsers stopped"
+  }
+ ],
+ "commit": "67db9703fc8c60d60c3eed8001554b08852611f3",
+ "round1": {
+  "input": "Coordinator fix cycle: unit tier pass with risks, seam tier fail, adversarial round pass.",
+  "merged": {
+   "branch": "iter/0.6.82-ui-ux",
+   "commit": "d15c0aa",
+   "conflicts": [
+    "src/main.ts (ui-logic import list: both sides kept)",
+    "docs/brand/strings.md (About list: the usage question line kept beside the integration branch's Backups and Language lines)"
+   ]
+  },
+  "done": [
+   {
+    "item": "Seam 1: the window reads the analytics status again in backgroundRefresh (every minute, and when the window is shown through the visibilitychange handler), so a question drawn before another app turned the switch off is dropped",
+    "evidence": [
+     "src/main.ts:2449",
+     "scripts/test-ui-logic.mjs wiring check 'backgroundRefresh reads the analytics status'"
+    ]
+   },
+   {
+    "item": "Seam 1: set_enabled(true) from an unanswered state while the shared switch is already off records disclosed_at without writing true, clears what waits and returns the fresh status; the window reports 'Usage counts stay off: ...' from the returned status",
+    "evidence": [
+     "answering_on_after_another_app_turned_the_switch_off_keeps_it_off",
+     "crates/switchboard-runtime/src/analytics.rs:320",
+     "crates/switchboard-runtime/src/analytics.rs:326",
+     "src/ui-logic.ts:516 usageAnswerText",
+     "scripts/test-ui-logic.mjs (usageAnswerText cases)"
+    ]
+   },
+   {
+    "item": "Seam 2: the off promise narrowed in ANALYTICS.md and SCN-073 to 'while the shared switch stays off'; another app turning it back on resumes counting (Fabric ADR-0127 Amendment 2)",
+    "evidence": [
+     "an_answer_of_off_holds_while_the_shared_switch_stays_off",
+     "docs/ANALYTICS.md section 'Nothing before the answer'",
+     "docs/ux/scenarios.md SCN-073 Expected result"
+    ]
+   },
+   {
+    "item": "Risk 3: analytics-state.json is in uninstall OWNED (uninstall forgets the answer; not in backups)",
+    "evidence": [
+     "uninstall_forgets_the_usage_answer",
+     "crates/switchboard-runtime/src/uninstall.rs:37"
+    ]
+   },
+   {
+    "item": "Risk 4: sent_before = installed || active_day present; a 0.6.81 state with a day and no install flag sends no app_installed and is marked installed",
+    "evidence": [
+     "an_old_state_with_a_day_but_no_install_flag_is_not_a_new_install",
+     "crates/switchboard-runtime/src/analytics.rs:178",
+     "crates/switchboard-runtime/src/analytics.rs:534"
+    ]
+   },
+   {
+    "item": "Risk 5: flush clears only when not answered or the shared switch reads off; an unreadable shared file keeps the queue",
+    "evidence": [
+     "a_shared_file_unreadable_for_a_moment_keeps_what_waits",
+     "crates/switchboard-runtime/src/analytics.rs:427"
+    ]
+   },
+   {
+    "item": "Risk 6: save() returns whether it wrote and logs analytics_state_unwritable (code only); listed in docs/OPERATIONS.md",
+    "evidence": [
+     "a_state_that_cannot_be_written_is_reported_not_hidden",
+     "crates/switchboard-runtime/src/analytics.rs:478",
+     "docs/OPERATIONS.md Log event list"
+    ]
+   },
+   {
+    "item": "Risk 7: ANALYTICS.md says days are not counted locally; the day's app_active goes at the first pass after an answer of on",
+    "evidence": [
+     "docs/ANALYTICS.md section 'Nothing before the answer'",
+     "through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day"
+    ]
+   },
+   {
+    "item": "Risk 8: first_passioncode_app persisted as State.machine_first until app_installed reports it",
+    "evidence": [
+     "the_first_passioncode_app_is_reported_truly_after_a_later_answer",
+     "crates/switchboard-runtime/src/analytics.rs:173"
+    ]
+   },
+   {
+    "item": "Risk 9: runtime-level test: enable_analytics_with against the local server, an operation (SaveProject) and a monitor pass send nothing; set_analytics(true) then a pass sends app_installed, app_started (launch background), app_active; stable over 5 extra runs",
+    "evidence": [
+     "through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day"
+    ]
+   },
+   {
+    "item": "Risk 10: the adversarial round's tests added without the adv_ prefix",
+    "evidence": [
+     "the_answer_adds_no_field_to_the_shared_file",
+     "no_identifier_leaves_with_the_held_start"
+    ]
+   },
+   {
+    "item": "Risk 11: 'Reading the numbers' says installs and active days count from the person's answer from 0.6.82 (growth sees a step); the shared-file section names each app's own answer timestamp",
+    "evidence": [
+     "docs/ANALYTICS.md 'Reading the numbers'",
+     "docs/ANALYTICS.md 'The shared installation id'"
+    ]
+   }
+  ],
+  "not_done": [
+   "CHANGELOG and docs/evidence/backlog.md (orchestrator's).",
+   "No new browser screenshots this round: the question and About layouts did not change; only the success line after an answer changed (covered by ui-logic tests)."
+  ],
+  "decisions": [
+   "The stale-answer line is a new string with its Russian entry: 'Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.'",
+   "mutate() accepts a success text or a function, so the answer reports the status the backend returned.",
+   "A 0.6.81 state with a day but no install flag is marked installed at the answer, so app_installed is never sent for it later.",
+   "Blocked for a while by a full disk (ENOSPC in the shared target); reported to the orchestrator, who ran cargo clean --profile dev on the shared target. Nothing was deleted by this node."
+  ],
+  "checks": [
+   {
+    "cmd": "cargo fmt --all -- --check",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo test -p switchboard-runtime --locked analytics",
+    "exit": 0,
+    "note": "26 passed"
+   },
+   {
+    "cmd": "cargo test -p switchboard-runtime --locked uninstall",
+    "exit": 0,
+    "note": "8 passed"
+   },
+   {
+    "cmd": "cargo test -p fabric-switchboard --locked",
+    "exit": 0,
+    "note": "29 passed"
+   },
+   {
+    "cmd": "npm run build",
+    "exit": 0
+   },
+   {
+    "cmd": "node scripts/test-ui-logic.mjs",
+    "exit": 0,
+    "note": "62 cases"
+   },
+   {
+    "cmd": "node scripts/check-locale.mjs",
+    "exit": 0,
+    "note": "1262 strings"
+   },
+   {
+    "cmd": "node scripts/check-error-vocabulary.mjs",
+    "exit": 0
+   },
+   {
+    "cmd": "node scripts/check-brand.mjs",
+    "exit": 0
+   },
+   {
+    "cmd": "python3 scripts/check_docs.py",
+    "exit": 0
+   }
+  ],
+  "commit": "dd061552fdb205003d55aeb3f7b876ef81875d88"
+ }
+}

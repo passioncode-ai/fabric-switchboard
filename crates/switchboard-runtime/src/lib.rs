@@ -1563,7 +1563,8 @@ impl Runtime {
         }
     }
     /// Starts analytics for the desktop app (docs/ANALYTICS.md): a release build (it carries
-    /// the App Key) owning the real data folder. `launch` is `ordinary` or `background`.
+    /// the App Key) owning the real data folder. `launch` is `ordinary` or `background`. Until
+    /// the person has answered the switch in this app, the start is held and nothing is sent.
     pub fn enable_analytics(self: &Arc<Self>, launch: &str) {
         let (Some(key), Some(shared)) = (analytics::APP_KEY, analytics::shared_folder()) else {
             return;
@@ -1592,14 +1593,16 @@ impl Runtime {
     pub(crate) fn analytics(&self) -> Option<Arc<analytics::Analytics>> {
         self.analytics.lock().ok().and_then(|slot| slot.clone())
     }
-    /// `{available, enabled}` for About. Unavailable outside a release desktop build.
+    /// `{available, enabled, disclosed, sent_before}` for the first-run notice and About.
+    /// Unavailable outside a release desktop build, where no notice is shown.
     pub fn analytics_status(&self) -> Value {
         self.analytics().map_or_else(
-            || json!({"available": false, "enabled": false}),
+            || json!({"available": false, "enabled": false, "disclosed": false, "sent_before": false}),
             |a| a.status(),
         )
     }
-    /// The person's switch; shared by every PassionCode app on this machine.
+    /// The person's switch, shared by every PassionCode app on this machine, and their answer
+    /// in this app (issue #128): until it, nothing is sent.
     pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
         self.analytics()
             .ok_or_else(|| "Usage analytics are available in the installed app only.".to_string())?

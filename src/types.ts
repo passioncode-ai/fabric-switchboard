@@ -134,8 +134,9 @@ export interface Adapter {
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
-  analytics(): Promise<LoginItem>;
-  setAnalytics(enabled: boolean): Promise<LoginItem>;
+  analytics(): Promise<AnalyticsStatus>;
+  /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128). */
+  setAnalytics(enabled: boolean): Promise<AnalyticsStatus>;
   /** Automatic updates (SB-55): on by default; unavailable outside the installed app. */
   updateStatus(): Promise<UpdateStatus>;
   setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;
@@ -145,6 +146,8 @@ export interface Adapter {
   checkForUpdates(): Promise<UpdateStatus>;
 }
 export interface LoginItem { available: boolean; enabled: boolean }
+/** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
+export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */
 export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null; openrouter?: { model_flag: string[] | null; model_env: string | null; default: boolean; notes: string | null } | null }
 /** What OpenRouter says the saved key may spend (`GET /key`), in US dollars; null where it has no limit. */
