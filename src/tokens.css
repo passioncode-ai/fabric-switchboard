@@ -28,14 +28,18 @@
   --danger-weak: var(--pc-negative-soft);
   --info: var(--pc-info);
   --info-weak: var(--pc-info-soft);
-  /* SB-147: chart series. The brand carries no data palette yet, so the series reuse its roles,
-     the accent first; a group's colour carries no meaning beyond telling series apart. */
-  --chart-1: var(--pc-accent);
+  /* SB-147, 0.6.82 (VIS-02, VIS-06): chart series. Six roles from the brand, two of them mixed,
+     so that in both themes every series is at least 3:1 against the panel (WCAG 1.4.11) and no two
+     series are alike (OKLab distance at least 0.09). Series 1 is the link role: the gold in dark,
+     the readable gold-brown in light, where the bright gold is 1.34:1 on the panel.
+     scripts/check-brand.mjs measures every value and every pair. A group's colour carries no
+     meaning beyond telling series apart. */
+  --chart-1: var(--pc-link);
   --chart-2: var(--pc-info);
   --chart-3: var(--pc-positive);
-  --chart-4: var(--pc-link);
-  --chart-5: var(--pc-warning);
-  --chart-6: var(--pc-text-muted);
+  --chart-4: var(--pc-brand-magenta);
+  --chart-5: color-mix(in srgb, var(--pc-warning) 60%, var(--pc-brand-magenta));
+  --chart-6: color-mix(in srgb, var(--pc-text-muted) 60%, var(--pc-brand-plum));
   --r-control: var(--pc-radius-control);
   --r-card: var(--pc-radius-panel);
   --r-pill: var(--pc-radius-pill);
@@ -45,18 +49,36 @@
   --dur-hover: var(--pc-duration-hover);
   --font-ui: var(--pc-font);
   --font-data: var(--pc-font-data);
+  /* VIS-30: paths and folders used --font-mono before it existed; it is the data face. */
+  --font-mono: var(--pc-font-data);
   --t-chip: var(--pc-type-meta);
   --t-label: var(--pc-type-meta);
   --t-body: var(--pc-type-body);
   --t-card: var(--pc-type-card);
   --t-section: var(--pc-type-section);
   --t-page: var(--pc-type-page);
+  /* VIS-08: one heading scale. Page title --t-page (h1); one section level --t-heading (every
+     h2 that opens a part of a page or a card); a sub-level at --t-label (pool, panel captions).
+     --t-section (22 px) is kept for a dialog's title, an empty state and a statistic's value. */
+  --t-heading: var(--pc-type-card);
+  /* VIS-09: two control heights. Header, panel and dialog actions, inputs, selects, chips and the
+     segmented track take --control-h; actions inside a row or a card take --control-h-compact. */
+  --control-h: 36px;
+  --control-h-compact: 30px;
   --space-1: var(--pc-space-1);
   --space-2: var(--pc-space-2);
   --space-3: var(--pc-space-3);
   --space-4: var(--pc-space-4);
   --space-5: var(--pc-space-5);
   --space-6: var(--pc-space-6);
+  /* VIS-18: hover tints toward the ink, so it darkens in light and lightens in dark; the raised
+     panel is white in light and read as no change on the light panel (1.08:1). */
+  --hover-bg: color-mix(in srgb, var(--ink) 7%, var(--panel));
+  /* VIS-10, VIS-17: one language for "chosen": a gold-tinted fill, a gold line and ink text, on
+     navigation, segments, chips, appearance options and model cards alike. */
+  --chosen-bg: var(--accent-weak);
+  --chosen-border: var(--accent-text);
+  --chosen-ink: var(--ink);
   background-color: var(--bg);
   color: var(--ink);
 }
