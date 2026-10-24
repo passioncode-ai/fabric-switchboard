@@ -1071,11 +1071,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the app runs (it owns the list); sessions launched by Switchboard 0.6.18 or later (earlier launches wrote no record).
 **Entry point:** Activity → *Sessions*, above the journal; for agents and other products, `switchboard sessions` and the MCP tool `switchboard_sessions` (SB-95).
 **Steps:**
-1. Open Activity → *Sessions* lists each session that is starting or running: “{provider} · {account}”, its state (*Running*, *Starting*), its folder, and how it runs — “Managed · follows the {pool} pool” or “Isolated”, “in Terminal” or “in an embedded terminal” — with “started {date}” once its script has run.
+1. Open Activity → *Sessions* lists each session that is starting or running: “{provider} · {account}”, its state (*Running*, *Starting*), its folder, and how it runs — “Managed · follows the {pool} pool” or “Isolated”, “in Terminal” or “in an embedded terminal” — with “started {date}” once its script has run. A session that runs in an organization's context carries that organization's badge beside its name, titled “Runs in {name}'s context.” (SB-110, SB-111); a personal session carries none. The context is fixed when the session starts.
 2. A session ends (its window closed, the agent quit) → it leaves the list at the next refresh (once a minute, or Refresh).
 **Alt paths:** none running → “No session Switchboard launched is running. Sessions started outside Switchboard are not listed.”; the read fails → “Sessions are unavailable. Refresh to retry.”; while reading → “Reading sessions…”. Russian: «Сессии», «Работает», «Запускается», «Управляемая · следует за пулом {pool}», «Изолированная», «в Terminal», «во встроенном терминале».
 **Expected result:** a person sees at a glance what Switchboard has running, without opening Terminal windows to find out.
-**UI elements:** the *Sessions* panel on Activity (rows with provider, account, state, folder, how it runs, start time).
+**UI elements:** the *Sessions* panel on Activity (rows with provider, account, state, the organization badge for an organization's context, folder, how it runs, start time).
 **States covered:** loading, empty, error, starting, running.
 **Errors & recovery:** a failed read keeps the last list and says to refresh.
 **Status:** draft

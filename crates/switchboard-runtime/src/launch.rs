@@ -47,6 +47,7 @@ const CONFLICTS: &[&str] = &[
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "SWITCHBOARD_LOCAL_TOKEN",
     "SWITCHBOARD_SESSION",
+    "SWITCHBOARD_CONTEXT",
 ];
 #[cfg(windows)]
 const CLI_NAME: &str = "switchboard.exe";
@@ -2448,7 +2449,14 @@ fn launch_full(
             .chain(board.as_ref().map(|b| (FABRIC_BOARD, b)))
             .collect::<Vec<_>>(),
     )?;
-    let mut env = BTreeMap::from([("SWITCHBOARD_SESSION".to_string(), session)]);
+    // SB-110: the session's context, fixed for the session (CX-26), for whatever reads it.
+    let context = store
+        .snapshot()?
+        .session_context(&account, Some(&working_directory));
+    let mut env = BTreeMap::from([
+        ("SWITCHBOARD_SESSION".to_string(), session),
+        ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
+    ]);
     if let Some(c) = continuation {
         // The Stop hook records the workflow on the session; the handoff id is what it accepts.
         env.insert("OBSERVATORY_WORKFLOW_ID".into(), c.workflow_id.clone());
@@ -2562,6 +2570,7 @@ fn launch_full(
         "account_id": account.id,
         "provider": account.provider.as_str(),
         "pool": account.pool,
+        "context": context,
         "mode": mode,
         "working_directory": working_directory,
         "in_place": in_place,
@@ -4633,6 +4642,11 @@ mod tests {
         );
         assert_eq!(session["account_id"], id.as_str());
         assert_eq!(session["provider"], "claude");
+        // SB-110: the context is recorded and exported; no organization here.
+        assert_eq!(session["context"], "personal");
+        assert!(fs::read_to_string(home.join("launch.command"))
+            .unwrap()
+            .contains("export SWITCHBOARD_CONTEXT='personal'"));
         assert_eq!(session["mode"], "isolated");
         assert_eq!(session["home"], "homes");
         assert_eq!(session["in_place"], false);

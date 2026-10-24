@@ -1207,6 +1207,7 @@ export const RU: Record<string, string> = {
   "by its team": "по команде",
   "by its domain": "по домену",
   "Runs only on accounts of {name}.": "Работает только на аккаунтах {name}.",
+  "Runs in {name}'s context.": "Работает в контексте {name}.",
   "On another machine": "На другой машине",
   "Marked as used on another machine: this computer never renews, rotates to or switches to it.": "Отмечен как используемый на другой машине: этот компьютер не продлевает его вход, не переключается на него и не выбирает его при ротации.",
   "Use here": "Использовать здесь",

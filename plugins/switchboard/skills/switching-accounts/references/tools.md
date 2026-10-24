@@ -75,8 +75,10 @@ The server works out which session asks from its own environment, first match wi
 ### `switchboard_sessions` — `all?` (boolean)
 
 `{sessions[]}`: the Claude Code, Codex and Kimi Code sessions Switchboard launched — `account_id`,
-`label`, `provider`, `pool`, `mode`, `working_directory`, `in_place`, `launched_at`,
-`started_at`, `continues`, `home` and `state` (`starting`, `running`, `ended`, `unknown`).
+`label`, `provider`, `pool`, `context` (`personal` or `org:<id>`, fixed at the session's start;
+absent before 0.6.80 and on Kimi Code, Hermes and OpenCode sessions), `context_name` (the organization's name), `mode`, `working_directory`,
+`in_place`, `launched_at`, `started_at`, `continues`, `home` and `state` (`starting`,
+`running`, `ended`, `unknown`).
 Without `all`, only starting and running ones. A session started outside Switchboard is not
 listed.
 

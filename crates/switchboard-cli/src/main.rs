@@ -1978,15 +1978,21 @@ fn print_result(value: &Value, cli: &Cli) {
                 println!("No session Switchboard launched is running.");
             }
             for s in sessions {
+                let label = s["label"]
+                    .as_str()
+                    .or(s["account_id"].as_str())
+                    .unwrap_or("—");
+                // SB-110: a session in an organization's context names it after the account.
+                let label = match s["context_name"].as_str() {
+                    Some(name) => format!("{label} ({name})"),
+                    None => label.to_owned(),
+                };
                 println!(
                     "{:<9} {:<7} {:<9} {} · {} · {}",
                     text(&s["state"]),
                     text(&s["provider"]),
                     text(&s["mode"]),
-                    s["label"]
-                        .as_str()
-                        .or(s["account_id"].as_str())
-                        .unwrap_or("—"),
+                    label,
                     text(&s["working_directory"]),
                     utc(&s["started_at"]).replace('—', "not started"),
                 );

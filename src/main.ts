@@ -1686,7 +1686,12 @@ function sessionsPanel() {
   const list = el('ul', 'session-list');
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
-    title.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : session.provider === 'opencode' ? 'OpenCode' : providerName(session.provider)} · ${session.label ?? session.account_id}`), el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
+    const name = el('span', 'session-name');
+    name.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : session.provider === 'opencode' ? 'OpenCode' : providerName(session.provider)} · ${session.label ?? session.account_id}`));
+    // SB-110/SB-111: an organization's context shows as its badge beside the name; personal shows nothing.
+    const contextOrg = session.context?.startsWith('org:') ? snapshot?.organizations?.find((o) => `org:${o.id}` === session.context) : undefined;
+    if (contextOrg) { const badge = el('span', 'badge org-badge', contextOrg.name); badge.title = t("Runs in {name}'s context.", { name: contextOrg.name }); name.append(' ', badge); }
+    title.append(name, el('span', `session-state is-${session.state}`, sessionStateLabel(session.state)));
     const facts = el('p', 'form-note', session.started_at ? t('{how} · started {date}', { how: sessionHow(session), date: date(session.started_at) }) : sessionHow(session));
     row.append(title, el('code', 'address', session.working_directory), facts); list.append(row);
   }

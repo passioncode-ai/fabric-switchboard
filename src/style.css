@@ -74,6 +74,8 @@ h1:focus { outline: none; }
 .event-row:last-child { border-bottom: 0; }
 .event-title { display: flex; justify-content: space-between; gap: var(--space-4); }
 .event-title strong { font-weight: 550; }
+/* SB-110: a session's name and its context badge stay together on the left. */
+.session-name { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .event-title time { font-size: var(--t-label); color: var(--muted); white-space: nowrap; }
 .event-row p { color: var(--muted); margin-top: var(--space-1); }
 .event-id { font-family: var(--font-data); color: var(--muted); font-size: var(--t-chip); overflow-wrap: anywhere; }

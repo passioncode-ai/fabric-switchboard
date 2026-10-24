@@ -577,6 +577,16 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   included) writes `<home>/.session.json` (0600) before the session starts: `account_id`,
   `provider`, `pool`, `mode`, `working_directory` (canonical), `in_place`, `launched_at`,
   `continues`. A failed write fails the launch before Terminal opens.
+- **Context (SB-110, 0.6.80).** The record also carries `context`, and the session's environment
+  `SWITCHBOARD_CONTEXT` (scrubbed from the inherited environment like `SWITCHBOARD_SESSION`):
+  `Snapshot::session_context` in the contract's form (`personal`, `org:<id>`): the group of the
+  account's pool, else the group holding the folder, else the account's own organization; a group
+  and the account that disagree give `personal`; `personal` while no organization exists
+  ([design](research/session-home-per-context-2026-10-24.md) H-1). `Operation::Sessions` adds
+  `context_name`; Activity → *Sessions* shows the organization's badge beside the name (SCN-051).
+  Tests: core `a_sessions_context_follows_its_group_else_its_account_and_the_more_private_wins`,
+  `a_launch_records_its_session_and_the_list_follows_its_process`,
+  `the_session_list_names_an_organizations_context`.
 - The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
   homes with a record. State comes from the same markers that keep one session per home:
   `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an

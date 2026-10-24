@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.80 (2026-10-24)
+
+- **A session knows which organization it works for (SB-110).** Every Claude Code and Codex session Switchboard starts now records its context: personal, or the organization whose group or account it runs on. Activity → *Sessions* shows the organization's badge beside the session, `switchboard sessions` names it after the account, and the session itself can read it as `SWITCHBOARD_CONTEXT`. Nothing about how sessions run changes; this is the first step towards a separate home per organization ([design](docs/research/session-home-per-context-2026-10-24.md)).
+
 ## 0.6.79 (2026-10-24)
 
 - **A sign-in is no longer lost when you quit or Switchboard updates during a renewal (SB-179).** Since 0.6.77 a quota check could renew an account's sign-in while Switchboard was shutting down, and the new sign-in was not saved, so the account asked you to sign in again at the next start. Switchboard now waits for such a renewal (within its usual few seconds) and saves it before it closes.
