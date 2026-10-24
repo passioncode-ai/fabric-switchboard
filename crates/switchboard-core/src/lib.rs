@@ -534,7 +534,8 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
 const OBSERVATION_INVALID: &str = "Invalid usage observation";
 const OBSERVATION_SUPERSEDED: &str = "Usage observation is older than the stored observation";
 const OBSERVATION_CREDENTIAL_CHANGED: &str = "Credential changed during usage check";
-const ACCOUNT_NOT_FOUND: &str = "Account not found";
+/// The store's refusal for an account it does not hold: a definitive answer, never a hiccup.
+pub const ACCOUNT_NOT_FOUND: &str = "Account not found";
 const STORE_UNAVAILABLE: &str = "Account store unavailable";
 const VAULT_UNAVAILABLE: &str = "Credential storage unavailable";
 
@@ -1276,7 +1277,7 @@ impl Store {
                 .accounts
                 .iter()
                 .find(|a| a.id == id)
-                .ok_or("Account not found")?;
+                .ok_or(ACCOUNT_NOT_FOUND)?;
             (a.provider, a.kind)
         };
         let started = std::time::Instant::now();
@@ -1436,6 +1437,7 @@ impl Store {
         if !health.valid() || ahead(checked_at) {
             return Err("Invalid usage health".into());
         }
+        let read = expected.map(|_| self.generation_read(id));
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let a = candidate
@@ -1452,16 +1454,8 @@ impl Store {
         {
             return Err("Usage health is older than the stored observation".into());
         }
-        if let Some(expected) = expected {
-            let current = self
-                .vault
-                .get(id)
-                .map_err(vault::surface(VAULT_UNAVAILABLE))?;
-            if current.access_token != expected.access_token
-                || current.expires_at != expected.expires_at
-            {
-                return Err(OBSERVATION_CREDENTIAL_CHANGED.into());
-            }
+        if let (Some(expected), Some(read)) = (expected, read) {
+            self.same_generation(id, expected, read)?;
         }
         // The same verdict again only moves its timestamps (lifecycle LC-08).
         let same_status = a
@@ -1689,6 +1683,41 @@ impl Store {
         self.observe_generation(id, None, usage)
     }
     /// Only publishes quota if the request's captured credential generation is still stored.
+    /// N1 round 1: a quota check's credential, read from the vault before the metadata lock is
+    /// taken (a Keychain read can take seconds), with the credential write count it was read at.
+    fn generation_read(&self, id: &str) -> (Result<Credential, String>, u64) {
+        let at = self.credential_changes();
+        (
+            self.vault
+                .get(id)
+                .map_err(vault::surface(VAULT_UNAVAILABLE)),
+            at,
+        )
+    }
+    /// Under the metadata lock: whether `expected` is still `id`'s stored credential. A
+    /// credential written since `read` was taken is read again (only a write landing in that
+    /// window costs a read under the lock).
+    fn same_generation(
+        &self,
+        id: &str,
+        expected: &Credential,
+        read: (Result<Credential, String>, u64),
+    ) -> Result<(), String> {
+        let (read, at) = read;
+        let current = if self.credential_changes() == at {
+            read
+        } else {
+            self.vault
+                .get(id)
+                .map_err(vault::surface(VAULT_UNAVAILABLE))
+        }?;
+        if current.access_token != expected.access_token
+            || current.expires_at != expected.expires_at
+        {
+            return Err(OBSERVATION_CREDENTIAL_CHANGED.into());
+        }
+        Ok(())
+    }
     /// PRD-17: the operations log's code for a refusal `observe_credential` gave a quota check
     /// (its text reaches no log): `superseded` (a newer observation or check is already held),
     /// `credential_changed` (renewed or signed in again while the check ran),
@@ -1721,6 +1750,7 @@ impl Store {
         if !usage_valid(&usage) || ahead(usage.observed_at) {
             return Err(OBSERVATION_INVALID.into());
         }
+        let read = expected.map(|_| self.generation_read(id));
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let a = candidate
@@ -1740,16 +1770,8 @@ impl Store {
         {
             return Err(OBSERVATION_SUPERSEDED.into());
         }
-        if let Some(expected) = expected {
-            let current = self
-                .vault
-                .get(id)
-                .map_err(vault::surface("Credential storage unavailable"))?;
-            if current.access_token != expected.access_token
-                || current.expires_at != expected.expires_at
-            {
-                return Err("Credential changed during usage check".into());
-            }
+        if let (Some(expected), Some(read)) = (expected, read) {
+            self.same_generation(id, expected, read)?;
         }
         // Inference response headers must not keep postponing the independent
         // quota endpoint poll, especially when they contain only one window.

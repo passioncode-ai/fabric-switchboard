@@ -107,47 +107,92 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Wait>, String> {
 }
 
 /// PRD-03 (D-4): drops stops older than 7 days, then, past 512, the oldest finished stops
-/// (resumed, cancelled) before the oldest live ones. The order of the rows kept is unchanged.
-/// Answers how many were dropped.
-fn prune(rows: &mut Vec<Wait>, now: i64) -> usize {
-    let before = rows.len();
-    rows.retain(|r| r.stopped_at >= now.saturating_sub(KEEP_SECONDS));
+/// (resumed, cancelled) before the oldest live ones. `written`, the stop this write adds or
+/// changes, is never dropped, whatever the rows' dates (N1 round 1: a clock that moved back made
+/// it the oldest live row). The order of the rows kept is unchanged. Answers the events dropped.
+fn prune(rows: &mut Vec<Wait>, now: i64, written: Option<&str>) -> Vec<String> {
+    let kept = |r: &Wait| written == Some(r.event.as_str());
+    let mut dropped = Vec::new();
+    rows.retain(|r| {
+        let keep = kept(r) || r.stopped_at >= now.saturating_sub(KEEP_SECONDS);
+        if !keep {
+            dropped.push(r.event.clone());
+        }
+        keep
+    });
     if rows.len() > KEEP_ROWS {
-        let mut order: Vec<usize> = (0..rows.len()).collect();
+        let mut order: Vec<usize> = (0..rows.len()).filter(|&i| !kept(&rows[i])).collect();
         order.sort_by_key(|&i| {
             let live = matches!(rows[i].state, State::Waiting | State::Claimed);
             (live, rows[i].stopped_at)
         });
         let drop: HashSet<usize> = order[..rows.len() - KEEP_ROWS].iter().copied().collect();
         let mut index = 0;
-        rows.retain(|_| {
+        rows.retain(|r| {
             let keep = !drop.contains(&index);
+            if !keep {
+                dropped.push(r.event.clone());
+            }
             index += 1;
             keep
         });
     }
-    before - rows.len()
+    dropped
 }
 
-/// The stops as of `now`: the file's rows without those `prune` drops (PRD-03), and how many
+/// The stops as of `now`: the file's rows without those `prune` drops (PRD-03), and the events
 /// it dropped. Reading writes nothing; the next write leaves them out of the file.
-fn current(root: &Path, now: i64) -> Result<(Vec<Wait>, usize), String> {
+fn current(root: &Path, now: i64) -> Result<(Vec<Wait>, Vec<String>), String> {
     let mut rows = read(root)?;
-    let dropped = prune(&mut rows, now);
+    let dropped = prune(&mut rows, now, None);
     Ok((rows, dropped))
 }
 
-/// Writes the stops as of `now`, pruned again after a stop was added; logs what left the file.
-fn keep(root: &Path, rows: &mut Vec<Wait>, now: i64, dropped: usize) -> Result<(), String> {
-    let dropped = dropped + prune(rows, now);
+/// Writes the stops as of `now`, pruned again with `written` kept; remembers the events that
+/// left the file (`recovery-pruned.json`) and logs how many.
+fn keep(
+    root: &Path,
+    rows: &mut Vec<Wait>,
+    now: i64,
+    mut dropped: Vec<String>,
+    written: Option<&str>,
+) -> Result<(), String> {
+    dropped.extend(prune(rows, now, written));
     write(root, rows)?;
-    if dropped > 0 {
+    if !dropped.is_empty() {
+        remember_pruned(root, &dropped);
         crate::oplog::event(
             "recovery_pruned",
-            &[("dropped", crate::oplog::Field::Number(dropped as i64))],
+            &[("dropped", crate::oplog::Field::Number(dropped.len() as i64))],
         );
     }
     Ok(())
+}
+
+/// N1 round 1 (seam tier): the events pruned lately, ids only, newest last, at most
+/// `MAX_PRUNED`, so a host that registers or finishes one again is answered as a replay rather
+/// than as a new stop or an unknown one. A file that cannot be read is an empty list: it only
+/// keeps replays idempotent, and never blocks a stop.
+const PRUNED_FILE: &str = "recovery-pruned.json";
+const MAX_PRUNED: usize = 2048;
+fn pruned(root: &Path) -> Vec<String> {
+    switchboard_core::private_fs::read_private(&root.join(PRUNED_FILE), 512 * 1024)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok())
+        .unwrap_or_default()
+}
+fn remember_pruned(root: &Path, events: &[String]) {
+    let mut list = pruned(root);
+    list.retain(|e| !events.contains(e));
+    list.extend(events.iter().filter(|e| identifier(e)).cloned());
+    let excess = list.len().saturating_sub(MAX_PRUNED);
+    list.drain(..excess);
+    if let Ok(bytes) = serde_json::to_vec(&list) {
+        let _ = switchboard_core::private_fs::private_write(&root.join(PRUNED_FILE), &bytes);
+    }
+}
+fn was_pruned(root: &Path, event: &str) -> bool {
+    pruned(root).iter().any(|e| e == event)
 }
 
 /// SB-150: every read-modify-write of the file holds this, so the `StopFailure` registration
@@ -188,6 +233,10 @@ pub(crate) fn register(
             Err(INVALID.into())
         };
     }
+    // A replay of a stop that aged out of the file stores nothing again.
+    if dropped.iter().any(|e| e == event) || was_pruned(root, event) {
+        return Ok(());
+    }
     if rows
         .iter()
         .any(|r| r.session == session && matches!(r.state, State::Waiting | State::Claimed))
@@ -196,7 +245,7 @@ pub(crate) fn register(
     }
     let row = new_row(snapshot, event, session, account, directory, now)?;
     rows.push(row);
-    keep(root, &mut rows, now, dropped)
+    keep(root, &mut rows, now, dropped, Some(event))
 }
 
 fn new_row(
@@ -269,7 +318,7 @@ pub(crate) fn register_stop(
         live.attempt = live.attempt.saturating_add(1);
         live.kind = kind;
         let event = live.event.clone();
-        keep(root, &mut rows, now, dropped)?;
+        keep(root, &mut rows, now, dropped, Some(&event))?;
         return Ok(Stopped::Again(event));
     }
     let mut attempt = 0;
@@ -296,7 +345,7 @@ pub(crate) fn register_stop(
     row.kind = kind;
     row.attempt = attempt;
     rows.push(row);
-    keep(root, &mut rows, now, dropped)?;
+    keep(root, &mut rows, now, dropped, Some(&event))?;
     Ok(Stopped::New(event))
 }
 
@@ -468,14 +517,21 @@ pub(crate) fn claim(
     row.selected_account = Some(account.into());
     row.mode = ready.mode;
     let result = row.clone();
-    keep(root, &mut rows, now, dropped)?;
+    keep(root, &mut rows, now, dropped, Some(event))?;
     Ok(result)
 }
 
-pub(crate) fn finish(root: &Path, event: &str, resumed: bool) -> Result<(), String> {
+pub(crate) fn finish(root: &Path, event: &str, resumed: bool, now: i64) -> Result<(), String> {
     let _writing = writing();
-    let mut rows = read(root)?;
-    let row = rows.iter_mut().find(|r| r.event == event).ok_or(INVALID)?;
+    let (mut rows, dropped) = current(root, now)?;
+    let Some(row) = rows.iter_mut().find(|r| r.event == event) else {
+        // A stop that aged out of the file is finished already: nothing to record.
+        return if dropped.iter().any(|e| e == event) || was_pruned(root, event) {
+            Ok(())
+        } else {
+            Err(INVALID.into())
+        };
+    };
     let target = if resumed {
         State::Resumed
     } else {
@@ -490,7 +546,7 @@ pub(crate) fn finish(root: &Path, event: &str, resumed: bool) -> Result<(), Stri
         return Err(INVALID.into());
     }
     row.state = target;
-    write(root, &rows)
+    keep(root, &mut rows, now, dropped, Some(event))
 }
 
 pub(crate) fn status(
@@ -635,14 +691,14 @@ mod tests {
             102
         )
         .is_err());
-        assert!(finish(root.path(), "limit:1", true).is_err());
+        assert!(finish(root.path(), "limit:1", true, 1000).is_err());
         let claimed = claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).unwrap();
         assert_eq!(claimed.state, State::Claimed);
         assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
         assert_eq!(read(root.path()).unwrap()[0].state, State::Claimed);
-        finish(root.path(), "limit:1", true).unwrap();
-        finish(root.path(), "limit:1", true).unwrap();
-        assert!(finish(root.path(), "limit:1", false).is_err());
+        finish(root.path(), "limit:1", true, 1000).unwrap();
+        finish(root.path(), "limit:1", true, 1000).unwrap();
+        assert!(finish(root.path(), "limit:1", false, 1000).is_err());
         assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
     }
     #[test]
@@ -704,7 +760,7 @@ mod tests {
             100,
         )
         .unwrap();
-        finish(root.path(), "limit:1", false).unwrap();
+        finish(root.path(), "limit:1", false, 1000).unwrap();
         assert_eq!(
             status(root.path(), &s, &none, &none, &none, 102).unwrap()["waiting_sessions"],
             0
@@ -1071,14 +1127,14 @@ mod tests {
         assert_eq!(rows[0].state, State::Resumed);
         let row = rows.iter().find(|r| r.event == second).unwrap();
         assert_eq!((row.attempt, row.state.clone()), (2, State::Waiting));
-        finish(root.path(), &second, false).unwrap();
+        finish(root.path(), &second, false, 1000).unwrap();
         // Cancelled work does not count; a resumed stop within 30 minutes does.
         let Stopped::New(third) = at(600).unwrap() else {
             panic!()
         };
         let rows = read(root.path()).unwrap();
         assert_eq!(rows.iter().find(|r| r.event == third).unwrap().attempt, 2);
-        finish(root.path(), &third, false).unwrap();
+        finish(root.path(), &third, false, 1000).unwrap();
         let Stopped::New(fourth) = at(150 + REPEAT_WINDOW + 1).unwrap() else {
             panic!()
         };
@@ -1206,6 +1262,96 @@ mod tests {
             oldest_resumed,
             now - DAY + (600 - (KEEP_ROWS - waiting)) as i64
         );
+    }
+
+    /// N1 round 1 (unit tier): with more than 512 live stops stamped later than now (a clock
+    /// that moved back), the stop just written was the oldest live row and was dropped while
+    /// `register_stop` answered `New`. The row just written is always kept.
+    #[test]
+    fn the_stop_just_written_is_kept_however_the_rows_are_dated() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let rows: Vec<_> = (0..600)
+            .map(|n| stop(n, now + 60, State::Waiting, &dir))
+            .collect();
+        write(root.path(), &rows).unwrap();
+        let Stopped::New(event) = register_stop(
+            root.path(),
+            &snapshot(),
+            "session-new",
+            "old",
+            &dir,
+            StopKind::Limit,
+            now,
+        )
+        .unwrap() else {
+            panic!()
+        };
+        let rows = read(root.path()).unwrap();
+        assert!(rows.iter().any(|r| r.event == event));
+        assert_eq!(rows.len(), KEEP_ROWS);
+    }
+    /// N1 round 1: `finish` wrote the file without pruning it, so a file past its bounds stayed
+    /// there until the next stop.
+    #[test]
+    fn finishing_a_stop_prunes_the_file_too() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = now_seconds();
+        let mut rows = vec![stop(1, now - 8 * DAY, State::Waiting, &dir)];
+        rows.push(stop(2, now, State::Waiting, &dir));
+        write(root.path(), &rows).unwrap();
+        finish(root.path(), "limit:2", false, now).unwrap();
+        let events: Vec<_> = read(root.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.event)
+            .collect();
+        assert_eq!(events, ["limit:2"]);
+    }
+    /// N1 round 1 (seam tier): a host that registers an event again after it was pruned is
+    /// answered as a replay (nothing new is stored); finishing it is a no-op; claiming it is not
+    /// ready. The pruned event ids are kept, ids only and bounded, in recovery-pruned.json.
+    #[test]
+    fn a_pruned_event_replayed_is_not_a_new_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = now_seconds();
+        write(
+            root.path(),
+            &[
+                stop(1, now - 8 * DAY, State::Waiting, &dir),
+                stop(2, now, State::Waiting, &dir),
+            ],
+        )
+        .unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(root.path(), &s, "limit:3", "session-3", "old", &dir, now).unwrap();
+        assert_eq!(read(root.path()).unwrap().len(), 2, "limit:1 left the file");
+        register(root.path(), &s, "limit:1", "session-1", "old", &dir, now).unwrap();
+        let events: Vec<_> = read(root.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.event)
+            .collect();
+        assert_eq!(events, ["limit:2", "limit:3"], "the replay stored nothing");
+        finish(root.path(), "limit:1", false, now).unwrap();
+        assert_eq!(
+            claim(root.path(), "limit:1", "new", &s, &none, &none, &none, now).unwrap_err(),
+            NOT_READY
+        );
+        assert!(
+            finish(root.path(), "limit:9", false, now).is_err(),
+            "an unknown event"
+        );
+    }
+    fn now_seconds() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
     }
 
     #[test]

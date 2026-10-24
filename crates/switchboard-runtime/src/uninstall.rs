@@ -24,6 +24,8 @@ const OWNED: &[&str] = &[
     "usage-holds.json",
     "limit-evidence.json",
     "recovery.json",
+    // Events pruned from recovery.json lately, ids only (N1 round 1).
+    "recovery-pruned.json",
     "project-suggestions.json",
     "claude-bindings.json",
     "pool-salts.json",

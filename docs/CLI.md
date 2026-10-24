@@ -449,8 +449,14 @@ belongs to the host's checkpoint. No command here sends a prompt or restarts a c
 
 Same-event registration and same-result finish are idempotent. Claim is deliberately
 not replayable: after a lost response inspect the existing claim and reconcile the
-host's receipt. The full private registry is bounded at 1024 records, including
-completed receipts; reaching it requires reconciliation, never silent eviction.
+host's receipt. The registry keeps stops of the last 7 days and at most 512 rows
+(D-4 of 0.6.82): an older stop leaves every answer at once and the file at the next
+write; past 512, finished stops (resumed, cancelled) go first, then the oldest live
+ones, and the stop being written is always kept, so a new stop is never refused for
+room. The ids of pruned events are remembered (`recovery-pruned.json`, ids only, the
+newest 2048): `register` of a pruned event answers as a replay and stores nothing,
+`finish` of one is a no-op, and `claim` of one answers that the stop is not ready.
+Each write that dropped rows logs `recovery_pruned` with the count.
 See [SB-114 packet](packets/sb-114-capacity-recovery.md) and `recovery::tests`.
 
 Recovery status separates `limited_accounts` (active holds) from
