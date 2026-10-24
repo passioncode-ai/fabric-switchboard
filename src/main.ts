@@ -608,7 +608,7 @@ function projectDialog(existing?: Project) {
   orgPicker?.addEventListener('change', syncAccounts); syncAccounts();
   const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this group; subfolders are included. Worktrees and clones of its repositories join it by themselves, and folders deleted from disk leave it. Add any other repository here, or from Repositories on disk.')));
   if (orgPicker) grid.append(field(t('Organization'), orgPicker, t('Sessions in this group\'s folders run only on this organization\'s accounts, or only on personal ones when you choose Personal accounts.')));
-  context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to Default.')));
+  context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default group.')));
   context.actions.append(submit(existing ? t('Save group') : t('Create group')));
   name.focus();
   context.form.addEventListener('submit', (event) => {
@@ -1175,7 +1175,7 @@ async function importSwap() {
     const result = await adapter.importClaudeSwap('default');
     await refreshContext();
     try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('Import completed, but accounts could not be refreshed. Refresh to load the imported accounts.'); }
-    const parts = [plural(result.imported.length, { one: '{n} Claude Swap account imported or updated in Default', other: '{n} Claude Swap accounts imported or updated in Default' })];
+    const parts = [plural(result.imported.length, { one: '{n} Claude Swap account imported or updated in the default group', other: '{n} Claude Swap accounts imported or updated in the default group' })];
     if (result.skipped) parts.push(t('{n} skipped', { n: result.skipped }));
     if (result.failed) parts.push(t('{n} could not be read; check them in Claude Swap and import again', { n: result.failed }));
     if (result.claude_swap_running) parts.push(t('Claude Swap is still running, so it keeps renewing those accounts and Switchboard follows its newest sign-ins'));
@@ -1224,7 +1224,7 @@ function renderAccounts(main: HTMLElement) {
       const owner = projectOf(pool.pool);
       if (group.pools.length > 1 || owner || anyProject) {
         const poolHead = el('div', 'pool-heading');
-        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default') : t('{id} (not a group)', { id: pool.pool })));
+        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : t('Group {id} · no folders', { id: pool.pool })));
         poolHead.append(poolTitle);
         // SB-142: which account this pool's sessions use, so every pool reads the same way.
         const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
@@ -1519,14 +1519,14 @@ function quotaDetails(account: Account) {
  */
 function poolField(current: string, locked = false) {
   const choices = poolChoices(snapshot?.accounts ?? [], snapshot?.projects ?? [], current);
-  const picker = select([...choices.map((c): [string, string] => [c.pool, c.group || c.pool === 'default' ? c.name : t('{id} (not a group)', { id: c.pool })]), ...(locked ? [] : [['__new', t('New id…')] as [string, string]])]);
+  const picker = select([...choices.map((c): [string, string] => [c.pool, c.group || c.pool === 'default' ? c.name : t('Group {id} · no folders', { id: c.pool })]), ...(locked ? [] : [['__new', t('New id…')] as [string, string]])]);
   picker.value = current;
   const typed = input(''); typed.maxLength = 32; typed.pattern = POOL_PATTERN; typed.required = false; typed.placeholder = 'work'; typed.title = t('Use lowercase letters, numbers, hyphens, or underscores.');
-  const typedField = field(t('Group id'), typed, t('Lowercase letters, numbers, hyphens or underscores. It becomes a group when you create one under Groups.')); typedField.hidden = true;
+  const typedField = field(t('Group id'), typed, t('Accounts in one group switch among themselves. Use an existing group id, or a new one to start a group: lowercase letters, numbers, hyphens or underscores.')); typedField.hidden = true;
   const sync = () => { const fresh = picker.value === '__new'; typedField.hidden = !fresh; typed.required = fresh; if (fresh) typed.focus(); };
   picker.addEventListener('change', sync);
   if (locked) { picker.disabled = true; picker.dataset.locked = 'true'; }
-  const node = el('div', 'pool-field'); node.append(field(t('Group'), picker, t('Default works in every folder outside groups.')), typedField);
+  const node = el('div', 'pool-field'); node.append(field(t('Group'), picker, t('The default group works in every folder outside other groups.')), typedField);
   return { node, picker, value: () => (picker.value === '__new' ? typed.value.trim() : picker.value), onChange: (fn: () => void) => { picker.addEventListener('change', fn); typed.addEventListener('change', fn); } };
 }
 function addDialog() {
@@ -1838,7 +1838,7 @@ function renderAbout(main: HTMLElement) {
   for (const [term, description] of [
     [t('Isolated launch'), t('A new official CLI session using this account’s private home. Account changes affect new launches.')],
     [t('Managed launch'), t('A session routed through the local HTTP/SSE proxy. Select an account for each provider and group; the next request uses that selection. A response already in progress keeps its identity.')],
-    [t('Groups'), t('Repositories with accounts of their own, such as a client\'s. Accounts in no group are in Default, which works in every other folder. Selection never silently falls back to another group.')],
+    [t('Groups'), t('Repositories with accounts of their own, such as a client\'s. Accounts in no other group are in the default group, which works in every other folder. Selection never silently falls back to another group.')],
     [t('Usage'), t('A timestamped provider observation. Unknown, stale, and unavailable are distinct from measured zero. API billing is separate from subscription quota.')],
     [t('Build'), demo ? t('Synthetic browser demo; it runs without the native app.') : t('{platform} build. Native platform is reported by the running app.', { platform: platformLabel(runtime?.platform) })],
     [t('Compatibility'), t('macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
@@ -2129,13 +2129,13 @@ function editDialog(account: Account) {
 }
 /** SB-122: the account card's ⋯ → *Move to another pool…*: the default pool or a project, the current one marked (SCN-062). */
 function moveDialog(account: Account, inCli: boolean) {
-  const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; Default works in every other folder.', { label: account.label }));
+  const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default group works in every other folder.', { label: account.label }));
   const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
   const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
-    const text = target.name === null ? t('Default') : t('Group “{name}”', { name: target.name });
+    const text = target.name === null ? t('Default group') : t('Group “{name}”', { name: target.name });
     const label = target.current ? t('{target} (now)', { target: text }) : text;
     option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool, false)); group.append(option); radios.push(radio);
   }
@@ -2149,7 +2149,7 @@ function moveDialog(account: Account, inCli: boolean) {
     event.preventDefault();
     const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === account.pool) return;
     const target = targets.find((x) => x.pool === chosen.value)!;
-    const success = target.name === null ? t('{label} moved to Default.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
+    const success = target.name === null ? t('{label} moved to the default group.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
     void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
   });
   (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();

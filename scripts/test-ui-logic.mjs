@@ -411,7 +411,7 @@ check(() => {
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
 check(() => {
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code · work.');
-  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code · Default.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code · Default group.');
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code · Alpha Web.');
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code · work.');
   assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code · work\. Switchboard could not remove its temporary sign-in folder yet/);
@@ -735,7 +735,7 @@ check(() => {
   assert.equal(choices[1].name, 'Alpha Web');
   assert.deepEqual(logic.poolChoices([], [], 'legacy').map((c) => c.pool), ['default', 'legacy'], 'the current pool stays offered');
   assert.equal(logic.poolName('alpha', projects), 'Alpha Web');
-  assert.equal(logic.poolName('default', projects), 'Default');
+  assert.equal(logic.poolName('default', projects), 'Default group');
   assert.equal(logic.poolName('work', projects), 'work');
 });
 // VIS-12: the tour card sits beside its target, never on it, and inside the window.

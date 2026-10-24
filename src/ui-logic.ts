@@ -820,9 +820,9 @@ export function nextStatSort(current: StatSort | null, column: number, isCount: 
  * inside a class is a syntax error and the whole check is silently dropped; the hyphen is escaped.
  */
 export const POOL_PATTERN = '[a-z0-9_\\-]+';
-/** D-1: a pool as a person reads it: its group's name, "Default", or the id of a pool with no group. */
+/** D-1, D-5: a pool as a person reads it: its group's name, the default group, or the id of a group without folders. */
 export function poolName(pool: string, projects: { pool: string; name: string }[] = []): string {
-  if (pool === 'default') return t('Default');
+  if (pool === 'default') return t('Default group');
   return projects.find((p) => p.pool === pool)?.name ?? pool;
 }
 export interface PoolChoice { pool: string; name: string; group: boolean }
@@ -834,7 +834,7 @@ export function poolChoices(accounts: Pick<Account, 'pool'>[], projects: { pool:
   const groups = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: p.name, group: true }));
   const known = new Set(['default', ...groups.map((g) => g.pool)]);
   const others = [...new Set([...accounts.map((a) => a.pool), ...(current ? [current] : [])])].filter((pool) => !known.has(pool)).sort().map((pool) => ({ pool, name: pool, group: false }));
-  return [{ pool: 'default', name: t('Default'), group: false }, ...groups, ...others];
+  return [{ pool: 'default', name: t('Default group'), group: false }, ...groups, ...others];
 }
 export interface Rect { left: number; top: number; width: number; height: number }
 /**

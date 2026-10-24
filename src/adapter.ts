@@ -330,7 +330,7 @@ const coreErrors: Record<string, string> = {
   'This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.': 'This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the group.',
   'This account belongs to a project. Launch it from one of the project\'s folders.': 'This account belongs to a group. Launch it from one of the group\'s folders.',
   'This folder belongs to a project. Launch one of the project\'s accounts.': 'This folder belongs to a group. Launch one of the group\'s accounts.',
-  'No project uses that pool. Choose a project, or Default.': 'That group no longer exists. Choose a group, or Default.',
+  'No project uses that pool. Choose a project, or Default.': 'That group no longer exists. Choose a group, or the default group.',
   'No project uses that pool. Choose a project.': 'That group no longer exists. Choose another group.',
   'Codex already uses another model provider (model_provider in its config.toml). Switchboard leaves it as it is; remove that line to let project folders use their Codex accounts.': 'Codex already uses another model provider (model_provider in its config.toml). Switchboard leaves it as it is; remove that line to let group folders use their Codex accounts.',
   'That pool is not a project. Choose a project, or none for the key every folder uses.': 'That group id names no group. Choose a group, or none for the key every folder uses.',
