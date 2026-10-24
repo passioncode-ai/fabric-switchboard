@@ -20,7 +20,7 @@ h1, h2, p { margin: 0; }
 .nav-icon { width: 16px; font-size: var(--t-card); }
 .sidebar-foot { margin-top: auto; padding-top: var(--space-6); color: var(--muted); font-size: var(--t-label); }
 .sidebar-foot p { margin: var(--space-2) 0; }
-.version { display: block; font-family: var(--font-data); font-size: var(--t-chip); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.version { display: block; font-family: var(--font-data); font-size: var(--t-chip); overflow-wrap: anywhere; }
 .main { flex: 1; min-width: 0; max-width: 1480px; padding: var(--space-6); }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); margin-bottom: var(--space-5); }
 .eyebrow { font-size: var(--t-chip); letter-spacing: .12em; color: var(--muted); font-weight: 600; }
@@ -150,7 +150,8 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
   /* VIS-29: the actions stay one row beside the title; when the title needs the width they move
      under it as a row, never as a stack of full-width buttons. */
   .page-header { align-items: flex-start; flex-wrap: wrap; row-gap: var(--space-3); }
-  .page-header > :first-child { flex: 1 1 16rem; }
+  /* The title and its subtitle keep the whole width; the actions take the row under them. */
+  .page-header > :first-child { flex: 1 1 100%; }
 }
 @media (max-width: 590px) {
   .shell { display: block; }
@@ -402,6 +403,8 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 .repository-map .repository-row .text-button { flex: none; }
 /* SB-142: a pool heading says which account its sessions use. */
 .pool-heading { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: var(--space-3); }
+/* A sub-heading inside a card ranks below the card's h2 (--t-heading). */
+h3 { font-size: var(--t-label); font-weight: 600; margin: var(--space-4) 0 var(--space-2); }
 .pool-heading h3 { margin: 0; font-size: inherit; font-weight: inherit; }
 .group-note { color: var(--muted); font-size: var(--t-label); }
 .pool-heading .group-note { font-weight: 400; letter-spacing: 0; }
