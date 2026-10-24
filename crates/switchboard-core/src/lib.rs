@@ -1845,3 +1845,23 @@ impl Store {
         self.publish(&mut state, candidate)
     }
 }
+
+#[cfg(test)]
+mod refusal_code_tests {
+    use super::*;
+
+    /// N1 round 3 (planted defect D12): a vault refusal that names its own cause and next step
+    /// (`keychain::ACTIONABLE`, a locked or refused Keychain) is still a vault failure in the
+    /// operations log, not an unknown refusal.
+    #[test]
+    fn every_actionable_keychain_refusal_is_coded_as_the_vault() {
+        assert_eq!(Store::usage_refusal_code(VAULT_UNAVAILABLE), Some("vault"));
+        for message in keychain::ACTIONABLE {
+            assert_eq!(
+                Store::usage_refusal_code(message),
+                Some("vault"),
+                "{message}"
+            );
+        }
+    }
+}

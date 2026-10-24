@@ -584,22 +584,35 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
     };
     // N1 round 1 (seam tier): keyed on what the schedule reads, not on `Store::changes`, which
     // every project save moves; the reads run off the async worker (`blocking::run`).
+    // N1 round 3: the key is kept only when every read succeeded or found no account; a read
+    // that failed (a `security` timeout, a locked keychain) keeps the account's earlier due time
+    // for this pass and is read again at the next one, never dropped until a credential is written.
     let key = crate::refresh::credentials_key(&runtime.store, &snapshot);
     if schedule.changes != Some(key) {
-        schedule.due_at = crate::blocking::run(|| {
-            snapshot
+        let previous = std::mem::take(&mut schedule.due_at);
+        let (due_at, certain) = crate::blocking::run(|| {
+            let mut certain = true;
+            let due_at = snapshot
                 .accounts
                 .iter()
                 .filter(|a| {
                     a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth
                 })
-                .filter_map(|a| {
-                    let credential = runtime.store.stored_credential(&a.id).ok()?;
-                    crate::refresh::due_at(&credential).map(|at| (a.id.clone(), at))
+                .filter_map(|a| match runtime.store.stored_credential(&a.id) {
+                    Ok(credential) => {
+                        crate::refresh::due_at(&credential).map(|at| (a.id.clone(), at))
+                    }
+                    Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => None,
+                    Err(_) => {
+                        certain = false;
+                        previous.iter().find(|(id, _)| *id == a.id).cloned()
+                    }
                 })
-                .collect()
+                .collect();
+            (due_at, certain)
         });
-        schedule.changes = Some(key);
+        schedule.due_at = due_at;
+        schedule.changes = certain.then_some(key);
     }
     let mut done = 0;
     for (id, due_at) in schedule.due_at.clone() {
@@ -997,6 +1010,60 @@ mod tests {
         runtime.store.update_fields(&id, None, Some(false)).unwrap();
         renew_due(&runtime, now(), &mut schedule).await;
         assert!(schedule.due_at.is_empty());
+    }
+    /// N1 round 3 (adversarial): a vault read that failed while the renewal schedule was built (a
+    /// locked keychain, a `security` timeout) must not drop the account from the schedule until
+    /// some credential is written: the next pass reads it again.
+    #[tokio::test]
+    async fn a_failed_read_does_not_stick_in_the_renewal_schedule() {
+        #[derive(Default)]
+        struct FlakyGets {
+            inner: MemoryVault,
+            fail: std::sync::atomic::AtomicBool,
+        }
+        impl switchboard_core::Vault for FlakyGets {
+            fn get(&self, id: &str) -> Result<Credential, String> {
+                if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err("Credential storage unavailable".into());
+                }
+                self.inner.get(id)
+            }
+            fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+                self.inner.put(id, value)
+            }
+            fn delete(&self, id: &str) -> Result<(), String> {
+                self.inner.delete(id)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(FlakyGets::default());
+        let runtime = Runtime::open(root.path().to_owned(), vault.clone())
+            .await
+            .unwrap();
+        let mut credential = crate::fixtures::credential("synthetic-a");
+        credential.expires_at = Some(now() + 86_400);
+        credential.refresh_token = Some("synthetic-a-refresh".into());
+        runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential,
+                Some(crate::fixtures::identity("synthetic-a")),
+            )
+            .unwrap();
+        let mut schedule = RenewSchedule::default();
+        vault.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        renew_due(&runtime, now(), &mut schedule).await;
+        vault.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        renew_due(&runtime, now(), &mut schedule).await;
+        assert_eq!(
+            schedule.due_at.len(),
+            1,
+            "the account came back once the vault answered"
+        );
     }
     /// PRD-17 (iteration 2026-10-24): 15 quota checks in 48 h were logged `usage_check
     /// outcome=other`. The store's refusals of the answer (`Store::usage_refusal_code`) and an

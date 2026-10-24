@@ -5513,11 +5513,23 @@ mod owner_tests {
             user_values_present: folders.iter().map(|f| (*f).to_owned()).collect(),
             ..Default::default()
         };
+        assert!(
+            !binding_changed(&mine(&[]), &mut last),
+            "a first sync with nothing"
+        );
         assert!(binding_changed(&mine(&["/a"]), &mut last), "first seen");
+        assert!(
+            !binding_changed(&mine(&["/a", "/a"]), &mut last),
+            "the same folder twice"
+        );
         assert!(!binding_changed(&mine(&["/a"]), &mut last), "the same set");
         assert!(
             binding_changed(&mine(&["/a", "/b"]), &mut last),
             "a new folder"
+        );
+        assert!(
+            !binding_changed(&mine(&["/b", "/a"]), &mut last),
+            "the same set in another order"
         );
         assert!(binding_changed(&mine(&[]), &mut last), "the set emptied");
         assert!(!binding_changed(&mine(&[]), &mut last), "nothing at all");
@@ -5582,9 +5594,14 @@ mod owner_tests {
         let root = tempfile::tempdir().unwrap();
         let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
         let mut held = runtime.hold("test").await;
+        std::thread::sleep(std::time::Duration::from_millis(200));
         held.phase("first");
         std::thread::sleep(std::time::Duration::from_millis(40));
         let fields = held.fields();
+        assert!(
+            fields[1].1 < 200,
+            "rest counts from the last mark: {fields:?}"
+        );
         assert_eq!(
             fields.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
             ["first", "rest"]

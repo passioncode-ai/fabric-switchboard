@@ -1004,15 +1004,25 @@ lineage is rejected; a project save, a policy or a quota change keeps it (before
 cache was keyed on `Store::changes`, which ~740 folder joins a day moved, and `recovery` still
 took 5 to 30 s). An answer is cached only when every read succeeded or found no account; a read
 that failed (a `security` timeout, a locked keychain) is not cached, and the account keeps the
-answer it had before, so an error never hides a needed sign-in. The token holder map
+answer it had for that same rejected lineage, or, with no such answer, is reported as needing a
+sign-in, so an error never hides a needed sign-in. The token holder map
 (`RefreshState::holder`) and the renewal schedule (`monitor::renew_due`) are keyed the same way,
 on `refresh::credentials_key` (credential writes, and each account's id, provider, kind, enabled
-flag and identity), not on `Store::changes`. A quota check's answer or failure is kept only for the
+flag and identity), not on `Store::changes`, and follow the same failed-read rule: each is kept
+under its key only when every read succeeded or found no account, so a failed read is read again
+at the next use instead of leaving the holder unknown or the account out of the renewal schedule
+until a credential is written (the schedule keeps the account's earlier due time meanwhile). A
+quota check's answer or failure is kept only for the
 credential the provider answered: that credential is read before the metadata lock and compared
 under it, read again only if a credential was written meanwhile. Evidence:
 `rejected_sign_ins_are_read_from_the_vault_only_after_a_change`,
 `a_folder_joining_its_group_does_not_cost_a_vault_read`,
 `a_failed_vault_read_is_not_cached_and_does_not_hide_a_needed_sign_in`,
+`a_failed_first_read_does_not_hide_a_new_rejection`,
+`a_failed_read_does_not_stick_in_the_token_holders`,
+`a_failed_read_does_not_stick_in_the_renewal_schedule`,
+`the_credentials_key_names_each_accounts_identity_and_state`,
+`the_token_holders_follow_each_accounts_identity`,
 `a_project_save_does_not_rebuild_the_token_holders`,
 `a_project_save_does_not_reread_the_renewal_schedule`, core
 `only_credential_writes_move_the_credential_count`,

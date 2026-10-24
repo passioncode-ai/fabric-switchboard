@@ -120,16 +120,23 @@ impl RefreshState {
             return answer;
         }
         let mut map = HashMap::new();
+        // N1 round 3: a read that failed (a `security` timeout, a locked keychain) leaves this
+        // answer incomplete; the map is kept only when every read succeeded or found no account.
+        let mut certain = true;
         for account in snapshot
             .accounts
             .iter()
             .filter(|a| a.provider == Provider::Claude && a.kind == AuthKind::OAuth)
         {
-            if let Some(held) = store
-                .stored_credential(&account.id)
-                .ok()
-                .and_then(|c| c.refresh_token)
-            {
+            let held = match store.stored_credential(&account.id) {
+                Ok(credential) => credential.refresh_token,
+                Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => None,
+                Err(_) => {
+                    certain = false;
+                    None
+                }
+            };
+            if let Some(held) = held {
                 // One token held by copies of two different accounts names nobody: an
                 // interrupted switch filed it under the wrong one, and the first copy read
                 // must not decide whose it is.
@@ -156,7 +163,7 @@ impl RefreshState {
         }
         let answer = map.get(&fingerprint(token)).cloned().flatten();
         // A credential written while these were read may have changed one: keep nothing then.
-        if credentials_key(store, snapshot) == key {
+        if certain && credentials_key(store, snapshot) == key {
             if let Ok(mut holders) = self.holders.lock() {
                 *holders = Some((key, map));
             }
@@ -395,18 +402,31 @@ impl RefreshState {
             return vec![];
         }
         let changes = store.credential_changes();
-        let mut previous = Vec::new();
+        let mut previous = None;
         if let Ok(cache) = self.sign_in_cache.lock() {
             if let Some((at, of, ids)) = cache.as_ref() {
                 if *at == changes && *of == dead {
                     return ids.clone();
                 }
-                previous = ids.clone();
+                previous = Some((of.clone(), ids.clone()));
             }
         }
+        // N1 rounds 1 and 3: an earlier answer speaks for a rejected lineage only if it was
+        // computed for that very lineage (`of` holds the same account and fingerprint).
+        let kept = |id: &String, hash: &String| {
+            previous
+                .as_ref()
+                .and_then(|(of, ids): &(Vec<(String, String)>, Vec<String>)| {
+                    of.iter()
+                        .any(|(i, h)| i == id && h == hash)
+                        .then(|| ids.contains(id))
+                })
+        };
         // PRD-01: each read may wait seconds on the Keychain; off the async worker it shares.
         // N1 round 1: a read that failed (a `security` timeout, a locked keychain) says nothing
-        // about the lineage: the account keeps the answer it had, and nothing is cached.
+        // about the lineage: the account keeps the answer it had for that lineage, and nothing
+        // is cached. N1 round 3: with no such answer the account needs a sign-in, so an error
+        // never hides one.
         let (ids, certain) = crate::blocking::run(|| {
             let mut certain = true;
             let ids: Vec<String> = dead
@@ -419,7 +439,7 @@ impl RefreshState {
                     Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => false,
                     Err(_) => {
                         certain = false;
-                        previous.contains(id)
+                        kept(id, hash).unwrap_or(true)
                     }
                 })
                 .map(|(id, _)| id.clone())
@@ -2113,7 +2133,8 @@ mod tests {
         remember_dead(&state, &a, "synthetic-a-refresh");
         *vault.failing.lock().unwrap() = Some(a.clone());
         *vault.failures.lock().unwrap() = 1;
-        let _ = state.sign_in_required(&store);
+        // N1 round 3: with no earlier answer to keep, a failed read still names the sign-in.
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
         let work = tempfile::tempdir().unwrap();
         let folder = work.path().canonicalize().unwrap();
         store.save_project(None, "App", &[folder], &[]).unwrap();
@@ -2143,6 +2164,163 @@ mod tests {
         *vault.failures.lock().unwrap() = 1;
         assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
         assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+    }
+    /// N1 round 3 (adversarial): a failed read while the token holder map is built must not leave
+    /// the holder unknown until a credential is written (attribution Unresolved for a stored
+    /// token).
+    #[test]
+    fn a_failed_read_does_not_stick_in_the_token_holders() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(FailingVault {
+            inner: Default::default(),
+            gets: Default::default(),
+            failing: Mutex::new(None),
+            failures: Mutex::new(0),
+        });
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        *vault.failing.lock().unwrap() = Some(a.clone());
+        *vault.failures.lock().unwrap() = 1;
+        let state = RefreshState::default();
+        let snapshot = store.snapshot().unwrap();
+        assert_eq!(
+            state.holder(&store, &snapshot, "synthetic-a-refresh"),
+            None,
+            "read failed"
+        );
+        assert_eq!(
+            state.holder(&store, &snapshot, "synthetic-a-refresh"),
+            Some(a.clone()),
+            "the vault answers again: the holder is known"
+        );
+    }
+    /// N1 round 3 (adversarial): a lineage the provider just rejected, whose credential read fails
+    /// at the first `sign_in_required` after it (no earlier answer to fall back on), must not read
+    /// as "no sign-in needed" (CONTRACTS: "an error never hides a needed sign-in").
+    #[test]
+    fn a_failed_first_read_does_not_hide_a_new_rejection() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(FailingVault {
+            inner: Default::default(),
+            gets: Default::default(),
+            failing: Default::default(),
+            failures: Default::default(),
+        });
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        *vault.failing.lock().unwrap() = Some(a.clone());
+        *vault.failures.lock().unwrap() = 1;
+        assert_eq!(
+            state.sign_in_required(&store),
+            vec![a.clone()],
+            "a failed read hid the sign-in"
+        );
+        // An earlier answer about another lineage of the same account says nothing about this
+        // one: the provider rejected the stored lineage after an answer that found it replaced.
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-older");
+        assert!(state.sign_in_required(&store).is_empty(), "replaced since");
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        *vault.failures.lock().unwrap() = 1;
+        assert_eq!(
+            state.sign_in_required(&store),
+            vec![a.clone()],
+            "an answer about another lineage hid the sign-in"
+        );
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+    }
+    /// N1 round 3 (planted defect D16): `credentials_key` names everything the holder map and
+    /// the renewal schedule read from the snapshot. Each account's id, provider, kind, enabled
+    /// flag and identity moves it; a project save does not.
+    #[test]
+    fn the_credentials_key_names_each_accounts_identity_and_state() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-a", "default")]);
+        let base = store.snapshot().unwrap();
+        let key = credentials_key(&store, &base);
+        let changed = |edit: &dyn Fn(&mut switchboard_core::Account)| {
+            let mut snapshot = base.clone();
+            edit(&mut snapshot.accounts[0]);
+            credentials_key(&store, &snapshot)
+        };
+        assert_ne!(key, changed(&|a| a.id = "other".into()), "id");
+        assert_ne!(key, changed(&|a| a.provider = Provider::Codex), "provider");
+        assert_ne!(key, changed(&|a| a.kind = AuthKind::ApiKey), "kind");
+        assert_ne!(key, changed(&|a| a.enabled = !a.enabled), "enabled");
+        assert_ne!(
+            key,
+            changed(&|a| a.external_identity = Some(identity("synthetic-b"))),
+            "identity"
+        );
+        assert_ne!(key, changed(&|a| a.external_identity = None), "no identity");
+        let work = tempfile::tempdir().unwrap();
+        store
+            .save_project(None, "App", &[work.path().canonicalize().unwrap()], &[])
+            .unwrap();
+        assert_eq!(
+            key,
+            credentials_key(&store, &store.snapshot().unwrap()),
+            "a project save"
+        );
+    }
+    /// N1 round 3 (planted defect D16): one refresh token held by copies of two different
+    /// accounts names nobody; once the snapshot says they are copies of one account, the first
+    /// copy holds it. A holder map kept across an identity change would still say nobody.
+    #[test]
+    fn the_token_holders_follow_each_accounts_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-a", "default")]);
+        store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "other".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        let snapshot = store.snapshot().unwrap();
+        assert_eq!(
+            state.holder(&store, &snapshot, "synthetic-a-refresh"),
+            None,
+            "two different accounts hold it"
+        );
+        let mut copies = snapshot.clone();
+        for account in &mut copies.accounts {
+            account.external_identity = Some(identity("synthetic-a"));
+        }
+        let first = copies.accounts[0].id.clone();
+        assert!(copies.accounts.iter().any(|x| x.id == a));
+        assert_eq!(
+            state.holder(&store, &copies, "synthetic-a-refresh"),
+            Some(first),
+            "copies of one account: the first holds it"
+        );
     }
     /// N1 round 1 (seam tier): the map of which account holds a refresh token was rebuilt,
     /// reading every Claude account's credential from the vault, whenever `Store::changes`
@@ -2267,6 +2445,95 @@ mod tests {
             )
             .unwrap();
         assert!(state.sign_in_required(&store).is_empty());
+    }
+    /// A vault whose next read returns what it held, then waits until released: a write
+    /// lands between the read and the reader's return.
+    #[derive(Default)]
+    struct GatedVault {
+        inner: switchboard_core::MemoryVault,
+        armed: std::sync::atomic::AtomicBool,
+        read: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+        release: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+    impl GatedVault {
+        fn arm(&self) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+            let (read_tx, read_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            *self.read.lock().unwrap() = Some(read_tx);
+            *self.release.lock().unwrap() = Some(release_rx);
+            self.armed.store(true, Ordering::SeqCst);
+            (read_rx, release_tx)
+        }
+    }
+    impl switchboard_core::Vault for GatedVault {
+        fn get(&self, id: &str) -> Result<Credential, String> {
+            let value = self.inner.get(id);
+            if self.armed.swap(false, Ordering::SeqCst) {
+                self.read.lock().unwrap().take().unwrap().send(()).unwrap();
+                self.release.lock().unwrap().take().unwrap().recv().unwrap();
+            }
+            value
+        }
+        fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// PRD-01 (adversarial round): a credential stored while `sign_in_required` reads the vault
+    /// may make that one answer old, never the next: a sign-in is seen and a lineage put back
+    /// is not hidden.
+    #[test]
+    fn a_credential_stored_during_the_read_never_sticks_in_the_answer() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(GatedVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        let put = |token: &str| {
+            let mut c = expired("synthetic-a");
+            c.refresh_token = Some(token.into());
+            store
+                .upsert(
+                    "synthetic-a".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    c,
+                    Some(identity("synthetic-a")),
+                )
+                .unwrap();
+        };
+        put("synthetic-a-refresh");
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        // A sign-in lands while the rejected credential is being read.
+        let (read, release) = vault.arm();
+        std::thread::scope(|scope| {
+            let reader = scope.spawn(|| state.sign_in_required(&store));
+            read.recv_timeout(std::time::Duration::from_secs(10))
+                .expect("the reader went to the vault");
+            put("signed-in-again");
+            release.send(()).unwrap();
+            assert_eq!(reader.join().unwrap(), vec![a.clone()], "read before it");
+        });
+        assert!(
+            state.sign_in_required(&store).is_empty(),
+            "the sign-in is seen by the next answer"
+        );
+        // The rejected lineage put back while the new one is being read is not hidden. A write
+        // first, so the reader goes to the vault.
+        put("signed-in-again");
+        let (read, release) = vault.arm();
+        std::thread::scope(|scope| {
+            let reader = scope.spawn(|| state.sign_in_required(&store));
+            read.recv_timeout(std::time::Duration::from_secs(10))
+                .expect("the reader went to the vault");
+            put("synthetic-a-refresh");
+            release.send(()).unwrap();
+            assert!(reader.join().unwrap().is_empty(), "read before it");
+        });
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
     }
     fn sorted(mut ids: Vec<String>) -> Vec<String> {
         ids.sort();

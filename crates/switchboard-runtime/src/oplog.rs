@@ -181,8 +181,28 @@ static GLOBAL: OnceLock<Log> = OnceLock::new();
 pub fn install(log: Log) {
     let _ = GLOBAL.set(log);
 }
+#[cfg(test)]
+thread_local! {
+    static CAPTURED: std::cell::RefCell<Option<Vec<&'static str>>> =
+        const { std::cell::RefCell::new(None) };
+}
+/// Tests: runs `f` and answers the names of the events this thread logged meanwhile, whether
+/// or not a log is installed (tests share one process, so the installed log is not theirs).
+#[cfg(test)]
+pub(crate) fn capture<R>(f: impl FnOnce() -> R) -> (R, Vec<&'static str>) {
+    CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    let result = f();
+    let events = CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default());
+    (result, events)
+}
 /// Writes to the installed log; a process without one (tests, offline commands) writes nothing.
 pub fn event(event: &'static str, fields: &[(&'static str, Field)]) {
+    #[cfg(test)]
+    CAPTURED.with(|c| {
+        if let Some(events) = c.borrow_mut().as_mut() {
+            events.push(event);
+        }
+    });
     if let Some(log) = GLOBAL.get() {
         log.event(event, fields);
     }

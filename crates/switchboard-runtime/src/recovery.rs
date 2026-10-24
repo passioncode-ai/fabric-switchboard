@@ -1302,13 +1302,20 @@ mod tests {
         let mut rows = vec![stop(1, now - 8 * DAY, State::Waiting, &dir)];
         rows.push(stop(2, now, State::Waiting, &dir));
         write(root.path(), &rows).unwrap();
-        finish(root.path(), "limit:2", false, now).unwrap();
+        // N1 round 3 (planted defect D15): finishing records the pruned event and logs it, as
+        // every other write does, so a replay of `limit:1` is still answered as one.
+        let (finished, logged) =
+            crate::oplog::capture(|| finish(root.path(), "limit:2", false, now));
+        finished.unwrap();
         let events: Vec<_> = read(root.path())
             .unwrap()
             .into_iter()
             .map(|r| r.event)
             .collect();
         assert_eq!(events, ["limit:2"]);
+        assert_eq!(pruned(root.path()), ["limit:1"], "the pruned id is kept");
+        assert_eq!(logged, ["recovery_pruned"]);
+        finish(root.path(), "limit:1", true, now).unwrap();
     }
     /// N1 round 1 (seam tier): a host that registers an event again after it was pruned is
     /// answered as a replay (nothing new is stored); finishing it is a no-op; claiming it is not
@@ -1354,6 +1361,230 @@ mod tests {
             .as_secs() as i64
     }
 
+    /// Adversarial round: the 7-day edge. A stop exactly 7 days old is not older than a week
+    /// and stays; a second more and it leaves; one 6.5 days old stays (a 6-day cut fails).
+    #[test]
+    fn the_week_is_seven_days_to_the_second() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        write(
+            root.path(),
+            &[
+                stop(1, now - 7 * DAY - 1, State::Waiting, &dir),
+                stop(2, now - 7 * DAY, State::Waiting, &dir),
+                stop(3, now - 6 * DAY - DAY / 2, State::Waiting, &dir),
+            ],
+        )
+        .unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        let answer = status(root.path(), &s, &none, &none, &none, now).unwrap();
+        assert_eq!(answer["waiting_sessions"], 2, "{answer}");
+        register(root.path(), &s, "limit:9", "session-9", "old", &dir, now).unwrap();
+        let events: Vec<_> = read(root.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.event)
+            .collect();
+        assert_eq!(events, ["limit:2", "limit:3", "limit:9"]);
+    }
+    /// Adversarial round: a 1024-row file an older version wrote, through `register` (the
+    /// other entry point): the file stays readable and keeps the new stop.
+    #[test]
+    fn a_full_file_stays_readable_after_register() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let rows: Vec<_> = (0..MAX_ROWS)
+            .map(|n| stop(n, now - DAY + n as i64, State::Waiting, &dir))
+            .collect();
+        write(root.path(), &rows).unwrap();
+        let s = snapshot();
+        register(
+            root.path(),
+            &s,
+            "limit:new",
+            "session-new",
+            "old",
+            &dir,
+            now,
+        )
+        .unwrap();
+        let rows = read(root.path()).expect("still readable");
+        assert_eq!(rows.len(), KEEP_ROWS);
+        assert!(rows.iter().any(|r| r.event == "limit:new"));
+        // The next hook is not refused either.
+        register_stop(
+            root.path(),
+            &s,
+            "session-x",
+            "old",
+            &dir,
+            StopKind::Limit,
+            now + 1,
+        )
+        .unwrap();
+        assert_eq!(read(root.path()).unwrap().len(), KEEP_ROWS);
+    }
+    /// Adversarial round: hooks registering at once on a full file each keep their stop.
+    #[test]
+    fn concurrent_hooks_on_a_full_file_each_keep_their_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let rows: Vec<_> = (0..MAX_ROWS)
+            .map(|n| stop(n, now - DAY + n as i64, State::Resumed, &dir))
+            .collect();
+        write(root.path(), &rows).unwrap();
+        let s = snapshot();
+        let events: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|n| {
+                    let (root, s, dir) = (root.path(), &s, &dir);
+                    scope.spawn(move || {
+                        match register_stop(
+                            root,
+                            s,
+                            &format!("session-c{n}"),
+                            "old",
+                            dir,
+                            StopKind::Limit,
+                            now,
+                        )
+                        .unwrap()
+                        {
+                            Stopped::New(e) => e,
+                            other => panic!("{other:?}"),
+                        }
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows.len(), KEEP_ROWS);
+        for event in events {
+            assert!(rows.iter().any(|r| r.event == event), "{event} kept");
+        }
+    }
+    /// Adversarial round: the clock moved back an hour after 512 live stops were written. A
+    /// new stop is still kept (D-4: "a new stop is always kept"), not answered `registered`
+    /// and dropped in the same write.
+    #[test]
+    fn a_new_stop_is_kept_when_the_clock_moved_back() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let rows: Vec<_> = (0..KEEP_ROWS)
+            .map(|n| stop(n, now + 3600 + n as i64, State::Waiting, &dir))
+            .collect();
+        write(root.path(), &rows).unwrap();
+        let s = snapshot();
+        let stopped = register_stop(
+            root.path(),
+            &s,
+            "session-new",
+            "old",
+            &dir,
+            StopKind::Limit,
+            now,
+        )
+        .unwrap();
+        let Stopped::New(event) = stopped else {
+            panic!("{stopped:?}")
+        };
+        let rows = read(root.path()).unwrap();
+        assert!(
+            rows.iter().any(|r| r.event == event),
+            "answered registered, so it is in the file"
+        );
+    }
+    /// N1 round 3 (adversarial): recovery-pruned.json is 0600 once written; a garbage or oversized
+    /// file never blocks a stop and is replaced by a valid list; a symlink in its place is not
+    /// followed (the target is untouched) and the stop is still kept.
+    #[test]
+    fn the_pruned_list_is_private_and_never_blocks_a_stop() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().canonicalize().unwrap();
+        let now = 30 * DAY;
+        let s = snapshot();
+        let old = |n| stop(n, now - 8 * DAY, State::Waiting, &dir);
+        write(root.path(), &[old(1)]).unwrap();
+        register(root.path(), &s, "limit:a", "session-a", "old", &dir, now).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(root.path().join(PRUNED_FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "pruned list mode {mode:o}");
+        }
+        assert_eq!(pruned(root.path()), ["limit:1"]);
+        // Garbage in the list.
+        std::fs::write(root.path().join(PRUNED_FILE), b"{not json").unwrap();
+        write(root.path(), &[old(2), stop(3, now, State::Waiting, &dir)]).unwrap();
+        register(root.path(), &s, "limit:b", "session-b", "old", &dir, now).unwrap();
+        assert!(read(root.path())
+            .unwrap()
+            .iter()
+            .any(|r| r.event == "limit:b"));
+        assert_eq!(
+            pruned(root.path()),
+            ["limit:2"],
+            "rewritten as a valid list"
+        );
+        // Oversized list (over the 512 KiB read bound).
+        std::fs::write(root.path().join(PRUNED_FILE), vec![b' '; 600 * 1024]).unwrap();
+        write(root.path(), &[old(4)]).unwrap();
+        register(root.path(), &s, "limit:c", "session-c", "old", &dir, now).unwrap();
+        assert!(read(root.path())
+            .unwrap()
+            .iter()
+            .any(|r| r.event == "limit:c"));
+        // A symlink in its place.
+        #[cfg(unix)]
+        {
+            let target = root.path().join("elsewhere.json");
+            std::fs::write(&target, b"[]").unwrap();
+            std::fs::remove_file(root.path().join(PRUNED_FILE)).unwrap();
+            std::os::unix::fs::symlink(&target, root.path().join(PRUNED_FILE)).unwrap();
+            write(root.path(), &[old(5)]).unwrap();
+            register(root.path(), &s, "limit:d", "session-d", "old", &dir, now).unwrap();
+            assert!(read(root.path())
+                .unwrap()
+                .iter()
+                .any(|r| r.event == "limit:d"));
+            assert_eq!(
+                std::fs::read(&target).unwrap(),
+                b"[]",
+                "the link was not followed"
+            );
+        }
+    }
+    /// N1 round 3 (adversarial): the pruned list is bounded at 2048 ids, newest kept, and a replay
+    /// of the newest pruned event still answers as a replay after the bound is passed.
+    #[test]
+    fn the_pruned_list_keeps_the_newest_2048() {
+        let root = tempfile::tempdir().unwrap();
+        let ids: Vec<String> = (0..MAX_PRUNED + 10)
+            .map(|n| format!("limit:p{n}"))
+            .collect();
+        remember_pruned(root.path(), &ids[..MAX_PRUNED]);
+        remember_pruned(root.path(), &ids[MAX_PRUNED..]);
+        let list = pruned(root.path());
+        assert_eq!(list.len(), MAX_PRUNED);
+        assert!(was_pruned(root.path(), ids.last().unwrap()));
+        assert!(!was_pruned(root.path(), &ids[0]), "the oldest left");
+        // 2048 ids of the longest identifier still fit the 512 KiB read bound.
+        let long: Vec<String> = (0..MAX_PRUNED).map(|n| format!("{n:0>160}")).collect();
+        remember_pruned(root.path(), &long);
+        assert!(
+            was_pruned(root.path(), long.last().unwrap()),
+            "a full list of long ids still reads"
+        );
+    }
     #[test]
     fn an_sb114_record_still_loads() {
         let root = tempfile::tempdir().unwrap();

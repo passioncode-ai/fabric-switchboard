@@ -228,5 +228,111 @@
     "exit": 0
    }
   ]
+ },
+ "round3 (adversarial)": {
+  "base": "37d1663",
+  "fixed": [
+   {
+    "id": "adv2-P8 sign_in_required: a failed first vault read with no earlier answer hid a newly rejected account (CONTRACTS: an error never hides a needed sign-in)",
+    "evidence": [
+     "a_failed_first_read_does_not_hide_a_new_rejection (failed at 37d1663: refresh.rs answered [] for a rejected account)",
+     "a_failed_vault_read_is_not_cached_and_does_not_hide_a_needed_sign_in (its first failed read is now asserted; failed at 37d1663)",
+     "crates/switchboard-runtime/src/refresh.rs (sign_in_required: a failed read keeps the earlier answer only when that answer was computed for the same account and lineage fingerprint; otherwise the account needs a sign-in)"
+    ]
+   },
+   {
+    "id": "adv2-P1 renew_due: a failed vault read dropped the account from the renewal schedule until a credential was written",
+    "evidence": [
+     "a_failed_read_does_not_stick_in_the_renewal_schedule (failed at 37d1663: due_at empty after the vault answered again)",
+     "crates/switchboard-runtime/src/monitor.rs (renew_due: the key is kept only when every read succeeded or found no account; a failed read keeps the account's earlier due time for the pass)"
+    ]
+   },
+   {
+    "id": "adv2-P2 RefreshState::holder: a failed vault read left the holder unknown until a credential was written",
+    "evidence": [
+     "a_failed_read_does_not_stick_in_the_token_holders (failed at 37d1663: None after the vault answered again)",
+     "crates/switchboard-runtime/src/refresh.rs (holder: the map is kept only when every read succeeded or found no account)"
+    ]
+   },
+   {
+    "id": "CONTRACTS failed-read rule",
+    "evidence": [
+     "docs/CONTRACTS.md (sign-in answer paragraph: the rule covers the holder map and the renewal schedule; evidence list extended)"
+    ]
+   }
+  ],
+  "integrated_probes": [
+   "refresh: a_credential_stored_during_the_read_never_sticks_in_the_answer (1e0c2f6)",
+   "core storage: refused_and_restored_credential_writes_move_the_credential_count, a_write_in_flight_during_the_generation_read_is_still_seen (314c5e1, 4ebed94)",
+   "runtime lib: a_sync_that_changed_nothing_is_not_logged_again (duplicate and reordered folders), a_long_hold_names_the_time_after_its_last_mark (rest counts from the last mark) (314c5e1)",
+   "recovery: the_week_is_seven_days_to_the_second, a_full_file_stays_readable_after_register, concurrent_hooks_on_a_full_file_each_keep_their_stop, a_new_stop_is_kept_when_the_clock_moved_back (4ebed94)",
+   "recovery: the_pruned_list_is_private_and_never_blocks_a_stop, the_pruned_list_keeps_the_newest_2048 (adv2 probes P3, P9)"
+  ],
+  "planted_defects": [
+   {
+    "defect": "D12 usage_refusal_code drops keychain::ACTIONABLE from the vault code (core/src/lib.rs)",
+    "caught_by": [
+     "refusal_code_tests::every_actionable_keychain_refusal_is_coded_as_the_vault"
+    ]
+   },
+   {
+    "defect": "D13 the pruned-id list keeps the oldest 2048 (list.truncate(MAX_PRUNED))",
+    "caught_by": [
+     "recovery::tests::the_pruned_list_keeps_the_newest_2048"
+    ]
+   },
+   {
+    "defect": "D15 finish writes without recording pruned ids or logging recovery_pruned",
+    "caught_by": [
+     "recovery::tests::finishing_a_stop_prunes_the_file_too (extended: pruned list and the logged event, through the test-only oplog::capture)"
+    ]
+   },
+   {
+    "defect": "D16 credentials_key ignores each account's identity",
+    "caught_by": [
+     "refresh::tests::the_credentials_key_names_each_accounts_identity_and_state",
+     "refresh::tests::the_token_holders_follow_each_accounts_identity"
+    ]
+   },
+   {
+    "defect": "Dcov a failed read falls back to an answer about another lineage of the same account",
+    "caught_by": [
+     "refresh::tests::a_failed_first_read_does_not_hide_a_new_rejection"
+    ]
+   },
+   {
+    "defect": "Dfix1 the round-1 rule restored (no earlier answer: not needed)",
+    "caught_by": [
+     "refresh::tests::a_failed_first_read_does_not_hide_a_new_rejection",
+     "refresh::tests::a_failed_vault_read_is_not_cached_and_does_not_hide_a_needed_sign_in"
+    ]
+   }
+  ],
+  "plant_method": "each defect applied alone to the worktree, cargo test --locked -p switchboard-core -p switchboard-runtime --no-fail-fast, exit 101 with the tests named above failing and no compile error, then reverted (pattern counts 1 after revert)",
+  "changed_sentences": [
+   {
+    "file": "CHANGELOG.md (0.6.82, Faster answers to Fabric)",
+    "old": "a failed Keychain read is never remembered as \"no sign-in needed\"",
+    "new": "a failed Keychain read never hides a needed sign-in or takes an account out of automatic sign-in renewal (it is read again next time)"
+   }
+  ],
+  "checks": [
+   {
+    "cmd": "cargo fmt --all --check",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "exit": 0
+   },
+   {
+    "cmd": "cargo test --locked -p switchboard-core -p switchboard-runtime --no-fail-fast (runtime 515 passed, core storage 41 passed)",
+    "exit": 0
+   },
+   {
+    "cmd": "./scripts/check.sh",
+    "exit": 0
+   }
+  ]
  }
 }
