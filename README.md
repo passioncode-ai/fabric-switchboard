@@ -22,10 +22,10 @@ and Linux (x64 and ARM), built by
 
 | Task | In Switchboard |
 |---|---|
-| Keep work and personal accounts separate | Groups of projects with accounts of their own (a project is a repository with its worktrees and clones; one project may be in several groups), project rules and isolated session homes |
+| Keep work and personal accounts separate | Groups of projects with accounts of their own (a project is a repository with its worktrees and clones; one project may be in several groups), folder rules and isolated session homes |
 | See where accounts and tokens go | Statistics: requests and the provider's own token counts by group, project, account, coding agent and day, with a daily chart |
 | Know which company an account belongs to | Organizations: companies with their e-mail domains; an account belongs by your choice, its team at the provider or its address; a group of an organization runs only on that organization's accounts; the list can be read from PassionCode.ai |
-| Give agents on API keys a key per project | API keys: the machine's OpenRouter key and a key per group, picked by the folder an agent starts in |
+| Give agents on API keys a key per group | API keys: the machine's OpenRouter key and a key per group, picked by the folder an agent starts in |
 | See when another account is needed | Reported usage, reset countdowns and explicit unknown or expired states |
 | Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
 | Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |

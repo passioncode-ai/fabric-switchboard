@@ -18,10 +18,16 @@ keep their identifiers (a stable API); the words below are what a person sees.
 | Tokens | tokens | токены | Only counted usage (Statistics: "Tokens per day", "tokens on average") and credential kinds a provider calls tokens ("Claude setup token"). Never the page of keys (CPY-14). | |
 
 Russian sentences use the same nouns: «группа» (never «пул» in a sentence), «проект» for a
-repository, «автоматическое переключение» / «автопереключение», «API-ключи». Until the window
-copy of 0.6.82 lands, the Russian dictionary still carries «пул» and «ротация» in sentences, English keys that say rotation or rotates, «Токены» for the
-page and «Ключи API» in Statistics; those entries are the window's to change (node N5 of 0.6.82), and this table is the
-target they change to.
+repository, «автоматическое переключение» / «автопереключение», «API-ключи». The window copy
+landed in 0.6.82 (node N5): no Russian window sentence says «пул» or «ротация».
+
+Decision D-6 (orchestrator, 0.6.82, extends D-1): «автопереключение» is allowed in interface
+sentences as well as in labels. «ID группы» names the field and the label ([src/locales/ru.ts](../../src/locales/ru.ts)
+“Group id”); running text says «идентификатор группы». After a preposition a group takes the
+phrase form: «в группе по умолчанию», «в группе «{name}»», «в группе {id} (без папок)» (English
+“in the default group”, “in group “{name}””, “in group {id} (no folders)”; `inGroup` in
+[src/ui-logic.ts](../../src/ui-logic.ts)); a label shows “Default group” / “Group {id} · no folders”
+(`poolName`, decision D-5).
 
 ## Product, license, appearance
 
