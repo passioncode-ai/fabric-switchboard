@@ -1,0 +1,376 @@
+{
+ "area": "copy",
+ "repository_commit": "c6354fb",
+ "method": [
+  "node scripts/check-locale.mjs (1242 interface strings, all in Russian; 0 unused entries)",
+  "node scripts/check-locale.mjs --list cross-checked against docs/brand/strings.md",
+  "TypeScript AST scan of src/main.ts, src/ui-logic.ts, src/adapter.ts for literals shown without t()",
+  "installed switchboard 0.6.80 --help walked over 108 command pages; crates/switchboard-cli/src/main.rs help_tests::every_command_and_argument_has_help",
+  "grep for U+2014 in string literals, clap doc comments, MCP descriptions, READMEs"
+ ],
+ "findings": [
+  {
+   "id": "CPY-01",
+   "severity": "P1",
+   "title": "One concept, three names: the window says group, the CLI, MCP, notifications, backend errors and the brand pack say project, and every surface also says pool",
+   "evidence": [
+    "src/main.ts:239",
+    "src/main.ts:253",
+    "src/main.ts:445",
+    "docs/brand/terminology.md:3",
+    "docs/brand/strings.md:47",
+    "docs/brand/strings.md:48",
+    "crates/switchboard-core/src/projects.rs:346",
+    "crates/switchboard-core/src/projects.rs:349",
+    "src/adapter.ts:194",
+    "src/adapter.ts:198",
+    "crates/switchboard-cli/src/main.rs:2174",
+    "crates/switchboard-cli/src/mcp.rs:60",
+    "crates/switchboard-cli/src/mcp.rs:61",
+    "crates/switchboard-cli/src/mcp.rs:63",
+    "crates/switchboard-cli/src/mcp.rs:64",
+    "src-tauri/src/suggestions.rs:24",
+    "src-tauri/src/suggestions.rs:28",
+    "src-tauri/src/suggestions.rs:48",
+    "README.md:27",
+    "src/main.ts:1146",
+    "switchboard project --help (installed 0.6.80): every subcommand names the group by --pool"
+   ],
+   "current": "Nav and dialog: \"Groups\", \"+ New group\", \"Group name\"; the same dialog's backend refusal: \"Name the project.\" / \"Add at least one project folder.\" / \"Project not found.\"; tray notification: \"Folder added to a project\"; CLI: \"No projects. `switchboard project save` reserves accounts for a project's folders.\"; MCP title \"Move a repository to another project\" over a description that says \"into another group\"; README: \"Give agents on API keys a key per project | ... a key per group\". terminology.md defines Pool and never Group; strings.md still registers \"+ New project\", \"Give a project its own accounts\".",
+   "proposal": "Add to terminology.md: Group = a set of projects (repositories) with accounts of its own (since SB-146); Project = one repository with its worktrees and clones; Pool = internal id, never shown alone to a person. Then rename in one pass: backend refusals \"Name the group.\", \"Add at least one folder to the group.\", \"Group not found.\"; notifications \"Folder added to a group\" / «Папка добавлена в группу»; MCP titles and descriptions; CLI empty-state \"No groups. `switchboard project save` creates one.\" (keep the command name, explain it once in --help: \"project: manage groups\"); README row \"a key per group\"."
+  },
+  {
+   "id": "CPY-02",
+   "severity": "P1",
+   "title": "Error sends the person to the wrong page: the OpenRouter key moved to Tokens, the backend still says Agents",
+   "evidence": [
+    "crates/switchboard-core/src/agent_keys.rs:14",
+    "crates/switchboard-runtime/src/launch.rs:1622",
+    "src/adapter.ts:163",
+    "src/adapter.ts:166",
+    "src/locales/ru.ts:836",
+    "src/locales/ru.ts:839",
+    "src/main.ts:761",
+    "src/main.ts:1612"
+   ],
+   "current": "No OpenRouter key is saved. Add one under Agents. / Choose a model for this launch, or set the default model of the OpenRouter key under Agents.",
+   "proposal": "No OpenRouter key is saved. Add one under Tokens. / Choose a model for this launch, or set the key's default model under Tokens. RU: «Ключ OpenRouter не сохранён. Добавьте его во вкладке «Токены».» (the window already has this sentence at src/main.ts:1612; reuse it)."
+  },
+  {
+   "id": "CPY-03",
+   "severity": "P2",
+   "title": "The CLI and MCP print raw backend errors that the window rewrites; the person in a terminal gets the worse sentence",
+   "evidence": [
+    "crates/switchboard-cli/src/main.rs:2523",
+    "src/adapter.ts:337-432",
+    "crates/switchboard-runtime/src/lib.rs:4477",
+    "crates/switchboard-runtime/src/lib.rs:4500",
+    "crates/switchboard-runtime/src/launch.rs:2504",
+    "crates/switchboard-runtime/src/lib.rs:2687",
+    "crates/switchboard-runtime/src/launch.rs:1474",
+    "crates/switchboard-runtime/src/launch.rs:1277",
+    "crates/switchboard-runtime/src/launch.rs:3547",
+    "crates/switchboard-runtime/src/control.rs:312",
+    "crates/switchboard-runtime/src/external.rs:1096",
+    "crates/switchboard-runtime/src/analytics.rs:102",
+    "crates/switchboard-runtime/src/analytics.rs:123"
+   ],
+   "current": "CLI shows \"Credential expired; reauthenticate this account\", \"Account is disabled\", \"Label or pool is invalid\", \"Unsafe account home.\", \"Session state invalid.\", \"Keychain unavailable.\", \"Control metadata unavailable.\", \"Backup identity mismatch.\", \"Installation file unreadable.\"; the window shows e.g. \"This credential has expired. Sign in to this account again.\"",
+   "proposal": "Rule: one sentence per failure, owned by the runtime. Move the coreErrors rewrites (about 90 entries in src/adapter.ts) into the Rust messages so CLI, MCP and window print the same text that says what happened and what to do; keep adapter.ts as a safety allowlist only."
+  },
+  {
+   "id": "CPY-04",
+   "severity": "P2",
+   "title": "Retired action words (capture, native activation, profile) still reach the person in English",
+   "evidence": [
+    "src/adapter.ts:251",
+    "src/adapter.ts:260",
+    "src/adapter.ts:262",
+    "src/adapter.ts:263",
+    "src/adapter.ts:269",
+    "src/adapter.ts:271",
+    "src/adapter.ts:278",
+    "src/adapter.ts:339",
+    "src/adapter.ts:340",
+    "src/adapter.ts:342",
+    "src/adapter.ts:427",
+    "crates/switchboard-runtime/src/lib.rs:4298",
+    "docs/brand/strings.md:24",
+    "docs/brand/strings.md:76"
+   ],
+   "current": "Native activation requires a Claude OAuth profile. / Capture or import this profile before native activation. / No current Claude sign-in found. Sign in with the official CLI, then capture again. / The local CLI profile is incomplete or inconsistent. Complete official sign-in, then capture the account again.",
+   "proposal": "Use the current actions, as the Russian already does: \"Switching Claude Code needs a Claude account signed in with OAuth.\" / \"Add this account (In use now, Add to Switchboard), then switch.\" / \"No Claude sign-in found. Sign in with claude /login, then add the account again.\""
+  },
+  {
+   "id": "CPY-05",
+   "severity": "P2",
+   "title": "Errors that do not say what happened or what to do next",
+   "evidence": [
+    "src/adapter.ts:436",
+    "src/adapter.ts:252",
+    "crates/switchboard-runtime/src/launch.rs:954",
+    "src/adapter.ts:331",
+    "src/adapter.ts:398",
+    "crates/switchboard-runtime/src/handovers.rs:71",
+    "crates/switchboard-runtime/src/handovers.rs:97",
+    "crates/switchboard-runtime/src/uninstall.rs:105",
+    "crates/switchboard-runtime/src/monitor.rs:812",
+    "src/adapter.ts:395"
+   ],
+   "current": "The operation could not be completed. Check your input and native credential storage access, then retry. / Account saved; isolated login cleanup needs attention. / Session state invalid. Inspect the managed home. / Switchboard could not record the hand-over. / Could not remove the login item. / Native account source unavailable.",
+   "proposal": "Fallback: \"Switchboard could not finish this action. Nothing was changed. Retry; if it repeats, open Activity for the recorded cause.\" Cleanup: \"The account was saved. A temporary sign-in folder was left behind; Switchboard removes it before the next sign-in.\" Session state: \"Switchboard could not read this account's session folder. Close the account's Terminal sessions, then retry.\" Hand-over: \"... Check that the app's data folder is writable, then retry.\" Login item: \"... Remove Fabric Switchboard from the system's login items yourself.\""
+  },
+  {
+   "id": "CPY-06",
+   "severity": "P2",
+   "title": "Rotation and automatic switching name the same feature; the Russian uses the forbidden «ротация»",
+   "evidence": [
+    "src/main.ts:296",
+    "src/main.ts:445",
+    "src/main.ts:580",
+    "src/main.ts:589",
+    "src/main.ts:2205",
+    "src/main.ts:2234",
+    "src/locales/ru.ts:1212",
+    "src/locales/ru.ts:1216",
+    "crates/switchboard-cli/src/mcp.rs:72",
+    "crates/switchboard-cli/src/mcp.rs:73",
+    "crates/switchboard-cli/src/mcp.rs:68",
+    "docs/brand/terminology.md:13"
+   ],
+   "current": "Window: 17 strings say \"automatic switching\", 10 say \"rotation\" (\"Rotation is off.\", \"Rotation still runs.\", \"Claude Code rotation requires OAuth accounts...\"); MCP titles \"Automatic rotation\" / \"Set automatic rotation\" with \"hysteresis\"; RU: «...не выбирает его при ротации.»",
+   "proposal": "Window and MCP titles: \"automatic switching\" everywhere (\"Automatic switching is off.\", \"Automatic switching still runs.\"); MCP may keep field names (hysteresis) but its title and prose say \"automatic switching\" and \"headroom\". RU 1212/1216: «...не продлевает его вход и не переключается на него, в том числе автоматически.»"
+  },
+  {
+   "id": "CPY-07",
+   "severity": "P2",
+   "title": "Internal ids and jargon in the automatic switching controls: pool slug, target, policy",
+   "evidence": [
+    "src/main.ts:1146",
+    "src/main.ts:1489",
+    "src/main.ts:1490",
+    "src/main.ts:2213",
+    "src/main.ts:2216",
+    "src/locales/ru.ts:567",
+    "src/locales/ru.ts:571"
+   ],
+   "current": "Stop {pool} / Edit {provider} · {pool} · {target}… / New policy… / Automatic switching stopped for this provider, pool and target. / Configure one provider, pool and target. Fresh eligible accounts stay within this boundary; no eligible account means hold. / Pool · {pool}",
+   "proposal": "Show the group's name or \"Default\" instead of the pool slug (the account list already does this with \"Group · {name}\"): \"Stop in {group}\", \"Edit {provider} in {group} ({where})…\", \"New automatic switching…\", \"Automatic switching stopped for {provider} in {group}.\", \"Choose the provider and group it watches. It moves only to a fresh account in the same group; with none, the current account stays.\""
+  },
+  {
+   "id": "CPY-08",
+   "severity": "P2",
+   "title": "Em dashes in user-facing text (operator rule): CLI help, CLI output, MCP descriptions, README.ru",
+   "evidence": [
+    "crates/switchboard-cli/src/main.rs:118",
+    "crates/switchboard-cli/src/main.rs:139",
+    "crates/switchboard-cli/src/main.rs:176",
+    "crates/switchboard-cli/src/main.rs:193",
+    "crates/switchboard-cli/src/main.rs:782",
+    "crates/switchboard-cli/src/main.rs:1923",
+    "crates/switchboard-cli/src/main.rs:1930",
+    "crates/switchboard-cli/src/main.rs:1984",
+    "crates/switchboard-runtime/src/onboarding.rs:129",
+    "crates/switchboard-cli/src/mcp.rs:58",
+    "crates/switchboard-cli/src/mcp.rs:83",
+    "README.ru.md:66",
+    "README.ru.md:80",
+    "README.ru.md:97",
+    "README.ru.md:99",
+    "README.ru.md:100",
+    "README.ru.md:102",
+    "README.ru.md:103",
+    "README.ru.md:131"
+   ],
+   "current": "ran out of its limit on another account — of the same provider / terminal on stdin and stdout) — for an embedded console / when its accounts run out — per machine / where the setup stands — each step done / the saved OpenRouter key instead — for a session script's / CLI empty cell \"—\" / MCP \"and state — starting, running\", \"the chain that applies — the workflow's own\" / README.ru «**Add account** — официальный вход»",
+   "proposal": "Replace with a colon, a full stop or parentheses (\"...on another account: of the same provider...\", \"...stdout), for an embedded console...\", \"state: starting, running, ended or unknown\"). CLI empty cell: \"-\" or \"none\" (the window uses \"–\" en dash). Extend scripts/check-locale.mjs's U+2014 check to clap doc comments, MCP descriptions and README*.md (a failing grep in ./scripts/check.sh)."
+  },
+  {
+   "id": "CPY-09",
+   "severity": "P2",
+   "title": "Backlog ids (SB-nnn) printed in --help and MCP tool descriptions",
+   "evidence": [
+    "crates/switchboard-cli/src/main.rs:41",
+    "crates/switchboard-cli/src/main.rs:49",
+    "crates/switchboard-cli/src/main.rs:64",
+    "crates/switchboard-cli/src/main.rs:139",
+    "crates/switchboard-cli/src/main.rs:168",
+    "crates/switchboard-cli/src/main.rs:282",
+    "crates/switchboard-cli/src/main.rs:298",
+    "crates/switchboard-cli/src/main.rs:299",
+    "crates/switchboard-cli/src/main.rs:327",
+    "crates/switchboard-cli/src/main.rs:336",
+    "crates/switchboard-cli/src/main.rs:339",
+    "crates/switchboard-cli/src/main.rs:343",
+    "crates/switchboard-cli/src/main.rs:374",
+    "crates/switchboard-cli/src/main.rs:377",
+    "crates/switchboard-cli/src/main.rs:388",
+    "crates/switchboard-cli/src/main.rs:391",
+    "crates/switchboard-cli/src/main.rs:458",
+    "crates/switchboard-cli/src/main.rs:557",
+    "crates/switchboard-cli/src/main.rs:650",
+    "crates/switchboard-cli/src/main.rs:753",
+    "crates/switchboard-cli/src/main.rs:789",
+    "crates/switchboard-cli/src/main.rs:901",
+    "crates/switchboard-cli/src/main.rs:926",
+    "crates/switchboard-cli/src/mcp.rs:70",
+    "crates/switchboard-cli/src/mcp.rs:76",
+    "crates/switchboard-cli/src/mcp.rs:77"
+   ],
+   "current": "--also  SB-146: add it to this group and keep it in its other groups / Organizations accounts belong to (SB-158): ... / What the proxy relayed (SB-145): ... (36 help lines, 18 distinct ids in the installed 0.6.80 --help tree)",
+   "proposal": "Drop the ids from `///` lines clap shows and from MCP descriptions; keep them in `//` comments next to the code. Add a help test that fails on /SB-\\d+/ in any about or help text."
+  },
+  {
+   "id": "CPY-10",
+   "severity": "P2",
+   "title": "Russian loading and waiting states in the first person, against the pack's own rule (one form per state, Switchboard never «мы»)",
+   "evidence": [
+    "src/locales/ru.ts:972",
+    "src/locales/ru.ts:990",
+    "src/locales/ru.ts:1031",
+    "src/locales/ru.ts:1086",
+    "src/locales/ru.ts:1108",
+    "src/locales/ru.ts:1156",
+    "src/locales/ru.ts:1229",
+    "docs/brand/strings.md:73"
+   ],
+   "current": "Ищем агентов для программирования на этом компьютере… / Загружаем список моделей OpenRouter… / Ищу репозитории… / Читаю настройки Codex… / Читаю статистику… / Читаю ключи… / Ждём PassionCode.ai в браузере…",
+   "proposal": "Поиск агентов на этом компьютере… / Загрузка моделей OpenRouter… / Поиск репозиториев… / Загрузка настроек Codex… / Загрузка статистики… / Загрузка ключей… / Ожидание ответа PassionCode.ai в браузере… Add a check-locale rule that rejects a value starting with a first-person verb (Читаю|Ищу|Ищем|Ждём|Загружаем)."
+  },
+  {
+   "id": "CPY-11",
+   "severity": "P2",
+   "title": "Russian calls a group «проект» in its delete confirmation, key panel and folder labels",
+   "evidence": [
+    "src/locales/ru.ts:353",
+    "src/locales/ru.ts:829",
+    "src/locales/ru.ts:1036",
+    "src/locales/ru.ts:1057",
+    "src/locales/ru.ts:1075",
+    "src/locales/ru.ts:1076",
+    "src/locales/ru.ts:1078",
+    "src/locales/ru.ts:1080",
+    "src/locales/ru.ts:1081"
+   ],
+   "current": "Проект «{name}» будет удалён. Его аккаунты останутся в пуле {pool}... (under the title «Удалить группу?») / Заменить ключ проекта «{name}» / Ключ для проекта «{name}» / Внутри папки проекта «{name}» / Сессии в папках проекта используют {label} / · в проекте {name}, перейдёт сюда",
+   "proposal": "Группа «{name}» будет удалена. Её аккаунты останутся в общем пуле и больше не будут закреплены за ней... / Заменить ключ группы «{name}» / Ключ для группы «{name}» / Внутри папки группы «{name}» / Сессии в папках группы используют {label} / · в группе {name}, перейдёт сюда"
+  },
+  {
+   "id": "CPY-12",
+   "severity": "P2",
+   "title": "strings.md (SB-66) is out of date both ways: it registers retired strings and misses most current ones",
+   "evidence": [
+    "docs/brand/strings.md:47",
+    "docs/brand/strings.md:48",
+    "docs/brand/strings.md:26",
+    "docs/brand/strings.md:30",
+    "docs/brand/strings.md:56",
+    "docs/brand/strings.md:57",
+    "docs/brand/strings.md:65",
+    "docs/brand/strings.md:68",
+    "docs/brand/README.md:6",
+    "scripts/check-locale.mjs --list (1243 keys)"
+   ],
+   "current": "Registered but no longer shown: \"+ New project\", \"Give a project its own accounts\", \"Project name\", \"Create project\", \"Save project\", \"No projects yet\", \"Step {n} of 5\" (now \"Step {step} of {total}\"), \"Signing in to Claude Code\" (now \"Signing in to {provider}\"), \"Version {current} is the latest...\" (now {version}), \"{n} accounts restored · {k} already here\", \"Limit reached · until {time}\", \"Update check finished.\", \"Next managed request\". Shown but not registered: 915 of 1243 interface keys, whole surfaces with none: Organizations and PassionCode.ai connect (SB-158/159), Tokens and group keys (SB-144), Statistics (SB-145/147/157), Repositories on disk (SB-135), Codex in group folders (SB-143), groups (SB-146), used on another machine (SB-175), session context (SB-110/111). docs/brand/README.md:6 still says localization is absent.",
+   "proposal": "Regenerate the registry from `node scripts/check-locale.mjs --list`, grouped by surface with its SCN id, mark retired strings under Retired, and add a gate step that fails when a key is neither registered nor listed as retired. Fix README.md:6 (Russian ships since SB-76)."
+  },
+  {
+   "id": "CPY-13",
+   "severity": "P2",
+   "title": "README.ru describes an older product and mixes English UI names and jargon; both READMEs show a 0.6.13 screenshot",
+   "evidence": [
+    "README.ru.md:16",
+    "README.ru.md:21-28",
+    "README.ru.md:97-102",
+    "README.ru.md:106",
+    "README.md:17",
+    "docs/brand/channels.md:7"
+   ],
+   "current": "«| Разделять рабочие и личные аккаунты | Пулы, правила проектов и отдельные профили сессий |» (no groups, Statistics, Tokens, Organizations, which README.md lists); «**Add account** ... **Select** ... **Check usage**» while the Russian window says «Добавить аккаунт», «Выбрать», «Проверить использование»; «Задайте label и pool», «один управляемый home», «Постоянный credential находится в OS vault, но isolated-режим...»",
+   "proposal": "Bring README.ru.md to parity with README.md's task table, name buttons as the Russian window shows them, replace label/pool/home/credential/OS vault/isolated-режим with название, группа, домашняя папка сессии, учётные данные, системное хранилище, изолированная сессия. Replace the 0.6.13 screenshot with a current one (channel github-readme asks for a current screenshot)."
+  },
+  {
+   "id": "CPY-14",
+   "severity": "P2",
+   "title": "\"Tokens\" names a page of API keys, while Statistics uses tokens for usage counts",
+   "evidence": [
+    "src/main.ts:239",
+    "src/main.ts:253",
+    "src/main.ts:254",
+    "src/main.ts:760",
+    "src/main.ts:1609",
+    "src/main.ts:1670"
+   ],
+   "current": "Nav and title \"Tokens\"; subtitle \"API keys agents run on: the machine's, and one per group.\"; section \"OpenRouter keys\"; Statistics \"Tokens per day\", \"tokens on average\"",
+   "proposal": "Name the page \"API keys\" (RU «Ключи API»), and keep \"tokens\" only for counted usage. Update the pointer \"... are under API keys.\" and \"Open API keys\"."
+  },
+  {
+   "id": "CPY-15",
+   "severity": "P3",
+   "title": "Personal is one key in three grammatical slots; the Russian help names an option that does not exist",
+   "evidence": [
+    "src/main.ts:524",
+    "src/main.ts:2056",
+    "src/main.ts:2169",
+    "src/locales/ru.ts:1167",
+    "src/locales/ru.ts:1188",
+    "src/locales/ru.ts:1221"
+   ],
+   "current": "Option «Личные» next to help «...а при выборе «Личная» только на личных.» and «Автоматически: личный»",
+   "proposal": "Split the key by context: \"Personal accounts\" (filter, «Личные»), \"Personal\" as an organization choice («Личные аккаунты»), and make the help quote the option exactly: «...а при выборе «Личные аккаунты» только на личных.» «Автоматически: личные аккаунты»."
+  },
+  {
+   "id": "CPY-16",
+   "severity": "P3",
+   "title": "Native notifications use macOS wording on every platform and a second name for Restart to update",
+   "evidence": [
+    "src-tauri/src/residency.rs:120-131",
+    "src-tauri/src/residency.rs:242-254",
+    "src-tauri/src/residency.rs:226-236"
+   ],
+   "current": "Restart to finish updating / Fabric Switchboard {version} is ready. Restart from the menu-bar icon, or it starts by itself at a quiet moment. / Allow it in System Settings → General → Login Items.",
+   "proposal": "Pass the platform in: \"its icon in the notification area\" on Windows and Linux (as the window already does), and a per-platform login items path (Windows: Settings → Apps → Startup). Title \"Restart to update\" to match the tray item."
+  },
+  {
+   "id": "CPY-17",
+   "severity": "P3",
+   "title": "Stale and jargon strings left in the window vocabulary",
+   "evidence": [
+    "src/adapter.ts:332",
+    "crates/switchboard-runtime/src/launch.rs:675",
+    "crates/switchboard-runtime/src/launch.rs:1608",
+    "crates/switchboard-runtime/src/launch.rs:2275",
+    "src/main.ts:279",
+    "src/locales/ru.ts:332",
+    "src/adapter.ts:331"
+   ],
+   "current": "Terminal launch is currently supported on macOS and Windows only. (Linux is supported; the runtime now says so) / Choose an existing project directory. (\"Project directory\" is retired in strings.md:69) / Loading your workbench",
+   "proposal": "Delete the dead macOS-and-Windows sentence from safeErrors; runtime \"Choose an existing folder.\"; \"Loading Switchboard\" (the Russian already says «Загрузка Switchboard»)."
+  },
+  {
+   "id": "CPY-18",
+   "severity": "P3",
+   "title": "Russian calques and transliterations that read as machine translation",
+   "evidence": [
+    "src/locales/ru.ts:752",
+    "src/locales/ru.ts:753",
+    "src/locales/ru.ts:1044",
+    "src/locales/ru.ts:1045",
+    "src/locales/ru.ts:1224",
+    "src/locales/ru.ts:991",
+    "src/locales/ru.ts:992"
+   ],
+   "current": "ворктри / Этот аккаунт относится к другой организации, чем группа. / ...или укажите любой id. / ...введённые вручную id по-прежнему работают.",
+   "proposal": "рабочие копии (git worktree) on first use, then «рабочие копии»; «Этот аккаунт относится к другой организации, не к организации группы.»; «идентификатор» instead of id in running text."
+  }
+ ],
+ "counts": {
+  "em_dash_strings": 19,
+  "ru_missing_keys": 0,
+  "empty_cli_help": 0
+ },
+ "notes": [
+  "No English string shown without t() was found in the window: every literal goes through t(), plural() or the adapter's verbatim/mapped sets; CLI and MCP are English-only by design.",
+  "Window strings carry no em dash (check-locale enforces it); the en dashes in src/main.ts:1585-1651 are empty-cell placeholders, not dashes between words."
+ ]
+}

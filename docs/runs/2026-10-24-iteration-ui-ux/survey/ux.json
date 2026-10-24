@@ -1,0 +1,439 @@
+{
+ "area": "ux",
+ "read": [
+  "docs/ux/scenarios.md",
+  "docs/ux/flows.md",
+  "docs/ux/screens.md",
+  "docs/ux/foundation.md",
+  "src/main.ts",
+  "src/i18n.ts",
+  "src/read-deadline.ts",
+  "index.html"
+ ],
+ "findings": [
+  {
+   "id": "UX-01",
+   "severity": "P2",
+   "title": "On an empty install two '+ Add account' menus share one key and open together",
+   "evidence": [
+    "src/main.ts:259",
+    "src/main.ts:1122",
+    "src/main.ts:980",
+    "src/main.ts:984",
+    "src/main.ts:998"
+   ],
+   "scenario": "SCN-001",
+   "user_impact": "On first run, pressing the empty state's '+ Add account' opens both the header menu and the empty-state menu, and focus jumps to the header one.",
+   "proposal": "Render one add menu on the empty Accounts page (drop the header one or give the empty-state menu its own menu key and data-focus)."
+  },
+  {
+   "id": "UX-02",
+   "severity": "P2",
+   "title": "Statistics read failure says 'Refresh to retry' but the header Refresh never re-reads statistics",
+   "evidence": [
+    "src/main.ts:1637",
+    "src/main.ts:1629",
+    "src/main.ts:166",
+    "src/main.ts:182",
+    "src/main.ts:240"
+   ],
+   "scenario": "SCN-067",
+   "user_impact": "After one failed read the Statistics page stays on the error until the person changes the range or leaves the page and returns.",
+   "proposal": "In reload(), clear statsError and call loadStats() when page is 'stats', or put a Retry button beside the error."
+  },
+  {
+   "id": "UX-03",
+   "severity": "P2",
+   "title": "Codex-in-group-folders section is read once per window and never again",
+   "evidence": [
+    "src/main.ts:303",
+    "src/main.ts:307",
+    "src/main.ts:313",
+    "src/main.ts:314",
+    "src/main.ts:319",
+    "src/main.ts:320",
+    "src/main.ts:166"
+   ],
+   "scenario": "SCN-066",
+   "user_impact": "A transient read error leaves the section with no button until the app is quit, and after moving a Codex account into a group it keeps saying no group has one.",
+   "proposal": "Reset codexRouteState and codexRouteError in reload() and whenever the snapshot's projects or accounts change, and offer Retry next to the error."
+  },
+  {
+   "id": "UX-04",
+   "severity": "P2",
+   "title": "A failed or timed-out current-CLI read shows 'Reading…' forever with no Retry",
+   "evidence": [
+    "src/main.ts:141",
+    "src/main.ts:142",
+    "src/main.ts:1462",
+    "src/main.ts:1464",
+    "src/read-deadline.ts:2",
+    "src/adapter.ts:18"
+   ],
+   "scenario": "SCN-024",
+   "user_impact": "When current_accounts rejects (including the 12 s deadline), 'In use now' never says the identity is unavailable and offers nothing to press.",
+   "proposal": "Keep the rejection as an 'unavailable' state in readContext and render 'Could not read the sign-in' with Retry, as the scenario's identity-unavailable state requires."
+  },
+  {
+   "id": "UX-05",
+   "severity": "P2",
+   "title": "Focus is lost after every dialog opened from a row or settings menu",
+   "evidence": [
+    "src/main.ts:986",
+    "src/main.ts:1883",
+    "src/main.ts:1902",
+    "src/main.ts:1325",
+    "src/main.ts:1331",
+    "src/main.ts:1003"
+   ],
+   "scenario": "SCN-013",
+   "user_impact": "Menu items re-render before the dialog opens, so the dialog records no trigger and closing it (Launch, Move, Rename, Remove, Organization, API key) drops keyboard focus to the page body.",
+   "proposal": "Pass the menu trigger key (menu-{key}) as openDialog's returnFocus from menu items, or record it before render() in the menu item handler."
+  },
+  {
+   "id": "UX-06",
+   "severity": "P2",
+   "title": "An action that succeeds but whose list re-read fails replaces the page with 'Unable to load accounts'",
+   "evidence": [
+    "src/main.ts:205",
+    "src/main.ts:1965",
+    "src/main.ts:1063",
+    "src/main.ts:1099",
+    "src/main.ts:276",
+    "src/main.ts:277"
+   ],
+   "scenario": "SCN-043",
+   "user_impact": "The last known accounts disappear behind an error titled as a load failure right after a successful change, and Organizations shows 'Unable to load accounts' for its own failure.",
+   "proposal": "Keep rendering the last snapshot with the partial-success line above it, and title the error state per page including Organizations."
+  },
+  {
+   "id": "UX-07",
+   "severity": "P2",
+   "title": "Action results appear only at the top of the page, out of view for controls lower down",
+   "evidence": [
+    "src/main.ts:270",
+    "src/main.ts:1822",
+    "src/main.ts:1819",
+    "src/main.ts:1754",
+    "src/main.ts:420",
+    "src/style.css:9",
+    "src/style.css:24"
+   ],
+   "scenario": "SCN-030",
+   "user_impact": "On long pages (About backups, update, login item; Groups' disk map) a sighted person pressing Back up now, Restore or Add sees no confirmation because the notice renders at the page top while focus stays at the button.",
+   "proposal": "Render the notice next to the control that caused it (or as a fixed toast region), keeping the existing aria-live announcement."
+  },
+  {
+   "id": "UX-08",
+   "severity": "P2",
+   "title": "Any backend message outside the allowlist becomes one generic sentence about credential storage",
+   "evidence": [
+    "src/adapter.ts:436",
+    "src/main.ts:206",
+    "src/main.ts:1966"
+   ],
+   "scenario": "SCN-043",
+   "user_impact": "A launch, Codex-route, statistics or folder failure the allowlist does not name reads 'Check your input and native credential storage access', which names neither the cause nor the next step.",
+   "proposal": "Map unknown errors per operation to a sentence naming that operation and its retry, and add a gate that fails when a backend refusal string is not in safeErrors or coreErrors."
+  },
+  {
+   "id": "UX-09",
+   "severity": "P2",
+   "title": "The group dialog promises that repositories agents 'work in' join by themselves; SB-171 removed that",
+   "evidence": [
+    "src/main.ts:547",
+    "docs/ux/scenarios.md:1155"
+   ],
+   "scenario": "SCN-055",
+   "user_impact": "People expect a repository to attach to a group after an agent works in it, and it never does.",
+   "proposal": "Reword the Folders help to what SCN-055 now says: worktrees and clones of the group's repositories join by themselves; other repositories are added with Add folder or Repositories on disk."
+  },
+  {
+   "id": "UX-10",
+   "severity": "P2",
+   "title": "The UX truth still describes the pre-groups screens and removed controls",
+   "evidence": [
+    "docs/ux/scenarios.md:710",
+    "docs/ux/scenarios.md:734",
+    "docs/ux/scenarios.md:881",
+    "docs/ux/scenarios.md:1317",
+    "docs/ux/scenarios.md:1337",
+    "docs/ux/scenarios.md:1358",
+    "docs/ux/scenarios.md:1255",
+    "docs/ux/screens.md:80",
+    "src/main.ts:49",
+    "src/main.ts:260",
+    "src/main.ts:362",
+    "src/main.ts:509",
+    "src/main.ts:767",
+    "src/main.ts:2190"
+   ],
+   "scenario": "SCN-034",
+   "user_impact": "Scenarios name '+ New project', 'Delete project?', '+2 worktrees and clones', 'Not in a project', 'Project keys', 'Agents -> OpenRouter key' and a provider filter, none of which the window shows, so audits and tests against them cannot pass or fail honestly.",
+   "proposal": "Update SCN-025, 034, 035, 042, 045, 059, 063, 064, 065 and SCR-01 to the shipped Groups and Tokens wording in the same change set, and run /ux-lint."
+  },
+  {
+   "id": "UX-11",
+   "severity": "P2",
+   "title": "'Project' means three different things in one window",
+   "evidence": [
+    "src/main.ts:296",
+    "src/main.ts:560",
+    "src/main.ts:445",
+    "src/main.ts:434",
+    "src/main.ts:1120",
+    "src/main.ts:1827",
+    "src/main.ts:1661"
+   ],
+   "scenario": null,
+   "user_impact": "A group's repository is a 'project', a folder rule is a 'project rule', and restore and backup text still calls groups 'projects', so a first-time user cannot tell what a project is.",
+   "proposal": "Fix one glossary in docs/brand/terminology.md (group, repository, folder rule) and align the strings, including the rules strip and backup/restore counts."
+  },
+  {
+   "id": "UX-12",
+   "severity": "P2",
+   "title": "Pointers to the OpenRouter key still send people to the Agents screen",
+   "evidence": [
+    "src/main.ts:926",
+    "src/main.ts:807",
+    "src/main.ts:761"
+   ],
+   "scenario": "SCN-046",
+   "user_impact": "With no key saved, the agent launch dialog says to save one 'on the Agents screen', and the Tokens panel says to launch from 'Set up button in Installed, above', which is on another page.",
+   "proposal": "Point both to Tokens (and to Agents -> Installed for launching) and give the launch dialog an 'Open Tokens' action."
+  },
+  {
+   "id": "UX-13",
+   "severity": "P2",
+   "title": "Fallback chains drive automatic hand-over but the window cannot show or set them",
+   "evidence": [
+    "src/main.ts:632",
+    "src/main.ts:649",
+    "docs/ux/scenarios.md:816",
+    "docs/ux/scenarios.md:836"
+   ],
+   "scenario": "SCN-039",
+   "user_impact": "The Agents page tells people that enabled agents take over work 'in fallback chains', yet with no chain set nothing is ever handed over and nothing in the window says so.",
+   "proposal": "Show the effective machine chain on Agents (or 'No chain set: work is not handed over automatically') with the switchboard chain command to copy."
+  },
+  {
+   "id": "UX-14",
+   "severity": "P3",
+   "title": "'Review rules' lands at the top of Groups; rules are the fourth section",
+   "evidence": [
+    "src/main.ts:296",
+    "src/main.ts:300",
+    "src/main.ts:560"
+   ],
+   "scenario": "SCN-025",
+   "user_impact": "From the Accounts strip the person arrives at the groups list and must scroll past the Codex switch and the disk map to find the rules.",
+   "proposal": "Make 'Review rules' focus the rules heading (rules-heading) after navigating."
+  },
+  {
+   "id": "UX-15",
+   "severity": "P3",
+   "title": "Kimi Code section always sits on Accounts, with its own duplicate Refresh",
+   "evidence": [
+    "src/main.ts:1122",
+    "src/main.ts:1161",
+    "src/main.ts:1192",
+    "src/main.ts:1199",
+    "src/main.ts:258"
+   ],
+   "scenario": "SCN-047",
+   "user_impact": "A first-time Claude or Codex user sees 'Kimi Code is not installed' under the empty state, and the page carries two Refresh buttons with overlapping meaning.",
+   "proposal": "Collapse the section to one line when kimi is not installed and no Kimi account exists, and drop its Refresh in favour of the header one."
+  },
+  {
+   "id": "UX-16",
+   "severity": "P3",
+   "title": "Automatic switching bar adds noise before rotation is possible",
+   "evidence": [
+    "src/main.ts:1115",
+    "src/main.ts:1475",
+    "src/main.ts:1481",
+    "src/main.ts:1490",
+    "src/ui-logic.ts:370"
+   ],
+   "scenario": "SCN-022",
+   "user_impact": "With zero or one account the bar shows 'off', a gear menu offering 'New policy…' for any pool, and when the monitor is unavailable two sentences say the same thing.",
+   "proposal": "Hide the bar until two switchable accounts exist (say why in one line) and show a single monitor-unavailable sentence."
+  },
+  {
+   "id": "UX-17",
+   "severity": "P3",
+   "title": "Pool is a free-text field, so a typo creates a new pool silently",
+   "evidence": [
+    "src/main.ts:1422",
+    "src/main.ts:2215"
+   ],
+   "scenario": "SCN-002",
+   "user_impact": "An API key added to 'Default' or a policy saved for 'wrok' lands in a pool nothing else uses, with no warning.",
+   "proposal": "Offer existing pools in a select with a separate 'New pool…' choice in the add and policy dialogs."
+  },
+  {
+   "id": "UX-18",
+   "severity": "P3",
+   "title": "Empty-state copy promises 'one click above' even when no CLI is signed in",
+   "evidence": [
+    "src/main.ts:1120",
+    "src/main.ts:1460",
+    "src/main.ts:1462"
+   ],
+   "scenario": "SCN-001",
+   "user_impact": "When both CLIs read 'Not signed in' there is no Add to Switchboard button above, so the first instruction points at nothing.",
+   "proposal": "Choose the sentence from currentAccounts: offer Add to Switchboard only when a CLI identity is unsaved, otherwise lead with Sign in."
+  },
+  {
+   "id": "UX-19",
+   "severity": "P3",
+   "title": "Copy buttons confirm only through the screen-reader live region",
+   "evidence": [
+    "src/main.ts:611",
+    "src/main.ts:702"
+   ],
+   "scenario": "SCN-050",
+   "user_impact": "Sighted people get no sign that the setup prompt or a command was copied.",
+   "proposal": "Change the button text to 'Copied' for two seconds alongside the announcement."
+  },
+  {
+   "id": "UX-20",
+   "severity": "P3",
+   "title": "Group name tooltips add extra tab stops and cannot be dismissed with Escape",
+   "evidence": [
+    "src/main.ts:429",
+    "src/main.ts:431",
+    "src/main.ts:2016",
+    "src/main.ts:408",
+    "src/style.css:408"
+   ],
+   "scenario": "SCN-068",
+   "user_impact": "Every group name, including inside move-dialog radio labels and names without a tooltip, is a separate tab stop, and the tooltip shown on focus stays until focus moves (WCAG 1.4.13).",
+   "proposal": "Make the name focusable only when it has a tooltip, keep it out of radio labels' tab order, and close the tooltip on Escape."
+  },
+  {
+   "id": "UX-21",
+   "severity": "P3",
+   "title": "Cancelling the PassionCode.ai connection reads as a red error",
+   "evidence": [
+    "src/main.ts:2090",
+    "src/main.ts:2078"
+   ],
+   "scenario": "SCN-071",
+   "user_impact": "A person who presses Cancel sees an error-styled notice, and a Cancel that itself fails is silently ignored.",
+   "proposal": "Treat the cancelled outcome as a neutral notice and await the cancel call to report its failure."
+  },
+  {
+   "id": "UX-22",
+   "severity": "P3",
+   "title": "Restore runs on one press and can bring back accounts the person removed",
+   "evidence": [
+    "src/main.ts:1819",
+    "src/main.ts:1121",
+    "docs/ux/scenarios.md:631"
+   ],
+   "scenario": "SCN-030",
+   "user_impact": "A stray press on Restore in About re-adds removed accounts and groups with no preview of what returns.",
+   "proposal": "Confirm restore in a dialog that names the backup date and the counts it brings back."
+  },
+  {
+   "id": "UX-23",
+   "severity": "P3",
+   "title": "New group dialog pre-fills the last folder picked anywhere",
+   "evidence": [
+    "src/main.ts:519",
+    "src/main.ts:122"
+   ],
+   "scenario": "SCN-034",
+   "user_impact": "A folder chosen for an unrelated launch becomes the new group's folder unless the person notices and removes it.",
+   "proposal": "Start a new group with no folder, or label the pre-filled one as a suggestion."
+  },
+  {
+   "id": "UX-24",
+   "severity": "P3",
+   "title": "Any running action disables every button, including navigation",
+   "evidence": [
+    "src/main.ts:158",
+    "src/main.ts:198",
+    "docs/ux/scenarios.md:592"
+   ],
+   "scenario": "SCN-013",
+   "user_impact": "During a Switch that waits up to 9 s for Claude Code's lock, or a restore, the person cannot even change page.",
+   "proposal": "Disable only the controls of the object being changed and keep navigation and Refresh usable."
+  },
+  {
+   "id": "UX-25",
+   "severity": "P3",
+   "title": "Linux AppImage branch of 'Connect an agent' has no scenario",
+   "evidence": [
+    "src/main.ts:713",
+    "docs/ux/scenarios.md:555"
+   ],
+   "scenario": "SCN-026",
+   "user_impact": "The AppImage message and its missing link button are not checked against any expected result.",
+   "proposal": "Add the AppImage alt path to SCN-026 with its expected text and controls."
+  },
+  {
+   "id": "UX-26",
+   "severity": "P3",
+   "title": "Activity shows unmapped journal codes raw",
+   "evidence": [
+    "src/ui-logic.ts:107",
+    "src/ui-logic.ts:143"
+   ],
+   "scenario": "SCN-011",
+   "user_impact": "Newer actions or details appear as code words with spaces, untranslated in Russian.",
+   "proposal": "Add the missing core codes to eventAction/eventDetail and make the locale gate fail on an unmapped journal code."
+  },
+  {
+   "id": "UX-27",
+   "severity": "P3",
+   "title": "The browser demo cannot show a first run",
+   "evidence": [
+    "src/demo.ts:63",
+    "src/adapter.ts:15"
+   ],
+   "scenario": "SCN-001",
+   "user_impact": "The empty state, restore offer and first-run tour are reviewed only in the native app, because the demo always starts with fixture accounts.",
+   "proposal": "Add a demo parameter (for example empty=1) that starts with no accounts and no stored tour or terms flags."
+  },
+  {
+   "id": "UX-28",
+   "severity": "P3",
+   "title": "Kimi 'Sign in again' from a row asks the person to refresh by hand",
+   "evidence": [
+    "src/main.ts:1223",
+    "src/main.ts:1227",
+    "docs/ux/scenarios.md:990"
+   ],
+   "scenario": "SCN-047",
+   "user_impact": "Unlike the Claude and Codex banner and the Kimi add dialog, a re-sign-in never completes on screen until Refresh is pressed.",
+   "proposal": "Reuse the add dialog's status poll for a row re-sign-in and update the row when Terminal reports success."
+  },
+  {
+   "id": "UX-29",
+   "severity": "P3",
+   "title": "Removing a selected account is a disabled button with no way out in the dialog",
+   "evidence": [
+    "src/main.ts:2182",
+    "src/main.ts:2183"
+   ],
+   "scenario": "SCN-010",
+   "user_impact": "The person must cancel, find another account to select or open Edit, then come back.",
+   "proposal": "Offer 'Disable and remove' or a Select-another action inside the dialog."
+  },
+  {
+   "id": "UX-30",
+   "severity": "P3",
+   "title": "Tour step 5 outlines nothing when the setup prompt is unavailable",
+   "evidence": [
+    "src/main.ts:50",
+    "src/main.ts:712",
+    "src/main.ts:714"
+   ],
+   "scenario": "SCN-035",
+   "user_impact": "When agent setup is still reading or failed, the last tour step points at a control that is not on the page.",
+   "proposal": "Fall back to outlining the Connect an agent panel when copy-onboard is absent."
+  }
+ ]
+}
