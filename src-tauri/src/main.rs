@@ -1000,10 +1000,14 @@ fn main() {
             if !started {
                 // Keep trying in the background as well: renewals, rotation and backups must
                 // resume once the store is free even while the window stays hidden.
+                // SB-181 seam review: after an update restart a `switchboard` command that
+                // waited out the drain can hold the store offline for a moment; the first 15
+                // tries come a second apart, so the new copy owns it as soon as it is free.
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    loop {
-                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    for attempt in 0u32.. {
+                        let wait = if attempt < 15 { 1 } else { 30 };
+                        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                         if handle.state::<Slot>().runtime().await.is_ok() {
                             break;
                         }

@@ -44,7 +44,7 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 `switchboard` commands and agents' tools answering while Switchboard updates itself, and a
 sign-in renewal no longer holds your changes; 0.6.74 and 0.6.75 start using Switchboard on two
 computers (an account used on another one, settings that move without a password); 0.6.65 and
-0.6.66 add organizations, linked to PassionCode.ai. Release notes for each version are in
+0.6.66 tie groups to organizations and link them to PassionCode.ai. Release notes for each version are in
 [CHANGELOG.md](CHANGELOG.md).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,

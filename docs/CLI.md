@@ -58,7 +58,7 @@ PassionCode.ai. Without a connection nothing here runs.
 
 `--secret-stdin` is mandatory for add; a secret value is never accepted as an argument. Redirect from a private credential file or a trusted secret manager. Do not put tokens in shell history. Provider/kind are explicit; supported kind spellings are `api-key`, `setup-token` and `oauth`. OAuth input is provider credential JSON. UUID identifies an account; labels are display text. Removal has the same selected-account/active-home guards as the GUI.
 
-Without a running owner, metadata operations acquire the Store’s exclusive lock and release it after the command. With GUI or `serve` running, they use the owner’s authenticated loopback control server. Both paths run core validation. The CLI must not convert an authentication failure into a local-write fallback.
+Without a running owner, metadata operations acquire the Store’s exclusive lock and release it after the command. While another process holds that lock (an owner draining or starting during an update restart, or another command), a command asks again every 200 ms, the running owner first, for up to 8 s (SB-181); “Another Switchboard instance owns this account storage” after that means the lock is still held. With GUI or `serve` running, they use the owner’s authenticated loopback control server. Both paths run core validation. The CLI must not convert an authentication failure into a local-write fallback.
 
 ### Moving to another machine (SB-176)
 

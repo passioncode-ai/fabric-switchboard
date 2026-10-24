@@ -496,7 +496,8 @@ pub(crate) async fn check(
 ) -> Result<Usage, String> {
     // SB-179: the owner transaction is held for the checks and the store, not for the grant.
     let refreshed = |force: bool| async move {
-        crate::refresh::ensure_fresh_with(store, native, refresh, id, force, lock).await
+        crate::refresh::ensure_fresh_with(store, native, refresh, id, force, lock, "usage_renewal")
+            .await
     };
     // A dead lineage leaves the due queue for the long backoff; otherwise it would sort
     // first on every tick and starve every other account's check and renewal.
@@ -578,6 +579,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
             &id,
             false,
             Some(&runtime.mutations),
+            "renewal",
         )
         .await;
         if outcome == crate::refresh::Outcome::Refreshed {
