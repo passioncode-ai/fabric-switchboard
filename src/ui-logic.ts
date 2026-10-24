@@ -93,7 +93,7 @@ export function eventAction(action: string): string {
     case 'usage': return t('Usage check');
     case 'request': return t('Managed request');
     case 'proxy': return t('Proxy');
-    case 'project_rule': return t('Project rule');
+    case 'project_rule': return t('Folder rule');
     case 'project': return t('Group');
     case 'fallback_chain': return t('Fallback chain');
     case 'agent_key': return t('Agent key');
@@ -104,7 +104,8 @@ export function eventAction(action: string): string {
     case 'rotation': return t('Automatic switching');
     case 'launch': return t('Launch');
     case 'login': return t('Sign-in');
-    default: return action.replaceAll('.', ' · ').replaceAll('_', ' ');
+    // UX-26: a word this window does not know yet is framed in the interface language, never shown bare.
+    default: return t('Other event ({code})', { code: action.replaceAll('.', ' · ').replaceAll('_', ' ') });
   }
 }
 export function eventDetail(detail: string): string {
@@ -379,6 +380,8 @@ export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[],
 /** Backend sign-in outcomes the banner acts on (runtime lib.rs finish_login, cancel_login); adapter.ts shows both verbatim. */
 export const LOGIN_FORGOTTEN = 'Sign-in not found. Start again.';
 export const LOGIN_SAVED_CLEANUP = 'Account saved; isolated login cleanup needs attention.';
+/** What adapter.ts shows for LOGIN_SAVED_CLEANUP (CPY-05): the effect, then what happens next. */
+export const LOGIN_SAVED_CLEANUP_SHOWN = 'The account was saved. A temporary sign-in folder was left behind; Switchboard removes it before the next sign-in.';
 export type LoginOutcome = 'saved_with_cleanup' | 'forgotten' | 'retry';
 /**
  * What a failed sign-in step means, read from the already-sanitized error text.
@@ -387,7 +390,7 @@ export type LoginOutcome = 'saved_with_cleanup' | 'forgotten' | 'retry';
  * (it restarted), so nothing can finish or cancel it. retry: anything else keeps the banner.
  */
 export function loginOutcome(errorText: string): LoginOutcome {
-  if (errorText === LOGIN_SAVED_CLEANUP) return 'saved_with_cleanup';
+  if (errorText === LOGIN_SAVED_CLEANUP || errorText === LOGIN_SAVED_CLEANUP_SHOWN) return 'saved_with_cleanup';
   if (errorText === LOGIN_FORGOTTEN) return 'forgotten';
   return 'retry';
 }
@@ -430,10 +433,12 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
  * The notice after an official sign-in is saved (SB-62). An identity already saved was signed in
  * again in place — same account, label and pool — so it is never announced as added.
  */
-export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string): string {
+export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
+  // D-1: the group's name or Default, never a pool id alone.
+  const group = poolName(account.pool, projects);
   const head = account.signed_in_again
-    ? t('{label} is signed in again in {provider} · {pool}.', { label: account.label, provider: providerLabel, pool: account.pool })
-    : t('{label} added to {provider} · {pool}.', { label: account.label, provider: providerLabel, pool: account.pool });
+    ? t('{label} is signed in again in {provider} · {group}.', { label: account.label, provider: providerLabel, group })
+    : t('{label} added to {provider} · {group}.', { label: account.label, provider: providerLabel, group });
   return account.login_cleanup === 'pending'
     ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
@@ -612,8 +617,8 @@ export function agentSetupFacts(setup: Pick<AgentSetup, 'connected' | 'proved'>)
 export function sessionStateLabel(state: SessionInfo['state']): string {
   return state === 'running' ? t('Running') : state === 'starting' ? t('Starting') : state === 'ended' ? t('Ended') : t('State unknown');
 }
-export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'pool'>): string {
-  const mode = session.mode === 'managed' ? t('Managed · follows the {pool} pool', { pool: session.pool }) : t('Isolated');
+export function sessionHow(session: Pick<SessionInfo, 'mode' | 'in_place' | 'pool'>, projects: { pool: string; name: string }[] = []): string {
+  const mode = session.mode === 'managed' ? t('Managed · follows {group}', { group: poolName(session.pool, projects) }) : t('Isolated');
   return session.in_place ? t('{mode} · in an embedded terminal', { mode }) : t('{mode} · in Terminal', { mode });
 }
 /** SB-98: what a limit row says — a hidden limit (refused while the usage figures showed room) first. */
@@ -700,6 +705,10 @@ export function statTrouble(c: StatCounts): number | null {
   return c.requests ? Math.round(((c.limited + c.failed) * 100) / c.requests) : null;
 }
 /** The trouble share as text: a few failures among many requests read as under 1%, never 0%. */
+/** VIS-23: limits and errors are an alert from 1 % of requests, measured exactly (statTrouble rounds). */
+export function statAlert(c: StatCounts): boolean {
+  return c.requests > 0 && (c.limited + c.failed) * 100 >= c.requests;
+}
 export function statTroubleText(c: StatCounts): string {
   const share = statTrouble(c);
   if (share === null) return '–';
@@ -804,4 +813,61 @@ export function sortStatRows(rows: StatRow[], sort: StatSort | null, compact: bo
 export function nextStatSort(current: StatSort | null, column: number, isCount: boolean): StatSort {
   if (current && current.column === column) return { column, descending: !current.descending };
   return { column, descending: isCount };
+}
+
+/**
+ * VIS-03: the pool field's `pattern`. WebKit compiles `pattern` with the `v` flag, where a bare `-`
+ * inside a class is a syntax error and the whole check is silently dropped; the hyphen is escaped.
+ */
+export const POOL_PATTERN = '[a-z0-9_\\-]+';
+/** D-1: a pool as a person reads it: its group's name, "Default", or the id of a pool with no group. */
+export function poolName(pool: string, projects: { pool: string; name: string }[] = []): string {
+  if (pool === 'default') return t('Default');
+  return projects.find((p) => p.pool === pool)?.name ?? pool;
+}
+export interface PoolChoice { pool: string; name: string; group: boolean }
+/**
+ * UX-17: the pools a group field offers: Default first, then each group by name, then any other pool
+ * an account already uses (and `current`), so a typo never makes a pool nothing else uses.
+ */
+export function poolChoices(accounts: Pick<Account, 'pool'>[], projects: { pool: string; name: string }[], current?: string): PoolChoice[] {
+  const groups = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: p.name, group: true }));
+  const known = new Set(['default', ...groups.map((g) => g.pool)]);
+  const others = [...new Set([...accounts.map((a) => a.pool), ...(current ? [current] : [])])].filter((pool) => !known.has(pool)).sort().map((pool) => ({ pool, name: pool, group: false }));
+  return [{ pool: 'default', name: t('Default'), group: false }, ...groups, ...others];
+}
+export interface Rect { left: number; top: number; width: number; height: number }
+/**
+ * VIS-12: where the tour card goes: below its target, else above, else beside it; always inside the
+ * window and never over the target. A step without a target keeps the bottom-right corner.
+ */
+export function tourPlacement(target: Rect | null, card: { width: number; height: number }, viewport: { width: number; height: number }, gap = 12): { left: number; top: number; side: 'below' | 'above' | 'left' | 'right' | 'corner' } {
+  const clampX = (x: number) => Math.max(gap, Math.min(x, viewport.width - card.width - gap));
+  const clampY = (y: number) => Math.max(gap, Math.min(y, viewport.height - card.height - gap));
+  const corner = { left: clampX(viewport.width - card.width - 24), top: clampY(viewport.height - card.height - 24), side: 'corner' as const };
+  if (!target) return corner;
+  const below = target.top + target.height + gap;
+  if (below + card.height <= viewport.height - gap) return { left: clampX(target.left), top: below, side: 'below' };
+  const above = target.top - gap - card.height;
+  if (above >= gap) return { left: clampX(target.left), top: above, side: 'above' };
+  const right = target.left + target.width + gap;
+  if (right + card.width <= viewport.width - gap) return { left: right, top: clampY(target.top), side: 'right' };
+  const left = target.left - gap - card.width;
+  if (left >= gap) return { left, top: clampY(target.top), side: 'left' };
+  return corner;
+}
+/**
+ * UX-18: what the empty Accounts page leads with. `add_current` only while a CLI is signed in to an
+ * account (its In use now card then offers Add to Switchboard); `sign_in` when neither is.
+ */
+export function firstRunHint(current: { claude?: { status: string } | null; codex?: { status: string } | null } | null): 'reading' | 'add_current' | 'sign_in' {
+  if (!current) return 'reading';
+  return current.claude?.status === 'available' || current.codex?.status === 'available' ? 'add_current' : 'sign_in';
+}
+/**
+ * UX-24: controls that change nothing stay usable while an action runs: navigation, Refresh, view
+ * toggles, sorting, the tour, and retries of a read. Every other control waits for the action.
+ */
+export function usableWhileBusy(key: string): boolean {
+  return /^(nav-|refresh$|dismiss-notice$|countdown-toggle$|org-filter-|quota-|chart-|stats-|stat-[a-z]+-sort-|folders-|disk-map-toggle$|review-rules$|open-api-keys$|tour-|[a-z-]+-retry$)/.test(key);
 }

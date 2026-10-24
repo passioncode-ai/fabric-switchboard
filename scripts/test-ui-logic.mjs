@@ -97,8 +97,9 @@ check(() => {
   assert.equal(logic.sessionStateLabel('starting'), 'Starting');
   assert.equal(logic.sessionStateLabel('ended'), 'Ended');
   assert.equal(logic.sessionStateLabel('unknown'), 'State unknown');
-  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows the work pool · in Terminal');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'work' }), 'Managed · follows work · in Terminal');
   assert.equal(logic.sessionHow({ mode: 'isolated', in_place: true, pool: 'default' }), 'Isolated · in an embedded terminal');
+  assert.equal(logic.sessionHow({ mode: 'managed', in_place: false, pool: 'alpha' }, [{ pool: 'alpha', name: 'Alpha Web' }]), 'Managed · follows Alpha Web · in Terminal', 'a group by its name (D-1)');
 });
 // SB-93: the Agents panel's setup facts — registration per agent, then whether an agent has called.
 check(() => {
@@ -255,7 +256,8 @@ check(() => {
 // and main.ts must decide through loginOutcome rather than its own string comparisons.
 check(() => {
   const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
-  for (const message of [logic.LOGIN_FORGOTTEN, logic.LOGIN_SAVED_CLEANUP]) assert(adapter.includes(`  '${message}',`), `verbatim: ${message}`);
+  assert(adapter.includes(`  '${logic.LOGIN_FORGOTTEN}',`), `verbatim: ${logic.LOGIN_FORGOTTEN}`);
+  assert(adapter.includes(`  '${logic.LOGIN_SAVED_CLEANUP}': '${logic.LOGIN_SAVED_CLEANUP_SHOWN}',`), 'the cleanup sentence is mapped to the one loginOutcome reads (CPY-05)');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert(!main.includes(logic.LOGIN_FORGOTTEN) && !main.includes(logic.LOGIN_SAVED_CLEANUP), 'main.ts classifies sign-in errors through loginOutcome');
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
@@ -409,6 +411,8 @@ check(() => {
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
 check(() => {
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code · work.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'default' }, 'Claude Code'), 'Work A added to Claude Code · Default.');
+  assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code · Alpha Web.');
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code · work.');
   assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code · work\. Switchboard could not remove its temporary sign-in folder yet/);
 });
@@ -464,7 +468,7 @@ check(() => {
   assert.equal(logic.eventAction('account_added'), 'Account added');
   assert.equal(logic.eventDetail('rate_limited'), 'rate limited');
   assert.equal(logic.eventDetail('4xx'), 'HTTP 4xx');
-  assert.equal(logic.eventAction('future_action'), 'future action', 'an unknown action shows as recorded');
+  assert.equal(logic.eventAction('future_action'), 'Other event (future action)', 'an unknown action shows as recorded, framed (UX-26)');
   assert.equal(logic.eventDetail('some_new_outcome'), 'some new outcome');
   i18n.setLocale('ru');
   assert.equal(logic.eventAction('usage'), 'Проверка использования');
@@ -479,9 +483,10 @@ check(() => {
   assert.ok(words.length > 40, 'event_valid vocabulary found');
   for (const word of words) {
     if (/^[2-5]xx$/.test(word)) continue;
-    const named = logic.eventAction(word) !== word.replaceAll('_', ' ') || logic.eventDetail(word) !== word.replaceAll('_', ' ');
+    const named = logic.eventAction(word) !== i18n.t('Other event ({code})', { code: word.replaceAll('_', ' ') }) || logic.eventDetail(word) !== word.replaceAll('_', ' ');
     assert.ok(named, `journal word without a label: ${word}`);
   }
+  assert.match(logic.eventAction('brand_new'), /brand new/, 'an unknown word is framed, not dropped (UX-26)');
   i18n.setLocale('en');
 });
 
@@ -537,7 +542,7 @@ check(() => {
 // first-account state; About draws the panel; the banner's Dismiss remembers the choice.
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /function renderAccounts\(main: HTMLElement\) \{\n  termsBanner\(main\);/, 'renderAccounts starts with the banner');
+  assert.match(main, /function renderAccounts\(main: HTMLElement\) \{\n(?:  \/\/[^\n]*\n)?  const status = el\('section', 'status-stack'\);[^\n]*\n  termsBanner\(status\);/, 'renderAccounts starts with the banner, in the status block (VIS-13)');
   assert.match(main, /function renderAbout\(main: HTMLElement\) \{[\s\S]*?main\.append\(section, termsPanel\(\),/, 'About carries the panel');
   assert.match(main, /termsNoticeOn\(page, termsDismissed\) !== 'banner'/, 'the banner follows termsNoticeOn');
   assert.match(main, /dismissTermsNotice\(noticeStore\(\)\); termsDismissed = true;/, 'Dismiss stores the choice');
@@ -713,5 +718,59 @@ check(() => {
   assert.match(logic.passioncodeLine({ connected: true, state: 'provider_sign_in' }).key, /in your browser/);
   assert.deepEqual(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: 5 }).values, { date: 5 });
   assert.match(logic.passioncodeLine({ connected: true, state: 'unreachable', read_at: null }).key, /yet/);
+});
+// VIS-03: the pool pattern compiles under the v flag WebKit applies to `pattern`, and still says what it said.
+check(() => {
+  const exact = new RegExp(`^(?:${logic.POOL_PATTERN})$`, 'v');
+  for (const ok of ['default', 'work', 'a-b_1', 'client-alpha']) assert.ok(exact.test(ok), ok);
+  for (const bad of ['Work', 'a b', '', 'é', 'a/b']) assert.ok(!exact.test(bad), bad);
+});
+// UX-17 (D-1): the group field offers existing pools by name, the default first, and never a pool the person never made.
+check(() => {
+  const accounts = [{ pool: 'work' }, { pool: 'default' }, { pool: 'alpha' }, { pool: 'work' }];
+  const projects = [{ pool: 'alpha', name: 'Alpha Web' }, { pool: 'zeta', name: 'Beta' }];
+  const choices = logic.poolChoices(accounts, projects);
+  assert.deepEqual(choices.map((c) => c.pool), ['default', 'alpha', 'zeta', 'work']);
+  assert.deepEqual(choices.map((c) => c.group), [false, true, true, false]);
+  assert.equal(choices[1].name, 'Alpha Web');
+  assert.deepEqual(logic.poolChoices([], [], 'legacy').map((c) => c.pool), ['default', 'legacy'], 'the current pool stays offered');
+  assert.equal(logic.poolName('alpha', projects), 'Alpha Web');
+  assert.equal(logic.poolName('default', projects), 'Default');
+  assert.equal(logic.poolName('work', projects), 'work');
+});
+// VIS-12: the tour card sits beside its target, never on it, and inside the window.
+check(() => {
+  const viewport = { width: 740, height: 560 }; const card = { width: 320, height: 200 };
+  const overlaps = (a, b) => a.left < b.left + b.width && b.left < a.left + a.width && a.top < b.top + b.height && b.top < a.top + a.height;
+  for (const target of [{ left: 400, top: 40, width: 200, height: 40 }, { left: 30, top: 420, width: 300, height: 60 }, { left: 500, top: 250, width: 200, height: 40 }]) {
+    const at = logic.tourPlacement(target, card, viewport);
+    assert.ok(!overlaps({ ...at, ...card }, target), JSON.stringify({ target, at }));
+    assert.ok(at.left >= 0 && at.top >= 0 && at.left + card.width <= viewport.width && at.top + card.height <= viewport.height, JSON.stringify(at));
+  }
+  assert.equal(logic.tourPlacement(null, card, viewport).side, 'corner', 'a step without a target keeps the corner');
+});
+// UX-18: the first-run sentence points at a button that is on the page.
+check(() => {
+  assert.equal(logic.firstRunHint(null), 'reading');
+  assert.equal(logic.firstRunHint({ claude: { status: 'missing' }, codex: { status: 'missing' } }), 'sign_in');
+  assert.equal(logic.firstRunHint({ claude: { status: 'unavailable' }, codex: { status: 'missing' } }), 'sign_in');
+  assert.equal(logic.firstRunHint({ claude: { status: 'available', identity: { email: 'a@b' } }, codex: { status: 'missing' } }), 'add_current');
+});
+// CPY-05: the window shows the rewritten cleanup sentence, and the banner still reads it as saved.
+check(() => {
+  assert.equal(logic.loginOutcome(logic.LOGIN_SAVED_CLEANUP_SHOWN), 'saved_with_cleanup');
+  assert.notEqual(logic.LOGIN_SAVED_CLEANUP_SHOWN, logic.LOGIN_SAVED_CLEANUP);
+});
+// UX-24: a running action leaves navigation, Refresh and view-only controls usable.
+check(() => {
+  for (const key of ['nav-accounts', 'refresh', 'dismiss-notice', 'countdown-toggle', 'org-filter-all', 'quota-x', 'chart-tokens', 'stats-30', 'stat-groups-sort-1', 'folders-alpha', 'disk-map-toggle', 'review-rules', 'open-api-keys', 'tour-next', 'stats-retry']) assert.ok(logic.usableWhileBusy(key), key);
+  for (const key of ['primary-x', 'menu-x', 'backup-now', 'restore-x', '', 'auto-on', 'menu-add']) assert.ok(!logic.usableWhileBusy(key), key);
+});
+// VIS-23: the limits-and-errors cell is an alert from exactly 1 % of requests.
+check(() => {
+  const c = (requests, limited, failed) => ({ requests, ok: requests - limited - failed, limited, failed, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
+  assert.equal(logic.statAlert(c(1000, 5, 4)), false, '0.9 % is not an alert, although it rounds to 1');
+  assert.equal(logic.statAlert(c(1000, 6, 4)), true);
+  assert.equal(logic.statAlert(c(0, 0, 0)), false);
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
