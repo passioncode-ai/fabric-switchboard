@@ -187,6 +187,27 @@ impl Snapshot {
     /// Whether `account` may serve the group that reserves `pool` (SB-109): its attribution
     /// equals the group's organization, personal included. Always while no organization exists,
     /// and for a pool no group reserves (`default`).
+    /// SB-110: the context a session of `account` in `folder` runs in, in the contract's form
+    /// (`personal`, `org:<id>`; fabric-agent-contract `contexts.md`). The group of the account's
+    /// pool decides, else the group holding the folder, else the account's own organization (a
+    /// folder in no group is a session without a project, CX-26); when a group and the account
+    /// disagree, the more private wins. `personal` while no organization exists.
+    pub fn session_context(&self, account: &Account, folder: Option<&std::path::Path>) -> String {
+        if self.organizations.is_empty() {
+            return "personal".into();
+        }
+        let own = self.attribution(account).organization;
+        let group = self
+            .project_of_pool(&account.pool)
+            .or_else(|| folder.and_then(|f| self.project_for(f)))
+            .map(|p| p.organization.clone());
+        let context = match group {
+            Some(group) if group == own => group,
+            Some(_) => None,
+            None => own,
+        };
+        context.map_or_else(|| "personal".into(), |id| format!("org:{id}"))
+    }
     pub fn context_admits(&self, pool: &str, account: &Account) -> bool {
         if self.organizations.is_empty() {
             return true;
@@ -620,6 +641,56 @@ mod tests {
     const B: &str = "00000000-0000-4000-8000-00000000000b";
     const O1: &str = "00000000-0000-4000-8000-000000000001";
     const O2: &str = "00000000-0000-4000-8000-000000000002";
+
+    /// SB-110 H-1: a session's context, as the design note's rule says.
+    #[test]
+    fn a_sessions_context_follows_its_group_else_its_account_and_the_more_private_wins() {
+        use crate::Project;
+        let group = |pool: &str, folder: &str, organization: Option<&str>| Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![folder.into()],
+            created_at: 1,
+            sources: Vec::new(),
+            organization: organization.map(str::to_owned),
+        };
+        let mut s = Snapshot::default();
+        let mut acme = account(A, Provider::Claude, "dev@acme.example", None);
+        assert_eq!(s.session_context(&acme, None), "personal");
+        s.organizations = vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])];
+        s.projects = vec![
+            group("acme-pool", "/work/acme", Some(O1)),
+            group("own-pool", "/work/own", None),
+            group("beta-pool", "/work/beta", Some(O2)),
+        ];
+        let org1 = format!("org:{O1}");
+        // No group: the account's own organization, also with no folder (CX-26).
+        assert_eq!(s.session_context(&acme, None), org1);
+        assert_eq!(s.session_context(&acme, Some("/elsewhere".as_ref())), org1);
+        // The folder's group agrees.
+        assert_eq!(
+            s.session_context(&acme, Some("/work/acme/app".as_ref())),
+            org1
+        );
+        // The folder's group is personal or another organization's: the more private wins.
+        assert_eq!(
+            s.session_context(&acme, Some("/work/own".as_ref())),
+            "personal"
+        );
+        assert_eq!(
+            s.session_context(&acme, Some("/work/beta".as_ref())),
+            "personal"
+        );
+        // The account's pool belongs to a group: that group decides, wherever the folder is.
+        acme.pool = "acme-pool".into();
+        assert_eq!(s.session_context(&acme, Some("/elsewhere".as_ref())), org1);
+        // A personal account is personal everywhere.
+        let me = account(B, Provider::Claude, "me@example.com", None);
+        assert_eq!(
+            s.session_context(&me, Some("/work/acme".as_ref())),
+            "personal"
+        );
+    }
 
     #[test]
     fn without_organizations_every_account_is_personal_and_unexplained() {

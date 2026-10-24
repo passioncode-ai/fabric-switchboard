@@ -4175,6 +4175,13 @@ async fn execute(
                         // A Hermes hand-over names its model itself (SB-107).
                         .or_else(|| session["label"].as_str().map(str::to_owned));
                     session["label"] = label.into();
+                    // SB-110: an organization's context also by its name, for the CLI and agents.
+                    let context_name = session["context"]
+                        .as_str()
+                        .and_then(|c| c.strip_prefix("org:"))
+                        .and_then(|id| snapshot.organization(id))
+                        .map(|o| o.name.clone());
+                    session["context_name"] = context_name.into();
                     session
                 })
                 .collect();
@@ -4729,6 +4736,45 @@ mod owner_tests {
     use super::*;
     use fixtures::*;
     use switchboard_core::{private_fs, MemoryVault};
+    /// SB-110: the session list carries each session's context and, for an organization's,
+    /// its name.
+    #[tokio::test]
+    async fn the_session_list_names_an_organizations_context() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let acme = runtime.store.add_organization("Acme", &[]).unwrap();
+        for (home, context) in [
+            ("one", format!("org:{}", acme.id)),
+            ("two", "personal".into()),
+        ] {
+            let dir = root.path().join("homes").join(home);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join(launch::SESSION_RECORD),
+                json!({"account_id": home, "provider": "claude", "pool": "default",
+                    "context": context, "mode": "isolated", "working_directory": "/w",
+                    "in_place": false, "launched_at": 1, "continues": null})
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let listed = runtime
+            .execute(Operation::Sessions { all: true })
+            .await
+            .unwrap();
+        let by = |c: &str| {
+            listed["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["account_id"] == c)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(by("one")["context_name"], "Acme");
+        assert_eq!(by("two")["context"], "personal");
+        assert!(by("two")["context_name"].is_null());
+    }
     /// SB-180: `suggest_found` held the owner transaction while every found folder was saved on
     /// its own, each save publishing `accounts.json` and syncing the bindings. One pass's folders
     /// of one group now join in one save; a folder that cannot join is refused alone.

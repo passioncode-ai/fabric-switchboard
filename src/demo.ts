@@ -108,7 +108,8 @@ export function createDemoAdapter(): Adapter {
   return {
     async currentAccounts() { return structuredClone(current); },
     async sessions() { return { sessions: [
-      { account_id: 'demo-claude-work', label: 'Studio', provider: 'claude' as const, pool: 'work', mode: 'managed' as const, working_directory: '/Users/demo/Projects/web-app', in_place: false, launched_at: now() - 2700, started_at: now() - 2690, continues: null, state: 'running' as const },
+      // SB-110: the first organization's context, once the person adds one; personal before.
+      { account_id: 'demo-claude-work', label: 'Studio', provider: 'claude' as const, pool: 'work', mode: 'managed' as const, working_directory: '/Users/demo/Projects/web-app', in_place: false, launched_at: now() - 2700, started_at: now() - 2690, continues: null, state: 'running' as const, context: state.organizations?.[0] ? `org:${state.organizations[0].id}` : 'personal' },
       { account_id: 'demo-codex-team', label: 'Team Codex', provider: 'codex' as const, pool: 'default', mode: 'isolated' as const, working_directory: '/Users/demo/Projects/api', in_place: true, launched_at: now() - 20, started_at: null, continues: null, state: 'starting' as const },
     ] }; },
     async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired], limited: [{ account_id: 'demo-claude-east', until: now() + 5400, source: 'claude_code', kind: 'unknown', resets_at: null, confidence: 'inferred', scope: 'unknown' }, ...(new URLSearchParams(location.search).get('quota-review') === '1' ? [{ account_id: 'demo-claude-summit', until: now() + 10800, source: 'claude_code' as const, kind: 'quota' as const, resets_at: now() + 10800, confidence: 'inferred' as const, scope: 'unknown' as const }] : [])] }; },

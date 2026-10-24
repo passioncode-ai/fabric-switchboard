@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: 0.6.80, a session's context recorded (SB-110 phase 1, SB-111)
+
+- **Done.** `Snapshot::session_context` (core), `context` in `.session.json` and
+  `SWITCHBOARD_CONTEXT` on every Claude Code and Codex launch, `context_name` in
+  `Operation::Sessions`, the organization badge beside the session on Activity (SCN-051) and in
+  `switchboard sessions`. Kimi Code, Hermes and OpenCode sessions carry no context yet.
+- **Checks run.** See the PR; WebKit on `?demo=1` at 740 px, both themes: no badge before an
+  organization exists, the badge beside the name after, no page error.
+- **Next task.** After 2026-10-25 04:13 UTC: the SB-174/SB-163 read (below). Then SB-183 (the
+  shell hook), first settling whether plain `claude` starts in a managed home without a sign-in.
+
 ## 2026-10-24: SB-110 design; contract v0.1.0+2026-10-24 pinned
 
 - **Done.** [session-home-per-context-2026-10-24](research/session-home-per-context-2026-10-24.md):
