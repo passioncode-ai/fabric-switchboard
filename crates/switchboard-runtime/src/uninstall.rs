@@ -358,13 +358,14 @@ mod tests {
         assert!(vault.get(&id).is_ok(), "credential untouched");
     }
 
-    #[cfg(unix)]
     #[test]
     fn uninstall_forgets_the_usage_answer() {
         // Issue #128 round 1: the answer lives in this app's analytics state, which is ours.
         assert!(OWNED.contains(&crate::analytics::STATE_FILE));
     }
 
+    // Unix only: it links the CLI with `std::os::unix::fs::symlink` (round 2, item 3).
+    #[cfg(unix)]
     #[test]
     fn apply_removes_owned_things_and_keeps_the_persons_files() {
         let (temp, root, vault) = setup();

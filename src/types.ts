@@ -135,8 +135,9 @@ export interface Adapter {
   setLoginItem(enabled: boolean): Promise<LoginItem>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<AnalyticsStatus>;
-  /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128). */
-  setAnalytics(enabled: boolean): Promise<AnalyticsStatus>;
+  /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128).
+   * `question` is the switch the question showed when this answers it; absent for About's switch, which always sets it. */
+  setAnalytics(enabled: boolean, question?: boolean): Promise<AnalyticsStatus>;
   /** Automatic updates (SB-55): on by default; unavailable outside the installed app. */
   updateStatus(): Promise<UpdateStatus>;
   setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;

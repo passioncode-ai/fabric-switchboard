@@ -327,5 +327,69 @@
    }
   ],
   "commit": "dd061552fdb205003d55aeb3f7b876ef81875d88"
+ },
+ "round2": {
+  "input": "Fix cycle 2 of iteration 0.6.82 (taken over after the previous session stopped on a usage limit): three BREAKS and two RISKS from the round 1 certification.",
+  "branch": "iter/0.6.82-ui-ux",
+  "base": "56b4676",
+  "done": [
+   {
+    "item": "BREAKS 1: the stale-question guard moved out of set_enabled into Analytics::answer(enabled, shown), used only for the answer to the question (first-run card, About while unanswered), which carries the shared switch the question was drawn with; an on is refused only when the fresh shared value differs from it. About's switch (set_analytics without question) always writes the shared switch. started() now holds the start while the switch is off and unanswered, so About turning it on reports app_installed and app_started. About's notice goes through usageAnswerText.",
+    "test": "about_turns_the_switch_on_when_another_app_turned_it_off_before_any_answer; answering_on_after_another_app_turned_the_switch_off_keeps_it_off (now through answer(true, true)); ui-logic check \"About's notice reports what is now true\"",
+    "pre_fix_failure": "status (enabled, disclosed) was (false, true), expected (true, true) at analytics.rs:1168",
+    "evidence": [
+     "crates/switchboard-runtime/src/analytics.rs:334",
+     "crates/switchboard-runtime/src/analytics.rs:511",
+     "crates/switchboard-runtime/src/lib.rs:1608",
+     "src-tauri/src/main.rs:896",
+     "src/main.ts:118",
+     "src/main.ts:1978"
+    ]
+   },
+   {
+    "item": "BREAKS 2: the 0.6.81 migration (a day without the install flag means the install was reported) runs once at load (State::migrated) and only for a state without disclosed_at; report_start no longer reads active_day; reported_before counts a day only without disclosed_at.",
+    "test": "an_off_then_on_in_one_run_still_reports_the_install_at_the_next_start; an_old_state_with_a_day_but_no_install_flag_is_not_a_new_install still passes",
+    "pre_fix_failure": "names after the restart were [app_active, app_started], expected [app_active, app_installed, app_started]",
+    "evidence": [
+     "crates/switchboard-runtime/src/analytics.rs:180",
+     "crates/switchboard-runtime/src/analytics.rs:185"
+    ]
+   },
+   {
+    "item": "BREAKS 3: #[cfg(unix)] is back directly above apply_removes_owned_things_and_keeps_the_persons_files; uninstall_forgets_the_usage_answer runs everywhere.",
+    "test": "cargo xwin check --locked --tests -p switchboard-runtime --target x86_64-pc-windows-msvc",
+    "pre_fix_failure": "error[E0433]: cannot find `unix` in `os` at uninstall.rs:386",
+    "evidence": [
+     "crates/switchboard-runtime/src/uninstall.rs:370"
+    ]
+   },
+   {
+    "item": "RISK 4: N5's window fixes have regression checks: poolField sync disables and marks the hidden id, loadStats drops an answer for a range left, reload passes readStamp to loadOpenrouter/loadKimi/loadSessions/loadBackups, placeTour scrolls only behind its scroll decision.",
+    "test": "scripts/test-ui-logic.mjs four 'Round 2: N5' checks",
+    "pre_fix_failure": "each failed against 0a2008c: 'a hidden group id is disabled and marked locked', 'an answer for a range the person left is dropped', 'loadOpenrouter takes the Refresh's stamp', 'placeTour scrolls only when asked or needed'",
+    "evidence": [
+     "scripts/test-ui-logic.mjs"
+    ]
+   },
+   {
+    "item": "RISK 5: placeTour remembers the step and selector it placed beside (tourFound) and also scrolls when the target is first found for the step or lies off screen; the toast's beside-tour class follows tourShown().",
+    "test": "scripts/test-ui-logic.mjs 'Round 2: ... the card scrolls to it once' check",
+    "pre_fix_failure": "'scroll when asked, first found or off screen' failed against 56b4676",
+    "evidence": [
+     "src/main.ts:68",
+     "src/main.ts:81",
+     "src/main.ts:348"
+    ]
+   }
+  ],
+  "not_done": [
+   "The Windows test build warns that uninstall.rs test helpers claude_snapshot, bound_folder and no_places are unused there (they serve unix-only tests); warnings, not errors, present before this round.",
+   "Live-provider, real Windows and browser walkthrough of the late Agents tour target were not run in this round."
+  ],
+  "docs": [
+   "docs/ANALYTICS.md 'Nothing before the answer'",
+   "docs/ux/scenarios.md SCN-044, SCN-035 expected result",
+   "CHANGELOG.md 0.6.82 first bullet"
+  ]
  }
 }

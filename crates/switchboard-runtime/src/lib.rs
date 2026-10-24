@@ -1602,11 +1602,17 @@ impl Runtime {
         )
     }
     /// The person's switch, shared by every PassionCode app on this machine, and their answer
-    /// in this app (issue #128): until it, nothing is sent.
-    pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
-        self.analytics()
-            .ok_or_else(|| "Usage analytics are available in the installed app only.".to_string())?
-            .set_enabled(enabled)
+    /// in this app (issue #128): until it, nothing is sent. `question` is the switch the question
+    /// showed when this is its answer (an "on" given after another app changed the switch since
+    /// is not written back); `None` is About's switch, which always sets it.
+    pub fn set_analytics(&self, enabled: bool, question: Option<bool>) -> Result<Value, String> {
+        let client = self.analytics().ok_or_else(|| {
+            "Usage analytics are available in the installed app only.".to_string()
+        })?;
+        match question {
+            Some(shown) => client.answer(enabled, shown),
+            None => client.set_enabled(enabled),
+        }
     }
     /// After an operation: accounts it added or removed, a switch it made; then a send.
     fn report(&self, kind: &Reported) {

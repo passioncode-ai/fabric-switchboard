@@ -886,14 +886,19 @@ fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
     launch
 }
 /// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled, disclosed, sent_before}`;
-/// `set_analytics` is also the person's answer that lets anything be sent (issue #128).
+/// `set_analytics` is also the person's answer that lets anything be sent (issue #128); `question`
+/// carries the switch the question showed, absent for About's switch.
 #[tauri::command]
 async fn analytics_status(slot: State<'_, Slot>) -> Result<Value, String> {
     Ok(slot.runtime().await?.analytics_status())
 }
 #[tauri::command]
-async fn set_analytics(slot: State<'_, Slot>, enabled: bool) -> Result<Value, String> {
-    slot.runtime().await?.set_analytics(enabled)
+async fn set_analytics(
+    slot: State<'_, Slot>,
+    enabled: bool,
+    question: Option<bool>,
+) -> Result<Value, String> {
+    slot.runtime().await?.set_analytics(enabled, question)
 }
 /// Whether Switchboard opens at login (SB-28). Unavailable in a development build and the smoke
 /// check.

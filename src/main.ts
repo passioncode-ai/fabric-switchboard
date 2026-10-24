@@ -64,17 +64,25 @@ function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
   for (const selector of tour()[step].target) { const found = scope.querySelector<HTMLElement>(selector); if (found) return found; }
   return null;
 }
+/** The step and selector the card was last placed beside: a target that appears late (Agents loads after its step shows) is scrolled to once. */
+let tourFound: { step: number; selector: string } | null = null;
 /** VIS-12: the card goes beside its target, never over it, and the target is scrolled into sight first. */
 function placeTour(scroll = false) {
   const card = root.querySelector<HTMLElement>('.tour-card'); if (!card || tourStep === null) return;
-  const target = tourTarget(root, tourStep);
+  const target = tourTarget(root, tourStep); const selector = target ? tour()[tourStep].target.find((s) => target.matches(s)) ?? '' : '';
   const viewport = { width: window.innerWidth, height: window.innerHeight }; const size = { width: card.offsetWidth, height: card.offsetHeight };
   const measure = () => { const r = target?.getBoundingClientRect(); return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null; };
   // Centred first; when the card fits neither above nor below, the target goes to the top so the card fits under it.
-  // Scrolling happens only when the step changes, never on a background render (unit tier G).
-  if (target && scroll) target.scrollIntoView({ block: 'center', inline: 'nearest' });
+  // Scrolling happens when the step changes, when its target first appears and when the target lies off screen;
+  // never otherwise on a background render (unit tier G, round 2).
+  const box = measure();
+  const firstFound = target !== null && (tourFound?.step !== tourStep || tourFound.selector !== selector);
+  const offScreen = box !== null && (box.top + box.height < 0 || box.top > viewport.height);
+  const move = target !== null && (scroll || firstFound || offScreen);
+  if (target && move) target.scrollIntoView({ block: 'center', inline: 'nearest' });
   let at = tourPlacement(measure(), size, viewport);
-  if (target && scroll && at.side === 'corner') { target.scrollIntoView({ block: 'start', inline: 'nearest' }); at = tourPlacement(measure(), size, viewport); }
+  if (target && move && at.side === 'corner') { target.scrollIntoView({ block: 'start', inline: 'nearest' }); at = tourPlacement(measure(), size, viewport); }
+  tourFound = target ? { step: tourStep, selector } : null;
   card.classList.add('is-placed'); card.style.left = `${at.left}px`; card.style.top = `${at.top}px`; card.dataset.side = at.side;
 }
 window.addEventListener('resize', () => placeTour());
@@ -106,16 +114,17 @@ function usageSwitch(focus: string) {
   option.append(box, el('span', '', t('Share anonymous usage counts')));
   return option;
 }
-function answerUsage(focus: string) {
+/** `shown` is the shared switch the question was drawn with: an "on" given after another tool changed it since is not written back (round 2). */
+function answerUsage(focus: string, shown: boolean) {
   const wanted = usageChoice;
   // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
-  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted, analyticsState), focus);
+  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted, shown); }, () => usageAnswerText(wanted, analyticsState), focus);
 }
 function usageQuestionCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
   const title = el('h2', '', t('Share anonymous usage counts?')); title.id = 'usage-question-title';
-  const actions = el('div', 'usage-question-actions');
-  actions.append(usageSwitch('usage-switch'), button(t('Continue'), () => answerUsage('page-title'), 'button primary', 'usage-continue'));
+  const actions = el('div', 'usage-question-actions'); const shown = !!analyticsState?.enabled;
+  actions.append(usageSwitch('usage-switch'), button(t('Continue'), () => answerUsage('page-title', shown), 'button primary', 'usage-continue'));
   card.append(title, el('p', '', USAGE_COUNTED()), el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.')));
   return card;
 }
@@ -336,7 +345,7 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
     shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourStep !== null ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
   if (page === 'about') renderAbout(main);
@@ -1960,12 +1969,13 @@ function analyticsPanel() {
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
   // Issue #128: not answered yet. The same choice as the first-run question; Continue answers it.
   if (usageQuestion(analyticsState)) {
-    const actions = el('div', 'usage-question-actions'); actions.append(usageSwitch('analytics'), button(t('Continue'), () => answerUsage('analytics'), 'button', 'usage-continue-about'));
+    const actions = el('div', 'usage-question-actions'); const shown = analyticsState.enabled; actions.append(usageSwitch('analytics'), button(t('Continue'), () => answerUsage('analytics', shown), 'button', 'usage-continue-about'));
     panel.append(el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer.')));
     return panel;
   }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
-  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for every PassionCode.ai tool on this computer.'), 'analytics'); });
+  // A deliberate choice: it always sets the shared switch (round 2), and the notice says what is now true.
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted, analyticsState), 'analytics'); });
   option.append(box, el('span', '', t('Share anonymous usage counts')));
   panel.append(option, el('p', 'form-note', analyticsState.available ? t('This switch applies to every PassionCode.ai tool on this computer.') : t('Only installed release builds send analytics; this build sends nothing.')));
   return panel;

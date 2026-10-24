@@ -54,13 +54,23 @@ While the switch is on and `disclosed_at` is absent:
 - A question answered on after another PassionCode.ai app turned the shared switch off records
   the answer and leaves the switch off for every app; the window reads the status again every
   minute and when it is shown, so such a question usually goes away by itself first
-  (`answering_on_after_another_app_turned_the_switch_off_keeps_it_off`).
+  (`answering_on_after_another_app_turned_the_switch_off_keeps_it_off`). Only the answer to the
+  question is checked this way: it carries the switch the question showed, and an "on" is not
+  written when the shared switch differs from it now. About's switch is a deliberate choice and
+  always sets the shared switch: where another app turned it off before Switchboard was answered,
+  About shows the plain switch, and turning it on there turns it on, records the answer and
+  reports the held start (`about_turns_the_switch_on_when_another_app_turned_it_off_before_any_answer`).
+  Both notices say what is now true.
 
 An install from 0.6.81 or earlier (its state has `installed` or an `active_day`, no `disclosed_at`) is asked once, is
 told “An earlier version of Switchboard may already have sent these counts from this computer.
 Nothing more is sent until you answer.”, and is never counted as a new install
 (`an_upgraded_install_asks_once_and_is_not_counted_as_new`,
-`an_old_state_with_a_day_but_no_install_flag_is_not_a_new_install`). A state file that cannot be
+`an_old_state_with_a_day_but_no_install_flag_is_not_a_new_install`). That reading is made once,
+when the state is loaded, and only for a state without `disclosed_at`: a day reported after an
+answer (an answer of off, then on in About in the same run) says nothing about the install, and
+the next start still reports `app_installed`, once
+(`an_off_then_on_in_one_run_still_reports_the_install_at_the_next_start`). A state file that cannot be
 read or parsed asks again and never sends `app_installed` a second time
 (`an_unreadable_state_asks_again_and_never_reports_a_second_install`); one that cannot be written
 logs `analytics_state_unwritable` (a code only) and the answer holds for that run only

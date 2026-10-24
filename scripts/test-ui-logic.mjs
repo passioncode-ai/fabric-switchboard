@@ -582,7 +582,7 @@ check(() => {
   const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
   assert.match(about, /if \(usageQuestion\(analyticsState\)\) \{/, 'About asks while unanswered');
   assert.match(about, /usageQuestionText\(analyticsState\)/, 'with the same line on what was sent');
-  assert.match(about, /answerUsage\('analytics'\)/, 'and Continue answers it');
+  assert.match(about, /answerUsage\('analytics', shown\)/, 'and Continue answers it, with the switch it showed');
   assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the answer goes to the backend');
   assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the question');
   assert.match(main, /event\.key === 'Escape' && !openMenu && tourShown\(\)/, 'Escape ends only a tour on screen');
@@ -828,5 +828,52 @@ check(() => {
   const ru = readFileSync(new URL('../src/locales/ru.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(ru, /группе Группа|группы Группа|в Группа/, 'a group phrase, not a group label, after a preposition');
   assert.doesNotMatch(ru, /в группе \{group\}|группы \{group\}/, 'sentences take {where} (inGroup), not {group}');
+});
+// Round 2 (N6): About's switch is a deliberate choice and always sets the shared switch; only the
+// question's answer carries the switch it showed, and both notices say what is now true.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const answer = main.slice(main.indexOf('function answerUsage('), main.indexOf('function usageQuestionCard() {'));
+  assert.match(answer, /adapter\.setAnalytics\(wanted, shown\)/, 'the answer names the switch the question showed');
+  const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
+  assert.match(about, /box\.addEventListener\('change', \(\) => \{ const wanted = box\.checked; void mutate\(async \(\) => \{ analyticsState = await adapter\.setAnalytics\(wanted\); \}, \(\) => usageAnswerText\(wanted, analyticsState\), 'analytics'\); \}\);/, "About's notice reports what is now true");
+  assert.doesNotMatch(about, /wanted \? t\('Anonymous usage analytics are on\.'\)/, 'never a fixed "on"');
+});
+// Round 2: N5's window fixes keep their regression checks (unit tier A to D, G).
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /const sync = \(\) => \{ const fresh = picker\.value === '__new'; [^}]*typed\.disabled = !fresh; typed\.dataset\.locked = String\(!fresh\);/, 'a hidden group id is disabled and marked locked');
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const stats = main.slice(main.indexOf('async function loadStats() {'), main.indexOf('async function loadStats() {') + 600);
+  assert.match(stats, /const days = statsDays;[\s\S]*adapter\.statistics\(days\)[\s\S]*if \(days !== statsDays\) return;/, 'an answer for a range the person left is dropped');
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const reload = main.slice(main.indexOf('async function reload() {'), main.indexOf('async function reload() {') + 2000);
+  for (const read of ['loadOpenrouter', 'loadKimi', 'loadSessions', 'loadBackups']) assert.match(reload, new RegExp(`void ${read}\\(readStamp\\);`), `${read} takes the Refresh's stamp`);
+});
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const place = main.slice(main.indexOf('function placeTour('), main.indexOf("window.addEventListener('resize', () => placeTour());"));
+  assert.match(place, /^function placeTour\(scroll = false\) \{/, 'placeTour scrolls only when asked or needed');
+  assert.doesNotMatch(place, /if \(target\) target\.scrollIntoView/, 'never an unconditional scroll on a background render');
+  const scrolls = place.match(/scrollIntoView/g) ?? [];
+  const gated = place.match(/if \(target && move[^)]*\) \{? ?target\.scrollIntoView/g) ?? [];
+  assert.equal(scrolls.length, 2); assert.equal(gated.length, scrolls.length, 'every scroll is behind move');
+  assert.match(main, /if \(tourStep !== null\) placeTour\(\); return true;/, 'a render places the card without asking to scroll');
+  assert.match(main, /restoreFocus\('tour-title'\); placeTour\(true\);/, 'a step change scrolls');
+});
+// Round 2: on a step whose target appears late (Agents loads after the step shows) or lies off
+// screen, the card scrolls to it once; the toast moves aside only while the tour is on screen.
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const place = main.slice(main.indexOf('function placeTour('), main.indexOf("window.addEventListener('resize', () => placeTour());"));
+  assert.match(place, /const move = target !== null && \(scroll \|\| firstFound \|\| offScreen\);/, 'scroll when asked, first found or off screen');
+  assert.match(place, /const firstFound = target !== null && \(tourFound\?\.step !== tourStep \|\| tourFound\.selector !== selector\);/, 'the target is remembered per step');
+  assert.match(place, /tourFound = target \? \{ step: tourStep, selector \} : null;/, 'and remembered once placed');
+  assert.match(main, /\$\{tourShown\(\) \? ' beside-tour' : ''\}/, 'the toast moves aside only beside a tour on screen');
+  assert.doesNotMatch(main, /tourStep !== null \? ' beside-tour'/);
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
