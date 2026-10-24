@@ -6,6 +6,14 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.79 (2026-10-24)
+
+- **A sign-in is no longer lost when you quit or Switchboard updates during a renewal (SB-179).** Since 0.6.77 a quota check could renew an account's sign-in while Switchboard was shutting down, and the new sign-in was not saved, so the account asked you to sign in again at the next start. Switchboard now waits for such a renewal (within its usual few seconds) and saves it before it closes.
+- **Launching a session on an account that is renewing gets the fresh sign-in (SB-179).** A session started at the moment the account's sign-in was being renewed could start on the old one, with minutes left; it now waits for the renewal and uses the new sign-in.
+- **A sign-in you make while Switchboard renews the same account is kept (SB-179).** It could be replaced by the renewed one, or the account could be shown as needing a sign-in.
+- **Fabric Dashboards and agents get answers about stopped sessions quickly again (SB-182).** Each request read the saved sign-ins of every account whose sign-in had been rejected, which took up to 18 seconds on a busy computer; the answer is now kept until something changes.
+- **After an update, Switchboard takes over within a second or two even when a command was waiting (SB-181).** It tries again every second at first, instead of waiting 30 seconds. The update restart that ends Switchboard right after it saves its work (0.6.77) applies to macOS and Linux.
+
 ## 0.6.78 (2026-10-23)
 
 - **One Refresh on the Agents page (SB-169).** The page had two Refresh buttons that did the same thing; the one at the top of the page stays and also looks the agents up again.

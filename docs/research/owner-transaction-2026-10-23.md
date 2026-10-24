@@ -29,7 +29,7 @@ of every number is the machine's.
 
 ## 2. What each step does under it
 
-- `renewal` (monitor.rs, `hold("renewal")`): `refresh::ensure_fresh`, a token grant over the
+- `renewal` (monitor.rs, `hold("renewal")`, before 0.6.77): `refresh::ensure_fresh`, a token grant over the
   network for one inactive Claude account, then the vault write.
 - `source_sync` (monitor.rs): `refresh::renew_idle_live` (a grant when Claude Code left its own
   token expired), `follow_claude_swap`, `sync_live_sources` (sign-in files and the Keychain).
@@ -55,5 +55,18 @@ manual switch on one account at once (the grant's result is dropped, the switch 
 
 T-1 is SB-163's first part (done in 0.6.76). T-2 and T-3 are SB-179 and SB-180, both done in
 0.6.77: `refresh::ensure_fresh_with` and `add_suggested_folders`, with their tests named in
-[CONTRACTS](../CONTRACTS.md). The `renewal` step no longer appears in `transaction_held`; its
-transaction now lasts as long as the checks and the store.
+[CONTRACTS](../CONTRACTS.md).
+
+**T-2 as built (0.6.77, completed in 0.6.79).** The transaction covers the checks and the
+reservation (the refresh token marked in flight), not the grant, and is taken again to store the
+successor. A native switch to the account while its token is in flight is **refused**
+(`RENEWING`), not run with the grant's result dropped as the table above says; a caller already
+under the transaction (a launch, a continue) waits for the grant and takes its successor; a
+sign-in stored meanwhile stands, the successor going only where the spent token still is. The
+drain waits for grants in flight before it stores what they kept. 0.6.77 and 0.6.78 lacked
+three of these (the drain's wait, the launch's wait, the sign-in through the owner's other
+copies), found by the 0.6.79 review and fixed with tests.
+
+**Measuring it.** In 0.6.77 and 0.6.78 the renewal took the lock without `hold`, so it could not
+log `transaction_held` at all: the absence of `renewal` lines in those versions proves nothing.
+From 0.6.79 each span logs as `renewal` or `usage_renewal`, phase `checks` or `store`.

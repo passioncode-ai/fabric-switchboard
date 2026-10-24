@@ -1094,15 +1094,7 @@ impl Runtime {
     /// agent's unassigned Git root, folders that could not be added yet, and deleted folders.
     /// The owner transaction for a background step, logged when held long.
     pub(crate) async fn hold(&self, step: &'static str) -> Held<'_> {
-        let guard = self.mutations.lock().await;
-        let now = std::time::Instant::now();
-        Held {
-            _guard: guard,
-            step,
-            since: now,
-            phases: Vec::new(),
-            last: now,
-        }
+        hold_on(&self.mutations, step).await
     }
     #[cfg(test)]
     pub(crate) async fn suggest_pass(&self, time: i64) {
@@ -2076,8 +2068,12 @@ impl Owner {
         // and holding it means no other one starts.
         let transaction = tokio::time::timeout(left(deadline), runtime.mutations.lock()).await;
         drained &= transaction.is_ok();
-        // SB-179: grants run outside the transaction; one that ended meanwhile is stored now.
+        // SB-179: grants run outside the transaction, and no new one starts once the drain
+        // began; a grant still on the network (a quota check from the window, the CLI or MCP)
+        // records its successor before it ends, so the drain waits for them, then stores every
+        // kept successor. Before, the drain waited for the transaction such a grant held.
         if transaction.is_ok() {
+            drained &= runtime.refresh.grants_ended(left(deadline)).await;
             refresh::adopt_all_kept(&runtime.store, &runtime.refresh);
         }
         drained &= runtime
@@ -2457,6 +2453,19 @@ impl Drop for Held<'_> {
             );
             oplog::event("transaction_held", &fields);
         }
+    }
+}
+/// The owner transaction `lock`, logged under `step` when held long (SB-163); also for a caller
+/// that holds only the mutex, such as a renewal outside the transaction (SB-179).
+pub(crate) async fn hold_on<'a>(lock: &'a tokio::sync::Mutex<()>, step: &'static str) -> Held<'a> {
+    let guard = lock.lock().await;
+    let now = std::time::Instant::now();
+    Held {
+        _guard: guard,
+        step,
+        since: now,
+        phases: Vec::new(),
+        last: now,
     }
 }
 /// A background step holding the owner transaction this long is logged.
@@ -7250,6 +7259,80 @@ mod lifecycle_tests {
     /// A quota check in flight at quit holds no transaction, so the drain does not wait for it;
     /// if the provider then rejects the token, the check must not spend the refresh token after
     /// the drain (SB-39 seam review).
+    /// SB-179 seam review: a quota check renews outside the owner transaction, so the drain no
+    /// longer waited for its grant; a successor the provider returned after the drain took the
+    /// transaction died with the process, and the account needed a new sign-in. The drain now
+    /// waits for grants in flight and stores what they kept.
+    #[tokio::test]
+    async fn the_drain_stores_the_token_a_quota_checks_renewal_returns_during_it() {
+        use axum::{
+            routing::{get, post},
+            Json, Router,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let runtime =
+            fixtures::runtime(tmp.path(), fixtures::signed_out, fixtures::activates).await;
+        let owner = Owner {
+            runtime: runtime.clone(),
+            control: control::ControlHandle::start(runtime.clone())
+                .await
+                .unwrap(),
+            monitor: monitor::MonitorHandle::start(&runtime, false),
+        };
+        // The monitor's first pass runs at start; it ends before the account exists, so only
+        // the quota check below renews it (a pass that joined it would hold the drain).
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Due for renewal: the access token expired.
+        let mut expired = fixtures::credential("synthetic-a");
+        expired.expires_at = Some(1_000);
+        let account = runtime
+            .store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired,
+                Some(fixtures::identity("synthetic-a")),
+            )
+            .unwrap();
+        let granted = Arc::new(tokio::sync::Notify::new());
+        let notify = granted.clone();
+        let app = Router::new()
+            .route("/api/oauth/usage", get(|| async { Json(json!({})) }))
+            .route(
+                "/token",
+                post(move || {
+                    let notify = notify.clone();
+                    async move {
+                        notify.notify_one();
+                        // Longer than the drain takes to reach the store.
+                        tokio::time::sleep(Duration::from_millis(1500)).await;
+                        Json(json!({"access_token":"successor","expires_in":28800,"refresh_token":"successor-r"}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let base = format!("http://{address}");
+        *runtime.usage_gate.origins.lock().unwrap() = Some((base.clone(), base.clone()));
+        runtime.refresh.set_endpoint(format!("{base}/token"));
+        let check = {
+            let (runtime, id) = (runtime.clone(), account.id.clone());
+            tokio::spawn(async move { runtime.execute(Operation::Usage { id }).await })
+        };
+        // The grant is on the network when the drain starts.
+        granted.notified().await;
+        let stopped = owner.shutdown(Duration::from_secs(4)).await;
+        assert!(
+            stopped.drained,
+            "the drain waited for the grant inside its deadline"
+        );
+        check.abort();
+        let stored = runtime.store.stored_credential(&account.id).unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("successor-r"));
+    }
     #[tokio::test]
     async fn a_quota_check_left_running_at_quit_spends_no_refresh_token() {
         use axum::{

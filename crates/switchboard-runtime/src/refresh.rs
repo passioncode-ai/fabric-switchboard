@@ -47,11 +47,15 @@ pub(crate) struct Kept {
     owner: Option<String>,
 }
 
+type SignInCache = Option<(u64, Vec<(String, String)>, Vec<String>)>;
 /// In-memory refresh bookkeeping of one owner process.
 pub(crate) struct RefreshState {
     endpoint: Mutex<String>,
     /// Account id → hash of the refresh token the provider rejected.
     dead: Mutex<HashMap<String, String>>,
+    /// SB-182: the last `sign_in_required` answer, with the store's change count and the
+    /// rejected lineages it was computed from.
+    sign_in_cache: Mutex<SignInCache>,
     /// Account id → (next attempt, current delay) after a transient failure.
     backoff: Mutex<HashMap<String, (i64, i64)>>,
     /// Identity (`account_id`) → last time it was seen signed in to the ordinary Claude Code.
@@ -150,6 +154,7 @@ impl RefreshState {
         Self {
             endpoint: Mutex::new(endpoint),
             dead: Mutex::new(HashMap::new()),
+            sign_in_cache: Mutex::new(None),
             backoff: Mutex::new(HashMap::new()),
             seen_active: Mutex::new(HashMap::new()),
             profile_endpoint: Mutex::new(
@@ -224,6 +229,38 @@ impl RefreshState {
             .store(allowed, std::sync::atomic::Ordering::SeqCst);
     }
     /// True while a grant is spending the refresh token `id` holds.
+    /// SB-179: waits until no grant spends `token`, at most `deadline`; false when one still does.
+    pub(crate) async fn token_released(&self, token: &str, deadline: Duration) -> bool {
+        let until = std::time::Instant::now() + deadline;
+        loop {
+            if self
+                .in_flight
+                .lock()
+                .map(|f| !f.contains(token))
+                .unwrap_or(true)
+            {
+                return true;
+            }
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    /// SB-179: waits until no grant is on the network, at most `deadline`; false when one still
+    /// is. A grant's task records its successor before it unmarks its token.
+    pub(crate) async fn grants_ended(&self, deadline: Duration) -> bool {
+        let until = std::time::Instant::now() + deadline;
+        loop {
+            if self.in_flight.lock().map(|f| f.is_empty()).unwrap_or(true) {
+                return true;
+            }
+            if std::time::Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
     pub(crate) fn in_flight(&self, store: &Store, id: &str) -> bool {
         store
             .stored_credential(id)
@@ -327,11 +364,31 @@ impl RefreshState {
             .is_some_and(|hash| hash == fingerprint(token))
     }
     /// Accounts whose stored lineage the provider rejected and nothing has replaced since.
+    /// SB-182: the answer is kept while neither the stored credentials (`Store::changes`) nor
+    /// the rejected lineages changed. `recovery`, which Fabric Dashboards reads every 15 s,
+    /// read every rejected account's credential from the vault each time, and took up to 18 s
+    /// on 2026-10-23 with six of them.
     pub(crate) fn sign_in_required(&self, store: &Store) -> Vec<String> {
-        let Ok(dead) = self.dead.lock() else {
-            return vec![];
+        let dead: Vec<(String, String)> = match self.dead.lock() {
+            Ok(dead) => {
+                let mut pairs: Vec<_> = dead.iter().map(|(i, h)| (i.clone(), h.clone())).collect();
+                pairs.sort();
+                pairs
+            }
+            Err(_) => return vec![],
         };
-        let mut ids: Vec<String> = dead
+        if dead.is_empty() {
+            return vec![];
+        }
+        let changes = store.changes();
+        if let Ok(cache) = self.sign_in_cache.lock() {
+            if let Some((at, of, ids)) = cache.as_ref() {
+                if *at == changes && *of == dead {
+                    return ids.clone();
+                }
+            }
+        }
+        let ids: Vec<String> = dead
             .iter()
             .filter(|(id, hash)| {
                 store.stored_credential(id).is_ok_and(|c| {
@@ -340,7 +397,12 @@ impl RefreshState {
             })
             .map(|(id, _)| id.clone())
             .collect();
-        ids.sort();
+        // A credential stored while these were read may have replaced one: keep nothing then.
+        if store.changes() == changes {
+            if let Ok(mut cache) = self.sign_in_cache.lock() {
+                *cache = Some((changes, dead, ids.clone()));
+            }
+        }
         ids
     }
 }
@@ -378,7 +440,7 @@ pub(crate) async fn ensure_fresh(
     id: &str,
     force: bool,
 ) -> Outcome {
-    ensure_fresh_with(store, native, state, id, force, None).await
+    ensure_fresh_with(store, native, state, id, force, None, "renewal").await
 }
 /// As `ensure_fresh`, for a caller that does not hold the owner transaction (SB-179): `lock` is
 /// taken for the checks and the token's reservation, released while the grant is on the network,
@@ -394,22 +456,42 @@ pub(crate) async fn ensure_fresh_with(
     id: &str,
     force: bool,
     lock: Option<&tokio::sync::Mutex<()>>,
+    step: &'static str,
 ) -> Outcome {
-    let guard = match lock {
-        Some(lock) => Some(lock.lock().await),
+    // Each span under the transaction is logged when long (`transaction_held`, SB-163).
+    let mut guard = match lock {
+        Some(lock) => Some(crate::hold_on(lock, step).await),
         None => None,
     };
+    if let Some(held) = guard.as_mut() {
+        held.phase("checks");
+    }
     let (result, refresh_token) = match reserve_due(store, native, state, id, force) {
         Step::Done(outcome) => return outcome,
+        // SB-179: a caller that holds the transaction (a launch, a switch) no longer finds the
+        // background renewal waiting behind it: it waits for that grant, which needs no
+        // transaction to keep its successor, and takes the successor.
+        Step::InFlight(token) => {
+            if lock.is_none() && state.token_released(&token, IN_FLIGHT_WAIT).await {
+                if let Some(outcome) = adopt_stash(store, state, id) {
+                    return outcome;
+                }
+            }
+            (Err(Failure::Transient), token)
+        }
         Step::Refused(failure, token) => (Err(failure), token),
         Step::Grant(reservation, token) => {
             drop(guard);
             let result = reservation.grant().await;
-            let _guard = match lock {
-                Some(lock) => Some(lock.lock().await),
+            let mut guard = match lock {
+                Some(lock) => Some(crate::hold_on(lock, step).await),
                 None => None,
             };
-            return granted(store, state, id, &token, result);
+            let outcome = granted(store, state, id, &token, result);
+            if let Some(held) = guard.as_mut() {
+                held.phase("store");
+            }
+            return outcome;
         }
     };
     granted(store, state, id, &refresh_token, result)
@@ -431,9 +513,28 @@ fn granted(
             // The token endpoint names whose token it issued: only that account's copies get
             // the successor, and a copy of another account holding it is a dead lineage here
             // (Claude Swap `autoswitch.py:836-877`).
-            settled(store, state, id, refresh_token, &kept)
+            // A sign-in stored for this account while the grant was out (its token is neither
+            // the spent one nor the successor) stands: the successor is filed only where the
+            // spent token still is, never over that sign-in through its owner's copies.
+            let replaced = store
+                .stored_credential(id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+                .is_some_and(|t| {
+                    t != refresh_token && Some(&t) != kept.refreshed.refresh_token.as_ref()
+                });
+            settled_as(store, state, id, refresh_token, &kept, !replaced)
         }
-        Err(Failure::Permanent) => remember_dead(state, id, refresh_token),
+        Err(Failure::Permanent) => {
+            remember_dead(state, id, refresh_token);
+            // A sign-in stored while the grant was out replaced the rejected lineage (SB-179):
+            // the account does not need one.
+            if state.is_dead(store, id) {
+                Outcome::SignInRequired
+            } else {
+                Outcome::NotNeeded
+            }
+        }
         // Not this account's fault and not its backoff: the hold covers every account.
         Err(Failure::Systemic) => Outcome::Transient,
         Err(Failure::Transient) => {
@@ -448,8 +549,13 @@ fn granted(
         }
     }
 }
+/// How long a caller under the transaction waits for another grant of the same token: the
+/// grant's own timeout and a margin.
+const IN_FLIGHT_WAIT: Duration = Duration::from_secs(12);
 enum Step<'a> {
     Done(Outcome),
+    /// Another grant is spending this token now.
+    InFlight(String),
     /// No grant could be reserved (grants off, the client refused, the token in flight).
     Refused(Failure, String),
     Grant(Box<Reservation<'a>>, String),
@@ -525,6 +631,13 @@ fn reserve_due<'a>(
     }
     if state.recently_active(&account, time) || is_active(native, state, &account, &credential) {
         return Step::Done(Outcome::Active);
+    }
+    if state
+        .in_flight
+        .lock()
+        .is_ok_and(|f| f.contains(&refresh_token))
+    {
+        return Step::InFlight(refresh_token);
     }
     match reserve(state, &credential) {
         Ok(reservation) => Step::Grant(Box::new(reservation), refresh_token),
@@ -631,6 +744,18 @@ fn settle(
     consumed: &str,
     kept: &Kept,
 ) -> Result<Vec<String>, ()> {
+    settle_as(store, state, consumed, kept, true)
+}
+/// `settle`; `owner_fallback` false leaves the named owner's other copies alone (SB-179: a
+/// sign-in stored while the grant was out stands, and its expiry is earlier than the
+/// successor's by the grant's own length).
+fn settle_as(
+    store: &Store,
+    state: &RefreshState,
+    consumed: &str,
+    kept: &Kept,
+    owner_fallback: bool,
+) -> Result<Vec<String>, ()> {
     let (mut updated, others) = store
         .adopt_refreshed_for(
             Provider::Claude,
@@ -641,7 +766,7 @@ fn settle(
         .map_err(|_| ())?;
     // The named owner's own copies hold an older lineage of theirs: the successor is still
     // that account's newest sign-in, never something to drop (audit P2-2).
-    if updated.is_empty() {
+    if updated.is_empty() && owner_fallback {
         if let Some(owner) = kept.owner.as_deref() {
             updated = file_with_owner(store, owner, &kept.refreshed)?;
         }
@@ -693,7 +818,17 @@ fn file_with_owner(store: &Store, owner: &str, refreshed: &Credential) -> Result
 }
 /// What settling a successor means for the account `id` that held the spent token.
 fn settled(store: &Store, state: &RefreshState, id: &str, consumed: &str, kept: &Kept) -> Outcome {
-    match settle(store, state, consumed, kept) {
+    settled_as(store, state, id, consumed, kept, true)
+}
+fn settled_as(
+    store: &Store,
+    state: &RefreshState,
+    id: &str,
+    consumed: &str,
+    kept: &Kept,
+    owner_fallback: bool,
+) -> Outcome {
+    match settle_as(store, state, consumed, kept, owner_fallback) {
         Ok(updated) if updated.iter().any(|u| u == id) => Outcome::Refreshed,
         Ok(_) if state.is_dead(store, id) => Outcome::SignInRequired,
         // Its credential changed meanwhile (a new sign-in); nothing more to do for it.
@@ -1726,6 +1861,92 @@ mod tests {
             self.inner.delete(id)
         }
     }
+    /// A vault that counts reads.
+    #[derive(Default)]
+    struct CountingVault {
+        inner: switchboard_core::MemoryVault,
+        gets: AtomicUsize,
+    }
+    impl switchboard_core::Vault for CountingVault {
+        fn get(&self, id: &str) -> Result<Credential, String> {
+            self.gets.fetch_add(1, Ordering::SeqCst);
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// SB-182: `recovery` read every rejected account's credential from the vault on each call
+    /// (Fabric Dashboards calls it every 15 s), up to 18 s on a loaded Mac. The answer is now
+    /// kept until a credential is stored or a lineage is rejected, and is still right after one.
+    #[test]
+    fn rejected_sign_ins_are_read_from_the_vault_only_after_a_change() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        for account in ["synthetic-a", "synthetic-b"] {
+            store
+                .upsert(
+                    account.into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    expired(account),
+                    Some(identity(account)),
+                )
+                .unwrap();
+        }
+        let (a, b) = (
+            id_of(&store, "synthetic-a", "default"),
+            id_of(&store, "synthetic-b", "default"),
+        );
+        let state = RefreshState::default();
+        assert!(state.sign_in_required(&store).is_empty());
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        remember_dead(&state, &b, "synthetic-b-refresh");
+        assert_eq!(
+            state.sign_in_required(&store),
+            sorted(vec![a.clone(), b.clone()])
+        );
+        let reads = vault.gets.load(Ordering::SeqCst);
+        for _ in 0..20 {
+            assert_eq!(
+                state.sign_in_required(&store),
+                sorted(vec![a.clone(), b.clone()])
+            );
+        }
+        assert_eq!(
+            vault.gets.load(Ordering::SeqCst),
+            reads,
+            "no vault read without a change"
+        );
+        // A new sign-in for b replaces its rejected lineage: b no longer needs one.
+        let mut fresh = expired("synthetic-b");
+        fresh.refresh_token = Some("signed-in-again".into());
+        store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                fresh,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        // A lineage rejected anew is seen at once, with no credential change.
+        let mut dead = state.dead.lock().unwrap();
+        dead.remove(&a);
+        drop(dead);
+        assert!(state.sign_in_required(&store).is_empty());
+    }
+    fn sorted(mut ids: Vec<String>) -> Vec<String> {
+        ids.sort();
+        ids
+    }
     #[tokio::test]
     async fn a_renewed_token_that_cannot_be_stored_is_kept_and_adopted_later() {
         let (url, calls) = endpoint((
@@ -2063,7 +2284,8 @@ mod tests {
             "/token",
             post(|| async {
                 tokio::time::sleep(Duration::from_millis(400)).await;
-                Json(json!({"access_token":"late","expires_in":28800,"refresh_token":"late-r"}))
+                // The endpoint names whose token it issued, as Anthropic's does.
+                Json(json!({"access_token":"late","expires_in":28800,"refresh_token":"late-r","account":{"uuid":"synthetic-b"}}))
             }),
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2077,7 +2299,16 @@ mod tests {
         let renewal = {
             let (store, state, lock, b) = (store.clone(), state.clone(), lock.clone(), b.clone());
             tokio::spawn(async move {
-                ensure_fresh_with(&store, SIGNED_IN_A, &state, &b, false, Some(&lock)).await
+                ensure_fresh_with(
+                    &store,
+                    SIGNED_IN_A,
+                    &state,
+                    &b,
+                    false,
+                    Some(&lock),
+                    "renewal",
+                )
+                .await
             })
         };
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2094,7 +2325,8 @@ mod tests {
         let mut new = expired("synthetic-b");
         new.access_token = "signed-in-again".into();
         new.refresh_token = Some("signed-in-again-r".into());
-        new.expires_at = Some(now() + 28_800);
+        // Earlier than the successor's, as a sign-in made before the grant answered is.
+        new.expires_at = Some(now() + 28_000);
         store
             .upsert(
                 "synthetic-b".into(),
@@ -2110,6 +2342,60 @@ mod tests {
         let stored = store.stored_credential(&b).unwrap();
         assert_eq!(stored.refresh_token.as_deref(), Some("signed-in-again-r"));
         assert!(!has_stash(&state, "synthetic-b-refresh"));
+    }
+    /// SB-179 unit review: a grant the provider rejects while a new sign-in is stored for the
+    /// account says nothing about that sign-in; the account does not need another.
+    #[tokio::test]
+    async fn a_rejected_grant_does_not_mark_a_sign_in_stored_meanwhile() {
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error":"invalid_grant"})),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = Arc::new(RefreshState::at(format!("http://{address}/token")));
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let b = id_of(&store, "synthetic-b", "default");
+        let renewal = {
+            let (store, state, lock, b) = (store.clone(), state.clone(), lock.clone(), b.clone());
+            tokio::spawn(async move {
+                ensure_fresh_with(
+                    &store,
+                    SIGNED_IN_A,
+                    &state,
+                    &b,
+                    false,
+                    Some(&lock),
+                    "renewal",
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut new = expired("synthetic-b");
+        new.refresh_token = Some("signed-in-again-r".into());
+        new.expires_at = Some(now() + 28_000);
+        store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                new,
+                Some(identity("synthetic-b")),
+            )
+            .unwrap();
+        assert_eq!(renewal.await.unwrap(), Outcome::NotNeeded);
+        assert!(state.sign_in_required(&store).is_empty());
     }
     /// SB-179: a successor kept in memory, because its grant ended while the drain held the
     /// transaction, is stored by the drain.
@@ -2162,16 +2448,18 @@ mod tests {
             crate::activate_native(&store, &b, None, SIGNED_IN_A, Some(&state)).unwrap_err(),
             RENEWING
         );
-        // A second grant on the same token is never made meanwhile.
+        // A second grant on the same token is never made meanwhile: a caller under the
+        // transaction (a launch) waits for this one and takes its successor (SB-179).
         assert_eq!(
             ensure_fresh(&store, SIGNED_IN_A, &state, &b, true).await,
-            Outcome::Transient
+            Outcome::Refreshed
         );
-        tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(!state.in_flight(&store, &b));
+        let stored = store.stored_credential(&b).unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("late-r"));
         assert_eq!(
             ensure_fresh(&store, SIGNED_IN_A, &state, &b, false).await,
-            Outcome::Refreshed
+            Outcome::NotNeeded
         );
     }
     #[tokio::test]

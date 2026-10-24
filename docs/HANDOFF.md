@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-24: 0.6.79, the review of 0.6.77 and 0.6.78 (SB-179, SB-181, SB-182)
+
+- **Review.** Three blind readings (unit, seam, product) of `4de0ab4..eb710ab`. All three found
+  that the drain no longer waited for a quota check's renewal (a sign-in could be lost at Quit or
+  an update restart); the seam reading found three more races, the product reading eleven stale
+  or false statements. All fixed with tests that fail without the fix (each checked by reverting
+  it): `the_drain_stores_the_token_a_quota_checks_renewal_returns_during_it`,
+  `an_account_whose_renewal_is_in_flight_is_not_switched_to`,
+  `a_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands`,
+  `a_rejected_grant_does_not_mark_a_sign_in_stored_meanwhile`,
+  `rejected_sign_ins_are_read_from_the_vault_only_after_a_change`.
+- **Corrected.** The entry below said no `control_slow` since 0.6.77: true until 21:41 UTC; then
+  `recovery` took 5 to 18 s (SB-182, fixed). Its "no `transaction_held`" counted an instrument
+  that could not fire for the renewal (restored in 0.6.79).
+- **SB-167** is due by 2026-11-14 (Observatory 0.30.0 by 2026-11-07), not 2026-10-30.
+- **Machine.** The disk was full during the review (178 MiB free); `target/debug/incremental`
+  (1.1 GB, this repository's) was removed. Other sessions' worktrees were left alone.
+- **Next task.** After a day on 0.6.79: `control_slow` and `transaction_held` (now with
+  `renewal`/`usage_renewal` phases) in switchboard.log, beside Fabric Dashboards' daily count of
+  "no answer within 10 s"; then close SB-174 and SB-163 or open what they show.
+
 ## 2026-10-23: 0.6.77 and 0.6.78 measured live; contract v0.1.0 pinned
 
 - **Measured (switchboard.log on this Mac).** 0.6.77 started 12:09:53 UTC, 0.6.78 at 14:32:21. That
