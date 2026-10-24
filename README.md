@@ -16,7 +16,7 @@ and Linux (x64 and ARM), built by
 
 ![Fabric Switchboard 0.6.13 Accounts screen with current sign-ins and quota](docs/evidence/screenshots/accounts-0.6.13.png)
 
-*Current interface, shown with synthetic demo accounts. [Screenshot provenance](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
+*The 0.6.13 Accounts screen, shown with synthetic demo accounts. [Screenshot provenance](docs/runs/2026-10-08-release-0612/README.md#screenshots).*
 
 ## What you can do
 
@@ -187,7 +187,7 @@ demo has no real accounts, no CLI launch and no network calls to providers.
    once. An API key does not report a reliable subscription quota; an unknown quota is never
    shown as zero.
 7. **Automatic switching** (**Turn on for Claude Code** on Accounts): when the account in use
-   nears its limit, Switchboard moves to the saved account with the most quota left.
+   nears its limit, Switchboard moves to the saved account in the same group with the most quota left.
 8. **Language**: the window speaks English or Russian, following the operating system;
    About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041--use-switchboard-in-russian)).
 

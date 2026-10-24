@@ -19,7 +19,7 @@ keep their identifiers (a stable API); the words below are what a person sees.
 
 Russian sentences use the same nouns: «группа» (never «пул» in a sentence), «проект» for a
 repository, «автоматическое переключение» / «автопереключение», «API-ключи». Until the window
-copy of 0.6.82 lands, the Russian dictionary still carries «пул» in sentences, «Токены» for the
+copy of 0.6.82 lands, the Russian dictionary still carries «пул» and «ротация» in sentences, English keys that say rotation or rotates, «Токены» for the
 page and «Ключи API» in Statistics; those entries are the window's to change (node N5 of 0.6.82), and this table is the
 target they change to.
 

@@ -20,12 +20,12 @@ pub fn added_text(new: &[(String, String)], ru: bool) -> (String, String) {
         [(folder, project)] => {
             if ru {
                 (
-                    "Папка добавлена в проект".into(),
-                    format!("{folder} теперь в проекте {project}."),
+                    "Папка добавлена в группу".into(),
+                    format!("{folder} теперь в группе {project}."),
                 )
             } else {
                 (
-                    "Folder added to a project".into(),
+                    "Folder added to a group".into(),
                     format!("{folder} is now part of {project}."),
                 )
             }
@@ -40,12 +40,12 @@ pub fn added_text(new: &[(String, String)], ru: bool) -> (String, String) {
             };
             if ru {
                 (
-                    "Папки добавлены в проекты".into(),
+                    "Папки добавлены в группы".into(),
                     format!("Добавлено папок: {n} ({}).", projects.join(", ")),
                 )
             } else {
                 (
-                    "Folders added to projects".into(),
+                    "Folders added to groups".into(),
                     format!("{n} folders added ({}).", projects.join(", ")),
                 )
             }
@@ -60,12 +60,12 @@ pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
         [(folder, project)] => {
             if ru {
                 (
-                    "Папка исключена из проекта".into(),
-                    format!("Папка {folder} удалена с диска и исключена из проекта {project}."),
+                    "Папка исключена из группы".into(),
+                    format!("Папка {folder} удалена с диска и исключена из группы {project}."),
                 )
             } else {
                 (
-                    "Folder removed from a project".into(),
+                    "Folder removed from a group".into(),
                     format!("{folder} was deleted and is no longer part of {project}."),
                 )
             }
@@ -74,13 +74,13 @@ pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
             let n = gone.len();
             if ru {
                 (
-                    "Папки исключены из проектов".into(),
-                    format!("Папки, удалённые с диска, исключены из проектов: {n}."),
+                    "Папки исключены из групп".into(),
+                    format!("Папки, удалённые с диска, исключены из групп: {n}."),
                 )
             } else {
                 (
-                    "Folders removed from projects".into(),
-                    format!("{n} deleted folders are no longer part of their projects."),
+                    "Folders removed from groups".into(),
+                    format!("{n} deleted folders are no longer part of their groups."),
                 )
             }
         }
