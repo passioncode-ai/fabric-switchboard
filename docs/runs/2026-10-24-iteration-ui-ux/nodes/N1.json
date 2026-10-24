@@ -1,0 +1,102 @@
+{
+ "node": "N1",
+ "done": [
+  {
+   "id": "PRD-01",
+   "evidence": [
+    "a_folder_joining_its_group_does_not_cost_a_vault_read",
+    "only_credential_writes_move_the_credential_count",
+    "rejected_sign_ins_are_read_from_the_vault_only_after_a_change (unchanged, passes)",
+    "crates/switchboard-core/src/lib.rs:934 (Store::credential_changes)",
+    "crates/switchboard-core/src/lib.rs:543 (CountedVault counts every put and delete)",
+    "crates/switchboard-runtime/src/refresh.rs:384 (cache keyed on credential_changes; vault reads in blocking::run)",
+    "docs/CONTRACTS.md (Sign-ins needed, SB-182, PRD-01)"
+   ]
+  },
+  {
+   "id": "PRD-02",
+   "evidence": [
+    "a_renewals_hold_names_the_time_its_checks_took",
+    "a_long_hold_names_the_time_after_its_last_mark",
+    "crates/switchboard-runtime/src/refresh.rs:473 (checks marked after reserve_due)",
+    "crates/switchboard-runtime/src/lib.rs:2497 (rest phase after the last mark)"
+   ]
+  },
+  {
+   "id": "PRD-03",
+   "evidence": [
+    "stops_older_than_a_week_are_dropped_at_read_and_at_the_next_write",
+    "a_full_file_keeps_a_new_stop_and_drops_finished_ones_first",
+    "crates/switchboard-runtime/src/recovery.rs:112 (prune: 7 days, 512 rows, finished first)",
+    "crates/switchboard-runtime/src/recovery.rs:141 (keep: write and recovery_pruned)",
+    "docs/CONTRACTS.md (Retention, PRD-03)"
+   ]
+  },
+  {
+   "id": "PRD-06",
+   "evidence": [
+    "docs/OPERATIONS.md:108 (control_refused, claude_binding, codex_route, statistics_saved, vesta_connect, vesta_read, handover, move_root, update_download, update_relaunch_helper, recovery_pruned; usage_renewal in transaction_held steps; probe left out as test-only)"
+   ]
+  },
+  {
+   "id": "PRD-12",
+   "evidence": [
+    "status_and_the_start_line_name_the_owners_version",
+    "crates/switchboard-runtime/src/lib.rs:2450 (owner_started version)",
+    "crates/switchboard-runtime/src/lib.rs:2702 (status owner_version, online)",
+    "docs/CONTRACTS.md:33"
+   ]
+  },
+  {
+   "id": "PRD-13",
+   "evidence": [
+    "a_sync_that_changed_nothing_is_not_logged_again",
+    "crates/switchboard-runtime/src/lib.rs:2462 (binding_changed compares the user-values set with the previous sync)"
+   ]
+  },
+  {
+   "id": "PRD-17",
+   "evidence": [
+    "each_refusal_of_a_usage_observation_has_a_log_code",
+    "a_failed_check_the_store_or_an_empty_answer_refused_has_its_own_code",
+    "crates/switchboard-core/src/lib.rs:1696 (Store::usage_refusal_code)",
+    "crates/switchboard-runtime/src/monitor.rs:395 (failure_code: superseded, credential_changed, invalid_observation, account_gone, vault, store, no_windows)",
+    "docs/OPERATIONS.md:108"
+   ]
+  }
+ ],
+ "not_done": [
+  {
+   "id": "PRD-14",
+   "reason": "update_check logging lives in src-tauri/src/updates.rs (recheck_done, about line 599 to 640), which N1 does not own; the coordinator takes it."
+  }
+ ],
+ "notes": [
+  "The shared CARGO_TARGET_DIR lets another worktree's build of switchboard-core replace this one's artefact (cargo hashes path packages relative to the workspace root): a build failed with 'no method credential_changes' until crates/switchboard-core/src/lib.rs was touched. Builds of both worktrees in one target dir can race this way.",
+  "ProbeFailure::kind lives in crates/switchboard-proxy (not N1's); PRD-17 codes are mapped in the runtime (monitor::failure_code) from core's own refusal texts and the proxy's 'Provider returned no usage windows.' text, pinned by a test that calls switchboard_proxy::parse_usage_at.",
+  "Two edited lines of docs/OPERATIONS.md:108 and docs/CONTRACTS.md (Coalescing) keep em dashes that were already there; the text N1 added has none."
+ ],
+ "checks": [
+  {
+   "cmd": "cargo fmt --all",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo clippy -p switchboard-core -p switchboard-runtime --all-targets --locked -- -D warnings",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo test -p switchboard-core -p switchboard-runtime --locked",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo test -p switchboard-proxy --locked",
+   "exit": 0
+  },
+  {
+   "cmd": "cargo check -p switchboard-cli --locked",
+   "exit": 0
+  }
+ ],
+ "commit": "a42f8d5"
+}

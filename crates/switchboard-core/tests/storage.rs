@@ -1696,3 +1696,100 @@ fn a_slow_credential_read_does_not_hold_the_metadata() {
     let _ = store.take_slowest_read();
     assert_eq!(store.take_slowest_read(), 0);
 }
+
+/// PRD-01 (iteration 2026-10-24): `credential_changes` moves on a credential stored or removed
+/// and never on a project save, which `changes` counts too.
+#[test]
+fn only_credential_writes_move_the_credential_count() {
+    let (_root, _vault, store) = setup();
+    let start = store.credential_changes();
+    let account = add(&store, "synthetic-counted");
+    let added = store.credential_changes();
+    assert!(added > start, "a stored credential is counted");
+    let work = TempDir::new().unwrap();
+    let folder = work.path().canonicalize().unwrap();
+    let changes = store.changes();
+    store
+        .save_project(None, "Synthetic group", &[folder], &[])
+        .unwrap();
+    assert!(
+        store.changes() > changes,
+        "a project save is a backup change"
+    );
+    assert_eq!(
+        store.credential_changes(),
+        added,
+        "and not a credential write"
+    );
+    store.remove(&account.id).unwrap();
+    assert!(
+        store.credential_changes() > added,
+        "a removed credential is counted"
+    );
+}
+
+/// PRD-17 (iteration 2026-10-24): 15 quota checks in 48 h were logged `usage_check
+/// outcome=other`: a check whose answer the store refused to keep (older than what it holds,
+/// a credential renewed while it ran) carried the store's text and no code. Each refusal of
+/// `observe_credential` now has one.
+#[test]
+fn each_refusal_of_a_usage_observation_has_a_log_code() {
+    let (_root, _vault, store) = setup();
+    let credential = Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        r#"{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic-refresh","expiresAt":2000000000000}}"#,
+    )
+    .unwrap();
+    let a = store
+        .add(
+            "Synthetic".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            credential.clone(),
+        )
+        .unwrap();
+    let usage = |at: i64, percent: f64| Usage {
+        windows: vec![],
+        used_percent: percent,
+        observed_at: at,
+        resets_at: Some(at + 7200),
+        source: "claude_oauth".into(),
+    };
+    let code = |e: String| Store::usage_refusal_code(&e);
+    store
+        .observe_credential(&a.id, &credential, usage(now(), 10.0))
+        .unwrap();
+    let older = store
+        .observe_credential(&a.id, &credential, usage(now() - 60, 10.0))
+        .unwrap_err();
+    assert_eq!(code(older), Some("superseded"));
+    let invalid = store
+        .observe_credential(&a.id, &credential, usage(now(), 200.0))
+        .unwrap_err();
+    assert_eq!(code(invalid), Some("invalid_observation"));
+    let mut renewed = credential.clone();
+    renewed.access_token = "synthetic-other".into();
+    let changed = store
+        .observe_credential(&a.id, &renewed, usage(now() + 1, 10.0))
+        .unwrap_err();
+    assert_eq!(code(changed), Some("credential_changed"));
+    let gone = store
+        .observe_credential(
+            "00000000-0000-4000-8000-000000000000",
+            &credential,
+            usage(now() + 2, 10.0),
+        )
+        .unwrap_err();
+    assert_eq!(code(gone), Some("account_gone"));
+    assert_eq!(
+        Store::usage_refusal_code("Credential storage unavailable"),
+        Some("vault")
+    );
+    assert_eq!(
+        Store::usage_refusal_code("Account store unavailable"),
+        Some("store")
+    );
+    assert_eq!(Store::usage_refusal_code("anything else"), None);
+}

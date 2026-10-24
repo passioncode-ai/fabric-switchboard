@@ -674,6 +674,9 @@ pub struct Runtime {
     openrouter_models: Mutex<agent_settings::ModelCache>,
     /// What the project folders' Claude Code route was last synced for (SB-118).
     bindings_key: Mutex<Option<u64>>,
+    /// PRD-13: the folders with the person's own `ANTHROPIC_*` values at the last sync, so an
+    /// unchanged set is not logged again (`binding_changed`).
+    binding_user_values: Mutex<Option<Vec<String>>>,
     /// The bindings pass and a capability rotation write the same files: one at a time, without
     /// the owner transaction (a pass over 200 folders held it up to 13 s, 2026-10-18).
     bindings_lock: tokio::sync::Mutex<()>,
@@ -775,6 +778,7 @@ impl Runtime {
             vesta_cancel: Mutex::new(None),
             vanish_at: std::sync::atomic::AtomicI64::new(0),
             bindings_key: Mutex::new(None),
+            binding_user_values: Mutex::new(None),
             bindings_lock: tokio::sync::Mutex::new(()),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
@@ -976,11 +980,10 @@ impl Runtime {
                 self.proxy.set_released_tokens(report.released.clone());
                 self.proxy.set_stat_folders(stat_folders(&snapshot));
                 // SB-155: a sync that changed nothing is not an event (178 a day on 2026-10-20).
-                let changed = report.bound
-                    + report.removed
-                    + report.skipped.len()
-                    + report.user_values_present.len()
-                    > 0;
+                let changed = match self.binding_user_values.lock() {
+                    Ok(mut last) => binding_changed(&report, &mut last),
+                    Err(_) => true,
+                };
                 if changed {
                     oplog::event(
                         "claude_binding",
@@ -2042,13 +2045,7 @@ impl Owner {
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
             "owner_started",
-            &[
-                ("pid", oplog::Field::Number(std::process::id().into())),
-                (
-                    "proxy_port",
-                    oplog::Field::Number(runtime.proxy.address().port().into()),
-                ),
-            ],
+            &owner_started_fields(std::process::id(), runtime.proxy.address().port()),
         );
         Ok(Self {
             runtime,
@@ -2446,6 +2443,29 @@ fn canonical_near(path: &Path) -> PathBuf {
     }
     path.to_owned()
 }
+/// Whether a bindings sync is worth a `claude_binding` line (SB-155): a folder bound, removed
+/// or skipped, or the set of folders holding the person's own values changed since `last`, the
+/// set at the previous sync (PRD-13: an unchanged set logged every sync). The first sync logs a
+/// non-empty set once.
+fn binding_changed(report: &bindings::Report, last: &mut Option<Vec<String>>) -> bool {
+    let mut users = report.user_values_present.clone();
+    users.sort();
+    users.dedup();
+    let users_changed = match last.as_ref() {
+        Some(previous) => *previous != users,
+        None => !users.is_empty(),
+    };
+    *last = Some(users);
+    users_changed || report.bound + report.removed + report.skipped.len() > 0
+}
+/// The fields of `owner_started`: the process, the proxy's port and the owner's version (PRD-12).
+fn owner_started_fields(pid: u32, proxy_port: u16) -> [(&'static str, oplog::Field); 3] {
+    [
+        ("pid", oplog::Field::Number(pid.into())),
+        ("proxy_port", oplog::Field::Number(proxy_port.into())),
+        ("version", oplog::Field::Code(env!("CARGO_PKG_VERSION"))),
+    ]
+}
 /// The owner transaction, held by a background step, logged when held long (2026-10-17: reads
 /// waited minutes behind it). `step` is a fixed code naming the holder.
 pub(crate) struct Held<'a> {
@@ -2467,16 +2487,37 @@ impl Held<'_> {
         self.last = now;
     }
 }
+impl Held<'_> {
+    /// The phases a long hold logs: each marked phase, then `rest`, the time after the last
+    /// mark (PRD-02: 14 s of a hold were in `millis` and in no phase). A hold with no marks has
+    /// only `millis`.
+    fn fields(&self) -> Vec<(&'static str, i64)> {
+        let mut fields = self.phases.clone();
+        if !fields.is_empty() {
+            fields.push(("rest", self.last.elapsed().as_millis() as i64));
+        }
+        fields
+    }
+}
+#[cfg(test)]
+thread_local! {
+    /// The phases of the last hold this thread let go, long or not, for tests.
+    pub(crate) static LAST_HOLD: std::cell::RefCell<Vec<(&'static str, i64)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
 impl Drop for Held<'_> {
     fn drop(&mut self) {
         let held = self.since.elapsed();
+        let phases = self.fields();
+        #[cfg(test)]
+        LAST_HOLD.with(|last| *last.borrow_mut() = phases.clone());
         if held >= HELD_LONG {
             let mut fields = vec![
                 ("step", oplog::Field::Code(self.step)),
                 ("millis", oplog::Field::Number(held.as_millis() as i64)),
             ];
             fields.extend(
-                self.phases
+                phases
                     .iter()
                     .map(|(name, ms)| (*name, oplog::Field::Number(*ms))),
             );
@@ -2655,8 +2696,10 @@ async fn execute(
         Operation::Snapshot => {
             serde_json::to_value(store.snapshot()?).map_err(|_| "Snapshot unavailable.".into())
         }
+        // PRD-12: `owner_version` names the build that answered (the client's may differ) and
+        // `online` says whether an owner runs, beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": env!("CARGO_PKG_VERSION"), "online": runtime.is_some()}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -5441,6 +5484,70 @@ mod owner_tests {
             ["first", "second"]
         );
         assert!(held.phases.iter().all(|(_, ms)| *ms >= 0));
+    }
+
+    #[test]
+    fn a_sync_that_changed_nothing_is_not_logged_again() {
+        // PRD-13 (iteration 2026-10-24): 522 of 1082 `claude_binding` lines in 48 h read
+        // bound=0 removed=0 skipped=0 user_values=1: one folder with the person's own values
+        // made every sync an event, against SB-155.
+        let mut last = None;
+        let mine = |folders: &[&str]| bindings::Report {
+            user_values_present: folders.iter().map(|f| (*f).to_owned()).collect(),
+            ..Default::default()
+        };
+        assert!(binding_changed(&mine(&["/a"]), &mut last), "first seen");
+        assert!(!binding_changed(&mine(&["/a"]), &mut last), "the same set");
+        assert!(
+            binding_changed(&mine(&["/a", "/b"]), &mut last),
+            "a new folder"
+        );
+        assert!(binding_changed(&mine(&[]), &mut last), "the set emptied");
+        assert!(!binding_changed(&mine(&[]), &mut last), "nothing at all");
+        let bound = bindings::Report {
+            bound: 1,
+            ..Default::default()
+        };
+        assert!(binding_changed(&bound, &mut last), "a folder bound");
+    }
+
+    #[tokio::test]
+    async fn status_and_the_start_line_name_the_owners_version() {
+        // PRD-12 (iteration 2026-10-24): twelve restarts into new releases in 48 h could not be
+        // told apart in the log, and `status` did not say which owner answered.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let status = runtime.execute(Operation::Status).await.unwrap();
+        assert_eq!(
+            status["owner_version"],
+            env!("CARGO_PKG_VERSION"),
+            "{status}"
+        );
+        assert_eq!(status["online"], true, "{status}");
+        let started = owner_started_fields(7, 8080);
+        assert!(started.iter().any(|(name, field)| *name == "version"
+            && matches!(field, oplog::Field::Code(v) if *v == env!("CARGO_PKG_VERSION"))));
+    }
+
+    #[tokio::test]
+    async fn a_long_hold_names_the_time_after_its_last_mark() {
+        // PRD-02 (iteration 2026-10-24): a hold logged only its marked phases; the time after
+        // the last mark (14 s of a `usage_renewal` on 2026-10-24) was in `millis` and nowhere else.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let mut held = runtime.hold("test").await;
+        held.phase("first");
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        let fields = held.fields();
+        assert_eq!(
+            fields.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            ["first", "rest"]
+        );
+        assert!(fields[1].1 >= 40, "{fields:?}");
+        // A hold with no marks has nothing to split.
+        drop(held);
+        let held = runtime.hold("test").await;
+        assert!(held.fields().is_empty());
     }
 
     #[tokio::test]

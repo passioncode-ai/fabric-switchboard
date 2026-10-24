@@ -388,6 +388,26 @@ fn failure_delay(previous: Option<(i64, i64)>, rate_limited: Option<Option<i64>>
     }
 }
 
+/// The `usage_check` outcome of a failed check: the proxy's own code, else the store's code
+/// for a refusal to keep the answer (PRD-17: `superseded`, `credential_changed`,
+/// `invalid_observation`, `account_gone`, `vault`, `store`), else `no_windows` for an answer
+/// without a quota window, else `other`.
+fn failure_code(failure: &switchboard_proxy::ProbeFailure) -> &'static str {
+    match failure.kind() {
+        "other" => Store::usage_refusal_code(&failure.message).unwrap_or(
+            if failure.message == NO_WINDOWS {
+                "no_windows"
+            } else {
+                "other"
+            },
+        ),
+        code => code,
+    }
+}
+/// `switchboard_proxy::parse_usage`'s refusal of an answer with no quota window, which the
+/// proxy gives no code (pinned by
+/// `a_failed_check_the_store_or_an_empty_answer_refused_has_its_own_code`).
+const NO_WINDOWS: &str = "Provider returned no usage windows.";
 /// The provider's usage endpoint, sent `credential`; a test gate may name a synthetic one.
 async fn probe_provider(
     store: Arc<Store>,
@@ -469,13 +489,13 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
                 Some(status) => crate::oplog::event(
                     "usage_check",
                     &[
-                        ("outcome", crate::oplog::Field::Code(failure.kind())),
+                        ("outcome", crate::oplog::Field::Code(failure_code(&failure))),
                         ("status", crate::oplog::Field::Number(i64::from(status))),
                     ],
                 ),
                 None => crate::oplog::event(
                     "usage_check",
-                    &[("outcome", crate::oplog::Field::Code(failure.kind()))],
+                    &[("outcome", crate::oplog::Field::Code(failure_code(&failure)))],
                 ),
             }
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
@@ -905,6 +925,37 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
 mod tests {
     use super::*;
     use switchboard_core::{Credential, MemoryVault};
+    /// PRD-17 (iteration 2026-10-24): 15 quota checks in 48 h were logged `usage_check
+    /// outcome=other`. The store's refusals of the answer (`Store::usage_refusal_code`) and an
+    /// answer with no quota window had no code; each has one now, and the provider's own codes
+    /// stay as they were.
+    #[test]
+    fn a_failed_check_the_store_or_an_empty_answer_refused_has_its_own_code() {
+        use switchboard_proxy::ProbeFailure;
+        let code = |message: &str| failure_code(&ProbeFailure::from(message));
+        assert_eq!(
+            code("Usage observation is older than the stored observation"),
+            "superseded"
+        );
+        assert_eq!(
+            code("Credential changed during usage check"),
+            "credential_changed"
+        );
+        assert_eq!(code("Invalid usage observation"), "invalid_observation");
+        assert_eq!(code("Account not found"), "account_gone");
+        // The empty answer's text, as the proxy writes it today.
+        let empty =
+            switchboard_proxy::parse_usage_at(Provider::Claude, &serde_json::json!({}), 1_000_000)
+                .unwrap_err();
+        assert_eq!(code(&empty), "no_windows");
+        assert_eq!(code(switchboard_proxy::REJECTED), "rejected");
+        let vault = ProbeFailure {
+            code: Some("vault"),
+            ..ProbeFailure::from("Keychain says no")
+        };
+        assert_eq!(failure_code(&vault), "vault");
+        assert_eq!(code("anything else"), "other");
+    }
     #[test]
     fn schedule_written_before_the_clock_moved_back_is_due_now() {
         let account = |checked_at: i64, next_check_at: i64| switchboard_core::Account {

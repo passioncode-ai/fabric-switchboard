@@ -53,8 +53,8 @@ pub(crate) struct RefreshState {
     endpoint: Mutex<String>,
     /// Account id → hash of the refresh token the provider rejected.
     dead: Mutex<HashMap<String, String>>,
-    /// SB-182: the last `sign_in_required` answer, with the store's change count and the
-    /// rejected lineages it was computed from.
+    /// SB-182: the last `sign_in_required` answer, with the store's credential write count
+    /// (PRD-01) and the rejected lineages it was computed from.
     sign_in_cache: Mutex<SignInCache>,
     /// Account id → (next attempt, current delay) after a transient failure.
     backoff: Mutex<HashMap<String, (i64, i64)>>,
@@ -364,8 +364,9 @@ impl RefreshState {
             .is_some_and(|hash| hash == fingerprint(token))
     }
     /// Accounts whose stored lineage the provider rejected and nothing has replaced since.
-    /// SB-182: the answer is kept while neither the stored credentials (`Store::changes`) nor
-    /// the rejected lineages changed. `recovery`, which Fabric Dashboards reads every 15 s,
+    /// SB-182: the answer is kept while neither the stored credentials
+    /// (`Store::credential_changes`, PRD-01: not `Store::changes`, which every project save moves)
+    /// nor the rejected lineages changed. `recovery`, which Fabric Dashboards reads every 15 s,
     /// read every rejected account's credential from the vault each time, and took up to 18 s
     /// on 2026-10-23 with six of them.
     pub(crate) fn sign_in_required(&self, store: &Store) -> Vec<String> {
@@ -380,7 +381,7 @@ impl RefreshState {
         if dead.is_empty() {
             return vec![];
         }
-        let changes = store.changes();
+        let changes = store.credential_changes();
         if let Ok(cache) = self.sign_in_cache.lock() {
             if let Some((at, of, ids)) = cache.as_ref() {
                 if *at == changes && *of == dead {
@@ -388,17 +389,20 @@ impl RefreshState {
                 }
             }
         }
-        let ids: Vec<String> = dead
-            .iter()
-            .filter(|(id, hash)| {
-                store.stored_credential(id).is_ok_and(|c| {
-                    c.refresh_token.as_deref().map(fingerprint).as_deref() == Some(hash.as_str())
+        // PRD-01: each read may wait seconds on the Keychain; off the async worker it shares.
+        let ids: Vec<String> = crate::blocking::run(|| {
+            dead.iter()
+                .filter(|(id, hash)| {
+                    store.stored_credential(id).is_ok_and(|c| {
+                        c.refresh_token.as_deref().map(fingerprint).as_deref()
+                            == Some(hash.as_str())
+                    })
                 })
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+                .map(|(id, _)| id.clone())
+                .collect()
+        });
         // A credential stored while these were read may have replaced one: keep nothing then.
-        if store.changes() == changes {
+        if store.credential_changes() == changes {
             if let Ok(mut cache) = self.sign_in_cache.lock() {
                 *cache = Some((changes, dead, ids.clone()));
             }
@@ -463,10 +467,12 @@ pub(crate) async fn ensure_fresh_with(
         Some(lock) => Some(crate::hold_on(lock, step).await),
         None => None,
     };
+    let step_due = reserve_due(store, native, state, id, force);
+    // PRD-02: the mark ends the phase, so it follows the checks it names.
     if let Some(held) = guard.as_mut() {
         held.phase("checks");
     }
-    let (result, refresh_token) = match reserve_due(store, native, state, id, force) {
+    let (result, refresh_token) = match step_due {
         Step::Done(outcome) => return outcome,
         // SB-179: a caller that holds the transaction (a launch, a switch) no longer finds the
         // background renewal waiting behind it: it waits for that grant, which needs no
@@ -1941,6 +1947,131 @@ mod tests {
         let mut dead = state.dead.lock().unwrap();
         dead.remove(&a);
         drop(dead);
+        assert!(state.sign_in_required(&store).is_empty());
+    }
+    struct SlowVault {
+        inner: switchboard_core::MemoryVault,
+        slow: std::sync::atomic::AtomicBool,
+    }
+    impl switchboard_core::Vault for SlowVault {
+        fn get(&self, id: &str) -> Result<Credential, String> {
+            if self.slow.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+            }
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// PRD-02 (iteration 2026-10-24): `transaction_held step=usage_renewal checks=0` with
+    /// 14 s held: the `checks` mark came before the checks ran, so their time went unnamed.
+    #[tokio::test]
+    async fn a_renewals_hold_names_the_time_its_checks_took() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(SlowVault {
+            inner: Default::default(),
+            slow: Default::default(),
+        });
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        let mut fresh = expired("synthetic-a");
+        fresh.expires_at = Some(now() + 86_400);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                fresh,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let id = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        let lock = tokio::sync::Mutex::new(());
+        vault.slow.store(true, Ordering::SeqCst);
+        ensure_fresh_with(
+            &store,
+            SIGNED_OUT,
+            &state,
+            &id,
+            false,
+            Some(&lock),
+            "usage_renewal",
+        )
+        .await;
+        let phases = crate::LAST_HOLD.with(|last| last.borrow().clone());
+        let checks = phases
+            .iter()
+            .find(|(name, _)| *name == "checks")
+            .map(|(_, ms)| *ms);
+        assert!(
+            checks.is_some_and(|ms| ms >= 50),
+            "the checks' time is under `checks`: {phases:?}"
+        );
+    }
+    /// PRD-01 (iteration 2026-10-24): the SB-182 cache was keyed on `Store::changes`, which
+    /// every project save moves too; a folder joining its group (about 740 a day) sent the next
+    /// `recovery` back to the Keychain, and it still took 5 to 30 s. Only a credential write
+    /// may cost a read now, and a new sign-in still invalidates the answer.
+    #[test]
+    fn a_folder_joining_its_group_does_not_cost_a_vault_read() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        let reads = vault.gets.load(Ordering::SeqCst);
+        let work = tempfile::tempdir().unwrap();
+        let mut folders = Vec::new();
+        for n in 0..5 {
+            let folder = work.path().join(format!("repo-{n}"));
+            std::fs::create_dir_all(&folder).unwrap();
+            folders.push(folder.canonicalize().unwrap());
+            let before = store.changes();
+            store
+                .save_project(Some("app"), "App", &folders, &[])
+                .or_else(|_| store.save_project(None, "App", &folders, &[]))
+                .unwrap();
+            assert!(
+                store.changes() > before,
+                "a project save is a backup change"
+            );
+            assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        }
+        assert_eq!(
+            vault.gets.load(Ordering::SeqCst),
+            reads,
+            "a project save is not a credential change"
+        );
+        // A new sign-in is still seen at once.
+        let mut fresh = expired("synthetic-a");
+        fresh.refresh_token = Some("signed-in-again".into());
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                fresh,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
         assert!(state.sign_in_required(&store).is_empty());
     }
     fn sorted(mut ids: Vec<String>) -> Vec<String> {
