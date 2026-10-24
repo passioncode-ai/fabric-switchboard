@@ -29,3 +29,5 @@
 .dialog .dialog-actions { position: sticky; bottom: 0; z-index: 1; background: var(--panel); }
 .pool-field { display: grid; gap: var(--space-3); }
 .pool-field > [hidden] { display: none; }
+/* Inside the shared status block the terms notice is one line of it, not a box in a box. */
+.status-stack .terms-notice { border: 0; padding: 0; margin: 0; background: none; }
