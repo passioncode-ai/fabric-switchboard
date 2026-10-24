@@ -30,7 +30,7 @@
       "expected": [
         "calls switchboard_project_apply with the absolute path of that folder",
         "tells the operator in one line which rule applied, or that no rule did",
-        "reminds that rules are visible and can be paused in the Switchboard app under Projects",
+        "reminds that rules are visible and can be paused in the Switchboard app under Groups",
         "does not create, unpause or renew a rule on its own"
       ]
     },
@@ -62,7 +62,7 @@
       "expected": [
         "confirms folder, account and target before saving",
         "calls switchboard_project_set with an expires_in_hours value rather than no expiry",
-        "reports that the rule is visible and pausable in the app under Projects",
+        "reports that the rule is visible and pausable in the app under Groups",
         "does not save any rule when the operator only asked to switch the current session"
       ]
     }

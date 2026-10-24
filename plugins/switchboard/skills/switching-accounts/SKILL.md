@@ -102,7 +102,7 @@ first write call, or when a result field is unclear.
 Call `switchboard_status` before anything else and read:
 
 - `runtime.online` false: the desktop app and `switchboard serve` are both stopped, so
-  managed sessions cannot route and rotation is paused. Reads come from local metadata.
+  managed sessions cannot route and automatic switching is paused. Reads come from local metadata.
 - `session.mode`: `managed` (with `provider` and `pool`: switching reaches this session),
   `isolated` (pinned to one `account_id`: nothing here changes it), or `native` (the
   ordinary CLI login; `provider` may be null).
