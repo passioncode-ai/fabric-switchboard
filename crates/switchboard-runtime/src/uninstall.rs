@@ -32,6 +32,9 @@ const OWNED: &[&str] = &[
     "capability-migration.json",
     "agents-settings.json",
     "statistics.json",
+    // Usage analytics' own state, the person's answer included (issue #128): uninstalling
+    // forgets the answer, and the question returns at the next first start.
+    "analytics-state.json",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
     // Folders taken out of their group lately (SB-172).
@@ -356,6 +359,12 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn uninstall_forgets_the_usage_answer() {
+        // Issue #128 round 1: the answer lives in this app's analytics state, which is ours.
+        assert!(OWNED.contains(&crate::analytics::STATE_FILE));
+    }
+
     #[test]
     fn apply_removes_owned_things_and_keeps_the_persons_files() {
         let (temp, root, vault) = setup();

@@ -687,6 +687,7 @@ export const RU: Record<string, string> = {
   "Only installed release builds send analytics; this build sends nothing.": "Аналитику отправляют только установленные релизные сборки; эта сборка ничего не отправляет.",
   "Share anonymous usage counts?": "Отправлять анонимную статистику использования?",
   "Continue": "Продолжить",
+  "Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.": "Статистика использования остаётся выключенной: её выключил другой инструмент PassionCode.ai на этом компьютере. Чтобы снова её отправлять, включите её в разделе «О программе».",
   "Nothing has been sent yet. Nothing is sent until you answer.": "Пока ничего не отправлено. До вашего ответа ничего не отправится.",
   "An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.": "Предыдущая версия Switchboard могла уже отправить эту статистику с этого компьютера. До вашего ответа больше ничего не отправится.",
   "This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.": "Этот переключатель действует для всех инструментов PassionCode.ai на этом компьютере. Изменить выбор можно позже в разделе «О программе».",

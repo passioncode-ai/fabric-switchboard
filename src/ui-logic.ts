@@ -512,6 +512,11 @@ export function usageQuestionText(status: UsageStatus | null | undefined): strin
     ? t('An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.')
     : t('Nothing has been sent yet. Nothing is sent until you answer.');
 }
+/** What an answer changed, from the status the backend returned: an "on" given after another tool turned the shared switch off leaves it off and says so. */
+export function usageAnswerText(wanted: boolean, status: UsageStatus | null | undefined): string {
+  if (wanted && status && !status.enabled) return t('Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.');
+  return wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for every PassionCode.ai tool on this computer.');
+}
 /** The first-run tour waits while the usage question is open or its status is still being read. */
 export function tourWaits(status: UsageStatus | null | undefined, statusFailed: boolean): boolean {
   if (statusFailed) return false;

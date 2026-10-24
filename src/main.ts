@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -108,7 +108,8 @@ function usageSwitch(focus: string) {
 }
 function answerUsage(focus: string) {
   const wanted = usageChoice;
-  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for every PassionCode.ai tool on this computer.'), focus);
+  // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
+  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted, analyticsState), focus);
 }
 function usageQuestionCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
@@ -260,13 +261,13 @@ async function reload() {
     }
   });
 }
-async function mutate(action: () => Promise<unknown>, success: string, focusKey?: string, accountId?: string, operation: Operation = 'change') {
+async function mutate(action: () => Promise<unknown>, success: string | (() => string), focusKey?: string, accountId?: string, operation: Operation = 'change') {
   busy = true; notice = ''; clock.begin(); render();
   try {
     await action();
     await refreshContext();
     if (accountId) usageErrors.delete(accountId);
-    showNotice(restoredText || success); restoredText = '';
+    showNotice(restoredText || (typeof success === 'function' ? success() : success)); restoredText = '';
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
@@ -2443,6 +2444,9 @@ document.addEventListener('click', (event) => { if (openMenu && !(event.target a
 function backgroundRefresh() {
   if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
   refreshing = true; const stamp = clock.stamp();
+  // Issue #128 round 1: another PassionCode.ai tool may have turned the shared switch off since
+  // the usage question was drawn; a fresh status drops a question that no longer applies.
+  void adapter.analytics().then((value) => { if (clock.accepts(stamp)) { analyticsState = value; analyticsError = false; backgroundRender(); } }, () => { /* the next pass reads it again */ });
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;

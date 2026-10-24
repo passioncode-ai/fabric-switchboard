@@ -566,6 +566,10 @@ check(() => {
   assert.equal(logic.tourWaits(null, true), false, 'a failed read never holds the tour');
   assert.equal(logic.tourWaits(ask, false), true, 'the question comes first');
   assert.equal(logic.tourWaits({ ...ask, disclosed: true }, false), false, 'answered: the tour shows');
+  // Round 1: an "on" answered after another tool turned the shared switch off stays off, and says so.
+  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: true, disclosed: true }), 'Anonymous usage analytics are on.');
+  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: false, disclosed: true }), 'Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.');
+  assert.equal(logic.usageAnswerText(false, { ...ask, enabled: false, disclosed: true }), 'Anonymous usage analytics are off for every PassionCode.ai tool on this computer.');
   i18n.setLocale('ru');
   assert.equal(logic.usageQuestionText(ask), 'Пока ничего не отправлено. До вашего ответа ничего не отправится.');
   i18n.setLocale('en');
@@ -582,6 +586,12 @@ check(() => {
   assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the answer goes to the backend');
   assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the question');
   assert.match(main, /event\.key === 'Escape' && !openMenu && tourShown\(\)/, 'Escape ends only a tour on screen');
+  // Round 1: the status is read again in the background (every minute and when the window is shown),
+  // so a question drawn before another tool turned the switch off is dropped, not answered with a stale "on".
+  const refresh = main.slice(main.indexOf('function backgroundRefresh() {'), main.indexOf('setInterval(backgroundRefresh, 60_000);'));
+  assert.match(refresh, /adapter\.analytics\(\)\.then\(\(value\) => \{ if \(clock\.accepts\(stamp\)\) \{ analyticsState = value;/, 'backgroundRefresh reads the analytics status');
+  assert.match(main, /document\.addEventListener\('visibilitychange', \(\) => \{ if \(!document\.hidden\) backgroundRefresh\(\); \}\);/, 'and so does showing the window');
+  assert.match(main, /\(\) => usageAnswerText\(wanted, analyticsState\)/, 'the answer reports what is now true');
 });
 
 // Launch (operator decision 2026-10-09): managed only for the pool's selected account while the

@@ -37,19 +37,36 @@ While the switch is on and `disclosed_at` is absent:
   `project_changed` and `account_switched` are not queued; a flush finds nothing to send. A
   background start (the login item, the lifecycle broker) or a run whose window never opens sends
   nothing (`nothing_is_queued_or_sent_before_the_answer_not_even_from_a_background_start`).
-- Accounts and days seen meanwhile are counted locally only, so nothing from before the answer is
-  reported after it. The one exception is the start of the run in which the person answers: an
-  answer of on reports that run's `app_installed` (a fresh install only) and its `app_started`,
-  once (`an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it`).
-- An answer of off sends nothing then or later, and the question is not asked again
-  (`an_answer_of_off_sends_nothing_then_or_after_a_restart`).
+- Accounts seen meanwhile are counted locally only, so no account change from before the answer is
+  reported after it. Days are not counted locally: the day's `app_active` goes at the first
+  background pass after an answer of on. The start of the run in which the person answers is
+  reported after the answer: an answer of on reports that run's `app_installed` (a fresh install
+  only, with `first_passioncode_app` true when this app created the shared file, kept in the state
+  as `machine_first` until then) and its `app_started`, once
+  (`an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it`,
+  `the_first_passioncode_app_is_reported_truly_after_a_later_answer`,
+  `through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day`).
+- An answer of off sends nothing while the shared switch stays off, and the question is not
+  asked again (`an_answer_of_off_sends_nothing_then_or_after_a_restart`). The switch is shared:
+  if another PassionCode.ai app turns it back on, Switchboard counts again, since it has its
+  answer (Fabric ADR-0127 Amendment 2;
+  `an_answer_of_off_holds_while_the_shared_switch_stays_off`).
+- A question answered on after another PassionCode.ai app turned the shared switch off records
+  the answer and leaves the switch off for every app; the window reads the status again every
+  minute and when it is shown, so such a question usually goes away by itself first
+  (`answering_on_after_another_app_turned_the_switch_off_keeps_it_off`).
 
-An install from 0.6.81 or earlier (its state has `installed`, no `disclosed_at`) is asked once, is
+An install from 0.6.81 or earlier (its state has `installed` or an `active_day`, no `disclosed_at`) is asked once, is
 told “An earlier version of Switchboard may already have sent these counts from this computer.
 Nothing more is sent until you answer.”, and is never counted as a new install
-(`an_upgraded_install_asks_once_and_is_not_counted_as_new`). A state file that cannot be read or
-parsed asks again and never sends `app_installed` a second time
-(`an_unreadable_state_asks_again_and_never_reports_a_second_install`).
+(`an_upgraded_install_asks_once_and_is_not_counted_as_new`,
+`an_old_state_with_a_day_but_no_install_flag_is_not_a_new_install`). A state file that cannot be
+read or parsed asks again and never sends `app_installed` a second time
+(`an_unreadable_state_asks_again_and_never_reports_a_second_install`); one that cannot be written
+logs `analytics_state_unwritable` (a code only) and the answer holds for that run only
+(`a_state_that_cannot_be_written_is_reported_not_hidden`). `switchboard uninstall` removes the
+state file with the rest of the data folder, so the answer is forgotten and the question returns
+at the next first start (`uninstall_forgets_the_usage_answer`); backups do not carry it.
 
 The window reads `{available, enabled, disclosed, sent_before}` (`analytics_status`); the
 question shows when all of `available`, `enabled` and `disclosed: false` hold, and the first-run
@@ -105,8 +122,9 @@ All PassionCode.ai tools share one file:
 - **`analytics: false` turns analytics off for every PassionCode.ai tool on the machine.** About →
   *Share anonymous usage counts* and the first-run question write it; turning it off also drops
   events still waiting.
-- **No app's answer is kept here.** Each app records its own `disclosed_at` in its own state file
-  (above).
+- **No app's answer is kept here.** Each app keeps its own answer timestamp in its own state file;
+  Switchboard's is `disclosed_at` (above). The answer adds no field to this file
+  (`the_answer_adds_no_field_to_the_shared_file`).
 
 Other apps adopt the same file, fields and rule (Fabric and Fabric Inbox tasks below).
 
@@ -118,6 +136,8 @@ Other apps adopt the same file, fields and rule (Fabric and Fabric Inbox tasks b
   `404` drop it. At most 200 events wait in memory; anything older than 23 h is dropped (the
   server refuses events older than a day). Nothing is written to disk but the small state file.
 - Each send is one `analytics_flush` line in the operation log with its outcome and event count.
+- A shared file that cannot be read for a moment keeps what waits for a later pass; a switch that
+  reads off drops it (`a_shared_file_unreadable_for_a_moment_keeps_what_waits`).
 
 ## Which builds send
 
@@ -136,6 +156,10 @@ The Aptabase dashboard at `analytics.passioncode.ai` (app *Fabric Switchboard*).
 `analytics.sshlg.me` the app had id `sVX004YjufDn0d4BiULQpF`; a debug event from `scripts/send-test-event.sh` was stored as `sVX004YjufDn0d4BiULQpF_DEBUG` on 2026-10-05); cross-app questions —
 one `install_id` across apps — through ClickHouse, which `sshlg-growth` queries
 (`growth.analytics.*`). Registering the app in growth's app registry is growth's task.
+
+From 0.6.82, installs and active days are counted from the person's answer, not from the first
+start (issue #128): growth sees a step down at that release, and installs that answer off are not
+counted at all.
 
 ## Cross-app tasks
 
