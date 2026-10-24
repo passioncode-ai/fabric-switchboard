@@ -1,0 +1,135 @@
+{
+ "node": "N4",
+ "done": [
+  "docs/brand/terminology.md: Group (CLI and MCP `project`, store `pool`, pool shown only as the group id), Default group, Project, Automatic switching (identifier `rotation`; never «ротация»), API keys (the page formerly Tokens) and Tokens (counted usage only), each with English and Russian forms («группа», «автоматическое переключение» / «автопереключение», «API-ключи»); Russian glossary aligned (D-1, D-2)",
+  "docs/brand/strings.md (CPY-12, SB-66): resynced by surface against `node scripts/check-locale.mjs --list` (1242 keys at b85aad1): shell and navigation, tour, provider terms, Accounts, Kimi Code, Groups, Codex in group folders, Repositories on disk, Organizations and PassionCode.ai, Agents, API keys, Statistics, Activity (session context), About, backend sentences; a Retired list (+ New project, Project name, Create project, Save project, No projects yet, Step {n} of 5, Signing in to Claude Code, Finish sign-in, Version {current} is the latest, Update check finished., {n} accounts restored · {k} already here, Limit reached · until {time}, Next managed request, Launch isolated…/managed…, 0.3 actions, the pre-0.6.51 SessionStart line); a section saying how completeness is checked; every quoted registry string checked present in --list and every retired one absent (scratch script, 0 misses after excluding non-t() natives listed with their source)",
+  "docs/brand/README.md: no longer says localization is absent (Russian since 0.6.10, SB-76); Sources gain `locales: src/locales/*.ts`; brand_lint (super-ux 0.66.1) clean",
+  "docs/brand/facts.md F-001 updated to current platforms and signing (INSTALL.md:61,65); F-007 names automatic switching with the identifier; docs/brand/locales/ru.md points at src/locales/ru.ts and the new terms",
+  "README.ru.md (CPY-13, CPY-08 README.ru part): task table at parity with README.md (groups, Organizations, Statistics, API keys, agents); buttons named as the Russian window does (+ Добавить аккаунт, Добавить в Switchboard, Переключить, Выбрать, Запустить…, Изолированная сессия, Проверить использование, Включить для Claude Code, Группы → + Новая группа, О программе → Язык); label/pool/home/credential/OS vault/isolated-режим/runtime/release workflow replaced by Russian interface words; no em dash and no spaced hyphen as a dash; recent changes 0.6.79 to 0.6.81 (CHANGELOG.md:9-25)",
+  "README.md: group and automatic switching vocabulary in 'Using it' (steps renumbered 1 to 8; step 5 was missing), Organizations row added, Tokens row renamed API keys, recent changes 0.6.79 to 0.6.81, screenshot alt no longer says pools; no em dash added",
+  "docs/AGENT-SUPPORT.md:11 (generated): 'Tokens → Machine key / Project keys' replaced by 'API keys → Machine key · OpenRouter / Group keys' in its generator scripts/agents_doc.py:43 (one string), regenerated; `agents_doc.py --check` current"
+ ],
+ "not_done": [
+  "Screenshot: no screenshot newer than docs/evidence/screenshots/accounts-0.6.13.png exists in the repo (ls docs/evidence/screenshots); both READMEs still show it, the Russian caption now says it is a 0.6.13 snapshot. Needs a new capture (another node), then README.md:17 and README.ru.md:16 point at it",
+  "README.md and README.ru.md name the page 'API keys' / «API-ключи» and the Russian group words ahead of the window: in 0.6.81 the window still shows 'Tokens' / «Токены» (src/main.ts:239, src/locales/ru.ts:1061) and «пул» (ru.ts:662, 665). True once N5 lands D-1/D-2; if N5 does not, revert those two words",
+  "strings.md entries marked '(0.6.81)' must be resynced to the shipped text after N5 (and N2 for the CLI SessionStart lines)",
+  "No script check written. Proposal: scripts/check-strings-registry.mjs that imports the key list of check-locale.mjs and fails when a string quoted under 'Retired strings' in docs/brand/strings.md is still a key, or when a quoted registry string is not a key (allowing an explicit list of native strings: tray labels from src-tauri/src/residency.rs:210, language names, suggestions.rs:29); add to scripts/check.sh after check-locale.mjs",
+  "AGENTS.md:76 (PRD-14) not edited: canvas gives PRD-14 to N1, whose code fix (routing the waiting recheck through logs_check) keeps the sentence true; see corrections_for_others"
+ ],
+ "corrections_for_others": [
+  {
+   "file": "docs/CLI.md",
+   "line": 3,
+   "claim": "Reference for the `switchboard` CLI as of 0.6.18",
+   "proof": "Cargo.toml:5 version = \"0.6.81\"; package.json:3 \"0.6.81\"",
+   "correction": "Reference for the `switchboard` CLI as of 0.6.82 (or the release this lands in)."
+  },
+  {
+   "file": "docs/CLI.md",
+   "line": 104,
+   "claim": "App/server restart invalidates pending in-memory login IDs; recovery limits are in [operations](OPERATIONS.md).",
+   "proof": "crates/switchboard-runtime/src/launch.rs:1002 pub fn adopt_logins (sign-ins whose journal `.login.json` is readable and that completed or are still open in Terminal are taken back, newest first, at most MAX_LOGINS); crates/switchboard-runtime/src/lib.rs:1503 Runtime::adopt_logins (SB-65); test launch.rs:3567 a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep",
+   "correction": "A sign-in survives a restart of the app or `serve`: each sign-in keeps a journal (`.login.json`) in its private home, and the next owner takes back those that completed or are still open in Terminal (newest first, at most the usual number of open sign-ins), keeps their login IDs and finishes them; the window shows the banner again (SB-65). The rest are swept; recovery limits are in [operations](OPERATIONS.md)."
+  },
+  {
+   "file": "docs/OPERATIONS.md",
+   "line": 108,
+   "claim": "The log event list (implicitly complete)",
+   "proof": "events written but not named: control_refused crates/switchboard-runtime/src/control.rs:196; claude_binding lib.rs:986; statistics_saved statistics.rs:142; update_download src-tauri/src/updates.rs:799; update_relaunch_helper updates.rs:1308; vesta_connect lib.rs:3798; vesta_read monitor.rs:176; handover handovers.rs:211; move_root lib.rs:4050; codex_route lib.rs:806; monitor step usage_renewal monitor.rs:511 (not in the transaction_held step list). `probe` (oplog.rs:254) is a test-only event, not a production one; control_slow is already named",
+   "correction": "Add control_refused, claude_binding, statistics_saved, update_download, update_relaunch_helper, vesta_connect, vesta_read, handover, move_root and codex_route with their fields, and usage_renewal to the transaction_held steps (PRD-06); drop `probe` from PRD-06's list"
+  },
+  {
+   "file": "AGENTS.md",
+   "line": 76,
+   "claim": "a check that finds nothing new is logged once",
+   "proof": "src-tauri/src/updates.rs:599 recheck_done logs update_check with waiting=yes unconditionally (line 637), bypassing logs_check (updates.rs:589); log: 77 of 89 outcome=current lines carry waiting=yes (PRD-14)",
+   "correction": "N1 routes recheck_done's `current` outcome through logs_check; if it does not, AGENTS.md:76 must read: a check that finds nothing new is logged once, except while an update waits, when every check is logged with waiting=yes."
+  },
+  {
+   "file": "src/locales/ru.ts",
+   "line": 1212,
+   "claim": "«… не выбирает его при ротации» (also line 1216)",
+   "proof": "docs/brand/terminology.md: never «ротация»",
+   "correction": "«… не продлевает его вход и не переключается на него, в том числе автоматически» (N5)"
+  },
+  {
+   "file": "src/locales/ru.ts",
+   "line": 662,
+   "claim": "«Перенести в другой пул…», «Пул по умолчанию» (665) and other sentences with «пул» (51 occurrences)",
+   "proof": "canvas D-1; docs/brand/terminology.md",
+   "correction": "«Перенести в другую группу…», «Группа по умолчанию»; «пул» only where an id is shown (N5)"
+  },
+  {
+   "file": "src/main.ts",
+   "line": 239,
+   "claim": "Nav and title 'Tokens' (also :253; pointer 'The machine's OpenRouter key and each group's own key are under Tokens.' / 'Open Tokens'; Statistics 'No OpenRouter key is saved. Add one under Tokens.')",
+   "proof": "canvas D-2, CPY-14",
+   "correction": "'API keys' / «API-ключи» (N5)"
+  },
+  {
+   "file": "crates/switchboard-cli/src/main.rs",
+   "line": 1813,
+   "claim": "SessionStart line says 'the project \"{project}\"' for what is a group",
+   "proof": "canvas D-1; mcp.rs:21 'Switchboard projects are groups'",
+   "correction": "'Switchboard: this folder was added to the group \"{group}\"; its sessions use the group's accounts from their next start.' and the same at :1817 (N2); then strings.md's SessionStart section is resynced"
+  }
+ ],
+ "backlog_closures": [
+  {
+   "row": "SB-109",
+   "proof": "docs/evidence/backlog.md row: 'done in 0.6.65 (2026-10-22)'; test crates/switchboard-core/tests/storage.rs:1338 a_groups_organization_keeps_its_folders_on_its_own_seats; CHANGELOG.md '## 0.6.65 (2026-10-22)'",
+   "text": "**done** in 0.6.65 (2026-10-22): a group's organization keeps its folders on that organization's accounts (`a_groups_organization_keeps_its_folders_on_its_own_seats`); closed 2026-10-24 by the 0.6.82 iteration (PRD-16)."
+  },
+  {
+   "row": "SB-110",
+   "proof": "backlog row: 'phase 1 done in 0.6.80'; CHANGELOG.md:14-16 (0.6.80, SB-110); the rest is rows SB-183 (plain sessions) and SB-184 (the profile)",
+   "text": "**done** (phase 1) in 0.6.80: the context on every launch, in the session list and as `SWITCHBOARD_CONTEXT`; the remaining work continues as SB-183 and SB-184; closed 2026-10-24 (PRD-16)."
+  },
+  {
+   "row": "SB-111",
+   "proof": "backlog row: 'done in 0.6.80: the session badge (Activity → Sessions) and the organization's name in switchboard sessions'; CHANGELOG.md:16; interface key 'Runs in {name}'s context.'",
+   "text": "**done** in 0.6.80: the badge on groups (0.6.65) and on sessions in Activity → Sessions and `switchboard sessions`; closed 2026-10-24 (PRD-16)."
+  },
+  {
+   "row": "SB-131",
+   "proof": "backlog row: released in v0.6.34 (run 38967680225, 2026-10-17); CHANGELOG.md '## 0.6.34'; follow-up SB-132 for Codex sessions",
+   "text": "**done**, released in v0.6.34; Codex sessions continue as SB-132; closed 2026-10-24 (PRD-16)."
+  },
+  {
+   "row": "SB-133",
+   "proof": "backlog row: fixed, released in v0.6.40; CHANGELOG.md '## 0.6.40'",
+   "text": "**done**, released in v0.6.40 (a capability per folder; a moved folder gets FOLDER_NOT_IN_PROJECT); the live check after the release is not recorded and stays as a note, not an open row; closed 2026-10-24 (PRD-16)."
+  },
+  {
+   "row": "SB-134",
+   "proof": "backlog row: part 3 done in 0.6.52, mcp_parity::PARITY has no LATER row; test crates/switchboard-cli/src/main.rs:2723 every_cli_command_has_an_mcp_tool_or_a_reason; CHANGELOG.md '## 0.6.52'",
+   "text": "**done** in 0.6.52: every CLI command has an MCP tool or a reason (`every_cli_command_has_an_mcp_tool_or_a_reason`); launching from an agent stays SB-64/SB-74; the double registration is operator config; closed 2026-10-24 (PRD-16)."
+  },
+  {
+   "row": "SB-63",
+   "proof": "backlog row: 'Left: docs/brand/strings.md registry drift (SB-66) and empty --help texts (SB-68)'; SB-68 done 2026-10-07 (test crates/switchboard-cli/src/main.rs:2552 every_command_and_argument_has_help); SB-66's resync done by this node, commit fd93fb810283eb7ea1de69b97f2f78189c884531",
+   "text": "**done** 2026-10-24: its two leftovers are closed (SB-68 on 2026-10-07, SB-66's strings.md resync in 0.6.82, commit fd93fb8)."
+  },
+  {
+   "row": "SB-66",
+   "proof": "commit fd93fb810283eb7ea1de69b97f2f78189c884531: docs/brand/strings.md resynced by surface against check-locale.mjs --list (1242 keys), retired strings listed, brand README fixed",
+   "text": "**done** in 0.6.82 (commit fd93fb8): strings.md resynced by surface with a Retired list and a completeness note; entries marked (0.6.81) are resynced when the 0.6.82 window copy lands; a script check is proposed in N4.json (not_done)."
+  },
+  {
+   "row": "SB-182",
+   "proof": "PRD-01: 10 control_slow operation=recovery lines after 0.6.79 started; 0.6.81 SB-185 (CHANGELOG.md:11) addresses the vault-read stall",
+   "text": "Not a closure: reopen or record that SB-185 in 0.6.81 supersedes the fix, citing PRD-01's log; the orchestrator decides after N1."
+  }
+ ],
+ "checks": [
+  "python3 scripts/check_docs.py -> 101 Markdown files, 810 relative links, 0 errors",
+  "node scripts/check-locale.mjs -> 1242 interface strings, all in Russian.",
+  "python3 ~/.claude/plugins/cache/super-ux/super-ux/0.66.1/scripts/brand_lint.py docs/brand -> brand pack is clean",
+  "python3 scripts/agents_doc.py --check -> docs/AGENT-SUPPORT.md is current",
+  "node scripts/check-brand.mjs -> PassionCode 1.1.0 ... version 0.6.81 verified",
+  "python3 scripts/check_plugin.py -> 0 errors",
+  "grep -n U+2014 README.ru.md docs/brand/*.md docs/brand/locales/*.md -> no output (exit 1); added lines of README.md and AGENT-SUPPORT.md: 0 em dashes",
+  "registry cross-check (scratch script over check-locale --list): every quoted registry string is a key except native strings named with their source; every retired string is absent"
+ ],
+ "commit": "fd93fb810283eb7ea1de69b97f2f78189c884531"
+}
