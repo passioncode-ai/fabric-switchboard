@@ -43,3 +43,6 @@ flowchart LR
  P[Turn on for Claude Code] --> Q[Monitor: renew inactive, check quota]
  Q -->|threshold| C
 ```
+
+## FLW-01 note (0.6.82)
+A failed read never replaces a list already on screen (SCN-043): the list stays, a line above it offers *Retry*. Remove of a selected account goes through *Disable and remove* in the same dialog (SCN-010), not back to the list. Restore from About asks first (SCN-030).
