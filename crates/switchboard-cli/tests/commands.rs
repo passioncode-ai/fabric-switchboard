@@ -203,7 +203,7 @@ fn project_suggestions_work_from_the_cli_and_the_hook_never_fails() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     let said = hooked(&hook.to_string());
-    assert!(said.contains("added to the project \"App\""), "{said}");
+    assert!(said.contains("added to the group \"App\""), "{said}");
     assert_eq!(said.lines().count(), 1);
     let (_, listed, _) = run(&["project", "suggestions"], None);
     // The clone the person removed is declined now; the new repository is the one added.

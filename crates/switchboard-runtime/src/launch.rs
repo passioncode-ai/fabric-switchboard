@@ -328,7 +328,7 @@ pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
 type FromCommand<'a> = Option<(&'a str, &'a Path, &'a [String])>;
 /// Printed by a session script that could not read its key; names the fix, never the key.
 const KEY_UNREADABLE: &str =
-    "Switchboard could not read the OpenRouter key. Check it under Agents, then launch again.";
+    "Switchboard could not read the OpenRouter key. Check it on the API keys page, then launch again.";
 #[cfg(not(windows))]
 pub(crate) fn script(
     home: &Path,
@@ -1515,9 +1515,9 @@ fn codex_auth_snapshot(
     }
 }
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
-    "This account belongs to a project. Launch it from one of the project's folders.";
+    "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
-    "This folder belongs to a project. Launch one of the project's accounts.";
+    "This folder belongs to a group. Launch one of the group's accounts.";
 /// Projects reserve their accounts (0.6): a project's account starts only inside the project's
 /// folders, and inside them a provider the project has accounts for uses only those.
 pub(crate) fn project_allows(
@@ -1619,7 +1619,7 @@ pub(crate) fn agent_folder(root: &Path, working_directory: &Path) -> Result<Path
     Ok(working_directory)
 }
 pub const OPENROUTER_MODEL_NEEDED: &str =
-    "Choose a model for this launch, or set the default model of the OpenRouter key under Agents.";
+    "Choose a model for this launch, or set the key's default model on the API keys page or with switchboard agents openrouter model.";
 /// Starts an agent with an OpenRouter recipe (catalog `openrouter`, SB-79) in a folder on the
 /// operator's saved OpenRouter key and `model` (default: the key's model). The key never touches
 /// disk: the session script reads it from `switchboard agents key --service openrouter` when it
