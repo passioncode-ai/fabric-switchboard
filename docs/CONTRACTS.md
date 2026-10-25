@@ -1007,19 +1007,18 @@ written by an earlier version still reads. Evidence:
   `recovery_continued` with `settled`. Its stdout is `{}`: Claude Code reads a Stop hook's output
   as a decision. Evidence: `a_session_that_goes_on_by_itself_settles_its_stop`,
   `the_stop_hook_after_a_turn_is_silent_and_never_fails`.
-- *A workflow continued in the stop's folder (SB-196).* A successful `Continue` (the CLI's
-  `continue`, the automatic fallback, a console hand-over) cancels every `waiting` stop whose
-  folder is the continuation's, and logs `recovery_handed_over`; a `claimed` stop is the host's
-  and stays. Evidence: `a_workflow_continued_in_the_folder_cancels_the_stop_waiting_there`.
 - *The hosts' horizon (SB-199).* A waiting or claimed stop older than one day reads as
   `cancelled`, and is written so at the next write; the 7-day retention above is unchanged.
   Evidence: `a_stop_past_the_hosts_horizon_reads_and_is_written_as_cancelled`.
 - *A host's report on a settled stop.* `finish` of a stop already `resumed` or `cancelled`, by
-  the host itself, the `Stop` hook, a continuation or the horizon, answers success and changes
+  the host itself, the `Stop` hook or the horizon, answers success and changes
   nothing. Evidence: `a_host_finishing_a_stop_settled_meanwhile_is_answered`.
-- *Assumed (2026-10-25, SB-196):* the continuation cancels every waiting stop of its folder, not
-  only the continued workflow's session: two resumptions in one checkout are the hazard,
-  whichever session they come from.
+- *Not settled by a continuation (SB-196, decided 2026-10-25).* A workflow continued in a stop's
+  folder leaves the stop as it is: an Observatory checkpoint names no session, so Switchboard
+  cannot tell which stop the continuation replaces, and cancelling every stop of the folder
+  would drop other sessions' safe resumes. The host holds a stop while a session runs in its
+  folder (Fabric Dashboards), and the continued session's own `Stop` hook settles nothing
+  that is not its own.
 
 **A stop follows its account (SB-205).** Readiness uses the stopped account's current group, so an
 account moved to another group after the stop keeps the stop ready or probed among that group's

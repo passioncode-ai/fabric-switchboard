@@ -4,8 +4,8 @@
 //! or billing stop is never probed. Stops can be registered by Claude Code's `StopFailure` hook.
 //! No prompt, credential or process control lives here. The session host owns resumption.
 //! 0.6.83 settles stops nobody resumes through a claim: a session that goes on by itself (its
-//! `Stop` hook, SB-204), a workflow continued in the stop's folder (SB-196), and a stop older
-//! than the hosts' horizon (SB-199). A stop follows its account into another group (SB-205).
+//! `Stop` hook, SB-204) and a stop older than the hosts' horizon (SB-199). A stop follows its
+//! account into another group (SB-205).
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -569,7 +569,7 @@ pub(crate) fn finish(root: &Path, event: &str, resumed: bool, now: i64) -> Resul
         State::Cancelled
     };
     // A stop already settled (the host's own outcome repeated, or settled meanwhile by its
-    // session's `Stop` hook, a continuation in its folder or the day's horizon, 0.6.83) is
+    // session's `Stop` hook or the day's horizon, 0.6.83) is
     // finished: the host's report changes nothing and is not an error.
     if matches!(row.state, State::Resumed | State::Cancelled) {
         return Ok(());
@@ -595,28 +595,6 @@ pub(crate) fn continued(root: &Path, session: &str, now: i64) -> Result<usize, S
             r.state = State::Resumed;
             settled.push(r.event.clone());
         }
-    }
-    let Some(last) = settled.last().cloned() else {
-        return Ok(0);
-    };
-    keep(root, &mut rows, now, dropped, Some(&last))?;
-    Ok(settled.len())
-}
-
-/// SB-196: a workflow continued in `directory` (`switchboard continue`, a hand-over) takes over
-/// the work there, so a waiting stop of that folder is cancelled: a host resuming it as well
-/// would run the same work twice in one checkout. A claimed stop is the host's and stays.
-pub(crate) fn settle_directory(root: &Path, directory: &Path, now: i64) -> Result<usize, String> {
-    let directory = directory.canonicalize().map_err(|_| INVALID)?;
-    let _writing = writing();
-    let (mut rows, dropped) = current(root, now)?;
-    let mut settled = Vec::new();
-    for r in rows
-        .iter_mut()
-        .filter(|r| r.directory == directory && r.state == State::Waiting)
-    {
-        r.state = State::Cancelled;
-        settled.push(r.event.clone());
     }
     let Some(last) = settled.last().cloned() else {
         return Ok(0);
@@ -1905,62 +1883,6 @@ mod tests {
         assert_eq!((gone.mode, gone.reason), (None, Some("account_removed")));
         let report = status(root.path(), &s, &held, &none, &none, 220).unwrap();
         assert_eq!(report["sessions"][0]["reason"], "account_removed");
-    }
-
-    #[test]
-    fn a_workflow_continued_in_the_folder_cancels_the_stop_waiting_there() {
-        // SB-196: a hand-over left the session's stop waiting, so a host could continue the same
-        // work twice in one checkout.
-        let root = tempfile::tempdir().unwrap();
-        let elsewhere = tempfile::tempdir().unwrap();
-        let s = snapshot();
-        let none = HashSet::new();
-        register(
-            root.path(),
-            &s,
-            "limit:1",
-            "session-1",
-            "old",
-            root.path(),
-            100,
-        )
-        .unwrap();
-        register(
-            root.path(),
-            &s,
-            "limit:2",
-            "session-2",
-            "old",
-            elsewhere.path(),
-            100,
-        )
-        .unwrap();
-        register(
-            root.path(),
-            &s,
-            "limit:3",
-            "session-3",
-            "old",
-            root.path(),
-            100,
-        )
-        .unwrap();
-        claim(root.path(), "limit:3", "new", &s, &none, &none, &none, 102).unwrap();
-        assert_eq!(settle_directory(root.path(), root.path(), 110).unwrap(), 1);
-        let rows = read(root.path()).unwrap();
-        let state = |e: &str| rows.iter().find(|r| r.event == e).unwrap().state.clone();
-        assert_eq!(state("limit:1"), State::Cancelled);
-        assert_eq!(
-            state("limit:2"),
-            State::Waiting,
-            "another folder's stop stays"
-        );
-        assert_eq!(
-            state("limit:3"),
-            State::Claimed,
-            "a host's claim stays its own"
-        );
-        assert_eq!(settle_directory(root.path(), root.path(), 111).unwrap(), 0);
     }
 
     #[test]

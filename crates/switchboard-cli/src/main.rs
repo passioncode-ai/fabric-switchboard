@@ -1905,12 +1905,16 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
+            // Bounded like the start hook (SB-149): a busy or absent owner never holds a turn.
             if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
-                let _ = call(
-                    root,
-                    Operation::RecoveryContinued {
-                        session: session.to_owned(),
-                    },
+                let _ = tokio::time::timeout(
+                    SESSION_HOOK_DEADLINE,
+                    call(
+                        root,
+                        Operation::RecoveryContinued {
+                            session: session.to_owned(),
+                        },
+                    ),
                 )
                 .await;
             }

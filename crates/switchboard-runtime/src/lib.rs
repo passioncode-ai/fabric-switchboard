@@ -924,26 +924,9 @@ impl Runtime {
         // private homes. Keep the complete operation in one owner transaction.
         let _mutation = self.mutations.lock().await;
         let reported = Reported::of(&operation, &self.store);
-        let continued_in = match &operation {
-            Operation::Continue {
-                working_directory, ..
-            } => Some(working_directory.clone()),
-            _ => None,
-        };
         let result = execute(self.store.clone(), &self.root, Some(self), operation).await;
         if let (Ok(_), Some(reported)) = (&result, reported) {
             self.report(&reported);
-        }
-        // SB-196: the workflow continued in that folder takes over a stop waiting there.
-        if let (Ok(_), Some(folder)) = (&result, continued_in) {
-            if let Ok(settled) = recovery::settle_directory(&self.root, &folder, monitor::now()) {
-                if settled > 0 {
-                    oplog::event(
-                        "recovery_handed_over",
-                        &[("settled", oplog::Field::Number(settled as i64))],
-                    );
-                }
-            }
         }
         result
     }
