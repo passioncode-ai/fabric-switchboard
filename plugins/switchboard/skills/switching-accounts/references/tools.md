@@ -153,7 +153,8 @@ last error. Never their contents.
 ### `switchboard_recovery`: no arguments
 
 Sessions that stopped on a limit and the accounts ready to continue them: each stop's `mode`
-(`capacity` or `probe`) and `probe_at`.
+(`capacity` or `probe`) and `probe_at`, and for a waiting stop that is not ready its `reason`
+(`billing`, `account_removed`, `no_account`, `backoff`).
 
 ### `switchboard_handovers`: no arguments
 

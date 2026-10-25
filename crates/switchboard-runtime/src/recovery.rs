@@ -568,12 +568,13 @@ pub(crate) fn finish(root: &Path, event: &str, resumed: bool, now: i64) -> Resul
     } else {
         State::Cancelled
     };
-    if row.state == target {
+    // A stop already settled (the host's own outcome repeated, or settled meanwhile by its
+    // session's `Stop` hook, a continuation in its folder or the day's horizon, 0.6.83) is
+    // finished: the host's report changes nothing and is not an error.
+    if matches!(row.state, State::Resumed | State::Cancelled) {
         return Ok(());
     }
-    if (resumed && row.state != State::Claimed)
-        || matches!(row.state, State::Resumed | State::Cancelled)
-    {
+    if resumed && row.state != State::Claimed {
         return Err(INVALID.into());
     }
     row.state = target;
@@ -785,7 +786,9 @@ mod tests {
         assert_eq!(read(root.path()).unwrap()[0].state, State::Claimed);
         finish(root.path(), "limit:1", true, 1000).unwrap();
         finish(root.path(), "limit:1", true, 1000).unwrap();
-        assert!(finish(root.path(), "limit:1", false, 1000).is_err());
+        // A settled stop stays as it was settled: a later report is answered, never applied.
+        finish(root.path(), "limit:1", false, 1000).unwrap();
+        assert_eq!(read(root.path()).unwrap()[0].state, State::Resumed);
         assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
     }
     #[test]
@@ -1958,5 +1961,70 @@ mod tests {
             "a host's claim stays its own"
         );
         assert_eq!(settle_directory(root.path(), root.path(), 111).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_host_finishing_a_stop_settled_meanwhile_is_answered() {
+        // Unit round 1: a claim just before the day's horizon, finished after it, read
+        // cancelled; a claim the session's `Stop` hook resumed first. Neither report fails.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).unwrap();
+        finish(root.path(), "limit:1", true, 100 + HORIZON_SECONDS + 1).unwrap();
+        register(
+            root.path(),
+            &s,
+            "limit:2",
+            "session-2",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        claim(root.path(), "limit:2", "new", &s, &none, &none, &none, 102).unwrap();
+        assert_eq!(continued(root.path(), "session-2", 300).unwrap(), 1);
+        finish(root.path(), "limit:2", false, 301).unwrap();
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows[1].state, State::Resumed);
+    }
+
+    #[tokio::test]
+    async fn the_owner_settles_a_stop_its_session_continued() {
+        use crate::{fixtures, Operation};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), fixtures::signed_out, fixtures::fails).await;
+        let old = fixtures::save(&runtime.store, "old", "default");
+        let now = crate::monitor::now();
+        register(
+            root.path(),
+            &runtime.store.snapshot().unwrap(),
+            "limit:1",
+            "session-1",
+            &old.id,
+            root.path(),
+            now - 1,
+        )
+        .unwrap();
+        let answer = runtime
+            .execute(Operation::RecoveryContinued {
+                session: "session-1".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["settled"], 1);
+        assert_eq!(read(root.path()).unwrap()[0].state, State::Resumed);
+        let status = runtime.execute(Operation::Recovery).await.unwrap();
+        assert_eq!(status["waiting_sessions"], 0);
     }
 }

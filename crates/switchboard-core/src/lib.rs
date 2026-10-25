@@ -1354,8 +1354,7 @@ impl Store {
         // write runs without it. A Keychain read has no deadline and waits behind every other
         // in the process; with the list locked across all of them, a snapshot (and `recovery`,
         // `sessions`, the window) waited out every saved account's read, up to 91 s on a loaded
-        // Mac. Callers hold the owner transaction, which already orders them against a removal;
-        // each write still checks, just before it, that the account is saved.
+        // Mac. Each write still runs under the lock, after checking the account is saved.
         let accounts: Vec<Account> = self
             .lock()?
             .accounts
@@ -1394,10 +1393,16 @@ impl Store {
             {
                 return Err("Credential identity does not match account identity".into());
             }
-            if !self.lock()?.accounts.iter().any(|saved| saved.id == a.id) {
+            // One write, under the lock, after checking the account is still saved: a removal
+            // or a sign-in writing this account (both hold the lock across their own write) is
+            // never interleaved with it. Only the N reads above run without the lock.
+            let saved = self.lock()?;
+            if !saved.accounts.iter().any(|s| s.id == a.id) {
                 continue;
             }
-            if self.vault.put(&a.id, refreshed).is_err() {
+            let written = self.vault.put(&a.id, refreshed);
+            drop(saved);
+            if written.is_err() {
                 // The copies already written stay written; the caller keeps the successor
                 // for the rest, which still hold the spent token.
                 if !updated.is_empty() {

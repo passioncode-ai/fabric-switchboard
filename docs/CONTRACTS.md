@@ -966,18 +966,21 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
 
 [Recovery packet](packets/sb-114-capacity-recovery.md) owns the host protocol;
 [CLI](CLI.md#capacity-recovery-sb-114) names the commands. `Operation::Recovery*`
-is owner-only. Its writes (register, claim, finish, the hook) run under the owner mutation
-lock; the status read `Recovery` does not, so a background step holding the lock never
-delays a host (SB-166: the file is replaced by rename, the limits are read from memory;
-`recovery_answers_while_a_background_step_holds_the_transaction`). A host-reported stop freezes
-provider, pool, folder and event/session binding in `<data>/recovery.json` (0600).
+is owner-only. Its host writes (register, claim, finish) run under the owner mutation lock;
+the status read `Recovery` and the session hooks (`RecoveryHook`, `RecoveryContinued`) do
+not, and take only the recovery file's own lock (`recovery::writing`), so a background step
+holding the owner lock never delays a host (SB-166: the file is replaced by rename, the limits
+are read from memory; `recovery_answers_while_a_background_step_holds_the_transaction`). A
+host-reported stop keeps provider, account, folder and event/session binding in
+`<data>/recovery.json` (0600); readiness uses the account's current group (SB-205, below).
 Candidates use post-stop successful observations at most 300 seconds old; a passed
 reset invalidates the observation. Hidden holds, sign-in requirements, disabled
 accounts, API keys, other pools/providers and project-folder refusals are excluded.
 A duplicate row of a held identity is excluded too. Claim rechecks and validates
 the credential before persisting `claimed`; it never returns a credential. An
 ambiguous claim survives restart without automatic replay. Completion is the
-host's claim, not independent provider acceptance. Evidence: `recovery::tests`.
+host's report or the session's own `Stop` hook (SB-204, below), not independent provider
+acceptance. Evidence: `recovery::tests`.
 
 **Retention (PRD-03, D-4 of iteration 2026-10-24).** The file keeps stops of the last 7 days and
 at most 512 rows. A stop older than 7 days is left out of every answer at once (a read writes
@@ -1011,6 +1014,12 @@ written by an earlier version still reads. Evidence:
 - *The hosts' horizon (SB-199).* A waiting or claimed stop older than one day reads as
   `cancelled`, and is written so at the next write; the 7-day retention above is unchanged.
   Evidence: `a_stop_past_the_hosts_horizon_reads_and_is_written_as_cancelled`.
+- *A host's report on a settled stop.* `finish` of a stop already `resumed` or `cancelled`, by
+  the host itself, the `Stop` hook, a continuation or the horizon, answers success and changes
+  nothing. Evidence: `a_host_finishing_a_stop_settled_meanwhile_is_answered`.
+- *Assumed (2026-10-25, SB-196):* the continuation cancels every waiting stop of its folder, not
+  only the continued workflow's session: two resumptions in one checkout are the hazard,
+  whichever session they come from.
 
 **A stop follows its account (SB-205).** Readiness uses the stopped account's current group, so an
 account moved to another group after the stop keeps the stop ready or probed among that group's

@@ -195,6 +195,16 @@ pub fn cooldown_left(last: Option<i64>, now: i64, urgent: bool) -> i64 {
     }
 }
 
+/// When the half hour before a drain starts counting (SB-191): the download, or the end of the
+/// pause when that is later. An urgent release has no pause, so it drains on the same terms as
+/// before 0.6.83.
+pub fn drain_from(waiting_since: i64, last: Option<i64>, now: i64, urgent: bool) -> i64 {
+    match last {
+        Some(at) if !urgent => waiting_since.max(at.min(now) + RESTART_EVERY_SECONDS),
+        _ => waiting_since,
+    }
+}
+
 /// Whether a ready update stops waiting for a quiet moment and drains: it has waited
 /// DRAIN_AFTER_SECONDS and nothing else keeps it (the window, a sign-in, the switch) but requests
 /// in flight.
@@ -749,7 +759,14 @@ fn watch_for_idle(app: &AppHandle) {
             };
             // SB-191: at most one restart on its own in RESTART_EVERY_SECONDS.
             let time = now();
-            let cooling = cooldown_left(state.restarted_at(), time, is_urgent);
+            let mut last = state.restarted_at();
+            // A time recorded ahead of the clock (a clock set back) is moved to now once, so the
+            // pause ends one period from now instead of holding until the clock catches up.
+            if last.is_some_and(|at| at > time) {
+                state.record_restart(time);
+                last = Some(time);
+            }
+            let cooling = cooldown_left(last, time, is_urgent);
             let busy = match app.try_state::<crate::Slot>() {
                 Some(slot) => slot
                     .runtime()
@@ -772,11 +789,7 @@ fn watch_for_idle(app: &AppHandle) {
             }
             // The half hour before a drain counts from the end of the pause, not from the
             // download: a restart that waited out the pause first gets its quiet moment.
-            let since = waiting_since.max(
-                state
-                    .restarted_at()
-                    .map_or(0, |at| at.min(time) + RESTART_EVERY_SECONDS),
-            );
+            let since = drain_from(waiting_since, last, time, is_urgent);
             if cooling == 0 && drain_due(time - since, blocker) {
                 state.record_restart(time);
                 drain_and_restart(&app).await;
@@ -1641,6 +1654,21 @@ mod tests {
         assert!(!urgent(&json!({"urgent": false})));
         assert!(!urgent(&json!({"urgent": "  "})));
         assert!(!urgent(&json!({"version": "0.6.84"})));
+        // The drain's half hour counts from the end of the pause, but not for an urgent release:
+        // on a Mac never idle it drains 30 minutes after the download, not six hours later.
+        let (downloaded, last) = (1_000_000, Some(1_000_000 - 60));
+        assert_eq!(
+            drain_from(downloaded, last, downloaded + 60, false),
+            1_000_000 - 60 + six
+        );
+        assert_eq!(
+            drain_from(downloaded, last, downloaded + 60, true),
+            downloaded
+        );
+        assert_eq!(
+            drain_from(downloaded, None, downloaded + 60, false),
+            downloaded
+        );
     }
 
     #[test]
