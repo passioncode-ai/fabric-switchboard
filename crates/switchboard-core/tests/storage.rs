@@ -2087,3 +2087,76 @@ fn a_write_in_flight_during_the_generation_read_is_still_seen() {
         "{refused}"
     );
 }
+
+/// A vault whose reads take `delay`, like a Keychain read on a loaded machine: Security.framework
+/// has no deadline, and every read in the process waits behind one module lock.
+struct SlowVault {
+    inner: MemoryVault,
+    delay: std::time::Duration,
+}
+impl Vault for SlowVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        std::thread::sleep(self.delay);
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn adopting_a_renewal_never_holds_the_account_list_across_keychain_reads() {
+    // H-1 (SB-163/SB-174, 0.6.83): `adopt_refreshed_for` read every OAuth account's credential
+    // with the account list locked, so on a loaded Mac (up to 91 s in `renew_live`) every
+    // snapshot, and with it `recovery`, `sessions` and the window, waited out all those reads.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(150),
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    for n in 0..6 {
+        store
+            .upsert(
+                format!("Account {n}"),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth(&format!("lineage-{n}")),
+                None,
+            )
+            .unwrap();
+    }
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(Provider::Claude, "lineage-5", &oauth("next"), None)
+                .unwrap()
+        })
+    };
+    // Six reads take 900 ms; a snapshot taken while they run answers at once.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    store.snapshot().unwrap();
+    let waited = started.elapsed();
+    let (updated, _) = adopting.join().unwrap();
+    assert_eq!(updated.len(), 1);
+    assert!(
+        waited < std::time::Duration::from_millis(100),
+        "a snapshot waited {waited:?} behind Keychain reads"
+    );
+}

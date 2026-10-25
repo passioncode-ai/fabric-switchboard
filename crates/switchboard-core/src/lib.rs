@@ -1350,14 +1350,22 @@ impl Store {
         refreshed: &Credential,
         owner: Option<&str>,
     ) -> Result<(Vec<String>, Vec<String>), String> {
-        let state = self.lock()?;
-        let mut updated = Vec::new();
-        let mut others = Vec::new();
-        for a in state
+        // H-1 (0.6.83): the account list is read under the lock and every Keychain read and
+        // write runs without it. A Keychain read has no deadline and waits behind every other
+        // in the process; with the list locked across all of them, a snapshot (and `recovery`,
+        // `sessions`, the window) waited out every saved account's read, up to 91 s on a loaded
+        // Mac. Callers hold the owner transaction, which already orders them against a removal;
+        // each write still checks, just before it, that the account is saved.
+        let accounts: Vec<Account> = self
+            .lock()?
             .accounts
             .iter()
             .filter(|a| a.provider == provider && a.kind == AuthKind::OAuth)
-        {
+            .cloned()
+            .collect();
+        let mut updated = Vec::new();
+        let mut others = Vec::new();
+        for a in &accounts {
             let Ok(stored) = self.vault.get(&a.id) else {
                 continue;
             };
@@ -1385,6 +1393,9 @@ impl Store {
                 .is_some_and(|(x, y)| x != y)
             {
                 return Err("Credential identity does not match account identity".into());
+            }
+            if !self.lock()?.accounts.iter().any(|saved| saved.id == a.id) {
+                continue;
             }
             if self.vault.put(&a.id, refreshed).is_err() {
                 // The copies already written stay written; the caller keeps the successor

@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - **A stopped session that goes on is no longer counted as waiting.** When a Claude Code session stopped on a limit continues by itself (on another account, at the reset, or after you send the prompt again), its stop is marked resumed after its next finished turn, through a new `Stop` hook in the plugin. A workflow continued in the same folder takes over the stop waiting there, and a stop older than a day reads as cancelled, as no host resumes it any more.
+- **Fabric no longer waits on the Keychain.** When a renewed sign-in was stored, Switchboard read every saved Claude account's Keychain item with the account list locked; on a busy Mac that made `recovery`, `sessions` and the window wait up to a minute. The list is now released before those reads.
 - **A stop follows its account.** An account moved to another group after its session stopped keeps that stop ready or probed among its new group's accounts, and a stop that is not ready says why (`reason` in `switchboard recovery`).
 
 ## 0.6.82 (2026-10-24)
