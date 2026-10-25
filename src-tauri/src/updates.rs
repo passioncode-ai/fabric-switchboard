@@ -48,6 +48,13 @@ pub const UNATTENDED_SECONDS: i64 = 30 * 60;
 /// An update that waited this long only for requests in flight drains instead (2026-10-18: with
 /// two dozen agent sessions there was never a moment with none, and 0.6.40 waited three hours).
 pub const DRAIN_AFTER_SECONDS: i64 = 30 * 60;
+/// SB-191 (operator decision 2026-10-25): an update downloads at once, but the app restarts into
+/// one on its own at most once in this long, and only at an idle moment (12 restarts in 48 hours
+/// cut managed sessions). A release the feed marks `"urgent": true` restarts at the next idle
+/// moment. *Restart to update* is the person's and is never held.
+pub const RESTART_EVERY_SECONDS: i64 = 6 * 60 * 60;
+/// When the app last restarted into an update on its own: Unix seconds, in the data folder.
+pub const RESTARTED_AT_FILE: &str = "update-restarted-at";
 /// How long a drain lets the requests in flight finish before the restart.
 pub const DRAIN_WAIT: Duration = Duration::from_secs(90);
 /// How often the idle watch says, at most, what keeps a ready update from starting (SB-105): the
@@ -165,6 +172,26 @@ pub fn idle_blocker(
         Some("checking")
     } else {
         busy
+    }
+}
+
+/// The feed's mark for a release that should not wait out RESTART_EVERY_SECONDS (SB-191):
+/// `"urgent": true` or a non-blank reason.
+pub fn urgent(feed: &Value) -> bool {
+    match feed.get("urgent") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => !s.trim().is_empty(),
+        _ => false,
+    }
+}
+
+/// Seconds left before the app may restart into an update on its own (SB-191): none before the
+/// first such restart, for an urgent release, or once RESTART_EVERY_SECONDS have passed. A
+/// restart time in the future (a clock set back) holds no longer than one period from now.
+pub fn cooldown_left(last: Option<i64>, now: i64, urgent: bool) -> i64 {
+    match last {
+        Some(at) if !urgent => (at.min(now) + RESTART_EVERY_SECONDS - now).max(0),
+        _ => 0,
     }
 }
 
@@ -377,6 +404,20 @@ impl Updates {
 
     fn choice_path(&self) -> Option<PathBuf> {
         self.root.as_ref().map(|root| root.join(AUTO_UPDATE_FILE))
+    }
+
+    /// When the app last restarted into an update on its own (SB-191); none when unknown.
+    fn restarted_at(&self) -> Option<i64> {
+        let path = self.root.as_ref()?.join(RESTARTED_AT_FILE);
+        std::fs::read_to_string(path).ok()?.trim().parse().ok()
+    }
+
+    /// Records an automatic restart, before it happens: a restart that then fails still counts,
+    /// so a broken relaunch is not retried every five minutes.
+    fn record_restart(&self, at: i64) {
+        if let Some(root) = self.root.as_ref() {
+            let _ = std::fs::write(root.join(RESTARTED_AT_FILE), at.to_string());
+        }
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -692,16 +733,23 @@ fn watch_for_idle(app: &AppHandle) {
         loop {
             tokio::time::sleep(IDLE_LOOK_EVERY).await;
             let state = app.state::<Updates>();
-            let (starts_alone, checking) = {
+            let (starts_alone, checking, is_urgent) = {
                 let inner = state.lock();
                 if inner.restart.is_some() {
                     break;
                 }
                 match inner.ready.as_ref() {
                     None => break,
-                    Some(ready) => (ready_starts_alone(ready), inner.rechecking),
+                    Some(ready) => (
+                        ready_starts_alone(ready),
+                        inner.rechecking,
+                        urgent(&ready.update.raw_json),
+                    ),
                 }
             };
+            // SB-191: at most one restart on its own in RESTART_EVERY_SECONDS.
+            let time = now();
+            let cooling = cooldown_left(state.restarted_at(), time, is_urgent);
             let busy = match app.try_state::<crate::Slot>() {
                 Some(slot) => slot
                     .runtime()
@@ -712,13 +760,25 @@ fn watch_for_idle(app: &AppHandle) {
             let enabled = state.is_enabled();
             let hidden = window_hidden(&app);
             // SB-105: a watch that never starts the update says why, at most hourly.
-            let blocker = idle_blocker(enabled, starts_alone, hidden, checking, busy);
+            let blocker = if enabled && starts_alone && cooling > 0 {
+                Some("cooldown")
+            } else {
+                idle_blocker(enabled, starts_alone, hidden, checking, busy)
+            };
             if let Some(reason) = blocker {
                 if report.due(now()) {
                     event("update_waiting", &[("reason", Field::Code(reason))]);
                 }
             }
-            if drain_due(now() - waiting_since, blocker) {
+            // The half hour before a drain counts from the end of the pause, not from the
+            // download: a restart that waited out the pause first gets its quiet moment.
+            let since = waiting_since.max(
+                state
+                    .restarted_at()
+                    .map_or(0, |at| at.min(time) + RESTART_EVERY_SECONDS),
+            );
+            if cooling == 0 && drain_due(time - since, blocker) {
+                state.record_restart(time);
                 drain_and_restart(&app).await;
                 break;
             }
@@ -726,11 +786,12 @@ fn watch_for_idle(app: &AppHandle) {
                 enabled,
                 starts_alone,
                 hidden,
-                busy.is_some() || checking,
+                busy.is_some() || checking || cooling > 0,
                 idle_before,
             );
             idle_before = idle;
             if start {
+                state.record_restart(time);
                 event("update_restart", &[("outcome", Field::Code("idle"))]);
                 // Nobody was looking: the relaunch keeps the window out of the way (SB-131).
                 if restart_as(app.clone(), true).await.is_err() {
@@ -1555,6 +1616,31 @@ mod tests {
         helper.wait().unwrap();
         assert!(marker.exists(), "started once it ended");
         assert!(started.elapsed() >= std::time::Duration::from_millis(900));
+    }
+
+    #[test]
+    fn an_update_restarts_on_its_own_at_most_once_in_six_hours_unless_urgent() {
+        // SB-191: 12 restarts in 48 hours cut managed sessions; the operator's rule (2026-10-25)
+        // is one in six hours, at an idle moment, and an urgent release at the next one.
+        let six = RESTART_EVERY_SECONDS;
+        assert_eq!(cooldown_left(None, 1_000_000, false), 0, "never restarted");
+        assert_eq!(
+            cooldown_left(Some(1_000_000), 1_000_000 + 60, false),
+            six - 60
+        );
+        assert_eq!(
+            cooldown_left(Some(1_000_000), 1_000_000 + six - 1, false),
+            1
+        );
+        assert_eq!(cooldown_left(Some(1_000_000), 1_000_000 + six, false), 0);
+        assert_eq!(cooldown_left(Some(1_000_000), 1_000_000 + 60, true), 0);
+        // A recorded time in the future holds one period from now, never longer.
+        assert_eq!(cooldown_left(Some(9_000_000), 1_000_000, false), six);
+        assert!(urgent(&json!({"version": "0.6.84", "urgent": true})));
+        assert!(urgent(&json!({"urgent": "a credential leak fix"})));
+        assert!(!urgent(&json!({"urgent": false})));
+        assert!(!urgent(&json!({"urgent": "  "})));
+        assert!(!urgent(&json!({"version": "0.6.84"})));
     }
 
     #[test]
