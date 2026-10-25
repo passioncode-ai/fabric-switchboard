@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-25: audit of all open work, the plan to a first organization, decisions D-1 to D-8
+
+- **Objective.** The operator's ask: see what other sessions left, clean what is finished, bring the rest into one
+  place, classify it, and grill the missing decisions. Record:
+  [reports/2026-10-25-audit-and-plan](reports/2026-10-25-audit-and-plan/README.md).
+- **Cleaned.** The one stash (`fix/sb-185-vault-lock`, byte-identical to `ebbf95e`) dropped; seven gate logs and two
+  group snapshots of merged runs removed from `~/DATA/_worktrees`; issue #128 closed (done in 0.6.82); the 0.6.81
+  Fabric task moved to review. No other branch, worktree or PR existed.
+- **Found.** The owner still stalls on 0.6.82: from 21:59 to 11:40 UTC `control_slow` `project_suggest` 19 times (up
+  to 22.5 s), `sessions` 12 (36.9 s), `recovery` 7 (29.1 s), `current_accounts` 37.8 s, `vault_slow` 11.9 s, and no
+  `transaction_held`: SB-174 and SB-163 stay open. Board: 380 messages read, one ask answered (`f05a284d` on thread
+  `27a35c9e`, still open), Q-1 to Fabric and the context-profile owner still unanswered.
+- **Decided (the operator, D-1 to D-8 in the report).** Two releases: 0.6.83 hotfix (SB-174, SB-163, SB-198, SB-196,
+  SB-199, SB-191 with the 6-hour idle rule, SB-07), then 0.7.0 «first organization» by 2026-11-14 (PassionCode.ai on
+  the two Macs, then the Appvillis pilot; SB-183 on by default on an organization machine, SB-201, SB-202, SB-167,
+  SB-160, SB-71 screen and SB-72 ceilings, SB-125 in the PassionCode.ai group); SB-184 waits for Project Observatory;
+  operator acceptance steps after 0.6.83 at the operator's signal.
+- **Board rows.** SB-65 and SB-168 closed; decisions recorded on SB-125, SB-183, SB-184, SB-191, SB-71, SB-72; the
+  0.6.82 measurement on SB-174 and SB-163; new SB-201 to SB-203.
+- **Checks run.** `scripts/check_docs.py` exit 0; no code changed.
+- **Exact next task.** Release 0.6.83 through `/task-pipeline iteration`: first H-1, find what makes `project_suggest`,
+  `sessions` and `current_accounts` wait up to 38 s with no `transaction_held` (start from `vault_slow` 11.9 s, more
+  than one bounded `security` call), with a test that fails without the fix; then SB-198, SB-196, SB-199, SB-191,
+  SB-07.
+
 ## 2026-10-24: 0.6.82 published; sessions belong to Dashboards, then Fabric (SB-190 superseded)
 
 - **Adopted.** The session that ran the 0.6.82 iteration stopped on a usage limit at 16:18 UTC in its confirming

@@ -157,7 +157,7 @@ Switchboard group per organization whose folders take only that organization's a
 | H-2 | SB-198 | P2 | `recovery claim` grants a second claim on a claimed stop: two hosts continue one conversation |
 | H-3 | SB-196 | P2 | A hand-over leaves the stop `waiting`: the same conversation can be continued twice |
 | H-4 | SB-199 | P2 | Stale `waiting` stops kept 7 days and re-attempted |
-| H-5 | SB-191 | P2 | 12 update restarts in 48 h interrupt managed sessions |
+| H-5 | SB-191 | P2 | 12 update restarts in 48 h interrupt managed sessions; rule decided (D-7): restart at most once in 6 h, only when idle, urgent releases at the next idle moment |
 | H-6 | SB-07 | P2 | Two flaky integration tests in the gate |
 | H-7 | board | P3 | Reply to `9c0e7327` (still open) and `0fa67613` |
 
@@ -165,22 +165,24 @@ Switchboard group per organization whose folders take only that organization's a
 
 The Switchboard side of Vesta waves 0 to 2, as one release:
 
-1. SB-183: the opt-in shell hook, so plain `claude` and `codex` in an organization's folders run in that
-   organization's context.
-2. New row: context for Kimi Code, Hermes and OpenCode launches.
+1. SB-183: the shell hook, so plain `claude` and `codex` in an organization's folders run in that
+   organization's context; on by default on a machine with an organization group (D-3).
+2. SB-201: context for Kimi Code, Hermes and OpenCode launches.
 3. SB-167: the organization's OpenRouter key into the group's slot (after Observatory 0.30.0).
 4. SB-159, SB-178, SB-143, SB-15: live checks on the two Macs (operator gates named in section 5).
-5. New row: the person's runbook (docs, the window's first run for an organization context).
+5. SB-202: the person's runbook and the window's first run for an organization context.
 6. SB-160: Switchboard's part of joining and leaving (attribution, signed-out state).
-7. SB-184 if an owner is decided (see question Q-4), else the rollout notice keeps saying the profile is shared.
+7. SB-184 stays with Project Observatory (D-4): out of 0.7.0 unless Observatory delivers; the rollout notice keeps saying the profile is shared.
 8. SB-177 only if Fabric CO-412 lands before the release; otherwise the manual mark (SB-175) holds.
+9. SB-71 (the fallback chains screen, scenario first) and SB-72 (paid ceilings), by the operator's choice (D-5); SB-72's date follows Observatory's grant registry.
+10. SB-125: the PassionCode.ai group for Serge Khurs's work (D-6).
 
 ### C. Product plan after the first organization
 
 | Theme | Rows | Waits on |
 |---|---|---|
-| Fallback chains in the window, scenario first | SB-71 (UI), SB-73 phase 2 | nothing |
-| Paid fallback with ceilings and grants | SB-72, SB-96, SB-97 | Observatory grant registry |
+| Fallback chains, phase 2 | SB-73 phase 2 | nothing |
+| Grants behind paid keys | SB-96, SB-97 | Observatory grant registry |
 | Pipelines and continuation over MCP | SB-64, SB-74, SB-82 | Fabric's ADR; contract runner routes |
 | Action parity with the contract | SB-200 | CT-124, CT-125 |
 | Folder attribution with Fabric's project id | SB-141 | CT-64, CT-66 |
@@ -190,7 +192,7 @@ The Switchboard side of Vesta waves 0 to 2, as one release:
 | One error text for every surface | SB-189 | nothing |
 | Window leftovers | SB-192, SB-193, SB-195 | nothing |
 | Codex renewal of inactive accounts | SB-16 | operator go and an operator-assisted acceptance |
-| Assessment data (session end, quota history) | new row | nothing |
+| Assessment data (session end, quota history) | SB-203 | nothing |
 
 ### D. Long backlog and hygiene
 
@@ -202,11 +204,9 @@ SB-148 (data palette), SB-194 (Fabric ADR-0127 amendment), SB-197 (`sessions --a
 
 | Row | Why |
 |---|---|
-| SB-190 | superseded by the operator's decision of 2026-10-24 (sessions live in Dashboards, then Fabric) |
-| SB-65 | the window's Sessions view is superseded the same way; the done parts have receipts |
+| SB-65 | the window's Sessions view is superseded the same way (closed 2026-10-25); the done parts have receipts |
 | SB-130, SB-138, SB-139, SB-115 | fixed and released; only a live check or a separate tail remains: close and keep the tail as its own row |
-| SB-168 | design done; built in SB-175 to SB-178 |
-| SB-176 | built (CLI carries it; window import deliberately not built) |
+| SB-168 | design done; built in SB-175 to SB-178 (closed 2026-10-25 as an umbrella) |
 | SB-126 | handed to Fabric |
 | SB-114 | producer released; host integration is Fabric's (FD-105, Q-1) |
 
@@ -230,7 +230,7 @@ with section E closed.
 
 ## 6. Questions for the operator
 
-Asked in the session of 2026-10-25; answers are recorded in section 7 when given.
+Asked and answered in the session of 2026-10-25; the answers are section 7.
 
 - **Q-1.** Two releases (0.6.83 hotfix, then 0.7.0 first organization) or one?
 - **Q-2.** Which organization does Switchboard accept first: PassionCode.ai on the two Macs (Vesta D-R4), or straight to the Appvillis pilot?
@@ -239,6 +239,15 @@ Asked in the session of 2026-10-25; answers are recorded in section 7 when given
 - **Q-5.** Fallback chains and paid ceilings (SB-71 UI, SB-72): in 0.7.0 or after?
 - **Q-6.** Which accounts and group carry Serge Khurs's work (SB-125)?
 
-## 7. Decisions
+## 7. Decisions (the operator, 2026-10-25, in the session)
 
-None yet.
+| # | Question | Decision | Consequence |
+|---|---|---|---|
+| D-1 | Q-1 releases | **Two releases:** 0.6.83 hotfix (section A), then 0.7.0 «first organization» (section B) by 2026-11-14 | hotfix starts now |
+| D-2 | Q-2 first organization | **PassionCode.ai on the two Macs first** (Vesta D-R4), then the Appvillis pilot on 2 or 3 Macs | acceptance order of 0.7.0 |
+| D-3 | Q-3 shell hook | **On by default** on a machine that holds a group bound to an organization; off by one command | SB-183 |
+| D-4 | Q-4 context profile | **Wait for Project Observatory**; asked on the board | SB-184 out of 0.7.0 unless delivered |
+| D-5 | Q-5 chains and ceilings | **Both in 0.7.0:** the chains screen (SB-71) and paid ceilings (SB-72) | 0.7.0 scope grows; SB-72's date follows Observatory |
+| D-6 | Q-6 Serge Khurs | **The PassionCode.ai group**, on PassionCode.ai accounts | SB-125 |
+| D-7 | update restarts | **At most once in 6 h, only when idle**; download at once; a release marked urgent restarts at the next idle moment | SB-191 in 0.6.83 |
+| D-8 | operator acceptance steps | **After 0.6.83, at the operator's signal**: one checklist with direct links (SB-159 sign-in, SB-178 spare account on both Macs) | the agent prepares the checklist and takes the measurements |
