@@ -1883,7 +1883,9 @@ async fn project_sources(
     .await
 }
 /// The largest hook input read; Claude Code's `StopFailure` payload is a few hundred bytes.
-const HOOK_INPUT_LIMIT: u64 = 64 * 1024;
+/// A `Stop` input carries the turn's whole last message (Claude Code 2.1.299), so the bound fits
+/// a long one: before 0.6.83 round 2 it was 64 KiB and a longer message settled nothing.
+const HOOK_INPUT_LIMIT: u64 = 8 * 1024 * 1024;
 /// `switchboard recovery hook` (SB-115). Only `rate_limit` and `billing_error` register; every
 /// refusal (no owner, malformed input, unknown account, a folder the account may not use)
 /// comes back as `registered: false` with a reason code, never as a failed exit.
@@ -1897,6 +1899,30 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     let Some(hook) = parsed else {
         return json!({"registered": false, "reason": "malformed_input"});
     };
+    // SB-204: the same hook command runs on `Stop`, after every finished turn. It settles the
+    // session's stop, asks the owner only when the session has one, and prints `{}`: a Stop
+    // hook's stdout is read by Claude Code as its decision.
+    if hook["hook_event_name"].as_str() == Some("Stop") {
+        if let Some(session) = hook["session_id"].as_str() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            // Bounded like the start hook (SB-149): a busy or absent owner never holds a turn.
+            if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
+                let _ = tokio::time::timeout(
+                    SESSION_HOOK_DEADLINE,
+                    call(
+                        root,
+                        Operation::RecoveryContinued {
+                            session: session.to_owned(),
+                        },
+                    ),
+                )
+                .await;
+            }
+        }
+        return json!({});
+    }
     let billing = match hook["error"].as_str() {
         Some("rate_limit") => false,
         Some("billing_error") => true,

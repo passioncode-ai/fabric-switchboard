@@ -495,6 +495,15 @@ agents is fabric-workspace
 See [SB-115 packet](packets/sb-115-limit-stop-resume.md); `recovery::tests` and
 `recovery_hook_never_fails_the_session`.
 
+Since 0.6.83 the plugin also runs the same command on `Stop`, after every finished turn
+(SB-204): a session that went on by itself (its traffic moved to another account, it
+continued at the reset, the person sent the prompt again) has its waiting or claimed stop
+marked `resumed`. The command reads the file first and asks the owner only when that
+session has a stop, and prints `{}`. A stop older than a day reads as
+`cancelled` (SB-199). A stop follows its account into another group, and a waiting stop
+that is not ready says why in `reason`: `billing`, `account_removed`, `no_account` or
+`backoff` (SB-205).
+
 ## Console hand-overs (SB-108)
 
 ```sh

@@ -1350,14 +1350,21 @@ impl Store {
         refreshed: &Credential,
         owner: Option<&str>,
     ) -> Result<(Vec<String>, Vec<String>), String> {
-        let state = self.lock()?;
-        let mut updated = Vec::new();
-        let mut others = Vec::new();
-        for a in state
+        // H-1 (0.6.83): the account list is read under the lock and every Keychain read and
+        // write runs without it. A Keychain read has no deadline and waits behind every other
+        // in the process; with the list locked across all of them, a snapshot (and `recovery`,
+        // `sessions`, the window) waited out every saved account's read, up to 91 s on a loaded
+        // Mac. Each write still runs under the lock, after checking the account is saved.
+        let accounts: Vec<Account> = self
+            .lock()?
             .accounts
             .iter()
             .filter(|a| a.provider == provider && a.kind == AuthKind::OAuth)
-        {
+            .cloned()
+            .collect();
+        let mut updated = Vec::new();
+        let mut others = Vec::new();
+        for a in &accounts {
             let Ok(stored) = self.vault.get(&a.id) else {
                 continue;
             };
@@ -1386,7 +1393,26 @@ impl Store {
             {
                 return Err("Credential identity does not match account identity".into());
             }
-            if self.vault.put(&a.id, refreshed).is_err() {
+            // One write, under the lock, after checking that the account is still saved and
+            // still holds the spent token: a removal or a sign-in writing this account (both
+            // hold the lock across their own write) is never interleaved with it, and a sign-in
+            // stored since the read keeps its place (SB-179). Only the reads of accounts that
+            // hold the spent token are repeated here; the N reads above run without the lock.
+            let saved = self.lock()?;
+            if !saved.accounts.iter().any(|s| s.id == a.id)
+                || self
+                    .vault
+                    .get(&a.id)
+                    .ok()
+                    .and_then(|c| c.refresh_token)
+                    .as_deref()
+                    != Some(consumed)
+            {
+                continue;
+            }
+            let written = self.vault.put(&a.id, refreshed);
+            drop(saved);
+            if written.is_err() {
                 // The copies already written stay written; the caller keeps the successor
                 // for the rest, which still hold the spent token.
                 if !updated.is_empty() {

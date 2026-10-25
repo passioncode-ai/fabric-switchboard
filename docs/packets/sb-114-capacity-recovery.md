@@ -58,6 +58,14 @@ a claim of a pruned event answers not ready. Evidence: `recovery::tests`
 `the_stop_just_written_is_kept_however_the_rows_are_dated`,
 `a_pruned_event_replayed_is_not_a_new_stop`).
 
+**Superseded in 0.6.83 (SB-204, SB-199, SB-205).** A stop is no longer settled only by
+the host: its session's own `Stop` hook resumes it, and a waiting or claimed stop older than
+one day reads as cancelled, so a crash
+after a claim no longer waits for manual reconciliation past that day. Readiness follows the
+stopped account's current group, and a host's `finish` of a stop already settled answers
+success. [CONTRACTS → Capacity notices](../CONTRACTS.md#capacity-notices-and-console-hand-overs-sb-114-sb-108)
+owns the rules.
+
 ## Integration boundary
 
 At intake `fabric_whoami` returned `no-project`. The operator enrolled and approved

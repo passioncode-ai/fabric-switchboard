@@ -966,18 +966,22 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
 
 [Recovery packet](packets/sb-114-capacity-recovery.md) owns the host protocol;
 [CLI](CLI.md#capacity-recovery-sb-114) names the commands. `Operation::Recovery*`
-is owner-only. Its writes (register, claim, finish, the hook) run under the owner mutation
-lock; the status read `Recovery` does not, so a background step holding the lock never
-delays a host (SB-166: the file is replaced by rename, the limits are read from memory;
-`recovery_answers_while_a_background_step_holds_the_transaction`). A host-reported stop freezes
-provider, pool, folder and event/session binding in `<data>/recovery.json` (0600).
+is owner-only, except `RecoveryContinued`, which with no owner running settles under the
+store's own lock. Its host writes (register, claim, finish) run under the owner mutation lock;
+the status read `Recovery` and the session hooks (`RecoveryHook`, `RecoveryContinued`) do
+not, and take only the recovery file's own lock (`recovery::writing`), so a background step
+holding the owner lock never delays a host (SB-166: the file is replaced by rename, the limits
+are read from memory; `recovery_answers_while_a_background_step_holds_the_transaction`). A
+host-reported stop keeps provider, account, folder and event/session binding in
+`<data>/recovery.json` (0600); readiness uses the account's current group (SB-205, below).
 Candidates use post-stop successful observations at most 300 seconds old; a passed
 reset invalidates the observation. Hidden holds, sign-in requirements, disabled
 accounts, API keys, other pools/providers and project-folder refusals are excluded.
 A duplicate row of a held identity is excluded too. Claim rechecks and validates
 the credential before persisting `claimed`; it never returns a credential. An
 ambiguous claim survives restart without automatic replay. Completion is the
-host's claim, not independent provider acceptance. Evidence: `recovery::tests`.
+host's report or the session's own `Stop` hook (SB-204, below), not independent provider
+acceptance. Evidence: `recovery::tests`.
 
 **Retention (PRD-03, D-4 of iteration 2026-10-24).** The file keeps stops of the last 7 days and
 at most 512 rows. A stop older than 7 days is left out of every answer at once (a read writes
@@ -994,6 +998,49 @@ written by an earlier version still reads. Evidence:
 `a_full_file_keeps_a_new_stop_and_drops_finished_ones_first`,
 `the_stop_just_written_is_kept_however_the_rows_are_dated`, `finishing_a_stop_prunes_the_file_too`,
 `a_pruned_event_replayed_is_not_a_new_stop`.
+
+**Stops nobody resumes through a claim are settled (0.6.83).**
+- *The session went on by itself (SB-204).* The plugin's `Stop` hook runs after every finished
+  turn of a Claude Code session (`StopFailure` runs instead when a turn ends on an API error).
+  `switchboard recovery hook` reads `hook_event_name: Stop`, checks the file without the owner
+  (`recovery::session_has_live_stop`), and only when the session has a waiting or claimed stop
+  asks the owner (`Operation::RecoveryContinued`, at most 1.5 s, like the start hook), which
+  marks it `resumed` and logs `recovery_continued` with `settled`; with no owner running the
+  CLI settles it under the store's lock. An unreadable file asks nothing. The input is read up
+  to 8 MiB, since a Stop input carries the turn's whole last message. Its stdout is `{}`:
+  Claude Code reads a Stop hook's output as a decision. Evidence:
+  `a_session_that_goes_on_by_itself_settles_its_stop`,
+  `the_stop_hook_after_a_turn_is_silent_and_never_fails`,
+  `a_long_last_message_still_settles_the_stop_with_no_owner_running`,
+  `the_owner_settles_a_stop_its_session_continued`.
+- *The hosts' horizon (SB-199).* A waiting or claimed stop older than one day reads as
+  `cancelled`, and is written so at the next write; the 7-day retention above is unchanged.
+  Evidence: `a_stop_past_the_hosts_horizon_reads_and_is_written_as_cancelled`.
+- *A host's report on a settled stop.* `finish` of a stop already `resumed` or `cancelled`, by
+  the host itself, the `Stop` hook or the horizon, answers success and changes
+  nothing. Evidence: `a_host_finishing_a_stop_settled_meanwhile_is_answered`.
+- *Not settled by a continuation (SB-196, decided 2026-10-25).* A workflow continued in a stop's
+  folder leaves the stop as it is: an Observatory checkpoint names no session, so Switchboard
+  cannot tell which stop the continuation replaces, and cancelling every stop of the folder
+  would drop other sessions' safe resumes. The host holds a stop while a session runs in its
+  folder (Fabric Dashboards), and the continued session's own `Stop` hook settles nothing
+  that is not its own.
+
+**A stop follows its account (SB-205).** Readiness uses the stopped account's current group, so an
+account moved to another group after the stop keeps the stop ready or probed among that group's
+accounts. A waiting stop that is not ready carries `reason`: `billing`, `account_removed`,
+`no_account` (none may be probed) or `backoff` (with `probe_at`). Evidence:
+`a_stop_follows_its_account_into_another_group_and_says_why_it_waits`.
+
+**A renewal is stored without holding the account list (H-1, 0.6.83).** `adopt_refreshed_for`
+reads the saved OAuth accounts' items without the store's lock (a Keychain read has no deadline
+and every read in the process waits behind one module lock), then, per account still holding
+the spent token, takes the lock, re-reads that one item, and writes only if the account is
+still saved and still holds that token: a removal or a sign-in meanwhile keeps its place
+(SB-179). Evidence: `adopting_a_renewal_never_holds_the_account_list_across_keychain_reads`,
+`a_renewal_never_writes_an_account_removed_while_its_reads_ran`,
+`a_sign_in_stored_while_a_renewal_reads_keeps_its_place`,
+`a_renewal_writes_under_the_lock_so_a_removal_waits_for_it`.
 
 **Sign-ins needed (SB-182, PRD-01).** `recovery`, `RecoveryClaim` and `MonitorStatus` read the
 accounts whose rejected lineage nothing replaced (`RefreshState::sign_in_required`): each such

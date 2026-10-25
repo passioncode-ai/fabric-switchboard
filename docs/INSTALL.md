@@ -46,6 +46,9 @@ If an updated CLI asks you to restart Switchboard, the installed files are newer
 running app. Choose **Restart to update** from Switchboard's menu, or **Quit Switchboard**
 and open it again from Applications. Closing the window only hides the app.
 Keep the CLI linked to the copy inside the app as shown above, so both update together.
+Since 0.6.83 the app restarts into an update on its own at most once in six hours, so on
+macOS the CLI (updated with the app's files) can be ahead of the running app for that long;
+a command the running app does not know asks for this restart.
 The managed proxy address and capability persist across the restart; existing agent processes
 are not terminated. See [the lifecycle contract](../AGENTS.md#lifecycle).
 

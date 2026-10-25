@@ -46,6 +46,8 @@ const OWNED: &[&str] = &[
     "backup-id",
     "login-item",
     "auto-update",
+    // When the app last restarted into an update on its own (SB-191).
+    "update-restarted-at",
     // A release being downloaded, kept between attempts (SB-162).
     "updates",
     "logins",

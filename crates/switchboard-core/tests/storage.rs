@@ -2087,3 +2087,225 @@ fn a_write_in_flight_during_the_generation_read_is_still_seen() {
         "{refused}"
     );
 }
+
+/// A vault whose reads take `delay`, like a Keychain read on a loaded machine: Security.framework
+/// has no deadline, and every read in the process waits behind one module lock.
+struct SlowVault {
+    inner: MemoryVault,
+    delay: std::time::Duration,
+    put_delay: std::time::Duration,
+}
+impl Vault for SlowVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        // The value first, then the wait: a caller then holds a credential read before a
+        // removal that lands during the wait, the window a write after the read must respect.
+        let read = self.inner.get(id);
+        std::thread::sleep(self.delay);
+        read
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        std::thread::sleep(self.put_delay);
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn adopting_a_renewal_never_holds_the_account_list_across_keychain_reads() {
+    // H-1 (SB-163/SB-174, 0.6.83): `adopt_refreshed_for` read every OAuth account's credential
+    // with the account list locked, so on a loaded Mac (up to 91 s in `renew_live`) every
+    // snapshot, and with it `recovery`, `sessions` and the window, waited out all those reads.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(150),
+        put_delay: std::time::Duration::ZERO,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    for n in 0..6 {
+        store
+            .upsert(
+                format!("Account {n}"),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth(&format!("lineage-{n}")),
+                None,
+            )
+            .unwrap();
+    }
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(Provider::Claude, "lineage-5", &oauth("next"), None)
+                .unwrap()
+        })
+    };
+    // Six reads take 900 ms; a snapshot taken while they run answers at once.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    store.snapshot().unwrap();
+    let waited = started.elapsed();
+    let (updated, _) = adopting.join().unwrap();
+    assert_eq!(updated.len(), 1);
+    assert!(
+        waited < std::time::Duration::from_millis(100),
+        "a snapshot waited {waited:?} behind Keychain reads"
+    );
+}
+
+#[test]
+fn a_renewal_never_writes_an_account_removed_while_its_reads_ran() {
+    // Unit rounds 1 and 3 of H-1: an account removed between the renewal's unlocked read and its
+    // write under the lock must not get its Keychain item back. One account; its value is read
+    // at 0 ms, the read returns at 300 ms, and the removal lands at 100 ms.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(300),
+        put_delay: std::time::Duration::ZERO,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+                .unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    store.remove(&id).unwrap();
+    let (updated, _) = adopting.join().unwrap();
+    assert!(updated.is_empty(), "{updated:?}");
+    assert!(
+        vault.inner.get(&id).is_err(),
+        "a removed account has no credential"
+    );
+}
+
+fn lineage(access: &str, refresh: &str) -> Credential {
+    Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        &format!(r#"{{"claudeAiOauth":{{"accessToken":"{access}","refreshToken":"{refresh}"}}}}"#),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_sign_in_stored_while_a_renewal_reads_keeps_its_place() {
+    // Adversarial round 2 of H-1 (SB-179's promise): a sign-in that lands between the renewal's
+    // unlocked read and its write is never overwritten by the older lineage's successor.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(300),
+        put_delay: std::time::Duration::ZERO,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(
+                    Provider::Claude,
+                    "spent",
+                    &lineage("a-renewed", "renewed"),
+                    None,
+                )
+                .unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // The person signs in again: the account's item now holds a newer lineage.
+    vault
+        .inner
+        .put(&id, &lineage("a-signin", "signin"))
+        .unwrap();
+    let (updated, _) = adopting.join().unwrap();
+    assert!(updated.is_empty(), "{updated:?}");
+    assert_eq!(
+        vault.inner.get(&id).unwrap().refresh_token.as_deref(),
+        Some("signin")
+    );
+}
+
+#[test]
+fn a_renewal_writes_under_the_lock_so_a_removal_waits_for_it() {
+    // Adversarial round 2 of H-1: the write runs under the lock, so a removal arriving during
+    // the write deletes what it wrote instead of being undone by it.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::ZERO,
+        put_delay: std::time::Duration::from_millis(400),
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(
+                    Provider::Claude,
+                    "spent",
+                    &lineage("a-renewed", "renewed"),
+                    None,
+                )
+                .unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    store.remove(&id).unwrap();
+    adopting.join().unwrap();
+    assert!(
+        vault.inner.get(&id).is_err(),
+        "a removed account has no credential"
+    );
+}

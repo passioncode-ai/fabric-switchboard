@@ -395,6 +395,10 @@ pub enum Operation {
         directory: PathBuf,
         billing: bool,
     },
+    /// A Claude Code session finished a turn (`Stop` hook, SB-204): its live stop is resumed.
+    RecoveryContinued {
+        session: String,
+    },
     /// The open project suggestions (SB-117): folders Switchboard found that look like a
     /// project's: those still being added (retried, never asked; SB-131), and those added or taken
     /// out as deleted in the last day.
@@ -883,6 +887,8 @@ impl Runtime {
                 // the recovery file under its own lock (`recovery::writing`); behind the owner
                 // transaction the hook waited out its 10 s and the stop went unrecorded.
                 | Operation::RecoveryHook { .. }
+                // SB-204: the same file and lock, after a turn of a stopped session.
+                | Operation::RecoveryContinued { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -2997,6 +3003,18 @@ async fn execute(
                     Err(e)
                 }
             }
+        }
+        // Also offline: with no owner, the CLI holds the store's lock alone and the file is
+        // written as the owner writes it (adversarial round 2: the stop stayed waiting).
+        Operation::RecoveryContinued { session } => {
+            let settled = recovery::continued(root, &session, monitor::now())?;
+            if settled > 0 {
+                oplog::event(
+                    "recovery_continued",
+                    &[("settled", oplog::Field::Number(settled as i64))],
+                );
+            }
+            Ok(json!({"settled": settled}))
         }
         Operation::Handovers => Ok(json!({
             "enabled": handovers::enabled(root),

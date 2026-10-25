@@ -6,6 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## 0.6.83 (2026-10-26)
+
+A hotfix release from the audit of 2026-10-25 ([plan](docs/reports/2026-10-25-audit-and-plan/README.md)): the owner's stalls on a busy Mac, limit stops nobody resumes, and how often the app restarts into an update.
+
+- **A stopped session that goes on is no longer counted as waiting.** When a Claude Code session stopped on a limit continues by itself (on another account, at the reset, or after you send the prompt again), its stop is marked resumed after its next finished turn, through a new `Stop` hook in the plugin (sessions started after the plugin updates). A stop older than a day reads as cancelled, as no host resumes it any more.
+- **Fabric no longer waits on every account's Keychain read.** When a renewed sign-in was stored, Switchboard read every saved Claude account's Keychain item with the account list locked; on a busy Mac that made `recovery`, `sessions` and the window wait up to a minute. Those reads now run with the list released; only the account being renewed is read again and written under it, so a sign-in made meanwhile keeps its place.
+- **Fewer restarts into updates.** Updates still download at once, but Switchboard restarts into one on its own at most once in six hours, and only when nothing is running through it; a release marked urgent restarts at the next quiet moment. *Restart to update* works as before.
+- **A stop follows its account.** An account moved to another group after its session stopped keeps that stop ready or probed among its new group's accounts, and a stop that is not ready says why (`reason` in `switchboard recovery`).
+
 ## 0.6.82 (2026-10-24)
 
 A release made from a review of the whole product: the window, its words, the CLI, the MCP server and the background owner ([iteration record](docs/runs/2026-10-24-iteration-ui-ux/canvas.md)).
