@@ -1393,11 +1393,21 @@ impl Store {
             {
                 return Err("Credential identity does not match account identity".into());
             }
-            // One write, under the lock, after checking the account is still saved: a removal
-            // or a sign-in writing this account (both hold the lock across their own write) is
-            // never interleaved with it. Only the N reads above run without the lock.
+            // One write, under the lock, after checking that the account is still saved and
+            // still holds the spent token: a removal or a sign-in writing this account (both
+            // hold the lock across their own write) is never interleaved with it, and a sign-in
+            // stored since the read keeps its place (SB-179). Only the reads of accounts that
+            // hold the spent token are repeated here; the N reads above run without the lock.
             let saved = self.lock()?;
-            if !saved.accounts.iter().any(|s| s.id == a.id) {
+            if !saved.accounts.iter().any(|s| s.id == a.id)
+                || self
+                    .vault
+                    .get(&a.id)
+                    .ok()
+                    .and_then(|c| c.refresh_token)
+                    .as_deref()
+                    != Some(consumed)
+            {
                 continue;
             }
             let written = self.vault.put(&a.id, refreshed);

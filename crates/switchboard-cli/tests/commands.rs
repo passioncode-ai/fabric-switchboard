@@ -513,6 +513,48 @@ fn the_stop_hook_after_a_turn_is_silent_and_never_fails() {
     assert!(!tmp.path().join("recovery.json").exists());
 }
 #[test]
+fn a_long_last_message_still_settles_the_stop_with_no_owner_running() {
+    // Adversarial round 2: Claude Code puts the turn's whole last message in the Stop input; a
+    // 64 KiB bound cut it and the stop stayed waiting. With no owner the CLI settles it itself.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let stop = serde_json::json!([{"event": "cc-s-1-100", "session": "s-1", "account": "a-1",
+        "provider": "claude", "pool": "default", "directory": dir,
+        "stopped_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap().as_secs() - 60,
+        "state": "waiting", "selected_account": null}]);
+    let file = tmp.path().join("recovery.json");
+    std::fs::write(&file, stop.to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let input = serde_json::json!({"session_id": "s-1", "cwd": dir, "hook_event_name": "Stop",
+        "last_assistant_message": "x".repeat(100 * 1024)});
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["recovery", "hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({}));
+    let rows: serde_json::Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(rows[0]["state"], "resumed", "{rows}");
+}
+#[test]
 fn the_plugin_settles_a_stop_from_the_stop_hook() {
     let hooks: serde_json::Value = serde_json::from_str(include_str!(
         "../../../plugins/switchboard/hooks/hooks.json"

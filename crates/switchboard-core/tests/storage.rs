@@ -2093,6 +2093,7 @@ fn a_write_in_flight_during_the_generation_read_is_still_seen() {
 struct SlowVault {
     inner: MemoryVault,
     delay: std::time::Duration,
+    put_delay: std::time::Duration,
 }
 impl Vault for SlowVault {
     fn get(&self, id: &str) -> Result<Credential, String> {
@@ -2103,6 +2104,7 @@ impl Vault for SlowVault {
         read
     }
     fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        std::thread::sleep(self.put_delay);
         self.inner.put(id, value)
     }
     fn delete(&self, id: &str) -> Result<(), String> {
@@ -2119,6 +2121,7 @@ fn adopting_a_renewal_never_holds_the_account_list_across_keychain_reads() {
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
         delay: std::time::Duration::from_millis(150),
+        put_delay: std::time::Duration::ZERO,
     });
     let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
     let oauth = |refresh: &str| {
@@ -2172,6 +2175,7 @@ fn a_renewal_never_writes_an_account_removed_while_its_reads_ran() {
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
         delay: std::time::Duration::from_millis(150),
+        put_delay: std::time::Duration::ZERO,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     // One lineage stored in four accounts (the same identity in several pools).
@@ -2218,6 +2222,108 @@ fn a_renewal_never_writes_an_account_removed_while_its_reads_ran() {
     assert!(!updated.contains(&last), "{updated:?}");
     assert!(
         vault.get(&last).is_err(),
+        "a removed account has no credential"
+    );
+}
+
+fn lineage(access: &str, refresh: &str) -> Credential {
+    Credential::parse(
+        Provider::Claude,
+        AuthKind::OAuth,
+        &format!(r#"{{"claudeAiOauth":{{"accessToken":"{access}","refreshToken":"{refresh}"}}}}"#),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_sign_in_stored_while_a_renewal_reads_keeps_its_place() {
+    // Adversarial round 2 of H-1 (SB-179's promise): a sign-in that lands between the renewal's
+    // unlocked read and its write is never overwritten by the older lineage's successor.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(300),
+        put_delay: std::time::Duration::ZERO,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(
+                    Provider::Claude,
+                    "spent",
+                    &lineage("a-renewed", "renewed"),
+                    None,
+                )
+                .unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // The person signs in again: the account's item now holds a newer lineage.
+    vault
+        .inner
+        .put(&id, &lineage("a-signin", "signin"))
+        .unwrap();
+    let (updated, _) = adopting.join().unwrap();
+    assert!(updated.is_empty(), "{updated:?}");
+    assert_eq!(
+        vault.inner.get(&id).unwrap().refresh_token.as_deref(),
+        Some("signin")
+    );
+}
+
+#[test]
+fn a_renewal_writes_under_the_lock_so_a_removal_waits_for_it() {
+    // Adversarial round 2 of H-1: the write runs under the lock, so a removal arriving during
+    // the write deletes what it wrote instead of being undone by it.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::ZERO,
+        put_delay: std::time::Duration::from_millis(400),
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store
+                .adopt_refreshed_for(
+                    Provider::Claude,
+                    "spent",
+                    &lineage("a-renewed", "renewed"),
+                    None,
+                )
+                .unwrap()
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    store.remove(&id).unwrap();
+    adopting.join().unwrap();
+    assert!(
+        vault.inner.get(&id).is_err(),
         "a removed account has no credential"
     );
 }

@@ -3004,8 +3004,9 @@ async fn execute(
                 }
             }
         }
+        // Also offline: with no owner, the CLI holds the store's lock alone and the file is
+        // written as the owner writes it (adversarial round 2: the stop stayed waiting).
         Operation::RecoveryContinued { session } => {
-            needs_owner()?;
             let settled = recovery::continued(root, &session, monitor::now())?;
             if settled > 0 {
                 oplog::event(

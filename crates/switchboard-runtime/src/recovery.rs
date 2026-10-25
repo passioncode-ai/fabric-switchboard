@@ -605,13 +605,14 @@ pub(crate) fn continued(root: &Path, session: &str, now: i64) -> Result<usize, S
 
 /// SB-204: whether `session` has a live stop, read without the lock or the owner, so the `Stop`
 /// hook that runs after every turn of every session asks the owner only when there is one. An
-/// unreadable file answers true: the owner then reads it and refuses honestly.
+/// unreadable file answers false: nothing could settle in it, and every turn of every session
+/// would otherwise ask the owner for nothing.
 pub fn session_has_live_stop(root: &Path, session: &str, now: i64) -> bool {
     match current(root, now) {
         Ok((rows, _)) => rows
             .iter()
             .any(|r| r.session == session && matches!(r.state, State::Waiting | State::Claimed)),
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 
@@ -1904,6 +1905,12 @@ mod tests {
         .unwrap();
         claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).unwrap();
         finish(root.path(), "limit:1", true, 100 + HORIZON_SECONDS + 1).unwrap();
+        let (rows, _) = current(root.path(), 100 + HORIZON_SECONDS + 2).unwrap();
+        assert_eq!(
+            rows[0].state,
+            State::Cancelled,
+            "a settled stop stays as it was settled"
+        );
         register(
             root.path(),
             &s,

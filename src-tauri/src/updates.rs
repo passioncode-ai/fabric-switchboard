@@ -195,6 +195,16 @@ pub fn cooldown_left(last: Option<i64>, now: i64, urgent: bool) -> i64 {
     }
 }
 
+/// The last restart on its own as the watch uses it, and whether to write it back (SB-191): a
+/// time recorded ahead of the clock (a clock set back) becomes now, once, so the pause ends one
+/// period from now instead of holding until the clock catches up.
+pub fn recorded_restart(recorded: Option<i64>, now: i64) -> (Option<i64>, bool) {
+    match recorded {
+        Some(at) if at > now => (Some(now), true),
+        other => (other, false),
+    }
+}
+
 /// When the half hour before a drain starts counting (SB-191): the download, or the end of the
 /// pause when that is later. An urgent release has no pause, so it drains on the same terms as
 /// before 0.6.83.
@@ -759,12 +769,9 @@ fn watch_for_idle(app: &AppHandle) {
             };
             // SB-191: at most one restart on its own in RESTART_EVERY_SECONDS.
             let time = now();
-            let mut last = state.restarted_at();
-            // A time recorded ahead of the clock (a clock set back) is moved to now once, so the
-            // pause ends one period from now instead of holding until the clock catches up.
-            if last.is_some_and(|at| at > time) {
+            let (last, rewrite) = recorded_restart(state.restarted_at(), time);
+            if rewrite {
                 state.record_restart(time);
-                last = Some(time);
             }
             let cooling = cooldown_left(last, time, is_urgent);
             let busy = match app.try_state::<crate::Slot>() {
@@ -1668,6 +1675,17 @@ mod tests {
         assert_eq!(
             drain_from(downloaded, None, downloaded + 60, false),
             downloaded
+        );
+        // A time ahead of the clock is moved to now once, so the pause ends a period later.
+        let (later, rewrite) = recorded_restart(Some(downloaded + 365 * 86_400), downloaded);
+        assert_eq!((later, rewrite), (Some(downloaded), true));
+        assert_eq!(cooldown_left(later, downloaded + six, false), 0);
+        assert_eq!(recorded_restart(last, downloaded), (last, false));
+        assert_eq!(recorded_restart(None, downloaded), (None, false));
+        assert_eq!(
+            drain_from(downloaded, Some(downloaded + 9_999), downloaded, false),
+            downloaded + six,
+            "a future time never pushes the drain past a period from now"
         );
     }
 

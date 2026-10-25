@@ -1883,7 +1883,9 @@ async fn project_sources(
     .await
 }
 /// The largest hook input read; Claude Code's `StopFailure` payload is a few hundred bytes.
-const HOOK_INPUT_LIMIT: u64 = 64 * 1024;
+/// A `Stop` input carries the turn's whole last message (Claude Code 2.1.299), so the bound fits
+/// a long one: before 0.6.83 round 2 it was 64 KiB and a longer message settled nothing.
+const HOOK_INPUT_LIMIT: u64 = 8 * 1024 * 1024;
 /// `switchboard recovery hook` (SB-115). Only `rate_limit` and `billing_error` register; every
 /// refusal (no owner, malformed input, unknown account, a folder the account may not use)
 /// comes back as `registered: false` with a reason code, never as a failed exit.
