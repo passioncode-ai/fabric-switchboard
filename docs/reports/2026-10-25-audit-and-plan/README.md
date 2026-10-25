@@ -168,7 +168,7 @@ The Switchboard side of Vesta waves 0 to 2, as one release:
 1. SB-183: the shell hook, so plain `claude` and `codex` in an organization's folders run in that
    organization's context; on by default on a machine with an organization group (D-3).
 2. SB-201: context for Kimi Code, Hermes and OpenCode launches.
-3. SB-167: the organization's OpenRouter key into the group's slot (after Observatory 0.30.0).
+3. SB-167: the organization's OpenRouter key into the group's slot; moved after 0.7.0 by Observatory's new date (section 8).
 4. SB-159, SB-178, SB-143, SB-15: live checks on the two Macs (operator gates named in section 5).
 5. SB-202: the person's runbook and the window's first run for an organization context.
 6. SB-160: Switchboard's part of joining and leaving (attribution, signed-out state).
@@ -251,3 +251,18 @@ Asked and answered in the session of 2026-10-25; the answers are section 7.
 | D-6 | Q-6 Serge Khurs | **The PassionCode.ai group**, on PassionCode.ai accounts | SB-125 |
 | D-7 | update restarts | **At most once in 6 h, only when idle**; download at once; a release marked urgent restarts at the next idle moment | SB-191 in 0.6.83 |
 | D-8 | operator acceptance steps | **After 0.6.83, at the operator's signal**: one checklist with direct links (SB-159 sign-in, SB-178 spare account on both Macs) | the agent prepares the checklist and takes the measurements |
+
+## 8. After the integration sync (2026-10-25)
+
+fabric-workspace now coordinates the integration from one page,
+[knowledge/integration.md](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/integration.md)
+(iterations I1: the operator's two Macs as one network; I2: the organizations). Switchboard answered its sync request
+`494bde3d` on thread `24483d65` with this plan (message `94df29f2`, coordination agreed). Read the same day:
+
+| Change | Source | Consequence |
+|---|---|---|
+| Observatory shifted its dates two weeks: 0.30.0 (2026-11-07) is UI/UX, key delivery OBS-191 is in 0.31.0 by 2026-11-21, first wave-1 events (OE-01a/b, OE-06) and "Join an organization" (OBS-200) in 0.32.0 by 2026-11-28 | board `1a79bd7f` | SB-167 leaves 0.7.0: about 2026-11-28 as a 0.7.x; Vesta W1 cannot collect before 2026-11-28 |
+| The operator decided Appvillis pilots across the whole team on Mac **and Windows** | Fabric announcement `4fb510aa` | SB-02 (native Windows acceptance, never run) blocks wave 2 if any pilot machine is Windows; SB-183 then also needs a PowerShell hook. Asked to be recorded in the ledger |
+| Legal questions are settled by counsel; software follows the rules of the organization that installs it | `4fb510aa` | no Switchboard row |
+| SB-184's owner is asked of the contract (N-10, conflict X-8) | integration ledger | Switchboard takes the owner N-10 names (also asked of Observatory on thread `9541a3f7`) |
+| The release train is Organization R1 (SD-4, RM-35); waves W1 earliest 2026-11-14, W2 end of November | `2009e1b6`, integration.md | 0.7.0 by 2026-11-14 stays aligned with W1 |
