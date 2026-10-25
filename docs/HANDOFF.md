@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-26: 0.6.83 hotfix (H-1 owner stalls, limit stops settled, one update restart in 6 hours)
+
+- **Objective.** The 0.6.83 hotfix of the 2026-10-25 plan ([report](reports/2026-10-25-audit-and-plan/README.md) §3A)
+  plus Fabric Dashboards' finding `183d87c6` (SB-204, SB-205), through `/task-pipeline iteration`.
+- **Done (branch `release/0.6.83`).**
+  - H-1 (SB-174, SB-163): `Store::adopt_refreshed_for` read every OAuth account's Keychain item with the store lock
+    held; every Keychain read waits behind one process lock with no deadline, so on the operator's Mac (load 89 to 100,
+    11 GB swap) `snapshot`, `recovery` and `sessions` answered in 5 to 52 s. Reads now run unlocked; each renewed
+    account is re-read and written under the lock, keeping a sign-in made meanwhile (SB-179).
+  - SB-204: the plugin's new `Stop` hook resumes a stop whose session went on by itself (offline too, input to 8 MiB,
+    owner call bounded at 1.5 s). SB-199: a stop older than a day reads cancelled. SB-205: a stop follows its account
+    into another group; not-ready stops carry `reason`. `finish` of a settled stop answers success.
+  - SB-191: an automatic restart into an update at most once in 6 hours, urgent releases excepted.
+  - SB-196 decided against folder-wide settlement (a checkpoint names no session; the host holds such stops).
+    SB-198 not reproducible (existing tests). SB-07: no failure in three full gates.
+- **Verification.** Three blind tiers (round 1: unit, seam, product), one adversarial round (15 plants, 10 caught; the
+  5 survivors and two real defects fixed in round 2), round 3 clean. `./scripts/check.sh` exit 0 on `4790697`.
+- **Rows.** SB-206 to SB-210 filed from the rounds; SB-184 now waits for OBS-236 (Observatory 0.31.0, 2026-11-14).
+- **Exact next task.** Merge the release PR, tag `v0.6.83`, watch the release run, confirm `latest.json` and the
+  installed app, update the plugin, then measure `control_slow` on the installed 0.6.83 for a day (SB-174), reply on
+  board threads `3f0ec524` (Dashboards: SB-204/205 shipped, `reason` to show) and `24483d65` (integration: 0.6.83
+  shipped), and prepare the operator's acceptance checklist (SB-159, SB-178) for their signal.
+
 ## 2026-10-25: audit of all open work, the plan to a first organization, decisions D-1 to D-8
 
 - **Objective.** The operator's ask: see what other sessions left, clean what is finished, bring the rest into one

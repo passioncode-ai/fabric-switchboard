@@ -2169,59 +2169,41 @@ fn adopting_a_renewal_never_holds_the_account_list_across_keychain_reads() {
 
 #[test]
 fn a_renewal_never_writes_an_account_removed_while_its_reads_ran() {
-    // Unit round 1 of H-1: the reads run without the lock, so an account removed meanwhile
-    // must not get its Keychain item back.
+    // Unit rounds 1 and 3 of H-1: an account removed between the renewal's unlocked read and its
+    // write under the lock must not get its Keychain item back. One account; its value is read
+    // at 0 ms, the read returns at 300 ms, and the removal lands at 100 ms.
     let root = tempfile::tempdir().unwrap();
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
-        delay: std::time::Duration::from_millis(150),
+        delay: std::time::Duration::from_millis(300),
         put_delay: std::time::Duration::ZERO,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
-    // One lineage stored in four accounts (the same identity in several pools).
-    let oauth = |access: &str, refresh: &str| {
-        Credential::parse(
+    let id = store
+        .upsert(
+            "Account".into(),
             Provider::Claude,
             AuthKind::OAuth,
-            &format!(
-                r#"{{"claudeAiOauth":{{"accessToken":"{access}","refreshToken":"{refresh}"}}}}"#
-            ),
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
         )
         .unwrap()
-    };
-    let mut ids = Vec::new();
-    for n in 0..4 {
-        ids.push(
-            store
-                .upsert(
-                    format!("Account {n}"),
-                    Provider::Claude,
-                    AuthKind::OAuth,
-                    format!("pool-{n}"),
-                    oauth(&format!("a-{n}"), "shared"),
-                    None,
-                )
-                .unwrap()
-                .id,
-        );
-    }
+        .id;
     let adopting = {
         let store = store.clone();
         std::thread::spawn(move || {
             store
-                .adopt_refreshed_for(Provider::Claude, "shared", &oauth("a-next", "next"), None)
+                .adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
                 .unwrap()
         })
     };
-    // Accounts are read in order, 150 ms each: the last one's value is read at 450 ms and its
-    // write follows at 600 ms. The removal lands in between.
-    std::thread::sleep(std::time::Duration::from_millis(520));
-    let last = ids.last().unwrap().clone();
-    store.remove(&last).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    store.remove(&id).unwrap();
     let (updated, _) = adopting.join().unwrap();
-    assert!(!updated.contains(&last), "{updated:?}");
+    assert!(updated.is_empty(), "{updated:?}");
     assert!(
-        vault.get(&last).is_err(),
+        vault.inner.get(&id).is_err(),
         "a removed account has no credential"
     );
 }

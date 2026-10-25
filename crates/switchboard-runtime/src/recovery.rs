@@ -1956,4 +1956,23 @@ mod tests {
         let status = runtime.execute(Operation::Recovery).await.unwrap();
         assert_eq!(status["waiting_sessions"], 0);
     }
+
+    #[test]
+    fn an_unreadable_file_asks_the_owner_nothing() {
+        // Round 2: the `Stop` hook runs after every turn of every session; a file nothing can
+        // settle in must not send each of those turns to the owner.
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(FILE), b"not json").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                root.path().join(FILE),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
+        assert!(read(root.path()).is_err());
+        assert!(!session_has_live_stop(root.path(), "session-1", 100));
+    }
 }
