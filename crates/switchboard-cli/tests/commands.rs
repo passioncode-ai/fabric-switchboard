@@ -483,6 +483,47 @@ fn recovery_hook_never_fails_the_session() {
     assert!(!tmp.path().join("recovery.json").exists());
 }
 #[test]
+fn the_stop_hook_after_a_turn_is_silent_and_never_fails() {
+    // SB-204: the same command runs on `Stop` after every finished turn. Claude Code reads a
+    // Stop hook's stdout as its decision, so the answer is an empty object, with or without a
+    // stop to settle and with no owner running.
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().to_string_lossy().into_owned();
+    let stop = serde_json::json!({"session_id": "s-1", "cwd": dir, "hook_event_name": "Stop",
+        "stop_hook_active": false});
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["recovery", "hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stop.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({}));
+    assert!(!tmp.path().join("recovery.json").exists());
+}
+#[test]
+fn the_plugin_settles_a_stop_from_the_stop_hook() {
+    let hooks: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../plugins/switchboard/hooks/hooks.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        hooks["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "switchboard recovery hook 2>/dev/null || true"
+    );
+}
+#[test]
 fn continuing_in_place_without_a_terminal_is_refused_before_anything_is_offered() {
     // SB-108: an offer nobody can accept is never made; no owner is even asked.
     let tmp = tempfile::tempdir().unwrap();

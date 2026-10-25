@@ -3,12 +3,15 @@
 //! probe on a short backoff (2, 5, 10, then 15 minutes), never at the provider's reset; a spend
 //! or billing stop is never probed. Stops can be registered by Claude Code's `StopFailure` hook.
 //! No prompt, credential or process control lives here. The session host owns resumption.
+//! 0.6.83 settles stops nobody resumes through a claim: a session that goes on by itself (its
+//! `Stop` hook, SB-204), a workflow continued in the stop's folder (SB-196), and a stop older
+//! than the hosts' horizon (SB-199). A stop follows its account into another group (SB-205).
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
-use switchboard_core::{AuthKind, Provider, Snapshot};
+use switchboard_core::{Account, AuthKind, Provider, Snapshot};
 
 const FILE: &str = "recovery.json";
 /// The most rows a file may hold to be read (an older version wrote up to this many).
@@ -16,6 +19,9 @@ const MAX_ROWS: usize = 1024;
 /// PRD-03 (D-4, 2026-10-24): the file keeps stops of the last 7 days, at most this many.
 const KEEP_ROWS: usize = 512;
 const KEEP_SECONDS: i64 = 7 * 86_400;
+/// SB-199: no host continues a stop older than a day (Fabric Dashboards `RESUME_MAX_AGE_MS`);
+/// a waiting or claimed stop past it reads, and is next written, as cancelled.
+const HORIZON_SECONDS: i64 = 86_400;
 const MAX_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const MAX_AGE: i64 = 300;
 const INVALID: &str = "The recovery record is invalid or conflicts with an existing stop.";
@@ -106,12 +112,20 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Wait>, String> {
     Ok(rows)
 }
 
-/// PRD-03 (D-4): drops stops older than 7 days, then, past 512, the oldest finished stops
+/// SB-199: first a live stop older than a day becomes cancelled. PRD-03 (D-4): drops stops
+/// older than 7 days, then, past 512, the oldest finished stops
 /// (resumed, cancelled) before the oldest live ones. `written`, the stop this write adds or
 /// changes, is never dropped, whatever the rows' dates (N1 round 1: a clock that moved back made
 /// it the oldest live row). The order of the rows kept is unchanged. Answers the events dropped.
 fn prune(rows: &mut Vec<Wait>, now: i64, written: Option<&str>) -> Vec<String> {
     let kept = |r: &Wait| written == Some(r.event.as_str());
+    let horizon = now.saturating_sub(HORIZON_SECONDS);
+    for r in rows.iter_mut() {
+        if !kept(r) && r.stopped_at < horizon && matches!(r.state, State::Waiting | State::Claimed)
+        {
+            r.state = State::Cancelled;
+        }
+    }
     let mut dropped = Vec::new();
     rows.retain(|r| {
         let keep = kept(r) || r.stopped_at >= now.saturating_sub(KEEP_SECONDS);
@@ -359,14 +373,10 @@ pub(crate) fn candidates(
     if wait.state != State::Waiting {
         return vec![];
     }
-    // A changed/deleted source binding requires the host to cancel and register a new stop.
-    if !snapshot
-        .accounts
-        .iter()
-        .any(|a| a.id == wait.account && a.provider == wait.provider && a.pool == wait.pool)
-    {
+    let Some(stopped) = bound(wait, snapshot) else {
         return vec![];
-    }
+    };
+    let pool = stopped.pool.as_str();
     let held_identities: HashSet<_> = snapshot
         .accounts
         .iter()
@@ -380,7 +390,7 @@ pub(crate) fn candidates(
             a.enabled
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && a.pool == wait.pool
+                && a.pool == pool
                 && !limited.contains(&a.id)
                 && !sign_in.contains(&a.id)
                 && !a
@@ -408,11 +418,22 @@ pub(crate) fn candidates(
     eligible.into_iter().map(|a| a.id.clone()).collect()
 }
 
+/// SB-205: the stopped account as the store has it now. A stop follows its account into another
+/// group (before 0.6.83 a moved account left the stop neither ready nor probed, and a host
+/// showed "no other account has capacity"); only a removed account leaves it unbound.
+fn bound<'a>(wait: &Wait, snapshot: &'a Snapshot) -> Option<&'a Account> {
+    snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == wait.account && a.provider == wait.provider)
+}
+
 /// Accounts a probe may go to (SB-115): the same provider, pool and folder permission as
 /// capacity, but no fresh quota is required. A spend cap or a needed sign-in still excludes an
 /// account; accounts without an active hold come first.
 fn probe_accounts(
     wait: &Wait,
+    pool: &str,
     snapshot: &Snapshot,
     limited: &HashSet<String>,
     capped: &HashSet<String>,
@@ -425,7 +446,7 @@ fn probe_accounts(
             a.enabled
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && a.pool == wait.pool
+                && a.pool == pool
                 && !capped.contains(&a.id)
                 && !sign_in.contains(&a.id)
                 && crate::launch::project_allows(snapshot, a, &wait.directory).is_ok()
@@ -444,6 +465,10 @@ pub(crate) struct Ready {
     pub accounts: Vec<String>,
     /// When a probe becomes due; none for a billing stop or when no account may be probed.
     pub probe_at: Option<i64>,
+    /// SB-205: why a waiting stop is not ready, so a host can say it: `billing` (needs a
+    /// person), `account_removed`, `no_account` (none may be probed), `backoff` (see
+    /// `probe_at`). None when ready or not waiting.
+    pub reason: Option<&'static str>,
 }
 
 pub(crate) fn readiness(
@@ -460,27 +485,32 @@ pub(crate) fn readiness(
             mode: Some(Mode::Capacity),
             accounts: capacity,
             probe_at: None,
+            reason: None,
         };
     }
-    // `candidates` answers empty for a source binding that changed; a probe follows it.
-    if wait.state != State::Waiting
-        || wait.kind == StopKind::Billing
-        || !snapshot
-            .accounts
-            .iter()
-            .any(|a| a.id == wait.account && a.provider == wait.provider && a.pool == wait.pool)
-    {
+    let not_ready = |reason| Ready {
+        reason: Some(reason),
+        ..Ready::default()
+    };
+    if wait.state != State::Waiting {
         return Ready::default();
     }
-    let accounts = probe_accounts(wait, snapshot, limited, capped, sign_in);
+    if wait.kind == StopKind::Billing {
+        return not_ready("billing");
+    }
+    let Some(stopped) = bound(wait, snapshot) else {
+        return not_ready("account_removed");
+    };
+    let accounts = probe_accounts(wait, &stopped.pool, snapshot, limited, capped, sign_in);
     if accounts.is_empty() {
-        return Ready::default();
+        return not_ready("no_account");
     }
     let step = PROBE_BACKOFF[(wait.attempt as usize).min(PROBE_BACKOFF.len() - 1)];
     let probe_at = wait.stopped_at.saturating_add(step);
     if now < probe_at {
         return Ready {
             probe_at: Some(probe_at),
+            reason: Some("backoff"),
             ..Ready::default()
         };
     }
@@ -488,6 +518,7 @@ pub(crate) fn readiness(
         mode: Some(Mode::Probe),
         accounts,
         probe_at: Some(probe_at),
+        reason: None,
     }
 }
 
@@ -549,6 +580,62 @@ pub(crate) fn finish(root: &Path, event: &str, resumed: bool, now: i64) -> Resul
     keep(root, &mut rows, now, dropped, Some(event))
 }
 
+/// SB-204: the session went on by itself (Claude Code's `Stop` hook after a successful turn): its
+/// waiting or claimed stop is resumed. Answers how many stops it settled; writes only then.
+pub(crate) fn continued(root: &Path, session: &str, now: i64) -> Result<usize, String> {
+    if !identifier(session) {
+        return Err(INVALID.into());
+    }
+    let _writing = writing();
+    let (mut rows, dropped) = current(root, now)?;
+    let mut settled = Vec::new();
+    for r in rows.iter_mut().filter(|r| r.session == session) {
+        if matches!(r.state, State::Waiting | State::Claimed) {
+            r.state = State::Resumed;
+            settled.push(r.event.clone());
+        }
+    }
+    let Some(last) = settled.last().cloned() else {
+        return Ok(0);
+    };
+    keep(root, &mut rows, now, dropped, Some(&last))?;
+    Ok(settled.len())
+}
+
+/// SB-196: a workflow continued in `directory` (`switchboard continue`, a hand-over) takes over
+/// the work there, so a waiting stop of that folder is cancelled: a host resuming it as well
+/// would run the same work twice in one checkout. A claimed stop is the host's and stays.
+pub(crate) fn settle_directory(root: &Path, directory: &Path, now: i64) -> Result<usize, String> {
+    let directory = directory.canonicalize().map_err(|_| INVALID)?;
+    let _writing = writing();
+    let (mut rows, dropped) = current(root, now)?;
+    let mut settled = Vec::new();
+    for r in rows
+        .iter_mut()
+        .filter(|r| r.directory == directory && r.state == State::Waiting)
+    {
+        r.state = State::Cancelled;
+        settled.push(r.event.clone());
+    }
+    let Some(last) = settled.last().cloned() else {
+        return Ok(0);
+    };
+    keep(root, &mut rows, now, dropped, Some(&last))?;
+    Ok(settled.len())
+}
+
+/// SB-204: whether `session` has a live stop, read without the lock or the owner, so the `Stop`
+/// hook that runs after every turn of every session asks the owner only when there is one. An
+/// unreadable file answers true: the owner then reads it and refuses honestly.
+pub fn session_has_live_stop(root: &Path, session: &str, now: i64) -> bool {
+    match current(root, now) {
+        Ok((rows, _)) => rows
+            .iter()
+            .any(|r| r.session == session && matches!(r.state, State::Waiting | State::Claimed)),
+        Err(_) => true,
+    }
+}
+
 pub(crate) fn status(
     root: &Path,
     snapshot: &Snapshot,
@@ -565,7 +652,7 @@ pub(crate) fn status(
         .map(|r| {
             let ready = readiness(r, snapshot, limited, capped, sign_in, now);
             serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
-                "candidates": ready.accounts, "probe_at": ready.probe_at})
+                "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason})
         })
         .collect();
     let ready = sessions.iter().filter(|r| r["ready"] == true).count();
@@ -966,7 +1053,10 @@ mod tests {
         let wait = &read(root.path()).unwrap()[0];
         assert_eq!(
             readiness(wait, &s, &held(), &none, &none, 100_000),
-            Ready::default()
+            Ready {
+                reason: Some("billing"),
+                ..Ready::default()
+            }
         );
         assert!(claim(
             root.path(),
@@ -997,7 +1087,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             readiness(&wait, &s, &held(), &held(), &none, 100_000),
-            Ready::default()
+            Ready {
+                reason: Some("no_account"),
+                ..Ready::default()
+            }
         );
         let one_capped = readiness(
             &wait,
@@ -1380,7 +1473,9 @@ mod tests {
         let s = snapshot();
         let none = HashSet::new();
         let answer = status(root.path(), &s, &none, &none, &none, now).unwrap();
-        assert_eq!(answer["waiting_sessions"], 2, "{answer}");
+        // Both stay in the file; past the day's horizon they read as cancelled (SB-199).
+        assert_eq!(answer["sessions"].as_array().unwrap().len(), 2, "{answer}");
+        assert_eq!(answer["waiting_sessions"], 0, "{answer}");
         register(root.path(), &s, "limit:9", "session-9", "old", &dir, now).unwrap();
         let events: Vec<_> = read(root.path())
             .unwrap()
@@ -1677,5 +1772,191 @@ mod tests {
             (row.account.as_str(), row.pool.as_str()),
             (mine.id.as_str(), "app")
         );
+    }
+
+    #[test]
+    fn a_session_that_goes_on_by_itself_settles_its_stop() {
+        // SB-204: the session's `Stop` hook after a finished turn resumes its stop; before
+        // 0.6.83 only a host's claim and finish did, and the stop waited 7 days.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        let stopped = register_stop(
+            root.path(),
+            &s,
+            "session-1",
+            "old",
+            root.path(),
+            StopKind::Limit,
+            100,
+        )
+        .unwrap();
+        register_stop(
+            root.path(),
+            &s,
+            "session-2",
+            "old",
+            root.path(),
+            StopKind::Limit,
+            100,
+        )
+        .unwrap();
+        assert!(session_has_live_stop(root.path(), "session-1", 192));
+        assert_eq!(continued(root.path(), "session-1", 192).unwrap(), 1);
+        assert!(!session_has_live_stop(root.path(), "session-1", 193));
+        let rows = read(root.path()).unwrap();
+        let mine = rows.iter().find(|r| r.session == "session-1").unwrap();
+        let Stopped::New(event) = stopped else {
+            panic!("a first stop is new")
+        };
+        assert_eq!(
+            (mine.event.as_str(), &mine.state),
+            (event.as_str(), &State::Resumed)
+        );
+        let other = rows.iter().find(|r| r.session == "session-2").unwrap();
+        assert_eq!(other.state, State::Waiting, "another session's stop stays");
+        // A turn with no live stop writes nothing; a claimed stop is resumed the same way.
+        assert_eq!(continued(root.path(), "session-1", 194).unwrap(), 0);
+        let status = status(root.path(), &s, &none, &none, &none, 195).unwrap();
+        assert_eq!(status["waiting_sessions"], 1);
+        assert!(continued(root.path(), "not an id", 196).is_err());
+    }
+
+    #[test]
+    fn a_stop_past_the_hosts_horizon_reads_and_is_written_as_cancelled() {
+        // SB-199: 60 of 84 waiting stops on the operator's Mac were older than the day no host
+        // resumes past; each read as waiting for up to 7 days.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let day = 100 + HORIZON_SECONDS;
+        assert!(session_has_live_stop(root.path(), "session-1", day));
+        let status_then = status(root.path(), &s, &none, &none, &none, day + 1).unwrap();
+        assert_eq!(status_then["waiting_sessions"], 0);
+        assert_eq!(status_then["sessions"][0]["stop"]["state"], "cancelled");
+        assert!(!session_has_live_stop(root.path(), "session-1", day + 1));
+        // The next write stores it cancelled; a new stop of the session is a new one.
+        register(
+            root.path(),
+            &s,
+            "limit:2",
+            "session-1",
+            "old",
+            root.path(),
+            day + 2,
+        )
+        .unwrap();
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows[0].state, State::Cancelled);
+        assert_eq!(rows[1].state, State::Waiting);
+    }
+
+    #[test]
+    fn a_stop_follows_its_account_into_another_group_and_says_why_it_waits() {
+        // SB-205: an account moved to another group after the stop left it neither ready nor
+        // probed, and a host said no account had capacity.
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let held = HashSet::from(["old".into()]);
+        s.accounts.iter_mut().for_each(|a| a.pool = "team".into());
+        let wait = &read(root.path()).unwrap()[0];
+        assert_eq!(candidates(wait, &s, &held, &none, 102), vec!["new"]);
+        // Without fresh capacity it is probed on the backoff, in the account's new group.
+        s.accounts
+            .iter_mut()
+            .for_each(|a| a.usage.as_mut().unwrap().observed_at = 100);
+        let early = readiness(wait, &s, &held, &none, &none, 102);
+        assert_eq!((early.reason, early.probe_at), (Some("backoff"), Some(220)));
+        let due = readiness(wait, &s, &held, &none, &none, 220);
+        assert_eq!((due.mode, due.reason), (Some(Mode::Probe), None));
+        // An account of the other group is never a candidate for this stop.
+        s.accounts[1].pool = "default".into();
+        assert!(readiness(wait, &s, &held, &none, &none, 220)
+            .accounts
+            .iter()
+            .all(|id| id == "old"));
+        // A removed account is said, not hidden.
+        s.accounts.retain(|a| a.id != "old");
+        let gone = readiness(wait, &s, &held, &none, &none, 220);
+        assert_eq!((gone.mode, gone.reason), (None, Some("account_removed")));
+        let report = status(root.path(), &s, &held, &none, &none, 220).unwrap();
+        assert_eq!(report["sessions"][0]["reason"], "account_removed");
+    }
+
+    #[test]
+    fn a_workflow_continued_in_the_folder_cancels_the_stop_waiting_there() {
+        // SB-196: a hand-over left the session's stop waiting, so a host could continue the same
+        // work twice in one checkout.
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        register(
+            root.path(),
+            &s,
+            "limit:2",
+            "session-2",
+            "old",
+            elsewhere.path(),
+            100,
+        )
+        .unwrap();
+        register(
+            root.path(),
+            &s,
+            "limit:3",
+            "session-3",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        claim(root.path(), "limit:3", "new", &s, &none, &none, &none, 102).unwrap();
+        assert_eq!(settle_directory(root.path(), root.path(), 110).unwrap(), 1);
+        let rows = read(root.path()).unwrap();
+        let state = |e: &str| rows.iter().find(|r| r.event == e).unwrap().state.clone();
+        assert_eq!(state("limit:1"), State::Cancelled);
+        assert_eq!(
+            state("limit:2"),
+            State::Waiting,
+            "another folder's stop stays"
+        );
+        assert_eq!(
+            state("limit:3"),
+            State::Claimed,
+            "a host's claim stays its own"
+        );
+        assert_eq!(settle_directory(root.path(), root.path(), 111).unwrap(), 0);
     }
 }

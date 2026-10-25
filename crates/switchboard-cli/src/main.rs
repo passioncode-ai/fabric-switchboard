@@ -1897,6 +1897,26 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     let Some(hook) = parsed else {
         return json!({"registered": false, "reason": "malformed_input"});
     };
+    // SB-204: the same hook command runs on `Stop`, after every finished turn. It settles the
+    // session's stop, asks the owner only when the session has one, and prints `{}`: a Stop
+    // hook's stdout is read by Claude Code as its decision.
+    if hook["hook_event_name"].as_str() == Some("Stop") {
+        if let Some(session) = hook["session_id"].as_str() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
+                let _ = call(
+                    root,
+                    Operation::RecoveryContinued {
+                        session: session.to_owned(),
+                    },
+                )
+                .await;
+            }
+        }
+        return json!({});
+    }
     let billing = match hook["error"].as_str() {
         Some("rate_limit") => false,
         Some("billing_error") => true,

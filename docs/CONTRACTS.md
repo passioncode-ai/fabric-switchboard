@@ -995,6 +995,29 @@ written by an earlier version still reads. Evidence:
 `the_stop_just_written_is_kept_however_the_rows_are_dated`, `finishing_a_stop_prunes_the_file_too`,
 `a_pruned_event_replayed_is_not_a_new_stop`.
 
+**Stops nobody resumes through a claim are settled (0.6.83).**
+- *The session went on by itself (SB-204).* The plugin's `Stop` hook runs after every finished
+  turn of a Claude Code session (`StopFailure` runs instead when a turn ends on an API error).
+  `switchboard recovery hook` reads `hook_event_name: Stop`, checks the file without the owner
+  (`recovery::session_has_live_stop`), and only when the session has a waiting or claimed stop
+  asks the owner (`Operation::RecoveryContinued`), which marks it `resumed` and logs
+  `recovery_continued` with `settled`. Its stdout is `{}`: Claude Code reads a Stop hook's output
+  as a decision. Evidence: `a_session_that_goes_on_by_itself_settles_its_stop`,
+  `the_stop_hook_after_a_turn_is_silent_and_never_fails`.
+- *A workflow continued in the stop's folder (SB-196).* A successful `Continue` (the CLI's
+  `continue`, the automatic fallback, a console hand-over) cancels every `waiting` stop whose
+  folder is the continuation's, and logs `recovery_handed_over`; a `claimed` stop is the host's
+  and stays. Evidence: `a_workflow_continued_in_the_folder_cancels_the_stop_waiting_there`.
+- *The hosts' horizon (SB-199).* A waiting or claimed stop older than one day reads as
+  `cancelled`, and is written so at the next write; the 7-day retention above is unchanged.
+  Evidence: `a_stop_past_the_hosts_horizon_reads_and_is_written_as_cancelled`.
+
+**A stop follows its account (SB-205).** Readiness uses the stopped account's current group, so an
+account moved to another group after the stop keeps the stop ready or probed among that group's
+accounts. A waiting stop that is not ready carries `reason`: `billing`, `account_removed`,
+`no_account` (none may be probed) or `backoff` (with `probe_at`). Evidence:
+`a_stop_follows_its_account_into_another_group_and_says_why_it_waits`.
+
 **Sign-ins needed (SB-182, PRD-01).** `recovery`, `RecoveryClaim` and `MonitorStatus` read the
 accounts whose rejected lineage nothing replaced (`RefreshState::sign_in_required`): each such
 account's stored credential, from the vault, off the async worker (`blocking::run`), never under

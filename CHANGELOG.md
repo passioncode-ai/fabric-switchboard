@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- **A stopped session that goes on is no longer counted as waiting.** When a Claude Code session stopped on a limit continues by itself (on another account, at the reset, or after you send the prompt again), its stop is marked resumed after its next finished turn, through a new `Stop` hook in the plugin. A workflow continued in the same folder takes over the stop waiting there, and a stop older than a day reads as cancelled, as no host resumes it any more.
+- **A stop follows its account.** An account moved to another group after its session stopped keeps that stop ready or probed among its new group's accounts, and a stop that is not ready says why (`reason` in `switchboard recovery`).
+
 ## 0.6.82 (2026-10-24)
 
 A release made from a review of the whole product: the window, its words, the CLI, the MCP server and the background owner ([iteration record](docs/runs/2026-10-24-iteration-ui-ux/canvas.md)).
