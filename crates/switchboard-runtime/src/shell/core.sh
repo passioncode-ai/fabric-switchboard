@@ -70,9 +70,12 @@ _switchboard_inherit() {
 }
 
 # Splits the answer in the caller's _sb_line into its _sb_context, _sb_claude and _sb_codex.
-# Fails on an answer of another form.
+# Fails on an answer of another form, one of more than one line included.
 _switchboard_parse() {
   _sb_tab=$(printf '\t')
+  _sb_nl='
+'
+  case $_sb_line in *"$_sb_nl"*) return 1 ;; esac
   case $_sb_line in
     *"$_sb_tab"*"$_sb_tab"*"$_sb_tab"*) ;;
     *) return 1 ;;
@@ -96,7 +99,7 @@ _switchboard_parse() {
 # A CLI that is missing, older, failing or slow, or an answer of another form, reads as `none`:
 # what the hook holds is given back, and nothing it does not hold changes.
 _switchboard_apply() {
-  local _sb_line _sb_tab _sb_rest _sb_pool _sb_context _sb_claude _sb_codex
+  local _sb_line _sb_tab _sb_nl _sb_rest _sb_pool _sb_context _sb_claude _sb_codex
   [ -z "${SWITCHBOARD_SESSION-}" ] || return 0
   _sb_line=
   if [ ! -x "$_switchboard_cli" ] || ! _switchboard_ask; then

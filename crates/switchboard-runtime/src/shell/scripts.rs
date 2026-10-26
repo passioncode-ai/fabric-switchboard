@@ -207,6 +207,18 @@ mod tests {
         env: &[(&str, &str)],
         body: &str,
     ) -> (String, String) {
+        run_after(w, kind, cli, env, "", body)
+    }
+    /// `run`, with `before` run ahead of loading the hook (a setting the person's start file
+    /// made earlier).
+    fn run_after(
+        w: &World,
+        kind: Kind,
+        cli: &Path,
+        env: &[(&str, &str)],
+        before: &str,
+        body: &str,
+    ) -> (String, String) {
         let hook = w.data.join(format!("hook.{}", kind.name()));
         std::fs::write(&hook, script(kind, cli, &w.data).unwrap()).unwrap();
         let prompt = match kind {
@@ -217,7 +229,7 @@ mod tests {
             Kind::Fish => format!("source {}", fish_quote(&hook.to_string_lossy())),
             _ => format!(". {}", sh_quote(&hook.to_string_lossy())),
         };
-        let script = format!("{load}\n{}", body.replace("@prompt", prompt));
+        let script = format!("{before}{load}\n{}", body.replace("@prompt", prompt));
         let mut command = Command::new(shell_path(kind).unwrap());
         match kind {
             Kind::Zsh => command.args(["-f", "-c", &script]),
@@ -408,12 +420,13 @@ mod tests {
                 cd(kind, &w.mine)
             );
             // With `set -a` on in bash and zsh, the hook's own variables are still never
-            // exported, loaded before or after it.
-            let (out, err) = run(
+            // exported: it is on before the hook loads and again after.
+            let (out, err) = run_after(
                 &w,
                 kind,
                 &w.cli,
                 &[("CLAUDE_CONFIG_DIR", "/own/secret-home")],
+                allexport,
                 &body,
             );
             let k = kind.name();
@@ -433,6 +446,30 @@ mod tests {
                 "{k}: {outside}"
             );
             assert!(!outside.contains("_switchboard"), "{k}: {outside}");
+        }
+    }
+
+    #[test]
+    fn set_a_stays_on_after_loading_and_after_a_prompt() {
+        for kind in shells().into_iter().filter(|k| *k != Kind::Fish) {
+            let w = world();
+            // `set -a` from the person's start file is theirs: the hook turns it off only
+            // while it works, and gives it back after loading and after each prompt.
+            let body = format!(
+                "echo \"load=$-\"\n{}\necho \"prompt=$-\"\n{}\necho \"leave=$-\"",
+                cd(kind, &w.acme),
+                cd(kind, &w.mine)
+            );
+            let (out, err) = run_after(&w, kind, &w.cli, &[], "set -a\n", &body);
+            let k = kind.name();
+            for tag in ["load=", "prompt=", "leave="] {
+                let flags = out
+                    .lines()
+                    .find_map(|l| l.strip_prefix(tag))
+                    .unwrap_or_else(|| panic!("{k}: no {tag}: {out}{err}"));
+                assert!(flags.contains('a'), "{k}: {tag}{flags}: {out}{err}");
+            }
+            assert_eq!(calls(&w), 3, "{k}: the hook ran: {out}{err}");
         }
     }
 
@@ -682,7 +719,12 @@ mod tests {
             assert!(out.contains("status=1"), "{k}: {out}");
             assert!(err.is_empty(), "{k}: {err}");
             // An answer with too many fields, or a home that is not absolute, is refused too.
-            for line in ["acme\torg:x\t/a\t-\textra", "acme\torg:x\trelative\t-"] {
+            // A two-line answer too: no line of it reaches a home.
+            for line in [
+                "acme\torg:x\t/a\t-\textra",
+                "acme\torg:x\trelative\t-",
+                "acme\torg:x\t/a\t/b\nmore",
+            ] {
                 std::fs::write(
                     &w.cli,
                     format!("#!/bin/sh\nprintf '%s\\n' {}\n", sh_quote(line)),
@@ -695,7 +737,10 @@ mod tests {
                     &[],
                     &[cd(kind, &w.acme), show(kind, "x")].join("\n"),
                 );
-                assert_eq!(seen(&out)["x CLAUDE_CONFIG_DIR"], "unset", "{k}: {line:?}");
+                let v = seen(&out);
+                assert_eq!(v["x CLAUDE_CONFIG_DIR"], "unset", "{k}: {line:?}: {out}");
+                assert_eq!(v["x CODEX_HOME"], "unset", "{k}: {line:?}: {out}");
+                assert_eq!(v["x SWITCHBOARD_CONTEXT"], "unset", "{k}: {line:?}: {out}");
             }
         }
     }

@@ -1401,10 +1401,12 @@ transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. De
   status the prompt shows; fish: `--on-variable PWD`. Each acts once at load. Loading twice
   registers once (the `_switchboard_shell` guard). Tests: `bash_3_2_syntax_is_accepted` (`bash -n`
   on `/bin/bash` 3.2.57 and `zsh -n`), `loading_twice_registers_once_and_bash_keeps_the_persons_prompt_command`,
-  `an_answer_of_another_form_changes_nothing_and_the_prompt_keeps_its_status`.
+  `an_answer_of_another_form_changes_nothing_and_the_prompt_keeps_its_status` (five fields, a
+  relative home, and since fix cycle 2 an answer of two lines, which bash had taken: none of
+  the three variables moves).
 - **The question.** `<cli> --data-dir <data> shell env --shell <shell> --dir "$PWD"`, stderr and
-  stdin closed. The answer is used only when it is four tab-separated fields with a pool, a
-  context and two homes that are `-` or absolute. Anything else reads as `none`: a CLI that is
+  stdin closed. The answer is used only when it is one line of four tab-separated fields with a
+  pool, a context and two homes that are `-` or absolute. Anything else reads as `none`: a CLI that is
   not executable (the app removed or moved), one that exits non-zero (an older CLI without
   `shell env`), an answer of another form, and in zsh a CLI silent for ten seconds (then two
   more for its exit status, which must be 0). So what the hook holds is given back and nothing
@@ -1426,10 +1428,12 @@ transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. De
   which never sees its parent's saved values) is held with "not set" as the person's own, with
   an `org:` context beside it. On load it exports `SWITCHBOARD_SHELL_HOOK=1`. The hook's own
   variables (`_switchboard_*`) are never exported, `set -a` included (bash and zsh turn it off
-  around the hook's assignments). Tests (real `/bin/zsh` and `/bin/bash`; fish when installed,
+  before the hook's first assignment and on again after loading and after each prompt, so the
+  person's `set -a` stays theirs). Tests (real `/bin/zsh` and `/bin/bash`; fish when installed,
   else skipped with the reason): `entering_and_leaving_restores_unset_and_set_values`,
   `a_value_the_person_set_inside_is_never_restored_over`, `a_launched_sessions_shell_is_never_touched`,
-  `the_saved_values_are_not_exported`, `a_missing_cli_prints_nothing`,
+  `the_saved_values_are_not_exported` (`set -a` on before the hook loads and again after),
+  `set_a_stays_on_after_loading_and_after_a_prompt` (bash and zsh), `a_missing_cli_prints_nothing`,
   `paths_with_spaces_and_quotes_survive_every_shell`,
   `a_shell_started_inside_an_organization_folder_gives_the_home_back_on_leaving`; CLI
   `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli` (the printed script,
@@ -1461,7 +1465,11 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   start files. Run this command without --data-dir.”, since every data folder would write the
   same marker into the same home; a development build with no installed CLI to name refuses
   `shell on` with “No installed switchboard command was found for the hook to run. Install Fabric
-  Switchboard, then run this command again.” Tests: `owner_tests::no_test_or_dev_build_touches_the_real_home`,
+  Switchboard, then run this command again.” The two runtime checks are in
+  `Runtime::enable_shell_hook_when`, the data folder first, so the installed check and the home
+  can be given by a test. Tests: `owner_tests::no_test_or_dev_build_touches_the_real_home`,
+  `owner_tests::an_installed_app_over_another_data_folder_writes_no_start_file` (the installed
+  check given as true and a home given: nothing written, the installed check never asked),
   `owner_tests::the_installed_owner_follows_the_presence_of_an_organization_group`,
   `shell::install::tests::only_the_apps_own_data_folder_and_an_installed_app_touch_the_home`,
   CLI `another_data_folder_never_touches_the_start_files`. Not covered: `residency::packaged`

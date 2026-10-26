@@ -1669,16 +1669,31 @@ impl Runtime {
     /// The app must also run from `/Applications` or `~/Applications` on macOS: a bundle opened
     /// from a download or build folder (or translocated) is not installed.
     pub fn enable_shell_hook(self: &Arc<Self>) {
+        self.enable_shell_hook_when(
+            || {
+                std::env::current_exe()
+                    .and_then(|exe| exe.canonicalize())
+                    .is_ok_and(|exe| {
+                        shell::install::installed_app(&exe, dirs::home_dir().as_deref())
+                    })
+            },
+            || shell::install::Host::process(shell::install::hook_cli()),
+        );
+    }
+    /// `enable_shell_hook` with the installed check and the person's home given: the data
+    /// folder is checked first, then `installed`, and only then is `host` asked for.
+    pub(crate) fn enable_shell_hook_when(
+        &self,
+        installed: impl FnOnce() -> bool,
+        host: impl FnOnce() -> Option<shell::install::Host>,
+    ) {
         if !shell::install::is_default_root(&self.root) {
             return;
         }
-        let installed = std::env::current_exe()
-            .and_then(|exe| exe.canonicalize())
-            .is_ok_and(|exe| shell::install::installed_app(&exe, dirs::home_dir().as_deref()));
-        if !installed {
+        if !installed() {
             return;
         }
-        if let Some(host) = shell::install::Host::process(shell::install::hook_cli()) {
+        if let Some(host) = host() {
             self.enable_shell_hook_with(host);
         }
     }
@@ -6003,6 +6018,49 @@ mod owner_tests {
         runtime.bindings_pass().await;
         assert!(!shell::install::record_path(root.path()).exists());
         assert!(runtime.shell_hook_notice().is_none());
+        drop(work);
+    }
+
+    /// SB-183 (node A-3): the data-folder guard holds on its own. Even when the app counts as
+    /// installed and a home is at hand, an owner over a data folder that is not the app's own
+    /// writes no start file and no record.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_installed_app_over_another_data_folder_writes_no_start_file() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let (work, acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        runtime.enable_shell_hook_when(
+            || {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                true
+            },
+            || Some(host),
+        );
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        assert!(!shell::install::record_path(root.path()).exists());
+        assert!(runtime.shell_hook_notice().is_none());
+        // The installed check is not even consulted: the data folder decides first.
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
         drop(work);
     }
 

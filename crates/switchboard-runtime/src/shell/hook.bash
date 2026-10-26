@@ -3,7 +3,9 @@
 # shell homes with SWITCHBOARD_CONTEXT=org:<id>; leaving the folder gives your own values back.
 # Off: `switchboard shell off`. It prints nothing and never fails the prompt.
 if [ -n "${BASH_VERSION-}" ] && [ -z "${SWITCHBOARD_SESSION-}" ] && [ -z "${_switchboard_shell-}" ]; then
-  case $- in *a*) _switchboard_allexport=1; set +a ;; *) _switchboard_allexport= ;; esac
+  # `set -a` goes off before the hook assigns anything, so none of its own variables is
+  # exported; it comes back at the end.
+  case $- in *a*) set +a; _switchboard_allexport=1 ;; *) _switchboard_allexport= ;; esac
   _switchboard_shell=bash
   _switchboard_cli=@CLI@
   _switchboard_data=@DATA@
