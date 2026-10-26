@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
@@ -174,6 +174,8 @@ let loadError = '';
 let runtimeError = false;
 let notice = '';
 let noticeError = false;
+/** SB-160 (B-4): the notice's one action (a new seat's *Move it to {group}*); a new notice drops it. */
+let noticeAction: { label: string; run: () => void } | null = null;
 let lastWorkingDirectory = storedFolder(noticeStore());
 /** The folder the next picker opens at; kept for the next start as a convenience only. */
 function rememberFolder(folder: string) { lastWorkingDirectory = folder; try { noticeStore()?.setItem(LAST_FOLDER_KEY, folder); } catch { /* remembered for this window only */ } }
@@ -220,7 +222,7 @@ function button(text: string, action: () => void, className = '', key = ''): HTM
 }
 function announce(text: string) { announcements.textContent = ''; requestAnimationFrame(() => { announcements.textContent = text; }); }
 /** Notices may carry a backend's English refusal: it is translated here, where it is shown (L10N-04). */
-function showNotice(text: string, error = false) { notice = t(text); noticeError = error; announce(notice); }
+function showNotice(text: string, error = false) { notice = t(text); noticeError = error; noticeAction = null; announce(notice); }
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
@@ -345,7 +347,7 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
     shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
   if (page === 'about') renderAbout(main);
@@ -1164,6 +1166,9 @@ async function pollLogin() {
     const account = await adapter.finishLogin(login.id);
     // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
     await loginSaved(signInNotice(account, providerName(account.provider), snapshot?.projects));
+    // SB-160 (SCN-077): a seat outside its organization's one group is offered it; nothing moves until pressed.
+    const move = signInMove(account);
+    if (move) noticeAction = { label: move.label, run: () => void mutate(() => adapter.moveAccount(move.id, move.pool), move.done, 'notice-action') };
   } catch (error) {
     const text = safeError(error, 'sign_in'); const outcome = loginOutcome(text);
     // The owner saved the account and released the sign-in; only its staging folder is left.
@@ -1618,7 +1623,7 @@ function renderCurrent(main: HTMLElement) {
       const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
       card.append(copy);
       if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
-      else card.append(button(t('Add to Switchboard'), () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
+      else card.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, 'button primary row-button', `capture-${provider}`));
     } else {
       const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
       copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));

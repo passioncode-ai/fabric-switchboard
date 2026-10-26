@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, Organization, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -433,15 +433,30 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
  * The notice after an official sign-in is saved (SB-62). An identity already saved was signed in
  * again in place — same account, label and pool — so it is never announced as added.
  */
-export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
+export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending'; organization_group?: OrganizationGroupOffer }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
   // D-1: the group by its name or the default group, never a pool id alone.
   const where = inGroup(account.pool, projects);
   const head = account.signed_in_again
     ? t('{label} is signed in again in {provider} {where}.', { label: account.label, provider: providerLabel, where })
     : t('{label} added to {provider} {where}.', { label: account.label, provider: providerLabel, where });
-  return account.login_cleanup === 'pending'
+  const text = account.login_cleanup === 'pending'
     ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
+  const note = organizationMoveNote(account.label, providerLabel, account.organization_group);
+  return note ? `${text} ${note}` : text;
+}
+/**
+ * SB-160 (B-4, SCN-077): the ordinary CLI's own account cannot join a group, so its offer is a
+ * sentence instead of an action; empty otherwise. Draft copy until wave 4.
+ */
+export function organizationMoveNote(label: string, providerLabel: string, offer: OrganizationGroupOffer | undefined): string {
+  return offer?.in_cli ? t('Switch {provider} to another account first to move {label} to group “{group}”.', { provider: providerLabel, label, group: offer.name }) : '';
+}
+/** SB-160 (B-4, SCN-077): the notice's one action for a seat that landed outside its organization's group; nothing moves until the person presses it. */
+export function signInMove(account: { id: string; label: string; organization_group?: OrganizationGroupOffer }): { id: string; pool: string; label: string; done: string } | null {
+  const offer = account.organization_group;
+  if (!offer || offer.in_cli) return null;
+  return { id: account.id, pool: offer.pool, label: t('Move it to “{group}”', { group: offer.name }), done: t('{label} moved to group “{name}”.', { label: account.label, name: offer.name }) };
 }
 /** The balance line of the saved OpenRouter key (SB-79): numbers only, in US dollars. */
 export function openrouterCreditLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_remaining' | 'limit_reset' | 'usage_daily'>): string {

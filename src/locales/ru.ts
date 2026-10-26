@@ -20,6 +20,8 @@ export const RU: Record<string, string> = {
   "Managed · follows the selection {where}": "Управляемая · по выбору {where}",
   "{label} added to {provider} {where}.": "Аккаунт {label} добавлен ({provider}) {where}.",
   "{label} is signed in again in {provider} {where}.": "Вход в аккаунт {label} выполнен снова ({provider}) {where}.",
+  "Switch {provider} to another account first to move {label} to group “{group}”.": "Сначала переключите {provider} на другой аккаунт, чтобы перенести {label} в группу «{group}».",
+  "Move it to “{group}”": "Перенести в «{group}»",
   "in the default group": "в группе по умолчанию",
   "in group “{name}”": "в группе «{name}»",
   "in group {id} (no folders)": "в группе {id} (без папок)",

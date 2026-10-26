@@ -21,6 +21,8 @@ export interface SessionInfo { account_id: string; label: string | null; /** The
 export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; claude_swap_accounts?: number; renewal_blocked?: boolean; claude_swap_switching?: boolean; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number; claude_swap_running?: boolean }
+/** SB-160 (B-4): the one group of a new seat's organization, when the seat landed outside it. */
+export interface OrganizationGroupOffer { pool: string; name: string; in_cli?: boolean }
 export interface Account {
   id: string; label: string; provider: Provider; kind: AuthKind; pool: string;
   external_identity?: ExternalIdentity | null; usage_health?: UsageHealth | null;
@@ -46,7 +48,7 @@ export interface LoginInput { provider: Provider; label: string; pool: string }
 export interface Adapter {
   snapshot(): Promise<Snapshot>;
   currentAccounts(): Promise<CurrentAccounts>;
-  captureCurrent(input: CaptureInput): Promise<Account>;
+  captureCurrent(input: CaptureInput): Promise<Account & { organization_group?: OrganizationGroupOffer }>;
   importClaudeSwap(pool: string): Promise<ImportResult>;
   activateNative(id: string): Promise<void>;
   setPolicy(policy: RotationPolicy): Promise<void>;
@@ -66,7 +68,7 @@ export interface Adapter {
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   pendingLogins(): Promise<{ logins: { login_id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'complete' | 'ended' }[] }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
-  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean }>;
+  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean; organization_group?: OrganizationGroupOffer }>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;

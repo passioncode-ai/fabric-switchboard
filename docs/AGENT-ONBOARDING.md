@@ -55,6 +55,10 @@ organization listed for the person, one optional `organization` step says so.
   IDs move. For a provider with no enabled account in that project, ordinary account launches keep
   their existing fallback; automatic `--provider` selection still requires the project's selected
   account. Never move accounts during setup.
+- A sign-in that lands outside its organization's group comes back with `organization_group`
+  in the `login finish` (or `accounts capture`) receipt. Tell the person; move the account
+  (`switchboard accounts move <id> --pool <group>`) only when they say so. With `in_cli: true`
+  it is the ordinary CLI's account, which joins a group only after the CLI switches.
 - Changing the ordinary Claude Code login affects every `claude` session on the computer. Never
   do it during setup.
 - A server you register during a session is loaded by the next session. If `switchboard_accounts`
