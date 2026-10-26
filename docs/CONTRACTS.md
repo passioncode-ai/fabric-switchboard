@@ -66,7 +66,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - `Session` is `{mode:"managed",provider,pool}`, `{mode:"isolated",provider,account_id}` or `{mode:"native",provider?}`. Launches set `SWITCHBOARD_SESSION=managed:<provider>:<pool>` or `isolated:<provider>:<account id>`; detection falls back to an `ANTHROPIC_BASE_URL` naming the running proxy, then `CODEX_HOME` under `<app data>/runtimes/codex-<pool>`, then native (`CLAUDECODE=1` marks Claude).
 - Launch attaches the tools when a CLI is found (this CLI, the one bundled beside the desktop executable, PATH, `~/.local/bin`): Claude gets `--mcp-config=<home>/switchboard-mcp.json` (one argument: the flag is variadic, SB-94), Codex gets `[mcp_servers.switchboard]` in its private `config.toml`; isolated sessions get `mcp --read-only`. The launch result carries `agent_tools: bool`. No CLI found is not a launch failure. Every launched session, managed or isolated, also gets the Fabric project board when the operator registered it for that provider in their own user scope — Claude Code's `~/.claude.json` `mcpServers.fabric`, Codex's `$CODEX_HOME`/`~/.codex` `config.toml` `[mcp_servers.fabric]` — beside Switchboard's server in the same file or section (SB-20). Only a stdio entry with an absolute command is carried, and only its `command` and `args`, never its `env`; none registered, a URL server or an unreadable file means no board, never a failed launch (`the_operators_fabric_board_reaches_a_launched_session_without_its_env`, `no_registered_board_or_a_doubtful_entry_means_no_board_never_a_failed_launch`).
 - **The operator's setup in a launched home (SB-137, SB-130).** A Claude Code home (`CLAUDE_CONFIG_DIR`, managed or isolated) links `CLAUDE.md`, `skills`, `commands`, `agents`, `output-styles`, `plugins` and `hooks` from the operator's own folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`; `carry::link_into`: a link it made before is renewed, a real file in the home is never replaced, links are made on macOS and Linux only). Its `settings.json` is the operator's `settings.json` without `env`, `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper`, `forceLoginMethod`, `forceLoginOrgUUID` or any top-level key shaped like a secret (`key`, `token`, `secret`, `password`, `auth`, `credential`, `cookie`), then, isolated, the account's own `env`; managed writes it only when something is carried. Its `.claude.json` gets `hasCompletedOnboarding: true`, and for a continuation `projects[<working folder>].hasTrustDialogAccepted: true` (that folder only: the previous agent of the workflow worked there; operator rule of 2026-10-17, decided 2026-10-19); an ordinary launch keeps the trust question, and a `.claude.json` that is not a JSON object is left untouched. A Codex home links `AGENTS.md` only (its `config.toml` may hold secrets). Pi's own `PI_CODING_AGENT_DIR` links `AGENTS.md`, `skills`, `extensions`, `prompts`, `themes` from `PI_CODING_AGENT_DIR` or `~/.pi/agent` and gets their `settings.json` without secret-shaped keys; `auth.json` is never carried, so the launch's key still wins. Tests: `carry::tests::*`, `a_launched_home_carries_the_operators_setup_and_a_continuation_trusts_its_folder`.
-- **Project keys for agents (SB-144).** `AgentKey` carries an optional `pool`; at most one key per service and pool, the pool a project's (`KEY_POOL_INVALID` otherwise; `default` is not a project pool). `Store::agent_key_in(service, folder)` returns the key of the project whose folder contains `folder`, else the machine's (`pool: null`). Operations `AgentKeySet|AgentKeyStatus|AgentKeyModel|AgentKeyRemove` take `pool`; `AgentKeys { service }` lists `{keys:[{pool, project, saved_at, model}], projects:[{pool, name, own}]}` (never a value); `AgentKeyValue { service, folder }` resolves by folder. Every launch script's key command is `switchboard --data-dir <root> agents key --service openrouter --dir <launch folder>` (it runs before the script's `cd`), and Hermes, OpenCode and the OpenRouter launches take the default model from the same key. Deleting a project deletes its keys (metadata, then vault items); a backup restores a project key only when its project exists. CLI `agents openrouter set|status|model|remove --pool`, `agents openrouter list`, `agents key --service openrouter --dir`; MCP `switchboard_openrouter_status` (`pool`, plus `keys` and `projects`), `switchboard_openrouter_model` (`pool`); Tauri `openrouter_keys`, `openrouter_save|model|remove|status` with `pool`; the window's Tokens page (SCN-045, SCN-065). Snapshots with a pooled key are unreadable to 0.6.47 and older (`deny_unknown_fields`). Test: `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines`.
+- **Project keys for agents (SB-144).** `AgentKey` carries an optional `pool`; at most one key per service and pool, the pool a project's (`KEY_POOL_INVALID` otherwise; `default` is not a project pool). `Store::agent_key_in(service, folder)` returns the key of the project whose folder contains `folder` (the one `Snapshot::project_for` names when several hold it), else the machine's (`pool: null`); the rule is `agent_keys::key_in`, which the runtime's spending gate and chains view call too. Operations `AgentKeySet|AgentKeyStatus|AgentKeyModel|AgentKeyRemove` take `pool`; `AgentKeys { service }` lists `{keys:[{pool, project, saved_at, model}], projects:[{pool, name, own}]}` (never a value); `AgentKeyValue { service, folder }` resolves by folder. Every launch script's key command is `switchboard --data-dir <root> agents key --service openrouter --dir <launch folder>` (it runs before the script's `cd`), and Hermes, OpenCode and the OpenRouter launches take the default model from the same key. Deleting a project deletes its keys (metadata, then vault items); a backup restores a project key only when its project exists. CLI `agents openrouter set|status|model|remove --pool`, `agents openrouter list`, `agents key --service openrouter --dir`; MCP `switchboard_openrouter_status` (`pool`, plus `keys` and `projects`), `switchboard_openrouter_model` (`pool`); Tauri `openrouter_keys`, `openrouter_save|model|remove|status` with `pool`; the window's Tokens page (SCN-045, SCN-065). Snapshots with a pooled key are unreadable to 0.6.47 and older (`deny_unknown_fields`). Test: `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines`.
 - **Codex in project folders (SB-143).** Codex strips `model_provider`, `model_providers` and `openai_base_url` from a project's `.codex/config.toml`, so one user-level provider does it: with `<data>/codex-route` = `on`, the owner writes between marker lines into `<CODEX_HOME or ~/.codex>/config.toml` a top-level `model_provider = "switchboard-auto"` (first in the file) and a `[model_providers.switchboard-auto]` table (last): `base_url = http://<proxy>/codex/_auto/v1`, `wire_api = "responses"`, `requires_openai_auth = true` (the person's own ChatGPT or API-key sign-in stays Codex's), `supports_websockets = false`, `http_headers = {X-Switchboard-Capability = <auto capability>}`; the result is parsed before it is written (0600), and the person's text outside the markers is never changed. A `model_provider` the person chose is refused (`CODEX_ROUTE_FOREIGN`), an unparsable file too (`CODEX_ROUTE_UNREADABLE`). Written at owner start, removed at owner stop, so a Codex started while Switchboard is not running reaches OpenAI directly. The proxy's `/codex/_auto/v1/responses` requires that capability (a pool's own does not count), reads the last `<cwd>` of the request's environment context, and for a folder of a project with an enabled Codex account (`codex_route::folders`, deepest folder wins) relays it as that pool's managed request with the session token (its account, fail-over and journal; the person's Authorization and `chatgpt-account-id` are dropped); any other request goes on unchanged to `<chatgpt>/backend-api/codex/responses` (when it carries `chatgpt-account-id`) or `<openai>/v1/responses`, without the capability header, recorded nowhere. Threat accepted: the capability sits in the person's own Codex config beside their `auth.json`, so a local process of that user can name another project's folder; it can already read that sign-in. Operation `CodexRoute { enabled? }` → `{on, applied, config, conflict, projects}`; CLI `project codex [on|off]`, MCP `switchboard_codex_route`, Tauri `codex_route`, Projects page *Codex in project folders* (SCN-066). Log `codex_route {outcome|switch}`. Tests: proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`.
 - **Groups (SB-146).** A `Project` is shown as a group: it holds repositories (folders) with accounts of its own. The same folder may be in several groups (`save_project` and `validate_projects` refuse only one group's folder strictly inside another group's: `FOLDER_NESTED`). `Snapshot::projects_for(path)` lists every group holding a path in creation order; `Snapshot::project_for(path)` is the group a session there works in: the first with an enabled account, else the first. Bindings (`bindings::desired`) and the Codex route (`codex_route::folders`) write a shared folder once, for the first group with an account of that provider; `launch::project_allows` accepts any of the folder's groups. `MoveRoot { folder, pool, from?, also? }`: `also` adds the repository with its worktrees and clones to one more group and leaves none; `from` names the group it leaves when it is in several (`MOVE_ROOT_NOT_IN_GROUP` when that group does not hold it); a repository the target already holds just leaves `from`. `RepositoryMap` rows carry `groups[{pool, name}]`; `project_roots` roots carry `remote`, so the window lists a group's unique projects (one per `origin`, never a worktree, clone or subfolder) when its name is hovered or focused.
 - **Project names (SB-155).** `roots::Root::name` is the name a project shows: the main checkout's folder name (a worktree root is named by the folder of its main checkout, the parent of the common `.git`; a bare repository by its folder without `.git`), else the folder's own name; never the remote's last segment (a renamed remote such as `project-observatory-dashboard` for the folder `project-observatory-open-source` keeps the folder's name). Statistics (`ProjectIndex`) and the window's group cards use it; two projects with one name read as `name (owner)`, the owner being the second-to-last segment of the project key. A subfolder of a listed folder belongs to that folder's project in the window too. A bindings sync that changed nothing writes no `claude_binding` event: a folder bound, removed or skipped is a change, and so is the set of folders holding the person's own `ANTHROPIC_*` values, compared with the previous sync's set rather than counted each time, and so is the set of folders skipped (PRD-13; `a_sync_that_changed_nothing_is_not_logged_again`).
@@ -153,7 +153,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.
 - `MonitorStatus` adds `sign_in_required: [account id]` and `limited: [{account_id, until, source: managed|claude_code}]`; the MCP `switchboard_status` result adds `limited`. Decision reasons add `limit_reached`, `limit_no_eligible_account`, `switched_on_limit`.
 - `Store::rotation_decision_with(policy, current, now, limited)`; `rotation_decision` passes an empty set. `Store::adopt_refreshed`, `Store::export`, `Store::changes`, `Store::backup_id`.
-- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item` and `auto-update` (`SETTING_FILES`; absent in a 0.5 backup, ignored by a 0.5 reader); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
+- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` (`SETTING_FILES`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 128 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`; restore writes a JSON setting back byte for byte, a switch word with its line end, so a `spend.json` of exactly its limit stays readable: `a_spend_file_of_exactly_the_limit_comes_back_from_a_backup_readable`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`), and so does a spending ceiling set or answered (`Store::setting_changed`; the gate's own records in `spend.json` wait for the next change-driven or daily backup). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
 
 ## 0.5.1 additions
 
@@ -414,10 +414,121 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   workflow's chain, else the project's, else the machine's, else none.
 - Removing an account drops executors pinned to it; removing a project drops its chain; a chain left
   empty is dropped (`chains::prune`).
-- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets}`; `Operation::SetChain
-  {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
+- `Operation::Chains {workflow?, pool?, folder?}` → `{chains, effective, presets, readiness,
+  last_handover, ceilings_unreadable, limits_known}`; `Operation::SetChain {scope, executors,
+  preset?}` → `{chain}`; a preset id (`subscriptions-first`) stands for the list. With `folder` (a
+  workflow's checkout, canonicalized when it exists) `effective` is resolved through the group the
+  automatic fallback would choose (`fallback::chain_pool_of`, below), `pool` then standing for the
+  executor account's group; without it, `pool` alone as before. `limits_known` is false in an
+  offline answer (no owner, so no limit evidence: `readiness` cannot name a limited account).
+  MCP `switchboard_chain_get` (`workflow_id?`, `pool?`, `folder?`, an absolute folder) and CLI
+  `chain list [--workflow] [--pool] [--dir]` (`--dir` absolute) return the same answer. Tests
+  `the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback`,
+  `handshake_lists_tools_and_rejects_malformed_messages` (`crates/switchboard-cli/tests/mcp.rs`).
+- **Readiness (0.7.0, C-2; SB-71 screen, SB-73 status).** Code:
+  `crates/switchboard-runtime/src/chain_view.rs`. `readiness` holds, for every chain set, keyed
+  `machine`, `project:<pool>` or `workflow:<id>`, one view per step of what it would do now:
+  `{agent, name, state: ready|skipped|not_automatic|not_installed, reason, paid, account_id?,
+  account_label?, key_scope?: group|machine, key?, spend?}`, built on the fallback's own
+  `resolve_with` with no executor and no workflow, after these checks in order: agents-settings.json
+  unreadable (`skipped`, `agent_settings_unreadable`), a step pinned to a key (`not_automatic`,
+  `key_pinned`, the vault name in `key`, never a value), an agent the fallback cannot run
+  (`not_automatic`, `agent_not_automatic_yet`), a disabled agent (`skipped`, `agent_disabled`), an
+  agent not on this computer (`not_installed`); then the resolution's skip reason
+  (`no_usable_account`, or `sign_in_required` for a pinned account that needs a new sign-in). A
+  group's chain is read for the group's first folder, so its account rules (SB-102) apply; this
+  computer's and a task's chains with no folder. `paid` is Hermes and OpenCode (with the
+  OpenRouter key they spend, `key_scope`) and Claude Code or Codex on an API-key account (C-Q3);
+  `spend` is null: a read never starts the workflow engine, a hand-over or a network call, and a
+  key's spend is read only at a paid hand-over (C-5). `last_handover` is spend.json's record
+  (written by C-5; null until then); `ceilings_unreadable: true` when spend.json cannot be read,
+  the chains staying readable. Tauri commands `chains` and `set_chain {scope, executors, preset?}`
+  (labels and codes only). Tests `chain_view::tests` and
+  `owner_tests::the_chain_view_names_why_each_step_would_be_skipped`.
 - The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
   are SB-72.
+- **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:
+  `crates/switchboard-runtime/src/spend.rs`. `<data>/spend.json` (0600, at most 128 KiB, carried in
+  backups, removed by `switchboard uninstall`), never `Snapshot`, so a 0.6.x build still reads the
+  store after a downgrade. Content: `{version: 1, ceilings: [{scope, cents, set_at,
+  doubled_from?}], questions: [{id: "q_" + 16 hex, scope, cents, spent, reached_at, answer?:
+  keep|double, answered_at?, answered_by?: window|cli|mcp}], baselines: [{workflow, key: machine
+  or a pool, usage, at}], last_handover?}`; at most 256 ceilings (one per `ChainScope`: the
+  machine's, at most 63 groups' and at most 192 tasks', so the machine's and a group's always
+  have room: `At most 192 task ceilings. ...`, `At most 63 group ceilings. ...`;
+  `task_ceilings_leave_room_for_the_machine_and_the_groups`), 64 questions, 256 baselines. The
+  largest file these caps allow is about 104 KiB (`the_largest_file_the_caps_allow_fits_under_the_limit`);
+  a write past 128 KiB is refused with its own sentence (`The spending ceilings file is full. ...`,
+  `a_write_past_the_limit_is_refused_with_its_own_sentence_and_nothing_written`), never as
+  unreadable. A task ceiling stays until the window clears it. A ceiling is whole cents from $0.01 to $1,000 (`spend::cents`: zero,
+  negative, NaN, infinite or out-of-range amounts are refused and nothing is written). Machine
+  and group ceilings count per UTC day; a group takes one only with its own OpenRouter key
+  (`Give this group its own key under API keys first.`), and one whose key was removed is kept
+  and shown inactive (`inactive_reason: no_own_key`); a task ceiling counts the key's usage since
+  the task's first paid hand-over (C-Q2). Setting a scope's value closes its open questions: an
+  answer is tied to the value it was asked about. `keep` is accepted from every surface,
+  `double` only with `by: window` (`Doubling a ceiling is answered in the Switchboard window.`,
+  C-Q1), doubling past $1,000 is refused and the question stays open. `by: window` is accepted
+  only in the app's own process: the control listener and an offline command refuse it before it
+  runs (`Only the Switchboard window answers as the window. ...`;
+  `a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener`,
+  `an_offline_command_cannot_answer_a_ceiling_as_the_window`). A removed group takes its
+  ceiling, questions and baselines along; answered questions and baselines go after 30 days, an
+  open daily question after the next UTC day, an open task question 7 days after it was asked; a
+  clock set back drops nothing. When 64 questions are held, a new one takes the slot of the
+  oldest answered question, else of the oldest open task question, and a machine or group
+  question then of the oldest open question, so it always gets one
+  (`a_machine_question_always_fits_and_open_task_questions_age_out`). Deleting a group
+  (`Operation::RemoveProject {pool, by}`, `by` defaulting to `cli`) prunes spend.json under its
+  write lock, so a group saved again under the same id inherits nothing; a group that holds a
+  ceiling is deleted only with `by: window` in the app's own process (C-Q7): from the CLI, MCP,
+  the control listener or an offline command it is refused (`This group has a spending ceiling.
+  Delete the group in the Switchboard window, where its ceiling goes with it.`, `by: window`
+  there refused as `WINDOW_ONLY`), the group and the ceiling kept, and a spend.json that cannot be
+  read refuses every group deletion
+  (`a_group_holding_a_ceiling_is_deleted_only_in_the_window_and_takes_it_along`,
+  `deleting_a_group_takes_its_ceiling_questions_and_baselines_and_keeps_the_rest`). A file that cannot
+  be read, is not a JSON object, or breaks any of these rules is an error, never "no ceilings":
+  `spend::check` then skips every paid step (`ceilings_unreadable`) and every write is refused.
+  Ceilings are no boundary against a process running as the operator: a hand edit that keeps
+  every rule, or deleting the file, loosens or removes them (a backup or the log shows it later).
+  After a downgrade to 0.6.x paid steps run with no ceiling (0.6.x has no gate and never reads
+  spend.json), and its `switchboard uninstall` leaves `spend.json` behind, since 0.6.x does not know
+  the file. A ceiling set or answered through `SetCeiling` or `AnswerCeiling` counts as a change
+  for the next backup (`Store::setting_changed`, so the change-driven backup takes it within its
+  60 s spacing; `spending_ceilings_are_set_read_and_answered_through_the_runtime`); records the
+  gate writes (questions it opens, baselines, the last hand-over) ride the next change-driven or
+  daily backup until C-5 bumps the count for them too. `backup::MAX_SPEND_SETTING` equals
+  `spend::MAX_BYTES`, so every file this build writes is carried
+  (`every_spend_file_this_build_writes_fits_a_backup`).
+  `spend::decide` (pure; called by C-5) counts no ceiling of a group the snapshot no longer holds
+  (`a_ceiling_of_a_removed_group_covers_no_step`), counts a negative or NaN usage read as unknown
+  and a huge one as spend (`a_provider_read_that_is_negative_nan_or_huge_is_never_counted_as_spend`),
+  and skips a paid step, in order: `key_exhausted` when the
+  key's own limit has less than $0.50 left, with or without a ceiling; `ceiling_reached` naming
+  the strictest reached ceiling; `spend_unknown` when a covering ceiling's spend could not be
+  read (an API-key Claude Code or Codex account under a ceiling is always unknown, C-Q3); with no
+  covering ceiling an unread key runs (`spend_unread`). Log event `ceiling` with `action`
+  (`set`, `cleared`, `reached`, `kept`, `doubled`, `removed` when a deleted group's ceiling went
+  with it, `remove_failed` when spend.json could not be written after a group was deleted, the
+  next change pruning it) and `scope` (`machine`, `project`,
+  `workflow`). `Operation::Ceilings` → `{ceilings, questions, last_handover, limits}`;
+  `Operation::SetCeiling {scope, usd, by}` (`usd: null` clears; a body without `usd` or `by` is
+  refused, never read as a clear) → `{ceiling}`. From `by: cli` or `by: mcp` only a first ceiling
+  of a scope or a value no higher than its current one is accepted; raising or clearing one is
+  refused (`Raising or clearing a ceiling is done in the Switchboard window. ...`, decided against
+  the file under its write lock, nothing written), and `by: window` through the control listener
+  or an offline command is refused like a ceiling answer (`WINDOW_ONLY`;
+  `a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener`);
+  `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. One read-modify-write of
+  spend.json at a time in a process (`two_surfaces_setting_one_ceiling_at_once_never_loosen_it`,
+  `four_scopes_set_at_once_are_all_kept`). `spend::key_slot(snapshot, folder)` names the key a
+  paid step in `folder` spends, for the gate's `PaidStep::key` (C-5) and the chains view's
+  `key_scope`; it and `Store::agent_key_in` share one rule, `agent_keys::key_in`
+  (`the_view_and_the_gate_name_the_key_a_launch_in_the_folder_uses`). An unreadable spend.json
+  names the order of recovery: delete it first, since a restore never writes over an existing
+  setting. Tests in `spend::tests` and
+  `spending_ceilings_are_set_read_and_answered_through_the_runtime`.
 
 ## Automatic fallback, phase 1 (SB-73, 2026-10-06)
 
@@ -425,8 +536,8 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
 `crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
 `continuation::{list_open, checkouts}`, called by the monitor after rotation.
 
-- **Trigger:** a chain applies (SB-71: the workflow's, else its executor account's project pool,
-  else the machine's — none set, nothing happens), and the executor of an open workflow without a
+- **Trigger:** a chain applies (SB-71: the workflow's, else its group's, else the machine's; none
+  set, nothing happens), and the executor of an open workflow without a
   waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
   executor's `accountRef`, only that account decides (one Switchboard does not hold decides
   nothing). When it names none, the executor is taken to be the ordinary CLI of its provider — but
@@ -488,9 +599,25 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
   phase 2). A Hermes executor at its limit is not detected yet.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`; store event `fallback`
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
+- **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
+  names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it
+  holds the checkout; else the one group holding the checkout, whoever's account worked there
+  (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
+  group); else, with several groups holding it (SB-146) and none of them the executor's, the
+  group `Snapshot::project_for` names (the first holding group with an enabled account, an
+  organization's group last when organizations exist; else the first), the one the folder's proxy
+  route and paid key use, logged `group_ambiguous`; with no group holding it, the executor
+  account's group as before. The engine is asked for the checkout whenever the workflow's, the
+  executor group's or the machine's chain is set, or any group has a chain. When no chain applies
+  to the chosen group the pass logs `no_chain` and leaves no retry mark, so a chain set meanwhile
+  is used at the next scan; the 15-minute mark is set once a chain resolves, and also after
+  `engine_unreadable` and `no_checkout`, which are attempts not repeated every minute. Tests
+  `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
+  `a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous`,
+  `no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan`.
 
 - **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
 

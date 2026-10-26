@@ -163,15 +163,21 @@ Sessions that stopped on a limit and the accounts ready to continue them: each s
 `{enabled, handovers[]}`: whether hand-overs open in Fabric's console, and those waiting for a
 console, oldest first.
 
-### `switchboard_chain_get`: `workflow_id?`, `pool?`
+### `switchboard_chain_get`: `workflow_id?`, `pool?`, `folder?`
 
-`{chains[], effective, presets[]}`. A chain is `{scope, executors[], updated_at}`: `scope` is
+`{chains[], effective, presets[], readiness, last_handover, ceilings_unreadable, limits_known}`. A chain is `{scope, executors[], updated_at}`: `scope` is
 `{kind: "machine"}`, `{kind: "project", pool}` (a group) or `{kind: "workflow", id}`; each executor is
 `{agent, account_id?, key?}`: a catalog agent id, optionally pinned to an account or to a paid
 key by its Observatory vault name (`project/env/NAME`; never a value). `effective` is the chain
 that applies (the workflow's own, else the group's, else the machine's) or null: **no chain
-applies until the operator sets one**. `presets` lists ready-made orders
-(`subscriptions-first`: claude-code → codex → kimi-code → hermes).
+applies until the operator sets one**. With `folder` (the workflow's checkout, an absolute
+folder) the group is found as the automatic fallback finds it: the executor's group (`pool`) when
+it holds the folder, else the one group holding it, else, when several do, the group its proxy route
+and paid key use; a relative `folder` is refused. `presets` lists ready-made orders
+(`subscriptions-first`: claude-code → codex → kimi-code → hermes). `readiness` says per chain
+what each step would do now; `limits_known` is false when no Switchboard owner runs, so readiness
+cannot name a limited account; `last_handover` and `ceilings_unreadable` come from the spending
+ceilings' file.
 
 ### `switchboard_openrouter_status`: `pool?`
 

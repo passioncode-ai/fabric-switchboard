@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- **Going back to 0.6.x after 0.7.0.** Spending ceilings live in a file of their own, `spend.json`, that 0.6.x does not read. After a downgrade to 0.6.x, paid agents in a fallback chain (Hermes and OpenCode on the OpenRouter key) start with no Switchboard ceiling; only the key's own OpenRouter limit still applies. The `switchboard uninstall` of 0.6.x leaves `spend.json` in the data folder; 0.7.0 reads it again after an upgrade.
+- **Only the window raises a ceiling.** The CLI and MCP may set a first spending ceiling or lower one; raising or clearing one is done in the Switchboard window, as doubling one already was.
+
 ## 0.6.83 (2026-10-26)
 
 A hotfix release from the audit of 2026-10-25 ([plan](docs/reports/2026-10-25-audit-and-plan/README.md)): the owner's stalls on a busy Mac, limit stops nobody resumes, and how often the app restarts into an update.

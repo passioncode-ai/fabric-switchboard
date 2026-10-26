@@ -48,6 +48,12 @@ const ALLOWLIST = {
   // runtime settings_bundle.rs parse(): SB-176 settings import runs from the CLI only; the window
   // has no import, so this prints to the terminal.
   'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',
+  // runtime spend.rs set_ceiling(): the window always sends `by: window`, so raising or clearing
+  // is refused only to the CLI and MCP, whose errors print to the terminal or the agent.
+  'Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.': 'C-Q1: CLI and MCP only; the window sets as the window',
+  // runtime spend.rs remove_group(): the window deletes a group with `by: window` (src-tauri
+  // remove_project), so a group holding a ceiling is refused only to the CLI (C-Q7).
+  'This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.': 'C-Q7: CLI only; the window deletes as the window',
   'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
   // runtime shell/map.rs write(): the terminal hook's folder map is written only by the owner's
   // background bindings pass (SB-183, node A-4), which logs a refusal; no renderer request writes it.

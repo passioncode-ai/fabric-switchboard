@@ -258,6 +258,12 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    if let Some(refusal) = crate::window_only_refusal(&operation) {
+        return Json(Reply::Error {
+            message: refusal.into(),
+        })
+        .into_response();
+    }
     let kind = operation_kind(&operation);
     let started = std::time::Instant::now();
     let reply = match state.runtime.execute(operation).await {
@@ -848,6 +854,217 @@ mod tests {
         assert!(result.unwrap_err().contains("closed its proved connection"));
         assert!(!received_mutation.load(Ordering::SeqCst));
         task.abort();
+    }
+    #[tokio::test]
+    async fn a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener() {
+        // C-Q1 (C-4): the window answers in the owner's own process, never through this
+        // listener. A request that names the window, crafted by anything holding the control
+        // token (an agent running the CLI), is refused before it runs, keep and double alike.
+        let (tmp, owner, _) = fixture().await;
+        let snapshot = owner.runtime.store.snapshot().unwrap();
+        // Asked now: the owner prunes a daily question after the next UTC day.
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &snapshot,
+            switchboard_core::ChainScope::Machine,
+            Some(5.0),
+            crate::spend::Surface::Window,
+            now,
+        )
+        .unwrap();
+        let id = crate::spend::open_question(
+            tmp.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.0,
+            now,
+        )
+        .unwrap()
+        .unwrap();
+        for answer in [crate::spend::Answer::Double, crate::spend::Answer::Keep] {
+            let refused = request(
+                tmp.path(),
+                &Operation::AnswerCeiling {
+                    id: id.clone(),
+                    answer,
+                    by: crate::spend::Surface::Window,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(refused, crate::spend::WINDOW_ONLY);
+        }
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 500, "nothing doubled");
+        assert!(file.questions[0].answer.is_none(), "still open");
+        // The CLI's own surface keeps it.
+        request(
+            tmp.path(),
+            &Operation::AnswerCeiling {
+                id,
+                answer: crate::spend::Answer::Keep,
+                by: crate::spend::Surface::Cli,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener() {
+        // C-Q1 (C-4 fix cycle 1): anything holding the control token (an agent running the CLI
+        // or MCP) may set a first ceiling or lower one, never raise or clear one; naming the
+        // window through this listener is refused like a ceiling answer.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, _owner, _) = fixture().await;
+        let set = |usd: Option<f64>, by: Surface| Operation::SetCeiling {
+            scope: ChainScope::Machine,
+            usd,
+            by,
+        };
+        // No ceiling yet: the CLI sets the first one.
+        request(tmp.path(), &set(Some(5.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let before = std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap();
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            for usd in [Some(10.0), None] {
+                let refused = request(tmp.path(), &set(usd, by)).await.unwrap_err();
+                assert_eq!(
+                    refused,
+                    if by == Surface::Window {
+                        crate::spend::WINDOW_ONLY
+                    } else {
+                        crate::spend::RAISE_IN_WINDOW
+                    },
+                    "{by:?} {usd:?}"
+                );
+                assert_eq!(
+                    std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap(),
+                    before,
+                    "spend.json unchanged"
+                );
+            }
+        }
+        // Lowering (and the same value) is accepted from the CLI and MCP.
+        request(tmp.path(), &set(Some(3.0), Surface::Mcp))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &set(Some(3.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 300);
+        // The offline path refuses the window the same way, before it opens the store.
+        let other = tempfile::tempdir().unwrap();
+        assert_eq!(
+            crate::execute_offline(other.path().to_owned(), set(Some(9.0), Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+    }
+    #[tokio::test]
+    async fn a_group_holding_a_ceiling_is_deleted_only_in_the_window_and_takes_it_along() {
+        // Risk 2 (C fix cycle 2, C-Q7): deleting a group drops its ceiling, a loosening an agent
+        // may not make (C-Q1). Through the listener and offline it is refused, the ceiling kept;
+        // the window deletes it, and a group saved again under the same id inherits nothing.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let remove = |by: Surface| Operation::RemoveProject {
+            pool: alpha.pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                if by == Surface::Window {
+                    crate::spend::WINDOW_ONLY
+                } else {
+                    crate::spend::GROUP_HOLDS_CEILING
+                },
+                "{by:?}"
+            );
+        }
+        // Offline the same: no owner answers in this other data folder, the refusal comes from
+        // spend.json itself, before the store's group is touched.
+        let offline = tempfile::tempdir().unwrap();
+        crate::spend::set_ceiling(
+            offline.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Cli))
+                .await
+                .unwrap_err(),
+            crate::spend::GROUP_HOLDS_CEILING
+        );
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        assert!(store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .any(|p| p.pool == alpha.pool));
+        assert_eq!(crate::spend::read(tmp.path()).unwrap().ceilings.len(), 1);
+        // The window deletes it in its own process; the ceiling goes with it.
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(crate::spend::read(tmp.path()).unwrap().ceilings.is_empty());
+        let again = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        assert_eq!(again.pool, alpha.pool, "the same id comes back");
+        let view = crate::spend::view(tmp.path(), &store.snapshot().unwrap(), now).unwrap();
+        assert!(view["ceilings"].as_array().unwrap().is_empty());
+        // A group without a ceiling is deleted from the CLI as before.
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
     }
     #[cfg(unix)]
     #[tokio::test]

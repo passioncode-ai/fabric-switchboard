@@ -116,6 +116,10 @@ export interface Adapter {
   /** The ordinary Hermes's model and provider (SB-80). */
   hermesModel(): Promise<HermesModel>;
   agentsOverview(): Promise<AgentsOverview>;
+  /** SB-71 (C-2): every fallback chain with what each step would do now and the last hand-over. */
+  chains(): Promise<Chains>;
+  /** Sets a scope's chain in order; an empty list clears it; `preset` stands for the list. */
+  setChain(scope: ChainScope, executors: ChainExecutor[], preset?: string | null): Promise<{ chain: Chain | null }>;
   agentEnable(agent: string, enabled: boolean): Promise<unknown>;
   agentDefault(agent: string | null): Promise<unknown>;
   openrouterModels(): Promise<OpenrouterModels>;
@@ -146,6 +150,27 @@ export interface Adapter {
   /** The person's check (LC-16): runs with automatic updates off too; resolves with the status after. */
   checkForUpdates(): Promise<UpdateStatus>;
 }
+/** SB-71 (C-2): a fallback chain's scope: this computer, a group (`pool`) or one task (a workflow id). */
+export type ChainScope = { kind: 'machine' } | { kind: 'project'; pool: string } | { kind: 'workflow'; id: string };
+/** One step: an agent, optionally pinned to a saved account or to a key by its vault name (never a value). */
+export interface ChainExecutor { agent: string; account_id?: string | null; key?: string | null }
+export interface Chain { scope: ChainScope; executors: ChainExecutor[]; updated_at: number }
+/** What a step would do now (`chain_view::preview`): codes, never words; `spend` stays null until a hand-over reads it (C-5). */
+export interface ChainStepView {
+  agent: string; name: string | null;
+  state: 'ready' | 'skipped' | 'not_automatic' | 'not_installed';
+  /** `agent_disabled`, `no_usable_account`, `sign_in_required`, `key_pinned`, `agent_not_automatic_yet`, `agent_settings_unreadable`, ... */
+  reason: string | null;
+  account_id?: string; account_label?: string;
+  /** Hermes and OpenCode on an OpenRouter key, or Claude Code and Codex on an API-key account. */
+  paid: boolean;
+  key_scope?: 'group' | 'machine' | null; key?: string; spend?: null;
+}
+/** The last automatic hand-over pass, from spend.json (written by the hand-over gate, C-5). */
+export interface LastHandover { at: number; workflow: string; outcome: string; skipped: { agent: string; reason: string }[] }
+export interface ChainPreset { id: string; agents: { agent: string; name: string | null }[] }
+/** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
+export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }

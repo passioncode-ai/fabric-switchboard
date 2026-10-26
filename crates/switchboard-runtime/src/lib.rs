@@ -8,6 +8,7 @@ pub mod attribution;
 mod bindings;
 mod blocking;
 mod carry;
+mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
@@ -30,6 +31,7 @@ mod refresh;
 pub mod roots;
 pub mod settings_bundle;
 pub mod shell;
+pub mod spend;
 mod statistics;
 pub mod suggest;
 pub mod uninstall;
@@ -208,8 +210,13 @@ pub enum Operation {
         #[serde(default)]
         organization: Option<String>,
     },
+    /// Deletes a group. `by` names the surface (C-Q7): a group holding a spending ceiling is
+    /// deleted only by the window, since its ceiling goes with it; the CLI and MCP are refused.
+    /// Left out, a request counts as the CLI's.
     RemoveProject {
         pool: String,
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// Makes a pool's folder capability worthless and writes a new one into its folders (an
     /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
@@ -449,11 +456,15 @@ pub enum Operation {
         on: Option<bool>,
     },
     /// Fallback chains (SB-71): every chain, presets, and effective workflow/project chain.
+    /// With `folder` (a workflow's checkout) the group is found as the fallback finds it
+    /// (`fallback::chain_pool`), `pool` standing for the executor account's group.
     Chains {
         #[serde(default)]
         workflow: Option<String>,
         #[serde(default)]
         pool: Option<String>,
+        #[serde(default)]
+        folder: Option<PathBuf>,
     },
     /// Sets the chain of a scope in order; an empty list clears it. A preset id may stand for
     /// the list.
@@ -463,6 +474,27 @@ pub enum Operation {
         executors: Vec<switchboard_core::Executor>,
         #[serde(default)]
         preset: Option<String>,
+    },
+    /// Spending ceilings for paid fallback agents (SB-72): every ceiling, the open questions and
+    /// the last hand-over (`spend::view`). An unreadable `spend.json` is an error, never "none".
+    Ceilings,
+    /// Sets the ceiling of a scope in dollars (machine and group: per UTC day; a task: since its
+    /// first paid hand-over); `usd: null` clears it, and a body without `usd` is refused. `by`
+    /// names the surface: the CLI and MCP may set a first ceiling or a lower one, raising and
+    /// clearing are the window's (C-Q1), and `by: window` from outside the app's own process is
+    /// refused like a ceiling answer.
+    SetCeiling {
+        scope: switchboard_core::ChainScope,
+        #[serde(deserialize_with = "spend::present")]
+        usd: Option<f64>,
+        by: spend::Surface,
+    },
+    /// Answers a reached ceiling's question: `keep` from any surface, `double` only from the
+    /// window (`by: window`, C-Q1). The CLI and MCP send their own surface.
+    AnswerCeiling {
+        id: String,
+        answer: spend::Answer,
+        by: spend::Surface,
     },
     /// Starts an agent in a folder: through the proxy on the pool's API-key account, or on the
     /// saved OpenRouter key (`via: openrouter`, SB-79) with `model` (default: the key's model).
@@ -853,6 +885,8 @@ impl Runtime {
                 | Operation::HermesModel
                 | Operation::KimiLoginStatus { .. }
                 | Operation::Chains { .. }
+                // A file read; spend.json is changed only by the operations below.
+                | Operation::Ceilings
                 | Operation::LaunchAccount { .. }
                 | Operation::Status
                 | Operation::MonitorStatus
@@ -2656,7 +2690,29 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
         .collect();
     json!({"schema": 1, "organizations": organizations, "accounts": accounts})
 }
+/// C-Q1: the window answers in the app's own process (`Runtime::execute`). An operation that
+/// names the window but arrives through the control listener or an offline command (anything
+/// holding the control token, an agent running the CLI included) is refused before it runs.
+pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
+    matches!(
+        operation,
+        Operation::AnswerCeiling {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::SetCeiling {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::RemoveProject {
+            by: spend::Surface::Window,
+            ..
+        }
+    )
+    .then_some(spend::WINDOW_ONLY)
+}
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
+    if let Some(refusal) = window_only_refusal(&operation) {
+        return Err(refusal.into());
+    }
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
     execute(store, &root, None, operation).await
 }
@@ -3032,12 +3088,95 @@ async fn execute(
             }
             Ok(json!({"enabled": handovers::enabled(root)}))
         }
-        Operation::Chains { workflow, pool } => {
+        Operation::Chains {
+            workflow,
+            pool,
+            folder,
+        } => {
+            let snapshot = store.snapshot()?;
+            // C-8: a checkout folder finds its group as the fallback does; `pool` is then the
+            // executor account's group.
+            let pool = match folder {
+                Some(folder) => {
+                    let folder = folder.canonicalize().unwrap_or(folder);
+                    fallback::chain_pool_of(&snapshot, pool, &folder).0
+                }
+                None => pool,
+            };
             let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
+            // C-2: what each step would do now, read like the fallback's own pass but never
+            // starting the engine, a hand-over or a network call (a paid step's spend is null).
+            let readiness = if snapshot.chains.is_empty() {
+                serde_json::Map::new()
+            } else {
+                let now = monitor::now();
+                let mut limited = runtime.map_or_else(HashSet::new, |r| r.limits.limited_ids(now));
+                if let Some(r) = runtime {
+                    limited.extend(r.kimi_watch.limited(now));
+                }
+                let sign_in: HashSet<String> =
+                    refresh_state.sign_in_required(&store).into_iter().collect();
+                let settings = agent_settings::read(root);
+                let settings_readable = settings.is_ok();
+                let disabled: HashSet<String> = settings
+                    .map(|s| s.disabled.into_iter().collect())
+                    .unwrap_or_default();
+                let wants = |agent: &str| {
+                    snapshot
+                        .chains
+                        .iter()
+                        .any(|c| c.executors.iter().any(|e| e.agent == agent))
+                };
+                let kimi_usable = |id: &str| kimi::continuation_preflight(root, &store, id).is_ok();
+                let kimi_used = |id: &str| runtime.map_or(0.0, |r| r.kimi_watch.used(id));
+                let kimi = fallback::KimiChoice {
+                    ids: snapshot
+                        .kimi_accounts
+                        .iter()
+                        .map(|k| k.id.clone())
+                        .collect(),
+                    usable: &kimi_usable,
+                    used: &kimi_used,
+                    hermes_ready: wants(hermes::HERMES_TARGET)
+                        && launch::hermes_continuation_ready(&store),
+                    opencode_ready: wants(launch::OPENCODE_TARGET)
+                        && launch::opencode_continuation_ready(&store),
+                    disabled,
+                };
+                let catalog = agent_catalog::catalog();
+                let installed = |agent: &str| {
+                    catalog["agents"]
+                        .as_array()
+                        .and_then(|all| all.iter().find(|a| a["id"] == agent))
+                        .is_some_and(|a| agent_settings::installed(a).is_some())
+                };
+                chain_view::readiness(
+                    &snapshot,
+                    &chain_view::Inputs {
+                        limited: &limited,
+                        sign_in: &sign_in,
+                        kimi: &kimi,
+                        installed: &installed,
+                        settings_readable,
+                    },
+                )
+            };
+            // The last hand-over is spend.json's record (C-5 writes it); an unreadable file keeps
+            // the chains readable and says so.
+            let (last_handover, ceilings_unreadable) = match spend::read(root) {
+                Ok(file) => (json!(file.last_handover), false),
+                Err(_) => (Value::Null, true),
+            };
             Ok(json!({
-                "chains": store.snapshot()?.chains,
+                "chains": snapshot.chains,
                 "effective": effective,
                 "presets": agent_catalog::presets(),
+                "readiness": readiness,
+                "last_handover": last_handover,
+                "ceilings_unreadable": ceilings_unreadable,
+                // Offline there is no owner: no limit evidence, so `readiness` cannot name a
+                // limited account.
+                "limits_known": runtime.is_some(),
             }))
         }
         Operation::SetChain {
@@ -3074,6 +3213,20 @@ async fn execute(
                 }
             }
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
+        }
+        Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
+        Operation::SetCeiling { scope, usd, by } => {
+            let ceiling =
+                spend::set_ceiling(root, &store.snapshot()?, scope, usd, by, monitor::now())?;
+            // spend.json is a setting backups carry: the next change-driven backup takes it.
+            store.setting_changed();
+            Ok(json!({"ceiling": ceiling}))
+        }
+        Operation::AnswerCeiling { id, answer, by } => {
+            let answered =
+                spend::answer(root, &store.snapshot()?, &id, answer, by, monitor::now())?;
+            store.setting_changed();
+            Ok(answered)
         }
         Operation::AgentConnect { agent, pool } => {
             let address = runtime
@@ -4191,8 +4344,13 @@ async fn execute(
             let map = blocking::run(|| roots::disk_map(&under, &snapshot));
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
-        Operation::RemoveProject { pool } => {
-            let project = store.remove_project(&pool)?;
+        Operation::RemoveProject { pool, by } => {
+            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock.
+            let (project, pruned) =
+                spend::remove_group(root, &pool, by, || store.remove_project(&pool))?;
+            if pruned {
+                store.setting_changed();
+            }
             // SB-121: its folders are not adopted by another project by themselves afterwards.
             if suggest::remember_removed(root, &project.pool, &project.folders, monitor::now())
                 .is_err()
@@ -6173,7 +6331,10 @@ mod owner_tests {
         // An account left in a deleted project's pool goes back to default by itself.
         runtime.execute(move_to("app")).await.unwrap();
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         assert_eq!(pool_of(&runtime), "app");
@@ -6411,7 +6572,10 @@ mod owner_tests {
         assert_eq!(folders(&runtime).len(), 2);
         // Removing the whole project remembers its folders too.
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         runtime
@@ -7008,6 +7172,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: Some("wf_0123456789abcdef".into()),
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7018,6 +7183,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7030,6 +7196,268 @@ mod owner_tests {
             })
             .await
             .is_err());
+    }
+    #[tokio::test]
+    async fn the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback() {
+        // C-8/C-2 fix cycle 1: `Chains {workflow, folder}` resolves the group the way the
+        // fallback does (`fallback::chain_pool`): the group holding the folder, not only a pool
+        // the caller names.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let group = runtime
+            .store
+            .save_project(None, "Alpha", std::slice::from_ref(&repo_path), &[])
+            .unwrap();
+        let step = |agent: &str| switchboard_core::Executor {
+            agent: agent.into(),
+            account_id: None,
+            key: None,
+        };
+        runtime
+            .store
+            .set_chain(switchboard_core::ChainScope::Machine, vec![step("codex")])
+            .unwrap();
+        runtime
+            .store
+            .set_chain(
+                switchboard_core::ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(repo_path.join("src")),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "project");
+        assert_eq!(view["effective"]["scope"]["pool"], group.pool.as_str());
+        assert_eq!(view["limits_known"], true, "the owner knows its limits");
+        // Outside every group the machine's chain applies.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(elsewhere.path().to_owned()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "machine");
+        // An offline answer has no owner's limits: it says so.
+        let offline = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let view = execute(
+            store,
+            offline.path(),
+            None,
+            Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(view["limits_known"], false);
+    }
+    #[tokio::test]
+    async fn spending_ceilings_are_set_read_and_answered_through_the_runtime() {
+        // SB-72 (C-4): the operations as the surfaces send them, over spend.json, never Snapshot.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let op = |v: Value| serde_json::from_value::<Operation>(v).unwrap();
+        let empty = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(empty["ceilings"], json!([]));
+        assert_eq!(empty["limits"]["max_usd"], 1000.0);
+        // C-4 fix cycle 1: a body that leaves out `usd` or `by` is refused, never read as
+        // "clear" or as some surface.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "by": "window"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5})
+        )
+        .is_err());
+        let changes = runtime.store.changes();
+        let set = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5, "by": "window"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(set["ceiling"]["cents"], 500);
+        // spend.json is carried by backups: a ceiling set counts for the next one.
+        assert!(
+            runtime.store.changes() > changes,
+            "the next backup carries it"
+        );
+        let out = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 0, "by": "window"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(out, spend::OUT_OF_RANGE);
+        // A question opened by the gate (C-5), answered as each surface would.
+        let snapshot = runtime.store.snapshot().unwrap();
+        let id = spend::open_question(
+            root.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.1,
+            monitor::now(),
+        )
+        .unwrap()
+        .unwrap();
+        let listed = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(listed["questions"][0]["id"], id.as_str());
+        assert_eq!(listed["questions"][0]["double_usd"], 10.0);
+        let refused = runtime
+            .execute(op(
+                json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "mcp"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::DOUBLE_IN_WINDOW);
+        let doubled = runtime
+            .execute(op(json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "window"})))
+            .await
+            .unwrap();
+        assert_eq!(doubled["ceiling"]["usd"], 10.0);
+        assert_eq!(doubled["ceiling"]["doubled_from"], 5.0);
+        // A surface must say who it is; an unknown one is refused before anything runs.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "operator"})
+        )
+        .is_err());
+        // Nothing of it reached accounts.json: a 0.6.x build still reads the store.
+        let stored = serde_json::to_string(&runtime.store.snapshot().unwrap()).unwrap();
+        assert!(!stored.contains("ceiling") && !stored.contains("cents"));
+        assert!(root.path().join(spend::FILE).is_file());
+        let cleared = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": null, "by": "window"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cleared["ceiling"], Value::Null);
+    }
+    #[tokio::test]
+    async fn the_chain_view_names_why_each_step_would_be_skipped() {
+        // C-2 (dossier C part A): `Chains` adds, per chain set, what each step would do now and
+        // the last hand-over from spend.json, without the engine, a hand-over or a network call.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        runtime
+            .execute(Operation::AgentEnable {
+                agent: "codex".into(),
+                enabled: false,
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![
+                    switchboard_core::Executor {
+                        agent: "codex".into(),
+                        account_id: None,
+                        key: None,
+                    },
+                    switchboard_core::Executor {
+                        agent: "hermes".into(),
+                        account_id: None,
+                        key: Some("demo/prod/OPENROUTER_API_KEY".into()),
+                    },
+                ],
+                preset: None,
+            })
+            .await
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        let steps = view["readiness"]["machine"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["state"], "skipped");
+        assert_eq!(steps[0]["reason"], "agent_disabled");
+        assert_eq!(steps[1]["state"], "not_automatic");
+        assert_eq!(steps[1]["reason"], "key_pinned");
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["ceilings_unreadable"], false);
+        // The last hand-over is read from spend.json, never from Snapshot events.
+        std::fs::write(
+            root.path().join(spend::FILE),
+            r#"{"version":1,"last_handover":{"at":5,"workflow":"wf_0123456789abcdef","outcome":"no_step","skipped":[{"agent":"codex","reason":"agent_disabled"}]}}"#,
+        )
+        .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["last_handover"]["outcome"], "no_step");
+        assert_eq!(
+            view["last_handover"]["skipped"][0]["reason"],
+            "agent_disabled"
+        );
+        // An unreadable spend.json keeps the chains readable and says so.
+        std::fs::write(root.path().join(spend::FILE), b"{broken").unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["ceilings_unreadable"], true);
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["chains"].as_array().unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn an_offline_command_cannot_answer_a_ceiling_as_the_window() {
+        // C-Q1 (C-4): with no owner running, the CLI's offline path refuses `by: window` before
+        // it opens the store; only the app's own process answers as the window.
+        let root = tempfile::tempdir().unwrap();
+        let refused = execute_offline(
+            root.path().to_owned(),
+            Operation::AnswerCeiling {
+                id: "q_0123456789abcdef".into(),
+                answer: spend::Answer::Double,
+                by: spend::Surface::Window,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused, spend::WINDOW_ONLY);
+        assert!(
+            !root.path().join("accounts.json").exists(),
+            "the store was never opened"
+        );
     }
     #[tokio::test]
     async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {

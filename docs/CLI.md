@@ -282,6 +282,7 @@ switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, e
 switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another group, in one step
 switchboard project move-root --folder /work/bot --pool tools --also   # SB-146: into one more group; it stays in its others (--from <group> picks the one it leaves)
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
+# a group holding a spending ceiling is deleted only in the window (its ceiling goes with it)
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --target claude-cli --paused

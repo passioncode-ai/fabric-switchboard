@@ -20,9 +20,10 @@ fabric-workspace on the board (operator decision `a509fcc0` of 2026-10-25: quest
 | B-Q4 | Runbook languages | Copylot route, global-25 | English and Russian | **assumed** |
 | B-Q5 | Fabric Dashboards' setup prompt and the new `onboard` step ids | dossier B | tell Dashboards on the board when B-3 lands | **to send** with B-3 |
 | B-Q6 | A Windows host | integration Q-A | the runbook's Windows column stays "not yet verified" until SB-02 | **operator queue Q-A** |
-| C-Q1 | Where *double* may be answered | authority.md, dossier C | the window only | **assumed** |
+| C-Q1 | Where *double* may be answered | authority.md, dossier C | the window only. Consequence (C-4 fix cycle 1): the same holds for every other way to loosen a ceiling: the CLI and MCP (`SetCeiling` with `by: cli` or `by: mcp`) may set a first ceiling or a lower value, never a higher one or a clear, and `by: window` through the control listener or an offline command is refused | **assumed** |
 | C-Q2 | Task ceiling measure | dossier C | key usage since the first paid hand-over, labelled, checked at a switch | **assumed** |
 | C-Q3 | API-key Claude or Codex steps under a ceiling | dossier C | gated: `spend_unknown` | **assumed** |
 | C-Q4 | Move the key's own provider ceiling when doubling | dossier C | no in 0.7.0 | **assumed** |
 | C-Q5 | Which door issued the keys in use, daily or monthly | `switchboard_openrouter_status` 2026-10-26 | **answered**: one machine key, limit $10, `limit_reset: daily`, so the provider-enforced daily ceiling holds | **closed** |
 | C-Q6 | Analytics for the new surfaces | ANALYTICS.md, AGENTS.md privacy rule | counts only in `app_active` (`chains`, `ceilings`) | **assumed** |
+| C-Q7 | Deleting a group that holds a ceiling | C-Q1, C fix cycle 2 (risk 2) | the window only: deleting the group drops its ceiling, a loosening (C-Q1 "an agent can never raise or clear a ceiling"). `RemoveProject` with `by: cli` or `by: mcp` (CLI `project delete`; MCP has no group deletion) is refused for such a group, through the control listener and offline alike, and `by: window` is accepted only in the app's own process. Whenever a group is deleted, spend.json drops its ceiling, questions and task baselines, so a group saved again under the same id inherits nothing | **assumed** |

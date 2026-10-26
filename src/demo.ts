@@ -3,7 +3,7 @@ import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel } from './types';
+import type { PassioncodeStatus, Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -96,6 +96,36 @@ export function createDemoAdapter(): Adapter {
   const demoInstalled = new Set(['claude-code', 'codex', 'opencode', 'hermes', 'kimi-code', 'gemini-cli', 'goose', 'kilo']);
   const agentDisabled = new Set<string>();
   let agentDefault: string | null = 'claude-code';
+  // SB-71 (C-2): synthetic fallback chains (this computer, one group, one task) and what each step
+  // would do now; Hermes reads skipped while the demo has no OpenRouter key saved.
+  const presetAgents = ['claude-code', 'codex', 'kimi-code', 'hermes'];
+  let demoChains: Chain[] = [
+    { scope: { kind: 'machine' }, executors: presetAgents.map((agent) => ({ agent })), updated_at: now() - 86_400 },
+    { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-work' }, { agent: 'opencode' }], updated_at: now() - 7200 },
+    { scope: { kind: 'workflow', id: 'wf_0123456789abcdef' }, executors: [{ agent: 'claude-code' }, { agent: 'hermes', key: 'alpha-web/prod/OPENROUTER_API_KEY' }], updated_at: now() - 600 },
+  ];
+  const lastHandover: LastHandover = { at: now() - 3 * 3600, workflow: 'wf_0123456789abcdef', outcome: 'offered', skipped: [{ agent: 'hermes', reason: 'no_usable_account' }] };
+  const scopeKey = (scope: ChainScope) => (scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`);
+  const stepView = (e: ChainExecutor, pool: string | null): ChainStepView => {
+    const base = { agent: e.agent, name: catalogAgents.find((a) => a.id === e.agent)?.name ?? null, paid: false };
+    if (e.key) return { ...base, state: 'not_automatic', reason: 'key_pinned', key: e.key };
+    if (!SWITCHABLE.includes(e.agent)) return { ...base, state: 'not_automatic', reason: 'agent_not_automatic_yet' };
+    if (agentDisabled.has(e.agent)) return { ...base, state: 'skipped', reason: 'agent_disabled' };
+    if (!demoInstalled.has(e.agent)) return { ...base, state: 'not_installed', reason: null };
+    if (e.agent === 'hermes' || e.agent === 'opencode') {
+      const keyScope = pool && projectKeys.has(pool) ? 'group' : openrouter.saved ? 'machine' : null;
+      return keyScope ? { ...base, state: 'ready', reason: null, paid: true, key_scope: keyScope, spend: null } : { ...base, state: 'skipped', reason: 'no_usable_account' };
+    }
+    if (e.agent === 'kimi-code') {
+      const k = kimi.accounts[0]?.account;
+      return k ? { ...base, state: 'ready', reason: null, account_id: k.id, account_label: k.label } : { ...base, state: 'skipped', reason: 'no_usable_account' };
+    }
+    const provider = e.agent === 'claude-code' ? 'claude' : 'codex';
+    const pick = state.accounts
+      .filter((a) => a.provider === provider && a.enabled && (!e.account_id || a.id === e.account_id))
+      .sort((a, b) => (a.usage?.used_percent ?? 1000) - (b.usage?.used_percent ?? 1000))[0];
+    return pick ? { ...base, state: 'ready', reason: null, account_id: pick.id, account_label: pick.label, paid: pick.kind === 'api_key' } : { ...base, state: 'skipped', reason: 'no_usable_account' };
+  };
   const agentsView = (): AgentsOverview => {
     const agents: AgentRow[] = catalogAgents.map((a) => {
       const installed = demoInstalled.has(a.id); const switchable = SWITCHABLE.includes(a.id); const disabled = agentDisabled.has(a.id);
@@ -375,6 +405,24 @@ export function createDemoAdapter(): Adapter {
     // SB-80: a synthetic Hermes configuration; changes stay in the demo.
     async hermesModel() { return structuredClone(hermes); },
     async agentsOverview() { return structuredClone(agentsView()); },
+    async chains() {
+      const presets = [{ id: 'subscriptions-first', agents: presetAgents.map((agent) => ({ agent, name: catalogAgents.find((a) => a.id === agent)?.name ?? null })) }];
+      const readiness = Object.fromEntries(demoChains.map((c) => [scopeKey(c.scope), c.executors.map((e) => stepView(e, c.scope.kind === 'project' ? c.scope.pool : null))]));
+      return structuredClone({ chains: demoChains, effective: demoChains.find((c) => c.scope.kind === 'machine') ?? null, presets, readiness, last_handover: lastHandover, ceilings_unreadable: false, limits_known: true });
+    },
+    async setChain(scope, executors, preset) {
+      await pause();
+      if (preset && executors.length) throw new Error('Give a preset or a list of agents, not both.');
+      if (preset && preset !== 'subscriptions-first') throw new Error('Unknown preset.');
+      const list: ChainExecutor[] = preset ? presetAgents.map((agent) => ({ agent })) : executors;
+      if (list.length > 8) throw new Error('A chain holds at most 8 agents.');
+      demoChains = demoChains.filter((c) => scopeKey(c.scope) !== scopeKey(scope));
+      if (!list.length) { log('fallback_chain', '', 'cleared'); return { chain: null }; }
+      const chain: Chain = { scope: structuredClone(scope), executors: structuredClone(list), updated_at: now() };
+      demoChains.push(chain);
+      log('fallback_chain', '', 'set');
+      return { chain: structuredClone(chain) };
+    },
     async agentEnable(agent, enabled) { await pause(); if (!catalogAgents.some((a) => a.id === agent)) throw new Error('No such agent in the catalog. Run switchboard agents list.'); agentDisabled.delete(agent); if (!enabled) { agentDisabled.add(agent); if (agentDefault === agent) agentDefault = null; } },
     async agentDefault(agent) { await pause(); if (agent && !SWITCHABLE.includes(agent)) throw new Error('Switchboard cannot hand work to this agent yet, so it cannot be the default.'); if (agent && agentDisabled.has(agent)) throw new Error('This agent is disabled for taking over work. Enable it on the Agents page, then try again.'); agentDefault = agent; },
     async openrouterModels() { await pause(); return { recommended: structuredClone(recommendedModels), models: [...recommendedModels.map((m) => ({ id: m.id, name: m.name, context: m.context, prompt: String(m.input_usd_per_million / 1e6) })), { id: 'moonshotai/kimi-k2', name: 'Kimi K2', context: 262144, prompt: '0.0000006' }, { id: 'openai/gpt-5.5-mini', name: 'GPT-5.5 mini', context: 400000, prompt: '0.0000004' }], available: true }; },

@@ -610,7 +610,10 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
     state
         .runtime()
         .await?
-        .execute(Operation::RemoveProject { pool })
+        .execute(Operation::RemoveProject {
+            pool,
+            by: switchboard_runtime::spend::Surface::Window,
+        })
         .await
 }
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.
@@ -748,6 +751,38 @@ async fn openrouter_save(
             key,
             model,
             pool,
+        })
+        .await
+}
+/// SB-71 (C-2): every fallback chain, the presets, what each step would do now (`readiness`) and
+/// the last hand-over. Labels and codes only, never a credential.
+#[tauri::command]
+async fn chains(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Chains {
+            workflow: None,
+            pool: None,
+            folder: None,
+        })
+        .await
+}
+/// Sets a scope's chain in order (an empty list clears it); a preset id may stand for the list.
+#[tauri::command]
+async fn set_chain(
+    scope: switchboard_core::ChainScope,
+    executors: Vec<switchboard_core::Executor>,
+    preset: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SetChain {
+            scope,
+            executors,
+            preset,
         })
         .await
 }
@@ -1163,6 +1198,8 @@ fn main() {
             organization_assign,
             passioncode,
             agents_overview,
+            chains,
+            set_chain,
             agent_enable,
             agent_default,
             openrouter_models,

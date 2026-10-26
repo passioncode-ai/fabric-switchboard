@@ -704,9 +704,14 @@ enum ChainCommand {
         /// A workflow id (`wf_` and 16 hex digits): show the chain that applies to it.
         #[arg(long)]
         workflow: Option<String>,
-        /// A group id: show the chain that applies to it.
+        /// A group id: show the chain that applies to it. With --dir, the executor account's
+        /// group.
         #[arg(long)]
         pool: Option<String>,
+        /// A workflow's checkout folder (absolute): its group is found as the automatic fallback
+        /// finds it, before --pool.
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
     /// Set a chain in order. Each agent is a catalog id (`switchboard agents list`), optionally
     /// pinned: `codex@ACCOUNT_ID` runs on that account, `kimi-code#project/env/NAME` on a paid
@@ -1350,9 +1355,18 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Some(HandoversCommand::Run { id }) => return run_handover(&root, id).await,
         },
         Command::Chain { command } => match command {
-            ChainCommand::List { workflow, pool } => Operation::Chains {
+            ChainCommand::List {
+                workflow,
+                pool,
+                dir,
+            } => Operation::Chains {
                 workflow: workflow.clone(),
                 pool: pool.clone(),
+                folder: match dir {
+                    Some(dir) if dir.is_absolute() => Some(dir.clone()),
+                    Some(_) => return Err("--dir must be an absolute folder.".into()),
+                    None => None,
+                },
             },
             ChainCommand::Set {
                 scope,
@@ -1558,7 +1572,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .map(|u| folder(&Some(u.clone())))
                     .collect::<Result<Vec<_>, _>>()?,
             },
-            Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
+            Project::Delete { pool } => Operation::RemoveProject {
+                pool: pool.clone(),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
             Project::Suggest {
                 from_hook: true, ..
             } => project_suggest_hook_and_exit(&root).await,
