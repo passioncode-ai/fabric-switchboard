@@ -586,8 +586,9 @@ fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
 /// executor account's group when that group holds the checkout; else the one group holding it,
 /// whoever's account worked there (plain `claude` in a group's folder runs on the ordinary
 /// sign-in, which stays in the default group); else, with several groups holding it (SB-146) and
-/// none the executor's, the executor account's group, and `true` says the choice was ambiguous;
-/// with no group holding it, the executor account's group as before.
+/// none the executor's, the group `Snapshot::project_for` names, the one the folder's proxy route
+/// and paid key use, and `true` says the choice was ambiguous; with no group holding it, the
+/// executor account's group as before.
 pub(crate) fn chain_pool(
     snapshot: &Snapshot,
     executor_account: Option<&str>,
@@ -600,6 +601,14 @@ pub(crate) fn chain_pool(
             .find(|x| x.id == a)
             .map(|x| x.pool.clone())
     });
+    chain_pool_of(snapshot, own, dir)
+}
+/// [`chain_pool`] with the executor account's group given (`Operation::Chains`' `pool`).
+pub(crate) fn chain_pool_of(
+    snapshot: &Snapshot,
+    own: Option<String>,
+    dir: &std::path::Path,
+) -> (Option<String>, bool) {
     let holding = snapshot.projects_for(dir);
     if holding.is_empty()
         || own
@@ -610,7 +619,7 @@ pub(crate) fn chain_pool(
     }
     match holding.as_slice() {
         [only] => (Some(only.pool.clone()), false),
-        _ => (own, true),
+        _ => (snapshot.project_for(dir).map(|p| p.pool.clone()), true),
     }
 }
 /// The pass with the hand-over as a parameter: the monitor passes `switchboard continue`'s own
@@ -746,7 +755,6 @@ where
         if !may_apply {
             continue;
         }
-        runtime.fallback.mark(id, now);
         let shown = {
             let (bin, id) = (bin.to_path_buf(), id.to_owned());
             tokio::task::spawn_blocking(move || {
@@ -754,11 +762,14 @@ where
             })
             .await
         };
+        // A failed read is an attempt like a hand-over: not repeated every pass.
         let Ok(Ok(shown)) = shown else {
+            runtime.fallback.mark(id, now);
             log("engine_unreadable");
             continue;
         };
         let Some(dir) = continuation::checkouts(&shown).into_iter().next() else {
+            runtime.fallback.mark(id, now);
             log("no_checkout");
             continue;
         };
@@ -766,10 +777,16 @@ where
         if ambiguous {
             log("group_ambiguous");
         }
+        // No chain for the checkout's group (another group has one): no retry mark, so a chain
+        // set meanwhile is used at the next scan.
         let chain = match runtime.store.chain_for(Some(id), pool.as_deref()) {
             Ok(Some(chain)) => chain,
-            _ => continue,
+            _ => {
+                log("no_chain");
+                continue;
+            }
         };
+        runtime.fallback.mark(id, now);
         let steps = resolve_with(
             &snapshot,
             &chain,
@@ -1656,7 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_in_two_groups_keeps_the_executors_group_and_logs_ambiguous() {
+    fn a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous() {
         let group = |pool: &str, folder: &str| switchboard_core::Project {
             pool: pool.into(),
             name: pool.into(),
@@ -1667,12 +1684,19 @@ mod tests {
         };
         let mut in_beta = account("in-beta", Provider::Claude, None);
         in_beta.pool = "beta".into();
+        let mut in_svc = account("in-svc", Provider::Claude, None);
+        in_svc.pool = "svc".into();
         let snapshot = Snapshot {
-            accounts: vec![account("cli", Provider::Claude, None), in_beta],
+            accounts: vec![account("cli", Provider::Claude, None), in_beta, in_svc],
             projects: vec![
                 group("alpha", "/work/shared"),
                 group("beta", "/work/shared"),
                 group("gamma", "/work/gamma"),
+                group("empty-1", "/work/bare"),
+                group("empty-2", "/work/bare"),
+                // A group inside another group's folder; the outer one has no account.
+                group("mono", "/work/mono"),
+                group("svc", "/work/mono/svc"),
             ],
             ..Default::default()
         };
@@ -1690,11 +1714,30 @@ mod tests {
             (Some("gamma".into()), false)
         );
         assert_eq!(pool_for(None, "/work/gamma"), (Some("gamma".into()), false));
-        // Several groups hold it and the executor's is none of them: the executor's group
-        // (default here) stays, and the pass logs `group_ambiguous`.
+        // Several groups hold it and the executor's is none of them: the group the folder's
+        // proxy route and paid key use (`Snapshot::project_for`: the first with an enabled
+        // account), and the pass logs `group_ambiguous`.
         assert_eq!(
             pool_for(Some("cli"), "/work/shared"),
-            (Some("default".into()), true)
+            (Some("beta".into()), true)
+        );
+        assert_eq!(
+            pool_for(None, "/work/shared/x"),
+            (Some("beta".into()), true)
+        );
+        // No holding group has an account: the first one, as `project_for` answers.
+        assert_eq!(
+            pool_for(Some("cli"), "/work/bare"),
+            (Some("empty-1".into()), true)
+        );
+        // Nested groups: the inner folder is held by both; the inner group has the account.
+        assert_eq!(
+            pool_for(Some("cli"), "/work/mono/svc/api"),
+            (Some("svc".into()), true)
+        );
+        assert_eq!(
+            pool_for(Some("cli"), "/work/mono/web"),
+            (Some("mono".into()), false)
         );
         // No group holds it: as before, the executor's group.
         assert_eq!(
@@ -1702,6 +1745,104 @@ mod tests {
             (Some("beta".into()), false)
         );
         assert_eq!(pool_for(None, "/elsewhere"), (None, false));
+    }
+
+    /// C-8 fix cycle 1: when no chain applies to the checkout's group, the pass logs `no_chain`
+    /// and leaves no retry mark, so a chain set a minute later is used at the next scan.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan() {
+        use crate::fixtures::*;
+        use crate::monitor::now;
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let other_path = other.path().canonicalize().unwrap();
+        let alpha = runtime
+            .store
+            .save_project(
+                None,
+                "Alpha",
+                std::slice::from_ref(&repo_path),
+                std::slice::from_ref(&c.id),
+            )
+            .unwrap();
+        let beta = runtime
+            .store
+            .save_project(None, "Beta", std::slice::from_ref(&other_path), &[])
+            .unwrap();
+        let projects = root.path().join("claude").join("projects").join("-p");
+        std::fs::create_dir_all(&projects).unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(now() - 60)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let line = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"timestamp":at,"quotaLimits":{"resetsAt":now()+3600}});
+        let file = projects.join("s.jsonl");
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        let profile = signed_in(Provider::Claude).unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime.limits.refresh(
+            &snapshot,
+            Some((&profile.identity, vec![a.id.clone()])),
+            &[file],
+            now(),
+        );
+        let step = |agent: &str| Executor {
+            agent: agent.into(),
+            account_id: None,
+            key: None,
+        };
+        // Only another group has a chain; none for Alpha, none for the machine.
+        runtime
+            .store
+            .set_chain(
+                ChainScope::Project {
+                    pool: beta.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        let bin = engine(root.path(), &a.id, &repo_path);
+        let calls: Arc<Mutex<Vec<(String, String, PathBuf)>>> = Default::default();
+        let record = |wf: String, account: String, dir: PathBuf| {
+            let calls = calls.clone();
+            async move {
+                calls.lock().unwrap().push((wf, account, dir));
+                Ok(())
+            }
+        };
+        let t = now();
+        crate::oplog::capture_begin();
+        pass_with(&runtime, t, &bin, record).await;
+        let logged = crate::oplog::capture_end();
+        assert!(calls.lock().unwrap().is_empty());
+        assert!(
+            logged.contains(&("fallback", vec!["no_chain"])),
+            "logged {logged:?}"
+        );
+        assert!(!runtime.fallback.recently_tried(WF, t), "no retry mark");
+        // Alpha gets a chain: the next scan hands the workflow over.
+        runtime
+            .store
+            .set_chain(
+                ChainScope::Project {
+                    pool: alpha.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        pass_with(&runtime, t + SCAN_SECONDS, &bin, record).await;
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![(WF.to_string(), c.id.clone(), repo_path.clone())]
+        );
+        assert!(runtime.fallback.recently_tried(WF, t + SCAN_SECONDS));
     }
 
     #[cfg(unix)]

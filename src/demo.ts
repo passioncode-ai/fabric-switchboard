@@ -408,7 +408,7 @@ export function createDemoAdapter(): Adapter {
     async chains() {
       const presets = [{ id: 'subscriptions-first', agents: presetAgents.map((agent) => ({ agent, name: catalogAgents.find((a) => a.id === agent)?.name ?? null })) }];
       const readiness = Object.fromEntries(demoChains.map((c) => [scopeKey(c.scope), c.executors.map((e) => stepView(e, c.scope.kind === 'project' ? c.scope.pool : null))]));
-      return structuredClone({ chains: demoChains, effective: demoChains.find((c) => c.scope.kind === 'machine') ?? null, presets, readiness, last_handover: lastHandover, ceilings_unreadable: false });
+      return structuredClone({ chains: demoChains, effective: demoChains.find((c) => c.scope.kind === 'machine') ?? null, presets, readiness, last_handover: lastHandover, ceilings_unreadable: false, limits_known: true });
     },
     async setChain(scope, executors, preset) {
       await pause();

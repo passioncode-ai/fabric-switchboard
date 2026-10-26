@@ -170,7 +170,7 @@ export interface ChainStepView {
 export interface LastHandover { at: number; workflow: string; outcome: string; skipped: { agent: string; reason: string }[] }
 export interface ChainPreset { id: string; agents: { agent: string; name: string | null }[] }
 /** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
-export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean }
+export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }

@@ -924,6 +924,11 @@ impl Store {
     pub fn changes(&self) -> u64 {
         self.changes.load(std::sync::atomic::Ordering::SeqCst)
     }
+    /// A settings file a backup carries changed outside the store (`spend.json`, SB-72): counts
+    /// for the next backup like a change of the store itself.
+    pub fn setting_changed(&self) {
+        self.changed();
+    }
     pub(crate) fn changed(&self) {
         self.changes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

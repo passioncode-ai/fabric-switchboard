@@ -761,6 +761,7 @@ async fn chains(state: State<'_, Slot>) -> Result<Value, String> {
         .execute(Operation::Chains {
             workflow: None,
             pool: None,
+            folder: None,
         })
         .await
 }

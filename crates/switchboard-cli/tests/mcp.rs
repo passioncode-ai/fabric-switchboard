@@ -233,6 +233,18 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         json!({"workflow_id": "wf_0123456789abcdef"}),
     );
     assert_eq!(got["effective"]["executors"][3]["agent"], "hermes");
+    // C-8: a checkout folder is passed through; a relative one is refused.
+    let (error, got) = agent.tool(
+        "switchboard_chain_get",
+        json!({"workflow_id": "wf_0123456789abcdef", "folder": std::env::temp_dir()}),
+    );
+    assert!(!error, "{got}");
+    assert_eq!(got["effective"]["scope"]["kind"], "workflow");
+    let (error, _) = agent.tool(
+        "switchboard_chain_get",
+        json!({"folder": "relative/checkout"}),
+    );
+    assert!(error, "a relative folder is refused");
     let (error, refused) = agent.tool(
         "switchboard_chain_set",
         json!({"executors": [{"agent": "aider"}]}),

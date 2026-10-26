@@ -232,7 +232,7 @@ export const RU: Record<string, string> = {
   "A chain holds at most 8 agents.": "В цепочке может быть не больше 8 агентов.",
   "Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Restore it from a backup, or delete it to start over with no ceilings.": "Не удалось прочитать потолки расходов (spend.json), поэтому ни один платный агент не получит задачи, пока это не удастся сделать. Восстановите файл из резервной копии или удалите его, чтобы начать заново без потолков.",
   "Enter an amount from $0.01 to $1,000.": "Введите сумму от 0,01 $ до 1000 $.",
-  "Give this group its own key under API keys first.": "Сначала назначьте этой группе отдельный ключ на странице «Ключи API».",
+  "Give this group its own key under API keys first.": "Сначала сохраните для этой группы отдельный ключ в разделе «API-ключи».",
   "That group id names no group.": "Группы с таким идентификатором нет.",
   "Doubling a ceiling is answered in the Switchboard window.": "Удвоить потолок можно только в окне Switchboard.",
   "Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.": "При удвоении потолок превысит 1000 $, максимально допустимое значение. Вместо этого установите потолок не выше 1000 $.",

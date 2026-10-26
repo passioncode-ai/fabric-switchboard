@@ -79,7 +79,9 @@ pub const SETTING_FILES: &[&str] = &[
 /// (SB-120); the spending ceilings' file holds up to 256 ceilings and their questions (SB-72,
 /// the runtime's `spend::MAX_BYTES`). A file past its limit is not carried.
 const MAX_SETTING: u64 = 4096;
-const MAX_SPEND_SETTING: u64 = 64 * 1024;
+/// The runtime's `spend::MAX_BYTES`: a test there fails when the two part (a spend.json the
+/// runtime writes must always fit a backup).
+pub const MAX_SPEND_SETTING: u64 = 64 * 1024;
 fn setting_limit(name: &str) -> u64 {
     if name == "spend.json" {
         MAX_SPEND_SETTING

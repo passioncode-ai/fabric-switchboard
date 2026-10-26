@@ -45,6 +45,9 @@ pub const DOUBLE_TOO_HIGH: &str =
     "Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.";
 /// A request that names the window but did not come from the window's own process (C-Q1).
 pub const WINDOW_ONLY: &str = "Only the Switchboard window answers as the window. Keep a ceiling from here, or double it in the window.";
+/// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
+/// lower one, never loosen one.
+pub const RAISE_IN_WINDOW: &str = "Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.";
 pub const NO_QUESTION: &str =
     "No open question with that id: it was answered, or its ceiling changed or was removed.";
 
@@ -67,6 +70,11 @@ pub struct SpendFile {
 }
 fn version() -> u32 {
     VERSION
+}
+/// `usd` of `SetCeiling` must be present: `null` clears, a missing field is refused (serde would
+/// otherwise read an absent `Option` as `None`, a clear nobody asked for).
+pub(crate) fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    Option::<f64>::deserialize(d)
 }
 impl Default for SpendFile {
     fn default() -> Self {
@@ -251,7 +259,10 @@ fn short_text_valid(text: &str) -> bool {
 }
 
 /// Every rule a file written by this build keeps; a hand edit that breaks one makes the whole
-/// file unreadable, so a ceiling is never silently lost or loosened.
+/// file unreadable, so such an edit is caught rather than read as fewer or higher ceilings. This
+/// is no boundary against a process running as the operator: a hand edit that keeps every rule,
+/// or deleting the file, loosens or removes ceilings, and only the next backup or the log shows
+/// it (CONTRACTS, spending ceilings).
 fn validate(file: &SpendFile) -> bool {
     let mut scopes = std::collections::HashSet::new();
     let ceilings_ok = file.ceilings.len() <= MAX_CEILINGS
@@ -396,12 +407,15 @@ fn new_question_id() -> String {
 }
 
 /// Sets (or with `usd: None` clears) the ceiling of a scope. Open questions of that scope close:
-/// an answer is tied to the value it was asked about.
+/// an answer is tied to the value it was asked about. From the CLI or MCP (`by`, C-Q1) only a
+/// first ceiling of a scope or a value no higher than its current one is accepted: raising or
+/// clearing is the window's (`RAISE_IN_WINDOW`), decided against the file under the write lock.
 pub fn set_ceiling(
     root: &Path,
     snapshot: &Snapshot,
     scope: ChainScope,
     usd: Option<f64>,
+    by: Surface,
     now: i64,
 ) -> Result<Option<Ceiling>, String> {
     let value = usd.map(cents).transpose()?;
@@ -422,6 +436,17 @@ pub fn set_ceiling(
         }
     }
     let set = change(root, snapshot, now, |file| {
+        if by != Surface::Window {
+            let current = file.ceilings.iter().find(|c| c.scope == scope);
+            let loosens = match (current, value) {
+                (None, _) => false,
+                (Some(_), None) => true,
+                (Some(c), Some(cents)) => cents > c.cents,
+            };
+            if loosens {
+                return Err(RAISE_IN_WINDOW.into());
+            }
+        }
         file.ceilings.retain(|c| c.scope != scope);
         // An answer is tied to the value it was asked about: a new value closes the old question.
         file.questions
@@ -599,8 +624,9 @@ pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String>
 }
 
 /// The decision for one paid step, in order: the key's own limit nearly spent, a ceiling reached,
-/// a covering ceiling whose spend could not be read. Pure: the caller reads.
-pub fn decide(file: &SpendFile, step: &PaidStep, reads: &Reads) -> Verdict {
+/// a covering ceiling whose spend could not be read. Pure: the caller reads. A ceiling of a group
+/// `snapshot` no longer holds covers nothing, as [`prune`] would drop it.
+pub fn decide(file: &SpendFile, snapshot: &Snapshot, step: &PaidStep, reads: &Reads) -> Verdict {
     let key = reads.key.as_ref();
     if key
         .and_then(|k| k.limit_remaining)
@@ -616,7 +642,10 @@ pub fn decide(file: &SpendFile, step: &PaidStep, reads: &Reads) -> Verdict {
         .iter()
         .filter(|c| match &c.scope {
             ChainScope::Machine => true,
-            ChainScope::Project { pool } => step.key == KeySlot::Group(pool.clone()),
+            ChainScope::Project { pool } => {
+                step.key == KeySlot::Group(pool.clone())
+                    && snapshot.projects.iter().any(|p| &p.pool == pool)
+            }
             ChainScope::Workflow { id } => step.workflow == Some(id.as_str()),
         })
         .collect();
@@ -681,9 +710,9 @@ pub fn decide(file: &SpendFile, step: &PaidStep, reads: &Reads) -> Verdict {
 
 /// [`decide`] over the file on disk: an unreadable file hands nothing paid over, never "no
 /// ceilings".
-pub fn check(root: &Path, step: &PaidStep, reads: &Reads) -> Verdict {
+pub fn check(root: &Path, snapshot: &Snapshot, step: &PaidStep, reads: &Reads) -> Verdict {
     match read(root) {
-        Ok(file) => decide(&file, step, reads),
+        Ok(file) => decide(&file, snapshot, step, reads),
         Err(_) => Verdict::Skip {
             reason: "ceilings_unreadable",
             reached: None,
@@ -759,7 +788,7 @@ mod tests {
     fn a_doubled_ceiling_is_tied_to_its_value_and_the_next_hit_asks_again() {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
-        set_ceiling(root.path(), &s, alpha(), Some(5.0), T).unwrap();
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
         let first = open_question(root.path(), &s, &alpha(), 500, 5.2, T + 10)
             .unwrap()
             .unwrap();
@@ -813,7 +842,7 @@ mod tests {
         let third = open_question(root.path(), &s, &alpha(), 1000, 10.5, T + 60)
             .unwrap()
             .unwrap();
-        set_ceiling(root.path(), &s, alpha(), Some(7.0), T + 70).unwrap();
+        set_ceiling(root.path(), &s, alpha(), Some(7.0), Surface::Window, T + 70).unwrap();
         assert!(open(root.path()).is_empty());
         assert_eq!(
             answer(
@@ -838,7 +867,7 @@ mod tests {
             pool: "beta".into(),
         };
         assert_eq!(
-            set_ceiling(root.path(), &s, beta, Some(5.0), T).unwrap_err(),
+            set_ceiling(root.path(), &s, beta, Some(5.0), Surface::Window, T).unwrap_err(),
             NO_OWN_KEY
         );
         assert_eq!(
@@ -849,6 +878,7 @@ mod tests {
                     pool: "gone".into()
                 },
                 Some(5.0),
+                Surface::Window,
                 T
             )
             .unwrap_err(),
@@ -856,7 +886,7 @@ mod tests {
         );
         assert!(read(root.path()).unwrap().ceilings.is_empty());
         // With its own key it takes one; when the key goes, the ceiling stays, shown inactive.
-        set_ceiling(root.path(), &s, alpha(), Some(5.0), T).unwrap();
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
         s.agent_keys.retain(|k| k.pool.is_none());
         let shown = view(root.path(), &s, T).unwrap();
         assert_eq!(shown["ceilings"][0]["active"], false);
@@ -871,6 +901,7 @@ mod tests {
         assert_eq!(
             decide(
                 &file,
+                &snapshot(),
                 &step(KeySlot::Machine),
                 &Reads {
                     key: full(50.0, 50.0),
@@ -881,7 +912,7 @@ mod tests {
         );
         // It can still be cleared.
         assert_eq!(
-            set_ceiling(root.path(), &s, alpha(), None, T).unwrap(),
+            set_ceiling(root.path(), &s, alpha(), None, Surface::Window, T).unwrap(),
             None
         );
         assert!(read(root.path()).unwrap().ceilings.is_empty());
@@ -891,7 +922,15 @@ mod tests {
     fn double_is_refused_from_mcp_and_cli() {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(5.0), T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         let id = open_question(root.path(), &s, &ChainScope::Machine, 500, 6.0, T)
             .unwrap()
             .unwrap();
@@ -904,7 +943,15 @@ mod tests {
         assert_eq!(read(root.path()).unwrap().ceilings[0].cents, 500);
         assert_eq!(open(root.path()).len(), 1, "still open for the window");
         // Doubling past the estate's total is refused and leaves the question open.
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(600.0), T + 2).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(600.0),
+            Surface::Window,
+            T + 2,
+        )
+        .unwrap();
         let high = open_question(root.path(), &s, &ChainScope::Machine, 60_000, 600.0, T + 3)
             .unwrap()
             .unwrap();
@@ -934,14 +981,14 @@ mod tests {
         };
         // No file: no ceilings, and a step on a full key runs.
         assert_eq!(
-            check(root.path(), &step(KeySlot::Machine), &reads()),
+            check(root.path(), &snapshot(), &step(KeySlot::Machine), &reads()),
             Verdict::Run
         );
         std::fs::write(root.path().join(FILE), b"{not json").unwrap();
         assert_eq!(read(root.path()).unwrap_err(), UNREADABLE);
         assert_eq!(view(root.path(), &snapshot(), T).unwrap_err(), UNREADABLE);
         assert_eq!(
-            check(root.path(), &step(KeySlot::Machine), &reads()),
+            check(root.path(), &snapshot(), &step(KeySlot::Machine), &reads()),
             Verdict::Skip {
                 reason: "ceilings_unreadable",
                 reached: None
@@ -949,7 +996,15 @@ mod tests {
         );
         // A write over it is refused too: the operator's values are not overwritten blind.
         assert_eq!(
-            set_ceiling(root.path(), &snapshot(), ChainScope::Machine, Some(1.0), T).unwrap_err(),
+            set_ceiling(
+                root.path(),
+                &snapshot(),
+                ChainScope::Machine,
+                Some(1.0),
+                Surface::Window,
+                T
+            )
+            .unwrap_err(),
             UNREADABLE
         );
         assert_eq!(std::fs::read(root.path().join(FILE)).unwrap(), b"{not json");
@@ -1057,7 +1112,15 @@ mod tests {
         ] {
             assert_eq!(cents(usd).unwrap_err(), OUT_OF_RANGE, "{usd}");
             assert_eq!(
-                set_ceiling(root.path(), &s, ChainScope::Machine, Some(usd), T).unwrap_err(),
+                set_ceiling(
+                    root.path(),
+                    &s,
+                    ChainScope::Machine,
+                    Some(usd),
+                    Surface::Window,
+                    T
+                )
+                .unwrap_err(),
                 OUT_OF_RANGE,
                 "{usd}"
             );
@@ -1068,8 +1131,24 @@ mod tests {
         assert_eq!(cents(2.5), Ok(250));
         assert_eq!(cents(0.1 + 0.2), Ok(30), "float noise rounds to the cent");
         // A second ceiling for the same scope replaces the first.
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(3.0), T).unwrap();
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(4.0), T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(3.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(4.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         let c = read(root.path()).unwrap().ceilings;
         assert_eq!((c.len(), c[0].cents), (1, 400));
         // A task ceiling needs a workflow id.
@@ -1078,6 +1157,7 @@ mod tests {
             &s,
             ChainScope::Workflow { id: "wf_x".into() },
             Some(1.0),
+            Surface::Window,
             T
         )
         .is_err());
@@ -1087,13 +1167,21 @@ mod tests {
     fn a_clock_set_back_drops_nothing_and_answers_still_work() {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(5.0), T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         let kept = open_question(root.path(), &s, &ChainScope::Machine, 500, 5.0, T)
             .unwrap()
             .unwrap();
         answer(root.path(), &s, &kept, Answer::Keep, Surface::Window, T).unwrap();
         let task = ChainScope::Workflow { id: WF.into() };
-        set_ceiling(root.path(), &s, task.clone(), Some(2.0), T).unwrap();
+        set_ceiling(root.path(), &s, task.clone(), Some(2.0), Surface::Window, T).unwrap();
         let waiting = open_question(root.path(), &s, &task, 200, 2.5, T)
             .unwrap()
             .unwrap();
@@ -1131,7 +1219,15 @@ mod tests {
         assert!(later.baselines.is_empty());
         assert_eq!(later.ceilings.len(), 2, "ceilings never age out");
         // An open daily question stays answerable through the next UTC day, then goes.
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(6.0), T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(6.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         let daily = open_question(root.path(), &s, &ChainScope::Machine, 600, 6.0, T)
             .unwrap()
             .unwrap();
@@ -1146,8 +1242,16 @@ mod tests {
     fn a_removed_group_takes_its_ceiling_questions_and_baselines_with_it() {
         let root = tempfile::tempdir().unwrap();
         let mut s = snapshot();
-        set_ceiling(root.path(), &s, alpha(), Some(5.0), T).unwrap();
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(9.0), T).unwrap();
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(9.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         open_question(root.path(), &s, &alpha(), 500, 5.0, T).unwrap();
         let mut file = read(root.path()).unwrap();
         file.baselines.push(Baseline {
@@ -1168,8 +1272,50 @@ mod tests {
         // The view prunes in memory only; the next write prunes on disk.
         let shown = view(root.path(), &s, T).unwrap();
         assert_eq!(shown["ceilings"].as_array().unwrap().len(), 1);
-        set_ceiling(root.path(), &s, ChainScope::Machine, Some(8.0), T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(8.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
         assert_eq!(read(root.path()).unwrap().ceilings.len(), 1);
+    }
+
+    #[test]
+    fn every_spend_file_this_build_writes_fits_a_backup() {
+        // The backup carries spend.json only up to its own limit (`backup::setting_limit`): a
+        // file this build may write and a backup would drop is a ceiling lost at a reinstall.
+        assert_eq!(switchboard_core::backup::MAX_SPEND_SETTING, MAX_BYTES);
+    }
+
+    #[test]
+    fn a_ceiling_of_a_removed_group_covers_no_step() {
+        // Prune drops it at the next write; until then the decision never counts it either.
+        let mut file = SpendFile::default();
+        file.ceilings.push(Ceiling {
+            scope: alpha(),
+            cents: 100,
+            set_at: T,
+            doubled_from: None,
+        });
+        let reads = Reads {
+            key: full(5.0, 5.0),
+            others: vec![],
+        };
+        let on_alpha = step(KeySlot::Group("alpha".into()));
+        assert!(matches!(
+            decide(&file, &snapshot(), &on_alpha, &reads),
+            Verdict::Skip {
+                reason: "ceiling_reached",
+                ..
+            }
+        ));
+        let mut removed = snapshot();
+        removed.projects.retain(|p| p.pool != "alpha");
+        assert_eq!(decide(&file, &removed, &on_alpha, &reads), Verdict::Run);
     }
 
     #[test]
@@ -1186,7 +1332,7 @@ mod tests {
             others: vec![],
         };
         assert_eq!(
-            decide(&file, &step(KeySlot::Machine), &failed),
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &failed),
             Verdict::RunUnread
         );
         // A machine ceiling covers every paid step: the same failed read is a denial.
@@ -1196,14 +1342,17 @@ mod tests {
             set_at: T,
             doubled_from: None,
         });
-        assert_eq!(decide(&file, &step(KeySlot::Machine), &failed), unknown);
+        assert_eq!(
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &failed),
+            unknown
+        );
         // The step's key reads, but another saved key the machine ceiling adds up does not.
         let other_failed = Reads {
             key: full(1.0, 1.0),
             others: vec![None],
         };
         assert_eq!(
-            decide(&file, &step(KeySlot::Machine), &other_failed),
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &other_failed),
             unknown
         );
         // OpenRouter answered without the day's usage.
@@ -1215,7 +1364,10 @@ mod tests {
             }),
             others: vec![],
         };
-        assert_eq!(decide(&file, &step(KeySlot::Machine), &no_daily), unknown);
+        assert_eq!(
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &no_daily),
+            unknown
+        );
         // An API-key Claude Code or Codex account: its spend is never readable (C-Q3).
         let api = PaidStep {
             key: KeySlot::Machine,
@@ -1226,9 +1378,9 @@ mod tests {
             key: full(1.0, 1.0),
             others: vec![],
         };
-        assert_eq!(decide(&file, &api, &readable), unknown);
+        assert_eq!(decide(&file, &snapshot(), &api, &readable), unknown);
         assert_eq!(
-            decide(&SpendFile::default(), &api, &readable),
+            decide(&SpendFile::default(), &snapshot(), &api, &readable),
             Verdict::Run,
             "no ceiling, no gate"
         );
@@ -1249,6 +1401,7 @@ mod tests {
         assert_eq!(
             decide(
                 &task,
+                &snapshot(),
                 &step(KeySlot::Machine),
                 &Reads {
                     key: full(0.0, 10.0),
@@ -1261,6 +1414,7 @@ mod tests {
         assert_eq!(
             decide(
                 &task,
+                &snapshot(),
                 &step(KeySlot::Group("alpha".into())),
                 &Reads {
                     key: full(0.0, 60.0),
@@ -1273,6 +1427,7 @@ mod tests {
         assert_eq!(
             decide(
                 &task,
+                &snapshot(),
                 &step(KeySlot::Machine),
                 &Reads {
                     key: full(0.0, 51.0),
@@ -1284,6 +1439,7 @@ mod tests {
         assert_eq!(
             decide(
                 &task,
+                &snapshot(),
                 &step(KeySlot::Machine),
                 &Reads {
                     key: full(0.0, 52.5),
@@ -1310,7 +1466,7 @@ mod tests {
         };
         // With or without a ceiling.
         assert_eq!(
-            decide(&file, &step(KeySlot::Machine), &exhausted),
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &exhausted),
             Verdict::Skip {
                 reason: "key_exhausted",
                 reached: None
@@ -1325,7 +1481,7 @@ mod tests {
             others: vec![],
         };
         assert_eq!(
-            decide(&file, &step(KeySlot::Machine), &at_floor),
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &at_floor),
             Verdict::Run
         );
         // A key without a limit of its own has nothing to exhaust.
@@ -1338,7 +1494,7 @@ mod tests {
             others: vec![],
         };
         assert_eq!(
-            decide(&file, &step(KeySlot::Machine), &unlimited),
+            decide(&file, &snapshot(), &step(KeySlot::Machine), &unlimited),
             Verdict::Run
         );
         // Machine $8 over every key; group alpha $3 on its own key.
@@ -1361,7 +1517,7 @@ mod tests {
             others: vec![full(2.0, 2.0)],
         };
         assert_eq!(
-            decide(&file, &on_alpha, &reads),
+            decide(&file, &snapshot(), &on_alpha, &reads),
             Verdict::Skip {
                 reason: "ceiling_reached",
                 reached: Some((alpha(), 300, 3.10))
@@ -1373,14 +1529,17 @@ mod tests {
             key: full(2.0, 2.0),
             others: vec![full(3.10, 40.0)],
         };
-        assert_eq!(decide(&file, &on_machine, &machine_reads), Verdict::Run);
+        assert_eq!(
+            decide(&file, &snapshot(), &on_machine, &machine_reads),
+            Verdict::Run
+        );
         // Both reached: the stricter ceiling ($3) is named.
         let both = Reads {
             key: full(6.0, 40.0),
             others: vec![full(2.5, 2.5)],
         };
         assert_eq!(
-            decide(&file, &on_alpha, &both),
+            decide(&file, &snapshot(), &on_alpha, &both),
             Verdict::Skip {
                 reason: "ceiling_reached",
                 reached: Some((alpha(), 300, 6.0))
@@ -1392,7 +1551,7 @@ mod tests {
             others: vec![None],
         };
         assert_eq!(
-            decide(&file, &on_alpha, &partly),
+            decide(&file, &snapshot(), &on_alpha, &partly),
             Verdict::Skip {
                 reason: "ceiling_reached",
                 reached: Some((alpha(), 300, 3.5))

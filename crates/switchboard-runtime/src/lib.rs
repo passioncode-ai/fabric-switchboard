@@ -449,11 +449,15 @@ pub enum Operation {
         on: Option<bool>,
     },
     /// Fallback chains (SB-71): every chain, presets, and effective workflow/project chain.
+    /// With `folder` (a workflow's checkout) the group is found as the fallback finds it
+    /// (`fallback::chain_pool`), `pool` standing for the executor account's group.
     Chains {
         #[serde(default)]
         workflow: Option<String>,
         #[serde(default)]
         pool: Option<String>,
+        #[serde(default)]
+        folder: Option<PathBuf>,
     },
     /// Sets the chain of a scope in order; an empty list clears it. A preset id may stand for
     /// the list.
@@ -468,11 +472,15 @@ pub enum Operation {
     /// the last hand-over (`spend::view`). An unreadable `spend.json` is an error, never "none".
     Ceilings,
     /// Sets the ceiling of a scope in dollars (machine and group: per UTC day; a task: since its
-    /// first paid hand-over); `usd: null` clears it.
+    /// first paid hand-over); `usd: null` clears it, and a body without `usd` is refused. `by`
+    /// names the surface: the CLI and MCP may set a first ceiling or a lower one, raising and
+    /// clearing are the window's (C-Q1), and `by: window` from outside the app's own process is
+    /// refused like a ceiling answer.
     SetCeiling {
         scope: switchboard_core::ChainScope,
-        #[serde(default)]
+        #[serde(deserialize_with = "spend::present")]
         usd: Option<f64>,
+        by: spend::Surface,
     },
     /// Answers a reached ceiling's question: `keep` from any surface, `double` only from the
     /// window (`by: window`, C-Q1). The CLI and MCP send their own surface.
@@ -2684,6 +2692,9 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
         Operation::AnswerCeiling {
             by: spend::Surface::Window,
             ..
+        } | Operation::SetCeiling {
+            by: spend::Surface::Window,
+            ..
         }
     )
     .then_some(spend::WINDOW_ONLY)
@@ -3067,9 +3078,22 @@ async fn execute(
             }
             Ok(json!({"enabled": handovers::enabled(root)}))
         }
-        Operation::Chains { workflow, pool } => {
-            let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
+        Operation::Chains {
+            workflow,
+            pool,
+            folder,
+        } => {
             let snapshot = store.snapshot()?;
+            // C-8: a checkout folder finds its group as the fallback does; `pool` is then the
+            // executor account's group.
+            let pool = match folder {
+                Some(folder) => {
+                    let folder = folder.canonicalize().unwrap_or(folder);
+                    fallback::chain_pool_of(&snapshot, pool, &folder).0
+                }
+                None => pool,
+            };
+            let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
             // C-2: what each step would do now, read like the fallback's own pass but never
             // starting the engine, a hand-over or a network call (a paid step's spend is null).
             let readiness = if snapshot.chains.is_empty() {
@@ -3140,6 +3164,9 @@ async fn execute(
                 "readiness": readiness,
                 "last_handover": last_handover,
                 "ceilings_unreadable": ceilings_unreadable,
+                // Offline there is no owner: no limit evidence, so `readiness` cannot name a
+                // limited account.
+                "limits_known": runtime.is_some(),
             }))
         }
         Operation::SetChain {
@@ -3178,12 +3205,18 @@ async fn execute(
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
         }
         Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
-        Operation::SetCeiling { scope, usd } => {
-            let ceiling = spend::set_ceiling(root, &store.snapshot()?, scope, usd, monitor::now())?;
+        Operation::SetCeiling { scope, usd, by } => {
+            let ceiling =
+                spend::set_ceiling(root, &store.snapshot()?, scope, usd, by, monitor::now())?;
+            // spend.json is a setting backups carry: the next change-driven backup takes it.
+            store.setting_changed();
             Ok(json!({"ceiling": ceiling}))
         }
         Operation::AnswerCeiling { id, answer, by } => {
-            spend::answer(root, &store.snapshot()?, &id, answer, by, monitor::now())
+            let answered =
+                spend::answer(root, &store.snapshot()?, &id, answer, by, monitor::now())?;
+            store.setting_changed();
+            Ok(answered)
         }
         Operation::AgentConnect { agent, pool } => {
             let address = runtime
@@ -7089,6 +7122,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: Some("wf_0123456789abcdef".into()),
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7099,6 +7133,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7113,6 +7148,78 @@ mod owner_tests {
             .is_err());
     }
     #[tokio::test]
+    async fn the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback() {
+        // C-8/C-2 fix cycle 1: `Chains {workflow, folder}` resolves the group the way the
+        // fallback does (`fallback::chain_pool`): the group holding the folder, not only a pool
+        // the caller names.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let group = runtime
+            .store
+            .save_project(None, "Alpha", std::slice::from_ref(&repo_path), &[])
+            .unwrap();
+        let step = |agent: &str| switchboard_core::Executor {
+            agent: agent.into(),
+            account_id: None,
+            key: None,
+        };
+        runtime
+            .store
+            .set_chain(switchboard_core::ChainScope::Machine, vec![step("codex")])
+            .unwrap();
+        runtime
+            .store
+            .set_chain(
+                switchboard_core::ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(repo_path.join("src")),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "project");
+        assert_eq!(view["effective"]["scope"]["pool"], group.pool.as_str());
+        assert_eq!(view["limits_known"], true, "the owner knows its limits");
+        // Outside every group the machine's chain applies.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(elsewhere.path().to_owned()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "machine");
+        // An offline answer has no owner's limits: it says so.
+        let offline = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let view = execute(
+            store,
+            offline.path(),
+            None,
+            Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(view["limits_known"], false);
+    }
+    #[tokio::test]
     async fn spending_ceilings_are_set_read_and_answered_through_the_runtime() {
         // SB-72 (C-4): the operations as the surfaces send them, over spend.json, never Snapshot.
         let root = tempfile::tempdir().unwrap();
@@ -7121,16 +7228,32 @@ mod owner_tests {
         let empty = runtime.execute(Operation::Ceilings).await.unwrap();
         assert_eq!(empty["ceilings"], json!([]));
         assert_eq!(empty["limits"]["max_usd"], 1000.0);
+        // C-4 fix cycle 1: a body that leaves out `usd` or `by` is refused, never read as
+        // "clear" or as some surface.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "by": "window"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5})
+        )
+        .is_err());
+        let changes = runtime.store.changes();
         let set = runtime
             .execute(op(
-                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5}),
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5, "by": "window"}),
             ))
             .await
             .unwrap();
         assert_eq!(set["ceiling"]["cents"], 500);
+        // spend.json is carried by backups: a ceiling set counts for the next one.
+        assert!(
+            runtime.store.changes() > changes,
+            "the next backup carries it"
+        );
         let out = runtime
             .execute(op(
-                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 0}),
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 0, "by": "window"}),
             ))
             .await
             .unwrap_err();
@@ -7178,7 +7301,7 @@ mod owner_tests {
         assert!(root.path().join(spend::FILE).is_file());
         let cleared = runtime
             .execute(op(
-                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": null}),
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": null, "by": "window"}),
             ))
             .await
             .unwrap();
@@ -7220,6 +7343,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7241,6 +7365,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -7255,6 +7380,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();

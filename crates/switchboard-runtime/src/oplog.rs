@@ -181,26 +181,47 @@ static GLOBAL: OnceLock<Log> = OnceLock::new();
 pub fn install(log: Log) {
     let _ = GLOBAL.set(log);
 }
+/// One event captured by a test: its name and its code fields' values.
+#[cfg(test)]
+pub(crate) type Captured = (&'static str, Vec<&'static str>);
 #[cfg(test)]
 thread_local! {
-    static CAPTURED: std::cell::RefCell<Option<Vec<&'static str>>> =
+    /// Each event this thread logged while capturing.
+    static CAPTURED: std::cell::RefCell<Option<Vec<Captured>>> =
         const { std::cell::RefCell::new(None) };
 }
 /// Tests: runs `f` and answers the names of the events this thread logged meanwhile, whether
 /// or not a log is installed (tests share one process, so the installed log is not theirs).
 #[cfg(test)]
 pub(crate) fn capture<R>(f: impl FnOnce() -> R) -> (R, Vec<&'static str>) {
-    CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    capture_begin();
     let result = f();
-    let events = CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default());
+    let events = capture_end().into_iter().map(|(e, _)| e).collect();
     (result, events)
+}
+/// Tests: starts capturing this thread's events, for an `async` body (a current-thread runtime
+/// keeps it on this thread); [`capture_end`] answers each event with its code fields' values.
+#[cfg(test)]
+pub(crate) fn capture_begin() {
+    CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+}
+#[cfg(test)]
+pub(crate) fn capture_end() -> Vec<Captured> {
+    CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 /// Writes to the installed log; a process without one (tests, offline commands) writes nothing.
 pub fn event(event: &'static str, fields: &[(&'static str, Field)]) {
     #[cfg(test)]
     CAPTURED.with(|c| {
         if let Some(events) = c.borrow_mut().as_mut() {
-            events.push(event);
+            let codes = fields
+                .iter()
+                .filter_map(|(_, f)| match f {
+                    Field::Code(code) => Some(*code),
+                    Field::Number(_) => None,
+                })
+                .collect();
+            events.push((event, codes));
         }
     });
     if let Some(log) = GLOBAL.get() {

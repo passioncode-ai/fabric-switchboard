@@ -153,7 +153,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.
 - `MonitorStatus` adds `sign_in_required: [account id]` and `limited: [{account_id, until, source: managed|claude_code}]`; the MCP `switchboard_status` result adds `limited`. Decision reasons add `limit_reached`, `limit_no_eligible_account`, `switched_on_limit`.
 - `Store::rotation_decision_with(policy, current, now, limited)`; `rotation_decision` passes an empty set. `Store::adopt_refreshed`, `Store::export`, `Store::changes`, `Store::backup_id`.
-- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` (`SETTING_FILES`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 64 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
+- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` (`SETTING_FILES`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 64 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`), and so does a spending ceiling set or answered (`Store::setting_changed`; the gate's own records in `spend.json` wait for the next change-driven or daily backup). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
 
 ## 0.5.1 additions
 
@@ -414,9 +414,17 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   workflow's chain, else the project's, else the machine's, else none.
 - Removing an account drops executors pinned to it; removing a project drops its chain; a chain left
   empty is dropped (`chains::prune`).
-- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets, readiness, last_handover,
-  ceilings_unreadable}`; `Operation::SetChain {scope, executors, preset?}` → `{chain}`; a preset id
-  (`subscriptions-first`) stands for the list. MCP `switchboard_chain_get` returns the same answer.
+- `Operation::Chains {workflow?, pool?, folder?}` → `{chains, effective, presets, readiness,
+  last_handover, ceilings_unreadable, limits_known}`; `Operation::SetChain {scope, executors,
+  preset?}` → `{chain}`; a preset id (`subscriptions-first`) stands for the list. With `folder` (a
+  workflow's checkout, canonicalized when it exists) `effective` is resolved through the group the
+  automatic fallback would choose (`fallback::chain_pool_of`, below), `pool` then standing for the
+  executor account's group; without it, `pool` alone as before. `limits_known` is false in an
+  offline answer (no owner, so no limit evidence: `readiness` cannot name a limited account).
+  MCP `switchboard_chain_get` (`workflow_id?`, `pool?`, `folder?`, an absolute folder) and CLI
+  `chain list [--workflow] [--pool] [--dir]` (`--dir` absolute) return the same answer. Tests
+  `the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback`,
+  `handshake_lists_tools_and_rejects_malformed_messages` (`crates/switchboard-cli/tests/mcp.rs`).
 - **Readiness (0.7.0, C-2; SB-71 screen, SB-73 status).** Code:
   `crates/switchboard-runtime/src/chain_view.rs`. `readiness` holds, for every chain set, keyed
   `machine`, `project:<pool>` or `workflow:<id>`, one view per step of what it would do now:
@@ -463,14 +471,32 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   open daily question after the next UTC day; a clock set back drops nothing. A file that cannot
   be read, is not a JSON object, or breaks any of these rules is an error, never "no ceilings":
   `spend::check` then skips every paid step (`ceilings_unreadable`) and every write is refused.
-  `spend::decide` (pure; called by C-5) skips a paid step, in order: `key_exhausted` when the
+  Ceilings are no boundary against a process running as the operator: a hand edit that keeps
+  every rule, or deleting the file, loosens or removes them (a backup or the log shows it later).
+  After a downgrade to 0.6.x paid steps run with no ceiling (0.6.x has no gate and never reads
+  spend.json), and its `switchboard uninstall` leaves `spend.json` behind, since 0.6.x does not know
+  the file. A ceiling set or answered through `SetCeiling` or `AnswerCeiling` counts as a change
+  for the next backup (`Store::setting_changed`, so the change-driven backup takes it within its
+  60 s spacing; `spending_ceilings_are_set_read_and_answered_through_the_runtime`); records the
+  gate writes (questions it opens, baselines, the last hand-over) ride the next change-driven or
+  daily backup until C-5 bumps the count for them too. `backup::MAX_SPEND_SETTING` equals
+  `spend::MAX_BYTES`, so every file this build writes is carried
+  (`every_spend_file_this_build_writes_fits_a_backup`).
+  `spend::decide` (pure; called by C-5) counts no ceiling of a group the snapshot no longer holds
+  (`a_ceiling_of_a_removed_group_covers_no_step`) and skips a paid step, in order: `key_exhausted` when the
   key's own limit has less than $0.50 left, with or without a ceiling; `ceiling_reached` naming
   the strictest reached ceiling; `spend_unknown` when a covering ceiling's spend could not be
   read (an API-key Claude Code or Codex account under a ceiling is always unknown, C-Q3); with no
   covering ceiling an unread key runs (`spend_unread`). Log event `ceiling` with `action`
   (`set`, `cleared`, `reached`, `kept`, `doubled`) and `scope` (`machine`, `project`,
   `workflow`). `Operation::Ceilings` → `{ceilings, questions, last_handover, limits}`;
-  `Operation::SetCeiling {scope, usd}` (`usd: null` clears) → `{ceiling}`;
+  `Operation::SetCeiling {scope, usd, by}` (`usd: null` clears; a body without `usd` or `by` is
+  refused, never read as a clear) → `{ceiling}`. From `by: cli` or `by: mcp` only a first ceiling
+  of a scope or a value no higher than its current one is accepted; raising or clearing one is
+  refused (`Raising or clearing a ceiling is done in the Switchboard window. ...`, decided against
+  the file under its write lock, nothing written), and `by: window` through the control listener
+  or an offline command is refused like a ceiling answer (`WINDOW_ONLY`;
+  `a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener`);
   `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. Tests in `spend::tests` and
   `spending_ceilings_are_set_read_and_answered_through_the_runtime`.
 
@@ -543,7 +569,7 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
   phase 2). A Hermes executor at its limit is not detected yet.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout`, `engine_unreadable` or `group_ambiguous`; store event `fallback`
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`; store event `fallback`
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
 - **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
@@ -551,11 +577,17 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   holds the checkout; else the one group holding the checkout, whoever's account worked there
   (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
   group); else, with several groups holding it (SB-146) and none of them the executor's, the
-  executor account's group, logged `group_ambiguous`; with no group holding it, the executor
+  group `Snapshot::project_for` names (the first holding group with an enabled account, an
+  organization's group last when organizations exist; else the first), the one the folder's proxy
+  route and paid key use, logged `group_ambiguous`; with no group holding it, the executor
   account's group as before. The engine is asked for the checkout whenever the workflow's, the
-  executor group's or the machine's chain is set, or any group has a chain. Tests
+  executor group's or the machine's chain is set, or any group has a chain. When no chain applies
+  to the chosen group the pass logs `no_chain` and leaves no retry mark, so a chain set meanwhile
+  is used at the next scan; the 15-minute mark is set once a chain resolves, and also after
+  `engine_unreadable` and `no_checkout`, which are attempts not repeated every minute. Tests
   `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
-  `a_folder_in_two_groups_keeps_the_executors_group_and_logs_ambiguous`.
+  `a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous`,
+  `no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan`.
 
 - **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
 

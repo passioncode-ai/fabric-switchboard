@@ -869,6 +869,7 @@ mod tests {
             &snapshot,
             switchboard_core::ChainScope::Machine,
             Some(5.0),
+            crate::spend::Surface::Window,
             now,
         )
         .unwrap();
@@ -910,6 +911,64 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+    }
+    #[tokio::test]
+    async fn a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener() {
+        // C-Q1 (C-4 fix cycle 1): anything holding the control token (an agent running the CLI
+        // or MCP) may set a first ceiling or lower one, never raise or clear one; naming the
+        // window through this listener is refused like a ceiling answer.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, _owner, _) = fixture().await;
+        let set = |usd: Option<f64>, by: Surface| Operation::SetCeiling {
+            scope: ChainScope::Machine,
+            usd,
+            by,
+        };
+        // No ceiling yet: the CLI sets the first one.
+        request(tmp.path(), &set(Some(5.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let before = std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap();
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            for usd in [Some(10.0), None] {
+                let refused = request(tmp.path(), &set(usd, by)).await.unwrap_err();
+                assert_eq!(
+                    refused,
+                    if by == Surface::Window {
+                        crate::spend::WINDOW_ONLY
+                    } else {
+                        crate::spend::RAISE_IN_WINDOW
+                    },
+                    "{by:?} {usd:?}"
+                );
+                assert_eq!(
+                    std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap(),
+                    before,
+                    "spend.json unchanged"
+                );
+            }
+        }
+        // Lowering (and the same value) is accepted from the CLI and MCP.
+        request(tmp.path(), &set(Some(3.0), Surface::Mcp))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &set(Some(3.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 300);
+        // The offline path refuses the window the same way, before it opens the store.
+        let other = tempfile::tempdir().unwrap();
+        assert_eq!(
+            crate::execute_offline(other.path().to_owned(), set(Some(9.0), Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
     }
     #[cfg(unix)]
     #[tokio::test]
