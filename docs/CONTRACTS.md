@@ -1129,13 +1129,17 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   “Two rows of the terminal folder map name the same folder.” and writes nothing. Test:
   `shell::map::tests::the_map_holds_one_row_per_folder`.
 - **Lookup.** The longest row folder that holds the folder wins, compared whole component by
-  whole component, the folder taken as given and with links resolved. A row is skipped when its
-  folder is not absolute, its pool is not `[A-Za-z0-9._-]` (or starts with `.`), or its pool or
-  context is empty, longer than 256 characters or holds a space or a control character. A folder
-  with a `..` step is never matched (`/w/acme/../mine` is not inside `/w/acme`). Ties are broken
-  the same way every time: a row that holds the resolved folder beats one that holds only the
-  folder as given, then the earlier row wins (a map with two rows for one folder, written by hand
-  or by an older writer, answers its first). Tests:
+  whole component, the folder matched with its links resolved: a link inside a group's folder
+  that leads out of it (`/w/acme/out -> /w/mine`) is the folder it leads to and answers nothing
+  of the group's, and a link from outside that leads into a group's folder answers that group.
+  Only a folder that cannot be resolved (it does not exist or cannot be read) is matched as
+  given. A row is skipped when its folder is not absolute, its pool is not `[A-Za-z0-9._-]` (or
+  starts with `.`), or its pool or context is empty, longer than 256 characters or holds a space
+  or a control character. A folder with a `..` step is never matched (`/w/acme/../mine` is not
+  inside `/w/acme`). Of two rows of the same length the earlier one wins, every time (a map with
+  two rows for one folder, written by hand or by an older writer, answers its first); a row that
+  names its folder through a link holds no folder that resolves. Tests:
+  `shell::map::tests::a_link_out_of_a_group_folder_never_answers_its_homes`,
   `shell::map::tests::a_folder_with_a_parent_step_is_never_matched`,
   `shell::map::tests::a_row_stored_through_a_link_loses_to_the_resolved_folder`.
 - **`shell env --shell <zsh|bash|fish|pwsh> --dir <folder>`** prints `none` or

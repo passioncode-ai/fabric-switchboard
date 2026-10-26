@@ -121,12 +121,13 @@ pub fn read(root: &Path) -> Loaded {
 
 impl Map {
     /// The row whose folder holds `dir` (the folder itself, a subfolder, a worktree inside it),
-    /// the longest folder winning; `dir` is tried as given and with links resolved. Whole path
+    /// the longest folder winning. `dir` is matched with its links resolved, so a link inside a
+    /// group's folder that leads out of it (`/w/acme/out -> /w/mine`) is the folder it leads to,
+    /// and a link from outside that leads in is the group's; only a `dir` that cannot be
+    /// resolved (it does not exist, or cannot be read) is matched as given. Whole path
     /// components are compared, so `/w/acme-other` is not inside `/w/acme`. Rows that are not
     /// valid are skipped, and a `dir` with a `..` step is never matched (`/w/acme/../mine` is
-    /// not inside `/w/acme`). Ties are broken the same way every time: a row that holds the
-    /// resolved folder beats one that holds only the folder as given (rows are written in
-    /// canonical form), then the earlier row wins.
+    /// not inside `/w/acme`). Of two rows of the same length, the earlier one wins.
     pub fn lookup(&self, dir: &Path) -> Option<&Row> {
         if !dir.is_absolute()
             || dir
@@ -135,22 +136,19 @@ impl Map {
         {
             return None;
         }
-        let resolved = dir.canonicalize().ok().filter(|r| r != dir);
-        let mut best: Option<(usize, bool, &Row)> = None;
+        let target = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let mut best: Option<(usize, &Row)> = None;
         for row in self.rows.iter().filter(|row| row.valid()) {
             let folder = Path::new(&row.folder);
-            let real = resolved
-                .as_deref()
-                .map_or(dir.starts_with(folder), |r| r.starts_with(folder));
-            if !real && !dir.starts_with(folder) {
+            if !target.starts_with(folder) {
                 continue;
             }
-            let key = (folder.components().count(), real);
-            if best.is_none_or(|(length, was_real, _)| key > (length, was_real)) {
-                best = Some((key.0, key.1, row));
+            let length = folder.components().count();
+            if best.is_none_or(|(longest, _)| length > longest) {
+                best = Some((length, row));
             }
         }
-        best.map(|(_, _, row)| row)
+        best.map(|(_, row)| row)
     }
 }
 impl Row {
@@ -427,7 +425,12 @@ mod tests {
     fn the_map_holds_one_row_per_folder() {
         let data = tempfile::tempdir().unwrap();
         let root = data.path();
-        let one = |pool: &str| row("/w/acme", pool, "org:o-acme", true, false);
+        // An absolute folder on every platform (`/w/acme` is not absolute on Windows).
+        let tmp = tempfile::tempdir().unwrap();
+        let acme = tmp.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(acme.join("src")).unwrap();
+        let folder = acme.to_string_lossy().into_owned();
+        let one = |pool: &str| row(&folder, pool, "org:o-acme", true, false);
         let refused = write(
             root,
             &Map {
@@ -440,7 +443,7 @@ mod tests {
         assert_eq!(read(root), Loaded::Missing, "nothing written");
         // The same folder spelled with a trailing separator is the same folder.
         let mut trailing = one("globex");
-        trailing.folder = "/w/acme/".into();
+        trailing.folder = format!("{folder}{}", std::path::MAIN_SEPARATOR);
         assert!(write(
             root,
             &Map {
@@ -457,7 +460,7 @@ mod tests {
                 rows: vec![one("acme"), one("globex"), one("initech")],
             },
         );
-        assert_eq!(answer(root, Path::new("/w/acme/src")).unwrap().pool, "acme");
+        assert_eq!(answer(root, &acme.join("src")).unwrap().pool, "acme");
     }
 
     #[test]
@@ -488,10 +491,47 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_link_out_of_a_group_folder_never_answers_its_homes() {
+        // A link inside the group's folder that leads to the person's own folder is the
+        // person's folder; a link from outside that leads into the group's folder is the
+        // group's.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        let mine = work.join("mine");
+        for dir in [&acme, &mine] {
+            std::fs::create_dir_all(dir.join("src")).unwrap();
+        }
+        let out = acme.join("out");
+        std::os::unix::fs::symlink(&mine, &out).unwrap();
+        let into = work.join("link");
+        std::os::unix::fs::symlink(&acme, &into).unwrap();
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![row(&s(&acme), "acme", "org:o-acme", true, true)],
+            },
+        )
+        .unwrap();
+        assert_eq!(answer(root, &out), None);
+        assert_eq!(answer(root, &out.join("src")), None);
+        assert_eq!(answer(root, &into).unwrap().pool, "acme");
+        assert_eq!(answer(root, &into.join("src")).unwrap().pool, "acme");
+        // A folder that cannot be resolved (it does not exist) is taken as given.
+        assert_eq!(answer(root, &acme.join("gone")).unwrap().pool, "acme");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_row_stored_through_a_link_loses_to_the_resolved_folder() {
-        // Rows are written in canonical form; a row that names a folder through a link is
-        // matched only through that link, and where the folder's resolved path has its own
-        // row of the same length, the resolved one answers whatever the rows' order.
+        // Rows are written in canonical form and a folder is matched with its links resolved:
+        // a row that names a folder through a link never holds a folder that resolves, and
+        // where the folder's resolved path has its own row, that row answers whatever the
+        // rows' order.
         let data = tempfile::tempdir().unwrap();
         let root = data.path();
         let tmp = tempfile::tempdir().unwrap();
@@ -518,7 +558,8 @@ mod tests {
             assert_eq!(answer(root, &link.join("src")).unwrap().pool, "acme");
             assert_eq!(answer(root, &acme.join("src")).unwrap().pool, "acme");
         }
-        // Alone, the linked row answers only a folder reached through the link.
+        // Alone, the linked row answers nothing that resolves, through the link or not; only a
+        // folder under the link that cannot be resolved (it does not exist) is taken as given.
         write(
             root,
             &Map {
@@ -527,7 +568,8 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(answer(root, &link.join("src")).unwrap().pool, "linked");
+        assert_eq!(answer(root, &link.join("src")), None);
         assert_eq!(answer(root, &acme.join("src")), None);
+        assert_eq!(answer(root, &link.join("gone")).unwrap().pool, "linked");
     }
 }
