@@ -909,7 +909,7 @@ impl Runtime {
         // provider never holds every other operation (SB-39).
         if let Operation::Usage { id } = &operation {
             return Ok(json!(
-                monitor::check(
+                monitor::check_by_person(
                     &self.store,
                     self.native,
                     &self.refresh,
@@ -2888,7 +2888,7 @@ async fn execute(
                 }
             };
             Ok(json!(
-                monitor::check(&store, native, refresh_state, &id, None, gate).await?
+                monitor::check_by_person(&store, native, refresh_state, &id, None, gate).await?
             ))
         }
         Operation::AgentCatalog => Ok(agent_catalog::catalog()),

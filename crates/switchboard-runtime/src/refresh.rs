@@ -64,6 +64,10 @@ pub(crate) struct RefreshState {
     rejected: Mutex<HashMap<String, String>>,
     /// Codex: account id → (credential fingerprint, time) of a 401 not yet repeated.
     first_rejection: Mutex<HashMap<String, (String, i64)>>,
+    /// B-5 fix cycle 1: moves whenever an account starts or stops reading as ended without a
+    /// credential write (a lineage refused, a usage verdict given or taken back), so the
+    /// renewal schedule is rebuilt then too.
+    verdicts: std::sync::atomic::AtomicU64,
     /// SB-182: the last `sign_in_required` answer, with the store's credential write count
     /// (PRD-01) and the rejected lineages it was computed from.
     sign_in_cache: Mutex<SignInCache>,
@@ -187,6 +191,7 @@ impl RefreshState {
             dead: Mutex::new(HashMap::new()),
             rejected: Mutex::new(HashMap::new()),
             first_rejection: Mutex::new(HashMap::new()),
+            verdicts: std::sync::atomic::AtomicU64::new(0),
             sign_in_cache: Mutex::new(None),
             backoff: Mutex::new(HashMap::new()),
             seen_active: Mutex::new(HashMap::new()),
@@ -419,6 +424,15 @@ impl RefreshState {
         if let Ok(mut rejected) = self.rejected.lock() {
             rejected.insert(id.to_owned(), credential_fingerprint(credential));
         }
+        self.verdict_changed();
+    }
+    fn verdict_changed(&self) {
+        self.verdicts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// B-5 fix cycle 1: how many times a verdict was given or taken back (see `verdicts`).
+    pub(crate) fn verdict_generation(&self) -> u64 {
+        self.verdicts.load(std::sync::atomic::Ordering::Relaxed)
     }
     /// B-5: a Codex usage check answered 401 for `credential` at `time`. True when it is the
     /// second in a row for the same credential, at least `REJECTION_SPACING` after the first:
@@ -441,6 +455,39 @@ impl RefreshState {
             self.reject(id, credential);
         }
         repeated
+    }
+    /// B-5 fix cycle 1: `id` reads as ended only by a usage check's verdict on its stored
+    /// credential, not by a lineage the token endpoint refused (`invalid_grant`). Nothing
+    /// remembered: no vault read.
+    pub(crate) fn usage_verdict_only(&self, store: &Store, id: &str) -> bool {
+        let Some(rejected) = self.rejected.lock().ok().and_then(|r| r.get(id).cloned()) else {
+            return false;
+        };
+        let dead = self.dead.lock().ok().and_then(|d| d.get(id).cloned());
+        let Ok(credential) = store.stored_credential(id) else {
+            return false;
+        };
+        let lineage = dead.is_some_and(|hash| {
+            credential
+                .refresh_token
+                .as_deref()
+                .map(fingerprint)
+                .as_deref()
+                == Some(hash.as_str())
+        });
+        !lineage && rejected == credential_fingerprint(&credential)
+    }
+    /// B-5 fix cycle 1: the provider answered a person's check of `id` with something other
+    /// than a 401: the usage verdict (and any unrepeated Codex 401) is taken back.
+    pub(crate) fn lift_verdict(&self, id: &str) {
+        self.clear_rejection(id);
+        let lifted = self
+            .rejected
+            .lock()
+            .is_ok_and(|mut rejected| rejected.remove(id).is_some());
+        if lifted {
+            self.verdict_changed();
+        }
     }
     /// B-5: a usage check of `id` got an answer other than a provider's 401: no row of 401s.
     pub(crate) fn clear_rejection(&self, id: &str) {
@@ -1052,6 +1099,7 @@ fn remember_dead(state: &RefreshState, id: &str, token: &str) -> Outcome {
     if let Ok(mut dead) = state.dead.lock() {
         dead.insert(id.to_owned(), fingerprint(token));
     }
+    state.verdict_changed();
     state.persist_dead();
     Outcome::SignInRequired
 }
@@ -1261,6 +1309,10 @@ pub(crate) async fn renew_idle_live(
             Err(Failure::Permanent) => {
                 for copy in &copies {
                     remember_dead(state, &copy.id, &consumed);
+                }
+                // B-5 fix cycle 1: one seat, however many copies hold its lineage.
+                if let Some(copy) = copies.first() {
+                    seat_ended(store, &copy.id, "renewal");
                 }
                 return Outcome::SignInRequired;
             }
@@ -3722,11 +3774,23 @@ mod tests {
         let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
         let (_root, store) = idle_setup(IDLE_ITEM());
         let state = RefreshState::at(url);
-        assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
-            Outcome::SignInRequired
-        );
+        let (outcome, events) =
+            crate::oplog::capture_async(renew_idle_live(&store, IDLE_A, &state)).await;
+        assert_eq!(outcome, Outcome::SignInRequired);
         assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
+        // B-5 fix cycle 1: the idle Claude Code account's `invalid_grant` is a seat that ended
+        // by renewal too, logged once however many copies hold the lineage.
+        assert_eq!(
+            events,
+            vec![(
+                "seat_ended",
+                vec![
+                    ("provider", crate::oplog::Field::Code("claude")),
+                    ("by", crate::oplog::Field::Code("renewal")),
+                    ("organization", crate::oplog::Field::Flag(false)),
+                ]
+            )]
+        );
     }
     #[tokio::test]
     async fn a_refused_client_holds_every_renewal_without_blaming_an_account() {
