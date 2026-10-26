@@ -64,6 +64,6 @@ Builders run one at a time since 2026-10-26 02:00 UTC: the MacBook's disk has fa
 processes too). `sb-070-target` is deleted between builders. A shared `CARGO_TARGET_DIR` served stale binaries twice: a green
 run counts only when its output names the node's tests.
 
-Board rows filed by the rounds: SB-211 (proxy failover does not read the ended-seat set). Still to file at A-9/B-9/C-9: the agent-settings unreadable sentence ("restore it from a backup" when restore never overwrites), one
+Board rows filed by the rounds: SB-211 (proxy failover does not read the ended-seat set). Still to file at A-9/B-9/C-9: six managed sessions of the PassionCode group stopped on one account at once (about 05:33 UTC 2026-10-26, reported by fabric-workspace) because a group's managed sessions share one route, with one account left holding quota: spread a group's sessions over its accounts; the agent-settings unreadable sentence ("restore it from a backup" when restore never overwrites), one
 session per agent home and the `openrouter` pool sentinel (w2/context round 1), detect_session and shell homes, the A-Q8
 read split.
