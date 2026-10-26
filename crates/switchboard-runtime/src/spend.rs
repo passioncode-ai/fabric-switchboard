@@ -406,10 +406,16 @@ pub fn key_slot(snapshot: &Snapshot, folder: Option<&Path>) -> Option<KeySlot> {
 /// next write that prunes with a snapshot (`set_ceiling`, `answer`: `change` with `Some`; the
 /// hand-over's writes prune with `None` and keep it), and `decide` and `view` never count it
 /// meanwhile: a ceiling of a group the snapshot does not hold covers nothing.
+///
+/// Deleting a group removes its own OpenRouter key with it (SB-144), so from the CLI or MCP a
+/// group whose own key another ceiling counts is refused as removing that key is
+/// (`KEY_COUNTED_BY_CEILING`, C-Q9): a machine ceiling, or a task ceiling whose baseline is that
+/// key. `own_key` says, under the write lock, whether the group holds its own key now.
 pub fn remove_group<T>(
     root: &Path,
     pool: &str,
     by: Surface,
+    own_key: impl FnOnce() -> Result<bool, String>,
     remove: impl FnOnce() -> Result<T, String>,
 ) -> Result<(T, bool), String> {
     let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
@@ -417,8 +423,13 @@ pub fn remove_group<T>(
     let scope = ChainScope::Project {
         pool: pool.to_owned(),
     };
-    if by != Surface::Window && file.ceilings.iter().any(|c| c.scope == scope) {
-        return Err(GROUP_HOLDS_CEILING.into());
+    if by != Surface::Window {
+        if file.ceilings.iter().any(|c| c.scope == scope) {
+            return Err(GROUP_HOLDS_CEILING.into());
+        }
+        if own_key()? && counts_key(&file, pool) {
+            return Err(KEY_COUNTED_BY_CEILING.into());
+        }
     }
     let removed = remove()?;
     let before = file.clone();
@@ -473,20 +484,25 @@ pub fn guard_group_key<T>(
                 return Err(KEY_HOLDS_CEILING.into());
             }
         }
-        let name = pool.unwrap_or("machine");
-        let counted = file.ceilings.iter().any(|c| match &c.scope {
-            ChainScope::Machine => true,
-            ChainScope::Workflow { id } => file
-                .baselines
-                .iter()
-                .any(|b| &b.workflow == id && b.key == name),
-            ChainScope::Project { .. } => false,
-        });
-        if counted {
+        if counts_key(&file, pool.unwrap_or("machine")) {
             return Err(KEY_COUNTED_BY_CEILING.into());
         }
     }
     change()
+}
+
+/// Whether a ceiling other than a group's own counts the spend of the key named `name` (a group's
+/// pool, or `machine`): a machine ceiling adds every saved key's daily spend up, and a task
+/// ceiling counts from its baseline key (C-Q9).
+fn counts_key(file: &SpendFile, name: &str) -> bool {
+    file.ceilings.iter().any(|c| match &c.scope {
+        ChainScope::Machine => true,
+        ChainScope::Workflow { id } => file
+            .baselines
+            .iter()
+            .any(|b| &b.workflow == id && b.key == name),
+        ChainScope::Project { .. } => false,
+    })
 }
 
 /// Drops what removed groups and time leave behind. A clock set back drops nothing: an age is
@@ -2247,10 +2263,16 @@ mod tests {
         let mut removed = false;
         for by in [Surface::Cli, Surface::Mcp] {
             assert_eq!(
-                remove_group(root.path(), "alpha", by, || {
-                    removed = true;
-                    Ok(())
-                })
+                remove_group(
+                    root.path(),
+                    "alpha",
+                    by,
+                    || Ok(false),
+                    || {
+                        removed = true;
+                        Ok(())
+                    }
+                )
                 .unwrap_err(),
                 GROUP_HOLDS_CEILING
             );
@@ -2259,12 +2281,37 @@ mod tests {
         assert_eq!(std::fs::read(root.path().join(FILE)).unwrap(), before);
         // A group with nothing in spend.json is deleted from the CLI, the file unchanged.
         assert_eq!(
-            remove_group(root.path(), "beta", Surface::Cli, || Ok(7)).unwrap(),
+            remove_group(root.path(), "beta", Surface::Cli, || Ok(false), || Ok(7)).unwrap(),
             (7, false)
         );
+        // Fix cycle 3: a group whose own key the machine ceiling counts keeps it from the CLI.
+        for by in [Surface::Cli, Surface::Mcp] {
+            assert_eq!(
+                remove_group(
+                    root.path(),
+                    "beta",
+                    by,
+                    || Ok(true),
+                    || {
+                        removed = true;
+                        Ok(())
+                    }
+                )
+                .unwrap_err(),
+                KEY_COUNTED_BY_CEILING
+            );
+        }
+        assert!(!removed, "the group is never touched");
         // The window deletes alpha; its ceiling, question and baseline go, the machine's stay.
         assert_eq!(
-            remove_group(root.path(), "alpha", Surface::Window, || Ok(())).unwrap(),
+            remove_group(
+                root.path(),
+                "alpha",
+                Surface::Window,
+                || Ok(false),
+                || Ok(())
+            )
+            .unwrap(),
             ((), true)
         );
         let after = read(root.path()).unwrap();
@@ -2276,9 +2323,13 @@ mod tests {
         // A removal that fails changes nothing.
         set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
         assert_eq!(
-            remove_group(root.path(), "alpha", Surface::Window, || Err::<(), _>(
-                "Project not found.".to_string()
-            ))
+            remove_group(
+                root.path(),
+                "alpha",
+                Surface::Window,
+                || Ok(false),
+                || Err::<(), _>("Project not found.".to_string())
+            )
             .unwrap_err(),
             "Project not found."
         );
@@ -2287,7 +2338,7 @@ mod tests {
         std::fs::write(root.path().join(FILE), b"{").unwrap();
         for by in [Surface::Window, Surface::Cli] {
             assert_eq!(
-                remove_group(root.path(), "beta", by, || Ok(())).unwrap_err(),
+                remove_group(root.path(), "beta", by, || Ok(false), || Ok(())).unwrap_err(),
                 UNREADABLE
             );
         }

@@ -676,9 +676,20 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   write lock (`spend::guard_group_key`), through the control listener and offline: a group's own
   key while the group holds a ceiling (`KEY_HOLDS_CEILING`); any saved key, the machine's
   included, while a machine ceiling adds them up, and the key a task ceiling counts from, its
-  baseline (`KEY_COUNTED_BY_CEILING`). A first key is saved as before
+  baseline (`KEY_COUNTED_BY_CEILING`). A first key is saved as before, and removing a key that
+  is not saved removes nothing and is not refused
   (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`,
-  `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`).
+  `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`,
+  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Deleting a
+  group (`switchboard project delete`, `RemoveProject`) removes its own OpenRouter key with it, so
+  the same rule holds there: from the CLI or MCP a group that holds its own key is refused with
+  `KEY_COUNTED_BY_CEILING` while a machine ceiling is set or a task ceiling counts from that key,
+  under the spend write lock (`spend::remove_group`), through the control listener and offline;
+  the group and its key stay, and the window deletes it
+  (`control::tests::a_group_whose_own_key_a_ceiling_counts_is_deleted_only_in_the_window`). A
+  hand-over records its folder canonicalized, as the first gate read it, so the gate at the take
+  and the background's gate read the same group's key (`fallback::queue_handover`,
+  `a_hand_over_records_the_canonical_folder_so_its_take_reads_the_groups_key`).
   OpenRouter's own report of a key's spend may lag a running agent, so a ceiling decides whether
   a step starts, never what a running session spends (the key's own limit bounds that). With no
   step tried, the hand-over's outcome is the first skip the gate gave. Every hand-over writes

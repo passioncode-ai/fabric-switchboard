@@ -3648,11 +3648,17 @@ async fn execute(
         }
         Operation::AgentKeyRemove { service, pool, by } => {
             // C-Q9: removing a key whose spend a ceiling counts moves its paid steps to a key the
-            // ceiling does not count, or out of a machine ceiling's sum.
-            let removed =
-                spend::guard_group_key(root, pool.as_deref(), service == "openrouter", by, || {
-                    store.remove_agent_key_for(&service, pool.as_deref())
-                })?;
+            // ceiling does not count, or out of a machine ceiling's sum. A key that is not saved
+            // removes nothing and loosens nothing.
+            let exists = service == "openrouter"
+                && store
+                    .agent_key_for(&service, pool.as_deref())
+                    .ok()
+                    .flatten()
+                    .is_some();
+            let removed = spend::guard_group_key(root, pool.as_deref(), exists, by, || {
+                store.remove_agent_key_for(&service, pool.as_deref())
+            })?;
             Ok(json!({ "removed": removed }))
         }
         Operation::AgentKeys { service } => agent_keys::list(&store, &service),
@@ -4713,9 +4719,15 @@ async fn execute(
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
         Operation::RemoveProject { pool, by } => {
-            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock.
-            let (project, pruned) =
-                spend::remove_group(root, &pool, by, || store.remove_project(&pool))?;
+            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock. C-Q9:
+            // its own OpenRouter key goes too, so a ceiling counting that key keeps the group.
+            let (project, pruned) = spend::remove_group(
+                root,
+                &pool,
+                by,
+                || Ok(store.agent_key_for("openrouter", Some(&pool))?.is_some()),
+                || store.remove_project(&pool),
+            )?;
             if pruned {
                 store.setting_changed();
             }

@@ -546,6 +546,11 @@ pub(crate) fn queue_handover(
         .ok_or_else(|| "Offered, but the session script is missing.".to_string())?;
     let (agent, label) = describe(snapshot, account);
     let paid = snapshot.and_then(|s| paid_kind(s, account));
+    // The folder the first gate read, canonicalized as `continue` does: the take's gate and the
+    // sweep match it against the groups' folders, and a raw symlinked or relative path would miss
+    // a capped group and read the machine key instead. A folder that cannot be canonicalized is
+    // kept as given.
+    let dir = dir.canonicalize().unwrap_or(dir);
     let handover = crate::handovers::Handover {
         id: crate::handovers::new_id(),
         workflow,
@@ -3598,6 +3603,90 @@ mod tests {
         assert_eq!(taken["handover"]["id"], handover.id);
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hand_over_records_the_canonical_folder_so_its_take_reads_the_groups_key() {
+        // Fix cycle 3, break 2: the first gate canonicalizes the folder; the hand-over must
+        // record that folder, or the take's gate (and the sweep's) matches the raw path against
+        // the groups' folders, misses a capped group and reads the machine key instead.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), None).await;
+        let alpha = runtime
+            .store
+            .save_project(None, "alpha", std::slice::from_ref(&dir), &[])
+            .unwrap();
+        runtime
+            .store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-fixture-two", None)
+            .unwrap();
+        spend::set_ceiling(
+            root.path(),
+            &runtime.store.snapshot().unwrap(),
+            ChainScope::Project {
+                pool: alpha.pool.clone(),
+            },
+            Some(5.0),
+            Surface::Window,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        crate::handovers::set_enabled(root.path(), true).unwrap();
+        let link = root.path().join("checkout-link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        let script = root.path().join("hermes.command");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        let answer = json!({"script": script, "offeredUntil": "2099-10-13T01:00:00Z"});
+        let snapshot = runtime.store.snapshot().unwrap();
+        let queued = queue_handover(
+            root.path(),
+            Some(&snapshot),
+            WF.into(),
+            crate::hermes::HERMES_TARGET,
+            link.clone(),
+            &answer,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        assert_eq!(queued.dir, dir, "the canonical folder is recorded");
+        assert_eq!(queued.paid, Some(Paid::OpenRouter));
+        // A folder that cannot be canonicalized is recorded as given, as before.
+        let gone = root.path().join("no-such-checkout");
+        let kept = queue_handover(
+            root.path(),
+            Some(&snapshot),
+            WF.into(),
+            crate::hermes::HERMES_TARGET,
+            gone.clone(),
+            &answer,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        assert_eq!(kept.dir, gone);
+        crate::handovers::take(root.path(), &kept.id).unwrap();
+        // The ceiling is reached before a console takes it: the group's key is read and the
+        // take is refused; it stays waiting.
+        let pools = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let read: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
+            let pools = pools.clone();
+            Arc::new(move |pool| {
+                pools.lock().unwrap().push(pool);
+                spend(40.0, 30.0, 6.0)
+            })
+        };
+        let refused = TEST_READ
+            .scope(
+                read,
+                runtime.execute(Operation::HandoverTake {
+                    id: queued.id.clone(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::STOP_CEILING_REACHED);
+        assert_eq!(*pools.lock().unwrap(), vec![Some(alpha.pool.clone())]);
+        assert_eq!(crate::handovers::pending(root.path()), vec![queued]);
+    }
     #[tokio::test]
     async fn a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling() {
         // Fix cycle 2, risk 5: the route's account is read first; a subscription account is

@@ -1152,13 +1152,13 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. A fallback prepares a continuation → its metadata waits in the private hand-over queue.
 2. The host takes the hand-over in a terminal → one taker receives the script; concurrent takers are refused.
 3. No host takes it within two minutes → the monitor requests Terminal launch while the offer remains live.
-**Alt paths:** Hand-overs off (the default) → existing Terminal behavior. Expired offer → removed without launching.
-**Expected result:** A queued continuation runs at most once; a launch request is not proof of workflow acceptance.
-**UI elements:** CLI list, setting and run command.
-**States covered:** empty, waiting, taken, expired, error
-**Errors & recovery:** No terminal → refuse before taking; expired offer → never launch; exclusive claim receipt → retain after completion or a crash, hide any leftover pending record and refuse republication. Ambiguous launch → reconcile before any further action.
+**Alt paths:** Hand-overs off (the default) → existing Terminal behavior. Expired offer → removed without launching. A paid hand-over (Hermes, OpenCode or an API-key account) whose spending ceiling is reached, or whose spend cannot be read, when a console takes it → the take is refused with the spend gate's sentence (“A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.”, or the sentence for an exhausted key or an unknown spend) and the hand-over stays waiting, so the window may double the ceiling meanwhile; the gate reads the folder the hand-over recorded, canonicalized as the first gate read it. A paid hand-over no console took, refused by the gate when the background would open it in Terminal → taken without a start (log `handover outcome=spend_refused`); its offer lapses by itself.
+**Expected result:** A queued continuation runs at most once; a launch request is not proof of workflow acceptance; a paid one starts only while its ceiling has room.
+**UI elements:** CLI list, setting and run command; the spend gate's refusal sentence; the ceiling's question in the Switchboard window.
+**States covered:** empty, waiting, taken, expired, refused by the spend gate, error
+**Errors & recovery:** No terminal → refuse before taking; expired offer → never launch; exclusive claim receipt → retain after completion or a crash, hide any leftover pending record and refuse republication. Ambiguous launch → reconcile before any further action. A take refused by the spend gate → nothing is taken; take it again once the window doubled the ceiling or the key has room.
 **Status:** draft
-**Coverage:** `handovers::tests`; CLI `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
+**Coverage:** `handovers::tests` (`a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`); `fallback::tests::a_queued_paid_hand_over_is_gated_again_when_it_is_taken`, `fallback::tests::a_hand_over_records_the_canonical_folder_so_its_take_reads_the_groups_key`; CLI `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
