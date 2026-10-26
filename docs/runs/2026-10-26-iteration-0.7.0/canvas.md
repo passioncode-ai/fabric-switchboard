@@ -64,6 +64,14 @@ Builders run one at a time since 2026-10-26 02:00 UTC: the MacBook's disk has fa
 processes too). `sb-070-target` is deleted between builders. A shared `CARGO_TARGET_DIR` served stale binaries twice: a green
 run counts only when its output names the node's tests.
 
-Board rows filed by the rounds: SB-211 (proxy failover does not read the ended-seat set). Still to file at A-9/B-9/C-9: SB-204's second source (sessions started before the plugin's 0.6.83 update have no `Stop` hook, so their stops wait for the one-day horizon; seen 2026-10-26 on 7 stops; settle a stop also on the session's first successful request through the proxy); six managed sessions of the PassionCode group stopped on one account at once (about 05:33 UTC 2026-10-26, reported by fabric-workspace) because a group's managed sessions share one route, with one account left holding quota: spread a group's sessions over its accounts; the agent-settings unreadable sentence ("restore it from a backup" when restore never overwrites), one
+Board rows filed by the rounds: SB-211 (proxy failover does not read the ended-seat set). Still to file at A-9/B-9/C-9: `shell::scripts::tests::a_missing_old_or_failing_cli_gives_the_held_values_back` failed once in zsh at load 66 (passed 3 of 3 alone; likely the zsh hook's 2 s wait under load; a sibling of SB-07); SB-204's second source (sessions started before the plugin's 0.6.83 update have no `Stop` hook, so their stops wait for the one-day horizon; seen 2026-10-26 on 7 stops; settle a stop also on the session's first successful request through the proxy); six managed sessions of the PassionCode group stopped on one account at once (about 05:33 UTC 2026-10-26, reported by fabric-workspace) because a group's managed sessions share one route, with one account left holding quota: spread a group's sessions over its accounts; the agent-settings unreadable sentence ("restore it from a backup" when restore never overwrites), one
 session per agent home and the `openrouter` pool sentinel (w2/context round 1), detect_session and shell homes, the A-Q8
 read split.
+
+## Wave 3 state (2026-10-26)
+
+| Node | Branch, last commit | Rounds | State |
+|---|---|---|---|
+| A-4, A-2 (R3), A-3 (R3) | `w3/shell` `11019dd` | r1 seam fail (backup lost `off`, notice in memory only, ZDOTDIR, created file left, other data folder); fixed `4d8feb0`; r2 adversarial: 12 of 15 plants caught, bash `set -a` leak; fixed, every plant now caught | **merged** |
+| B-3, B-4 | `w3/person` `97a48df` | r1 seam fail (`shell on` offered after the person turned it off, `shell on/off` dependency, `in_cli` missing on login finish) | fix cycle on top of the merged `w3/shell` next |
+| C-5 (R3), C-6 (R3) | not started | | after B-3/B-4 |
