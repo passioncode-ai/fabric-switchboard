@@ -258,6 +258,12 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    if let Some(refusal) = crate::window_only_refusal(&operation) {
+        return Json(Reply::Error {
+            message: refusal.into(),
+        })
+        .into_response();
+    }
     let kind = operation_kind(&operation);
     let started = std::time::Instant::now();
     let reply = match state.runtime.execute(operation).await {
@@ -848,6 +854,62 @@ mod tests {
         assert!(result.unwrap_err().contains("closed its proved connection"));
         assert!(!received_mutation.load(Ordering::SeqCst));
         task.abort();
+    }
+    #[tokio::test]
+    async fn a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener() {
+        // C-Q1 (C-4): the window answers in the owner's own process, never through this
+        // listener. A request that names the window, crafted by anything holding the control
+        // token (an agent running the CLI), is refused before it runs, keep and double alike.
+        let (tmp, owner, _) = fixture().await;
+        let snapshot = owner.runtime.store.snapshot().unwrap();
+        // Asked now: the owner prunes a daily question after the next UTC day.
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &snapshot,
+            switchboard_core::ChainScope::Machine,
+            Some(5.0),
+            now,
+        )
+        .unwrap();
+        let id = crate::spend::open_question(
+            tmp.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.0,
+            now,
+        )
+        .unwrap()
+        .unwrap();
+        for answer in [crate::spend::Answer::Double, crate::spend::Answer::Keep] {
+            let refused = request(
+                tmp.path(),
+                &Operation::AnswerCeiling {
+                    id: id.clone(),
+                    answer,
+                    by: crate::spend::Surface::Window,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(refused, crate::spend::WINDOW_ONLY);
+        }
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 500, "nothing doubled");
+        assert!(file.questions[0].answer.is_none(), "still open");
+        // The CLI's own surface keeps it.
+        request(
+            tmp.path(),
+            &Operation::AnswerCeiling {
+                id,
+                answer: crate::spend::Answer::Keep,
+                by: crate::spend::Surface::Cli,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
     }
     #[cfg(unix)]
     #[tokio::test]

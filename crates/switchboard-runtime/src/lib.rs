@@ -28,6 +28,7 @@ pub mod recovery;
 mod refresh;
 pub mod roots;
 pub mod settings_bundle;
+pub mod spend;
 mod statistics;
 pub mod suggest;
 pub mod uninstall;
@@ -462,6 +463,23 @@ pub enum Operation {
         #[serde(default)]
         preset: Option<String>,
     },
+    /// Spending ceilings for paid fallback agents (SB-72): every ceiling, the open questions and
+    /// the last hand-over (`spend::view`). An unreadable `spend.json` is an error, never "none".
+    Ceilings,
+    /// Sets the ceiling of a scope in dollars (machine and group: per UTC day; a task: since its
+    /// first paid hand-over); `usd: null` clears it.
+    SetCeiling {
+        scope: switchboard_core::ChainScope,
+        #[serde(default)]
+        usd: Option<f64>,
+    },
+    /// Answers a reached ceiling's question: `keep` from any surface, `double` only from the
+    /// window (`by: window`, C-Q1). The CLI and MCP send their own surface.
+    AnswerCeiling {
+        id: String,
+        answer: spend::Answer,
+        by: spend::Surface,
+    },
     /// Starts an agent in a folder: through the proxy on the pool's API-key account, or on the
     /// saved OpenRouter key (`via: openrouter`, SB-79) with `model` (default: the key's model).
     LaunchAgent {
@@ -851,6 +869,8 @@ impl Runtime {
                 | Operation::HermesModel
                 | Operation::KimiLoginStatus { .. }
                 | Operation::Chains { .. }
+                // A file read; spend.json is changed only by the operations below.
+                | Operation::Ceilings
                 | Operation::LaunchAccount { .. }
                 | Operation::Status
                 | Operation::MonitorStatus
@@ -2654,7 +2674,23 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
         .collect();
     json!({"schema": 1, "organizations": organizations, "accounts": accounts})
 }
+/// C-Q1: the window answers in the app's own process (`Runtime::execute`). An operation that
+/// names the window but arrives through the control listener or an offline command (anything
+/// holding the control token, an agent running the CLI included) is refused before it runs.
+pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
+    matches!(
+        operation,
+        Operation::AnswerCeiling {
+            by: spend::Surface::Window,
+            ..
+        }
+    )
+    .then_some(spend::WINDOW_ONLY)
+}
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
+    if let Some(refusal) = window_only_refusal(&operation) {
+        return Err(refusal.into());
+    }
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
     execute(store, &root, None, operation).await
 }
@@ -3072,6 +3108,14 @@ async fn execute(
                 }
             }
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
+        }
+        Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
+        Operation::SetCeiling { scope, usd } => {
+            let ceiling = spend::set_ceiling(root, &store.snapshot()?, scope, usd, monitor::now())?;
+            Ok(json!({"ceiling": ceiling}))
+        }
+        Operation::AnswerCeiling { id, answer, by } => {
+            spend::answer(root, &store.snapshot()?, &id, answer, by, monitor::now())
         }
         Operation::AgentConnect { agent, pool } => {
             let address = runtime
@@ -6999,6 +7043,99 @@ mod owner_tests {
             })
             .await
             .is_err());
+    }
+    #[tokio::test]
+    async fn spending_ceilings_are_set_read_and_answered_through_the_runtime() {
+        // SB-72 (C-4): the operations as the surfaces send them, over spend.json, never Snapshot.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let op = |v: Value| serde_json::from_value::<Operation>(v).unwrap();
+        let empty = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(empty["ceilings"], json!([]));
+        assert_eq!(empty["limits"]["max_usd"], 1000.0);
+        let set = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(set["ceiling"]["cents"], 500);
+        let out = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 0}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(out, spend::OUT_OF_RANGE);
+        // A question opened by the gate (C-5), answered as each surface would.
+        let snapshot = runtime.store.snapshot().unwrap();
+        let id = spend::open_question(
+            root.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.1,
+            monitor::now(),
+        )
+        .unwrap()
+        .unwrap();
+        let listed = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(listed["questions"][0]["id"], id.as_str());
+        assert_eq!(listed["questions"][0]["double_usd"], 10.0);
+        let refused = runtime
+            .execute(op(
+                json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "mcp"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::DOUBLE_IN_WINDOW);
+        let doubled = runtime
+            .execute(op(json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "window"})))
+            .await
+            .unwrap();
+        assert_eq!(doubled["ceiling"]["usd"], 10.0);
+        assert_eq!(doubled["ceiling"]["doubled_from"], 5.0);
+        // A surface must say who it is; an unknown one is refused before anything runs.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "operator"})
+        )
+        .is_err());
+        // Nothing of it reached accounts.json: a 0.6.x build still reads the store.
+        let stored = serde_json::to_string(&runtime.store.snapshot().unwrap()).unwrap();
+        assert!(!stored.contains("ceiling") && !stored.contains("cents"));
+        assert!(root.path().join(spend::FILE).is_file());
+        let cleared = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": null}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cleared["ceiling"], Value::Null);
+    }
+    #[tokio::test]
+    async fn an_offline_command_cannot_answer_a_ceiling_as_the_window() {
+        // C-Q1 (C-4): with no owner running, the CLI's offline path refuses `by: window` before
+        // it opens the store; only the app's own process answers as the window.
+        let root = tempfile::tempdir().unwrap();
+        let refused = execute_offline(
+            root.path().to_owned(),
+            Operation::AnswerCeiling {
+                id: "q_0123456789abcdef".into(),
+                answer: spend::Answer::Double,
+                by: spend::Surface::Window,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused, spend::WINDOW_ONLY);
+        assert!(
+            !root.path().join("accounts.json").exists(),
+            "the store was never opened"
+        );
     }
     #[tokio::test]
     async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {

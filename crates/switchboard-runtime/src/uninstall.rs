@@ -31,6 +31,8 @@ const OWNED: &[&str] = &[
     "pool-salts.json",
     "capability-migration.json",
     "agents-settings.json",
+    // Spending ceilings and their questions (SB-72); they travel in backups.
+    "spend.json",
     "statistics.json",
     // Usage analytics' own state, the person's answer included (issue #128): uninstalling
     // forgets the answer, and the question returns at the next first start.

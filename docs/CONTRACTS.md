@@ -153,7 +153,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.
 - `MonitorStatus` adds `sign_in_required: [account id]` and `limited: [{account_id, until, source: managed|claude_code}]`; the MCP `switchboard_status` result adds `limited`. Decision reasons add `limit_reached`, `limit_no_eligible_account`, `switched_on_limit`.
 - `Store::rotation_decision_with(policy, current, now, limited)`; `rotation_decision` passes an empty set. `Store::adopt_refreshed`, `Store::export`, `Store::changes`, `Store::backup_id`.
-- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item` and `auto-update` (`SETTING_FILES`; absent in a 0.5 backup, ignored by a 0.5 reader); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
+- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` (`SETTING_FILES`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 64 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
 
 ## 0.5.1 additions
 
@@ -418,6 +418,40 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
 - The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
   are SB-72.
+- **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:
+  `crates/switchboard-runtime/src/spend.rs`. `<data>/spend.json` (0600, at most 64 KiB, carried in
+  backups, removed by `switchboard uninstall`), never `Snapshot`, so a 0.6.x build still reads the
+  store after a downgrade. Content: `{version: 1, ceilings: [{scope, cents, set_at,
+  doubled_from?}], questions: [{id: "q_" + 16 hex, scope, cents, spent, reached_at, answer?:
+  keep|double, answered_at?, answered_by?: window|cli|mcp}], baselines: [{workflow, key: machine
+  or a pool, usage, at}], last_handover?}`; at most 256 ceilings (one per `ChainScope`), 64
+  questions, 256 baselines. A ceiling is whole cents from $0.01 to $1,000 (`spend::cents`: zero,
+  negative, NaN, infinite or out-of-range amounts are refused and nothing is written). Machine
+  and group ceilings count per UTC day; a group takes one only with its own OpenRouter key
+  (`Give this group its own key under API keys first.`), and one whose key was removed is kept
+  and shown inactive (`inactive_reason: no_own_key`); a task ceiling counts the key's usage since
+  the task's first paid hand-over (C-Q2). Setting a scope's value closes its open questions: an
+  answer is tied to the value it was asked about. `keep` is accepted from every surface,
+  `double` only with `by: window` (`Doubling a ceiling is answered in the Switchboard window.`,
+  C-Q1), doubling past $1,000 is refused and the question stays open. `by: window` is accepted
+  only in the app's own process: the control listener and an offline command refuse it before it
+  runs (`Only the Switchboard window answers as the window. ...`;
+  `a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener`,
+  `an_offline_command_cannot_answer_a_ceiling_as_the_window`). A removed group takes its
+  ceiling, questions and baselines along; answered questions and baselines go after 30 days, an
+  open daily question after the next UTC day; a clock set back drops nothing. A file that cannot
+  be read, is not a JSON object, or breaks any of these rules is an error, never "no ceilings":
+  `spend::check` then skips every paid step (`ceilings_unreadable`) and every write is refused.
+  `spend::decide` (pure; called by C-5) skips a paid step, in order: `key_exhausted` when the
+  key's own limit has less than $0.50 left, with or without a ceiling; `ceiling_reached` naming
+  the strictest reached ceiling; `spend_unknown` when a covering ceiling's spend could not be
+  read (an API-key Claude Code or Codex account under a ceiling is always unknown, C-Q3); with no
+  covering ceiling an unread key runs (`spend_unread`). Log event `ceiling` with `action`
+  (`set`, `cleared`, `reached`, `kept`, `doubled`) and `scope` (`machine`, `project`,
+  `workflow`). `Operation::Ceilings` → `{ceilings, questions, last_handover, limits}`;
+  `Operation::SetCeiling {scope, usd}` (`usd: null` clears) → `{ceiling}`;
+  `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. Tests in `spend::tests` and
+  `spending_ceilings_are_set_read_and_answered_through_the_runtime`.
 
 ## Automatic fallback, phase 1 (SB-73, 2026-10-06)
 

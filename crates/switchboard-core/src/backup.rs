@@ -67,10 +67,26 @@ pub struct Restored {
     pub organizations: usize,
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
-/// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
-pub const SETTING_FILES: &[&str] = &["login-item", "auto-update", "agents-settings.json"];
-/// A setting file carried in a backup: a word for the switches, a small JSON for the agents (SB-120).
+/// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater;
+/// `spend.json`: the spending ceilings, SB-72).
+pub const SETTING_FILES: &[&str] = &[
+    "login-item",
+    "auto-update",
+    "agents-settings.json",
+    "spend.json",
+];
+/// A setting file carried in a backup: a word for the switches, a small JSON for the agents
+/// (SB-120); the spending ceilings' file holds up to 256 ceilings and their questions (SB-72,
+/// the runtime's `spend::MAX_BYTES`). A file past its limit is not carried.
 const MAX_SETTING: u64 = 4096;
+const MAX_SPEND_SETTING: u64 = 64 * 1024;
+fn setting_limit(name: &str) -> u64 {
+    if name == "spend.json" {
+        MAX_SPEND_SETTING
+    } else {
+        MAX_SETTING
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -226,7 +242,8 @@ pub fn write(
     let settings = SETTING_FILES
         .iter()
         .filter_map(|name| {
-            let bytes = private_fs::read_private(&store.root().join(name), MAX_SETTING).ok()?;
+            let bytes =
+                private_fs::read_private(&store.root().join(name), setting_limit(name)).ok()?;
             let text = String::from_utf8(bytes).ok()?.trim().to_owned();
             (!text.is_empty()).then(|| ((*name).to_owned(), text))
         })
@@ -679,7 +696,7 @@ pub fn restore(
         let path = store.root().join(&name);
         // Only the known settings, never over a choice made on this install.
         if SETTING_FILES.contains(&name.as_str())
-            && value.len() as u64 <= MAX_SETTING
+            && value.len() as u64 <= setting_limit(&name)
             && !path.exists()
             && private_fs::private_write(&path, format!("{value}\n").as_bytes()).is_ok()
         {
@@ -1008,6 +1025,53 @@ mod tests {
         );
     }
     const PERSONAL_WORD: &str = crate::organizations::PERSONAL;
+
+    #[test]
+    fn a_backup_carries_the_spending_ceilings_whole() {
+        // SB-72 (C-4): spend.json holds money values the operator set; a reinstall gets them back
+        // byte for byte, also when the file is larger than a switch's 4 KiB.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        save(&original, "synthetic-a", "token-a-secret");
+        let ceilings: Vec<String> = (0..120)
+            .map(|i| {
+                format!(
+                    r#"{{"scope":{{"kind":"workflow","id":"wf_{i:016x}"}},"cents":250,"set_at":1}}"#
+                )
+            })
+            .collect();
+        let spend = format!(
+            r#"{{"version":1,"ceilings":[{{"scope":{{"kind":"machine"}},"cents":500,"set_at":1}},{}]}}"#,
+            ceilings.join(",")
+        );
+        assert!(spend.len() > 4096 && spend.len() < 64 * 1024);
+        std::fs::write(original.root().join("spend.json"), &spend).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.settings, 1);
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("spend.json"))
+                .unwrap()
+                .trim_end(),
+            spend
+        );
+        // A file past the limit is not carried (nor restored): never a truncated copy.
+        let third = store(&temp.path().join("three"));
+        save(&third, "synthetic-b", "token-b-secret");
+        std::fs::write(third.root().join("spend.json"), vec![b' '; 64 * 1024 + 1]).unwrap();
+        let big = write(&third, &backups, &keys, 2_000).unwrap().unwrap();
+        let fourth = store(&temp.path().join("four"));
+        assert_eq!(
+            restore(&fourth, &backups, &big.file, &keys)
+                .unwrap()
+                .settings,
+            0
+        );
+        assert!(!fourth.root().join("spend.json").exists());
+    }
 
     #[test]
     fn a_reinstall_gets_projects_rules_selections_and_settings_back() {
