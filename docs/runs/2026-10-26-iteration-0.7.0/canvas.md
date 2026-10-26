@@ -73,8 +73,10 @@ read split.
 | Node | Branch, last commit | Rounds | State |
 |---|---|---|---|
 | A-4, A-2 (R3), A-3 (R3) | `w3/shell` `11019dd` | r1 seam fail (backup lost `off`, notice in memory only, ZDOTDIR, created file left, other data folder); fixed `4d8feb0`; r2 adversarial: 12 of 15 plants caught, bash `set -a` leak; fixed, every plant now caught | **merged** |
-| B-3, B-4 | `w3/person` `97a48df` | r1 seam fail (`shell on` offered after the person turned it off, `shell on/off` dependency, `in_cli` missing on login finish) | fix cycle on top of the merged `w3/shell` next |
-| C-5 (R3), C-6 (R3) | not started | | after B-3/B-4 |
+| B-3, B-4 | `w3/person` `97a48df`, fix `947b8e3` | r1 seam fail (`shell on` offered after the person turned it off, `shell on/off` dependency, `in_cli` missing on login finish); fixed; r2 clean | **merged** `a6701ad` |
+| C-5 (R3), C-6 (R3) | `w3/spend` `49c415f` | fix cycle 1 `c373510` (every paid start gated once, C-Q8, C-Q9); fix cycle 2 `9a4f473` (counted keys window-only, one budget per pass, paid gate before the owner transaction, queued hand-overs re-gated, subscription refusal first); blind seam read: blocker `project delete` removed a counted key; fix cycle 3 `49c415f` (group delete keeps counted keys, canonical hand-over folder, SCN-054); loop guard reached, non-blocking findings filed SB-213 … SB-217 (`4fd6f4e`) | **merged** `dc734fd` |
+
+Merged gate on `dc734fd` (2026-10-26): clippy `-D warnings` exit 0; `cargo test` core, runtime (669 passed, 1 ignored), cli: 0 failed; `check-error-vocabulary`, `check-locale`, `check_docs`, `check_plugin` exit 0. **Wave 3 closed.**
 
 ## D-1 (added 2026-10-26)
 
