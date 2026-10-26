@@ -69,34 +69,46 @@ _switchboard_inherit() {
   return 0
 }
 
-# Asks Switchboard what applies in this folder and moves the three variables. Prints nothing;
-# a missing CLI or an answer of another form changes nothing.
+# Splits the answer in the caller's _sb_line into its _sb_context, _sb_claude and _sb_codex.
+# Fails on an answer of another form.
+_switchboard_parse() {
+  _sb_tab=$(printf '\t')
+  case $_sb_line in
+    *"$_sb_tab"*"$_sb_tab"*"$_sb_tab"*) ;;
+    *) return 1 ;;
+  esac
+  _sb_pool=${_sb_line%%"$_sb_tab"*}
+  _sb_rest=${_sb_line#*"$_sb_tab"}
+  _sb_context=${_sb_rest%%"$_sb_tab"*}
+  _sb_rest=${_sb_rest#*"$_sb_tab"}
+  _sb_claude=${_sb_rest%%"$_sb_tab"*}
+  _sb_codex=${_sb_rest#*"$_sb_tab"}
+  case $_sb_codex in *"$_sb_tab"*) return 1 ;; esac
+  [ -n "$_sb_pool" ] && [ -n "$_sb_context" ] || return 1
+  [ "$_sb_claude" != - ] || _sb_claude=
+  [ "$_sb_codex" != - ] || _sb_codex=
+  case $_sb_claude in ''|/*) ;; *) return 1 ;; esac
+  case $_sb_codex in ''|/*) ;; *) return 1 ;; esac
+  return 0
+}
+
+# Asks Switchboard what applies in this folder and moves the three variables. Prints nothing.
+# A CLI that is missing, older, failing or slow, or an answer of another form, reads as `none`:
+# what the hook holds is given back, and nothing it does not hold changes.
 _switchboard_apply() {
   local _sb_line _sb_tab _sb_rest _sb_pool _sb_context _sb_claude _sb_codex
   [ -z "${SWITCHBOARD_SESSION-}" ] || return 0
-  [ -x "$_switchboard_cli" ] || return 0
-  _sb_line=$("$_switchboard_cli" --data-dir "$_switchboard_data" shell env --shell "$_switchboard_shell" --dir "$PWD" 2>/dev/null </dev/null) || return 0
+  _sb_line=
+  if [ ! -x "$_switchboard_cli" ] || ! _switchboard_ask; then
+    _sb_line=none
+  fi
   _sb_context=
   _sb_claude=
   _sb_codex=
-  if [ "$_sb_line" != none ]; then
-    _sb_tab=$(printf '\t')
-    case $_sb_line in
-      *"$_sb_tab"*"$_sb_tab"*"$_sb_tab"*) ;;
-      *) return 0 ;;
-    esac
-    _sb_pool=${_sb_line%%"$_sb_tab"*}
-    _sb_rest=${_sb_line#*"$_sb_tab"}
-    _sb_context=${_sb_rest%%"$_sb_tab"*}
-    _sb_rest=${_sb_rest#*"$_sb_tab"}
-    _sb_claude=${_sb_rest%%"$_sb_tab"*}
-    _sb_codex=${_sb_rest#*"$_sb_tab"}
-    case $_sb_codex in *"$_sb_tab"*) return 0 ;; esac
-    [ -n "$_sb_pool" ] && [ -n "$_sb_context" ] || return 0
-    [ "$_sb_claude" = - ] && _sb_claude=
-    [ "$_sb_codex" = - ] && _sb_codex=
-    case $_sb_claude in ''|/*) ;; *) return 0 ;; esac
-    case $_sb_codex in ''|/*) ;; *) return 0 ;; esac
+  if [ "$_sb_line" != none ] && ! _switchboard_parse; then
+    _sb_context=
+    _sb_claude=
+    _sb_codex=
   fi
   _switchboard_var claude CLAUDE_CONFIG_DIR "$_sb_claude"
   _switchboard_var codex CODEX_HOME "$_sb_codex"

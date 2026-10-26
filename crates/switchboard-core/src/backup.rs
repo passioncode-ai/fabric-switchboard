@@ -68,12 +68,14 @@ pub struct Restored {
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
 /// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater;
-/// `spend.json`: the spending ceilings, SB-72).
+/// `spend.json`: the spending ceilings, SB-72; `shell-hook`: the terminal hook's `on` or `off`,
+/// SB-183, so a restored `off` is never read as the default and written over).
 pub const SETTING_FILES: &[&str] = &[
     "login-item",
     "auto-update",
     "agents-settings.json",
     "spend.json",
+    "shell-hook",
 ];
 /// A setting file carried in a backup: a word for the switches, a small JSON for the agents
 /// (SB-120); the spending ceilings' file holds up to 256 ceilings and their questions (SB-72,
@@ -1213,6 +1215,26 @@ mod tests {
                 .unwrap()
                 .trim(),
             "on"
+        );
+    }
+    /// SB-183: the terminal hook's choice travels like the other switches, so a reinstall that
+    /// restores a backup keeps `off` off (absent would read as the default, and the owner would
+    /// write the start-file blocks again).
+    #[test]
+    fn the_terminal_hooks_choice_survives_a_reinstall() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        save(&original, "synthetic-a", "token-a-secret");
+        std::fs::write(original.root().join("shell-hook"), "off\n").unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.settings, 1);
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("shell-hook")).unwrap(),
+            "off\n"
         );
     }
     #[test]

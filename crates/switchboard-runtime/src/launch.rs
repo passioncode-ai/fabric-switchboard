@@ -60,9 +60,28 @@ pub fn agent_cli() -> Option<PathBuf> {
     if current.file_name().is_some_and(|n| n == CLI_NAME) {
         return Some(current);
     }
+    cli_candidates(&current)
+        .into_iter()
+        .filter(|p| p.is_absolute() && p.is_file())
+        .find_map(|p| p.canonicalize().ok())
+}
+/// An installed CLI other than `current` (a development build): beside the desktop executable,
+/// on the user's PATH or in `~/.local/bin`, found as [`agent_cli`] finds one.
+pub(crate) fn installed_cli(current: &Path) -> Option<PathBuf> {
+    cli_candidates(current)
+        .into_iter()
+        .filter(|p| p.is_absolute() && p.is_file())
+        .filter_map(|p| p.canonicalize().ok())
+        .find(|p| p != current)
+}
+fn cli_candidates(current: &Path) -> Vec<PathBuf> {
     // Never a translocated copy beside a desktop app opened from its download folder: an MCP
     // entry pointing into it breaks once the app quits.
-    let mut candidates = vec![current.parent()?.join(CLI_NAME)];
+    let mut candidates: Vec<PathBuf> = current
+        .parent()
+        .map(|dir| dir.join(CLI_NAME))
+        .into_iter()
+        .collect();
     candidates.retain(|p| !crate::agents::translocated(p));
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(CLI_NAME)));
@@ -71,9 +90,6 @@ pub fn agent_cli() -> Option<PathBuf> {
         candidates.push(PathBuf::from(home).join(".local/bin").join(CLI_NAME));
     }
     candidates
-        .into_iter()
-        .filter(|p| p.is_absolute() && p.is_file())
-        .find_map(|p| p.canonicalize().ok())
 }
 /// What a launched session needs to reach Switchboard's tools: Claude reads an extra MCP
 /// file named on its command line; Codex reads `[mcp_servers]` from its private config.

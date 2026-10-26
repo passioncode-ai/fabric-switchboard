@@ -1078,7 +1078,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             keep_data,
             purge,
             yes,
-            &switchboard_runtime::uninstall::places(),
+            &switchboard_runtime::uninstall::places(&root),
         );
     }
     if let Command::Onboard {

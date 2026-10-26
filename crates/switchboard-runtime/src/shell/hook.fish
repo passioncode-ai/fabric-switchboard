@@ -2,7 +2,8 @@
 # In a folder of a group bound to an organization, `claude` and `codex` run in that group's
 # shell homes with SWITCHBOARD_CONTEXT=org:<id>; leaving the folder gives your own values back.
 # Off: `switchboard shell off`. It prints nothing and never fails the prompt.
-if not set -q SWITCHBOARD_SESSION; and not set -q _switchboard_shell
+# fish reads conf.d in every fish, scripts too: only an interactive one is hooked.
+if status is-interactive; and not set -q SWITCHBOARD_SESSION; and not set -q _switchboard_shell
     set -g _switchboard_shell fish
     set -g _switchboard_cli @CLI@
     set -g _switchboard_data @DATA@
@@ -52,26 +53,37 @@ if not set -q SWITCHBOARD_SESSION; and not set -q _switchboard_shell
         return 0
     end
 
+    # A CLI that is missing, older or failing, or an answer of another form, reads as `none`:
+    # what the hook holds is given back. (fish has no timeout for a command's output.)
     function _switchboard_apply
         set -q SWITCHBOARD_SESSION; and return 0
-        test -x "$_switchboard_cli"; or return 0
-        set -l line ("$_switchboard_cli" --data-dir "$_switchboard_data" shell env --shell fish --dir "$PWD" 2>/dev/null </dev/null)
-        or return 0
-        test (count $line) -eq 1; or return 0
+        set -l line none
+        if test -x "$_switchboard_cli"
+            set line ("$_switchboard_cli" --data-dir "$_switchboard_data" shell env --shell fish --dir "$PWD" 2>/dev/null </dev/null)
+            or set line none
+        end
+        test (count $line) -eq 1; or set line none
         set -l context ""
         set -l claude ""
         set -l codex ""
         if test "$line" != none
             set -l parts (string split \t -- $line)
-            test (count $parts) -eq 4; or return 0
-            test -n "$parts[1]"; and test -n "$parts[2]"; or return 0
-            set context $parts[2]
-            set claude $parts[3]
-            set codex $parts[4]
-            test "$claude" = -; and set claude ""
-            test "$codex" = -; and set codex ""
-            string match -q -r '^(|/.*)$' -- $claude; or return 0
-            string match -q -r '^(|/.*)$' -- $codex; or return 0
+            set -l ok 1
+            test (count $parts) -eq 4; and test -n "$parts[1]"; and test -n "$parts[2]"; or set ok 0
+            if test $ok = 1
+                set context $parts[2]
+                set claude $parts[3]
+                set codex $parts[4]
+                test "$claude" = -; and set claude ""
+                test "$codex" = -; and set codex ""
+                string match -q -r '^(|/.*)$' -- $claude; or set ok 0
+                string match -q -r '^(|/.*)$' -- $codex; or set ok 0
+            end
+            if test $ok != 1
+                set context ""
+                set claude ""
+                set codex ""
+            end
         end
         _switchboard_var claude CLAUDE_CONFIG_DIR "$claude"
         _switchboard_var codex CODEX_HOME "$codex"

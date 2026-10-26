@@ -9,6 +9,11 @@ if [ -n "${BASH_VERSION-}" ] && [ -z "${SWITCHBOARD_SESSION-}" ] && [ -z "${_swi
   _switchboard_data=@DATA@
   _switchboard_pwd=$PWD
 @CORE@
+  # The CLI's answer into the caller's _sb_line; fails when the CLI fails. (bash has no timeout
+  # for a command's output that also works in its POSIX mode.)
+  _switchboard_ask() {
+    _sb_line=$("$_switchboard_cli" --data-dir "$_switchboard_data" shell env --shell bash --dir "$PWD" 2>/dev/null </dev/null)
+  }
   # Runs before every prompt; acts only when the folder changed, and keeps the status the
   # prompt shows.
   _switchboard_prompt() {

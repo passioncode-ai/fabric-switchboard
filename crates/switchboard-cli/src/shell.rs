@@ -69,7 +69,9 @@ impl InitShell {
 }
 
 /// `switchboard shell on|off`: saves the choice, brings the start files in line with it now and
-/// answers `shell status`.
+/// answers `shell status`. Only for the app's own data folder: every data folder would write the
+/// same marker into the same home. The hook names the installed CLI (a development build never
+/// names itself).
 pub fn set(data_dir: Option<&Path>, on: bool) -> Result<Value, String> {
     let root = match data_dir {
         Some(root) => root.to_owned(),
@@ -78,7 +80,13 @@ pub fn set(data_dir: Option<&Path>, on: bool) -> Result<Value, String> {
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
     }
-    let cli = std::env::current_exe().and_then(|p| p.canonicalize()).ok();
+    if !install::is_default_root(&root) {
+        return Err(NOT_OWN_FOLDER.into());
+    }
+    let cli = install::hook_cli();
+    if on && cli.is_none() {
+        return Err(NO_INSTALLED_CLI.into());
+    }
     let host = install::Host::process(cli)
         .ok_or("Your home folder could not be found, so no start file was changed.")?;
     install::set_choice(&root, on)?;
@@ -91,6 +99,10 @@ pub fn set(data_dir: Option<&Path>, on: bool) -> Result<Value, String> {
     }
     Ok(status(Some(&root), None))
 }
+/// `shell on|off` with another `--data-dir` (copy: Copylot reports in the commit).
+const NOT_OWN_FOLDER: &str = "Only Switchboard's own data folder can change your terminals' start files. Run this command without --data-dir.";
+/// `shell on` in a development build with no installed CLI to name.
+const NO_INSTALLED_CLI: &str = "No installed switchboard command was found for the hook to run. Install Fabric Switchboard, then run this command again.";
 
 /// `switchboard shell init <shell>`: the hook script, naming this executable and the data
 /// folder.
@@ -298,6 +310,9 @@ pub fn status_text(value: &Value) -> String {
                 "a link, so Switchboard did not change it. Add this yourself: switchboard shell init {shell}"
             ),
             Some("skipped_owner") => "another user's file, not changed".to_owned(),
+            Some("skipped_zdotdir_unknown") => {
+                "not created: zsh may read its start file from another folder (ZDOTDIR). Add this to the start file zsh reads: eval \"$(switchboard shell init zsh)\"".to_owned()
+            }
             Some("unreadable") => "could not be read, not changed".to_owned(),
             Some("removed_by_person") => {
                 "you took the block out; switchboard shell on adds it again".to_owned()

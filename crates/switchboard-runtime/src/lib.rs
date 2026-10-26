@@ -688,8 +688,6 @@ pub struct Runtime {
     /// Whether a group bound to an organization existed at the last look, for the hook's
     /// default (written when the first appears, taken out when the last leaves).
     shell_present: Mutex<Option<bool>>,
-    /// The first-time notice for the window, taken once (`take_shell_hook_notice`).
-    shell_notice: Mutex<Option<Value>>,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
     backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
     backup_folder: Mutex<Option<PathBuf>>,
@@ -836,7 +834,6 @@ impl Runtime {
             usage_gate,
             shell_hook: Mutex::new(None),
             shell_present: Mutex::new(None),
-            shell_notice: Mutex::new(None),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
@@ -1669,11 +1666,19 @@ impl Runtime {
     /// SB-183 (node A-3): the installed app's owner writes the terminal hook's start-file
     /// blocks. Only for the app's own data folder; the app calls it only from an installed
     /// build (never a development build or the smoke check), and `serve` never does.
+    /// The app must also run from `/Applications` or `~/Applications` on macOS: a bundle opened
+    /// from a download or build folder (or translocated) is not installed.
     pub fn enable_shell_hook(self: &Arc<Self>) {
-        if default_root().ok().as_deref() != Some(self.root.as_path()) {
+        if !shell::install::is_default_root(&self.root) {
             return;
         }
-        if let Some(host) = shell::install::Host::process(launch::agent_cli()) {
+        let installed = std::env::current_exe()
+            .and_then(|exe| exe.canonicalize())
+            .is_ok_and(|exe| shell::install::installed_app(&exe, dirs::home_dir().as_deref()));
+        if !installed {
+            return;
+        }
+        if let Some(host) = shell::install::Host::process(shell::install::hook_cli()) {
             self.enable_shell_hook_with(host);
         }
     }
@@ -1687,10 +1692,17 @@ impl Runtime {
             .is_ok_and(|s| shell::homes::organizations_present(&s));
         self.shell_hook_apply(present);
     }
-    /// The first-time notice (once): `{organization, group}` of the organization's group whose
-    /// presence wrote the first block. The window shows it (node A-7).
-    pub fn take_shell_hook_notice(&self) -> Option<Value> {
-        self.shell_notice.lock().ok().and_then(|mut n| n.take())
+    /// The first-time notice: `{organization, group}` of the organization's group whose
+    /// presence wrote the first block, kept in `shell-hook.json` until the window acknowledges
+    /// it (a restart in between keeps it). The window shows it (node A-7).
+    pub fn shell_hook_notice(&self) -> Option<Value> {
+        shell::install::pending_notice(&self.root)
+            .map(|n| json!({"organization": n.organization, "group": n.group}))
+    }
+    /// The window showed the first-time notice: it is never shown again.
+    pub fn acknowledge_shell_hook_notice(&self) {
+        let root = self.root.clone();
+        blocking::run(move || shell::install::acknowledge_notice(&root));
     }
     /// Runs the start-file installer when the presence of an organization's group is new or
     /// flipped; never on an idle pass, never without the installed app's home.
@@ -1730,10 +1742,13 @@ impl Runtime {
                         .is_some_and(|o| s.organization(o).is_some())
                 })?;
                 let organization = s.organization(group.organization.as_deref()?)?;
-                Some(json!({"organization": organization.name, "group": group.name}))
+                Some(shell::install::Notice {
+                    organization: organization.name.clone(),
+                    group: group.name.clone(),
+                })
             });
-            if let (Some(notice), Ok(mut slot)) = (notice, self.shell_notice.lock()) {
-                *slot = Some(notice);
+            if let Some(notice) = notice {
+                blocking::run(|| shell::install::set_notice(&self.root, notice));
             }
         }
     }
@@ -5987,7 +6002,7 @@ mod owner_tests {
         runtime.enable_shell_hook();
         runtime.bindings_pass().await;
         assert!(!shell::install::record_path(root.path()).exists());
-        assert!(runtime.take_shell_hook_notice().is_none());
+        assert!(runtime.shell_hook_notice().is_none());
         drop(work);
     }
 
@@ -6017,18 +6032,17 @@ mod owner_tests {
         // No organization yet: enabled, nothing written.
         runtime.enable_shell_hook_with(host);
         assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
-        assert!(runtime.take_shell_hook_notice().is_none());
+        assert!(runtime.shell_hook_notice().is_none());
         // The first organization's group appears: the next pass writes the block, once.
         let (work, _acme) = organization_group(&runtime).await;
         runtime.bindings_pass().await;
         let text = std::fs::read_to_string(&zshrc).unwrap();
         assert!(text.contains(shell::install::OPEN), "{text}");
-        let notice = runtime
-            .take_shell_hook_notice()
-            .expect("the first-time notice");
+        let notice = runtime.shell_hook_notice().expect("the first-time notice");
         assert_eq!(notice["organization"], "Acme");
         assert_eq!(notice["group"], "Acme");
-        assert!(runtime.take_shell_hook_notice().is_none(), "only once");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none(), "only once");
         // Idle passes do not touch the file.
         std::fs::write(&zshrc, &text).unwrap();
         runtime.bindings_pass().await;
@@ -6062,7 +6076,7 @@ mod owner_tests {
     }
 
     /// A group bound to the organization "Acme" with one Claude account and one folder.
-    async fn organization_group(runtime: &Runtime) -> (tempfile::TempDir, PathBuf) {
+    pub(crate) async fn organization_group(runtime: &Runtime) -> (tempfile::TempDir, PathBuf) {
         let work = tempfile::tempdir().unwrap();
         let acme = work.path().canonicalize().unwrap().join("acme");
         std::fs::create_dir_all(&acme).unwrap();
@@ -8175,6 +8189,52 @@ mod lifecycle_tests {
             .await
             .unwrap()
             .status()
+    }
+
+    /// SB-183 (node A-3): the first-time notice waits for the window, across a restart of the
+    /// owner, and is gone once the window acknowledged it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_first_time_notice_waits_for_the_window_across_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        let first = owner(root.path()).await;
+        first.runtime.enable_shell_hook_with(host.clone());
+        let (work, _acme) = super::owner_tests::organization_group(&first.runtime).await;
+        first.runtime.bindings_pass().await;
+        assert!(first.runtime.shell_hook_notice().is_some());
+        first.shutdown(Duration::from_secs(5)).await;
+        // The app restarted before the window showed it.
+        let second = owner(root.path()).await;
+        let runtime = &second.runtime;
+        let notice = runtime
+            .shell_hook_notice()
+            .expect("the notice is still waiting after a restart");
+        assert_eq!(notice["organization"], "Acme");
+        assert_eq!(notice["group"], "Acme");
+        assert!(runtime.shell_hook_notice().is_some(), "until acknowledged");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none());
+        second.shutdown(Duration::from_secs(5)).await;
+        let third = owner(root.path()).await;
+        third.runtime.enable_shell_hook_with(host);
+        third.runtime.bindings_pass().await;
+        assert!(third.runtime.shell_hook_notice().is_none(), "said once");
+        third.shutdown(Duration::from_secs(5)).await;
+        drop(work);
     }
 
     #[tokio::test]

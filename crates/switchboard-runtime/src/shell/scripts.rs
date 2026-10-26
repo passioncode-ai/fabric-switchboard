@@ -11,7 +11,10 @@
 //! - a variable the person changed while the hook held it is theirs: never written over;
 //! - a terminal Switchboard launched (`SWITCHBOARD_SESSION` set) is never touched;
 //! - a home inherited from a hooked parent terminal is held, with "not set" as the person's own;
-//! - the CLI missing, or an answer of another form: nothing changes, nothing is printed.
+//! - the CLI missing, older, failing (or, in zsh, silent for ten seconds), or an answer of
+//!   another form: read as `none`, so what the hook holds is given back and nothing else
+//!   changes; nothing is printed;
+//! - fish: only an interactive fish is hooked (`conf.d` is read by fish scripts too).
 //!
 //! The scripts are templates (`hook.zsh`, `hook.bash`, `hook.fish`, with `core.sh` shared by
 //! zsh and bash) holding the CLI's and the data folder's absolute paths, quoted for the shell.
@@ -219,7 +222,9 @@ mod tests {
         match kind {
             Kind::Zsh => command.args(["-f", "-c", &script]),
             Kind::Bash => command.args(["--noprofile", "--norc", "-c", &script]),
-            Kind::Fish => command.args(["--no-config", "-c", &script]),
+            // fish reads `conf.d` in every fish, scripts too: the hook acts only in an
+            // interactive one, so the tests run fish as one.
+            Kind::Fish => command.args(["--no-config", "-i", "-c", &script]),
         };
         command
             .env_clear()
@@ -449,6 +454,119 @@ mod tests {
             );
             assert!(err.is_empty(), "{k}: {err}");
         }
+    }
+
+    /// A CLI that is gone (the app uninstalled or moved), too old to know `shell env`, or failing:
+    /// the variables the hook holds are given back as on leaving, so no group's home outlives
+    /// the CLI that chose it.
+    #[test]
+    fn a_missing_old_or_failing_cli_gives_the_held_values_back() {
+        for kind in shells() {
+            for broken in ["gone", "old", "garbage"] {
+                let w = world();
+                let quote = |p: &Path| match kind {
+                    Kind::Fish => fish_quote(&p.to_string_lossy()),
+                    _ => sh_quote(&p.to_string_lossy()),
+                };
+                let replacement = w.data.join("replacement");
+                std::fs::write(
+                    &replacement,
+                    match broken {
+                        // An older CLI: `shell env` is an unknown command there.
+                        "old" => "#!/bin/sh\necho 'error: unrecognized subcommand' >&2\nexit 2\n",
+                        _ => "#!/bin/sh\necho 'acme\torg:o-acme'\nexit 0\n",
+                    },
+                )
+                .unwrap();
+                let break_it = match broken {
+                    "gone" => format!("rm -f {}", quote(&w.cli)),
+                    _ => format!("cp {} {}", quote(&replacement), quote(&w.cli)),
+                };
+                let body = [
+                    cd(kind, &w.acme),
+                    show(kind, "acme"),
+                    break_it,
+                    cd(kind, &w.mine),
+                    show(kind, "mine"),
+                ]
+                .join("\n");
+                let (out, err) = run(&w, kind, &w.cli, &[("CODEX_HOME", "/own/codex")], &body);
+                let v = seen(&out);
+                let k = format!("{} {broken}", kind.name());
+                assert_eq!(
+                    v["acme CLAUDE_CONFIG_DIR"], w.acme_claude,
+                    "{k}: {out}{err}"
+                );
+                assert_eq!(v["mine CLAUDE_CONFIG_DIR"], "unset", "{k}: {out}{err}");
+                assert_eq!(v["mine CODEX_HOME"], "/own/codex", "{k}: set back");
+                assert_eq!(v["mine SWITCHBOARD_CONTEXT"], "unset", "{k}");
+                assert!(err.is_empty(), "{k}: {err}");
+            }
+        }
+    }
+
+    /// zsh waits at most ten seconds for the CLI's answer: a CLI that hangs never holds the
+    /// prompt longer, and what the hook held is given back.
+    #[test]
+    fn a_hanging_cli_never_holds_a_zsh_prompt() {
+        let Some(_) = shell_path(Kind::Zsh) else {
+            return;
+        };
+        let w = world();
+        let hang = w.data.join("hang");
+        std::fs::write(&hang, "#!/bin/sh\nsleep 30\necho none\n").unwrap();
+        let body = [
+            cd(Kind::Zsh, &w.acme),
+            show(Kind::Zsh, "acme"),
+            format!(
+                "cp {} {}",
+                sh_quote(&hang.to_string_lossy()),
+                sh_quote(&w.cli.to_string_lossy())
+            ),
+            cd(Kind::Zsh, &w.mine),
+            show(Kind::Zsh, "mine"),
+        ]
+        .join("\n");
+        let started = std::time::Instant::now();
+        let (out, err) = run(&w, Kind::Zsh, &w.cli, &[], &body);
+        let took = started.elapsed();
+        let v = seen(&out);
+        assert_eq!(v["acme CLAUDE_CONFIG_DIR"], w.acme_claude, "{out}{err}");
+        assert_eq!(v["mine CLAUDE_CONFIG_DIR"], "unset", "{out}{err}");
+        assert!(
+            took < std::time::Duration::from_secs(25),
+            "the prompt waited {took:?}"
+        );
+        assert!(err.is_empty(), "{err}");
+    }
+
+    /// fish reads `conf.d` in scripts too: a fish that is not interactive never runs the hook.
+    #[test]
+    fn a_fish_script_never_runs_the_hook() {
+        let Some(fish) = shell_path(Kind::Fish) else {
+            eprintln!("skipped: fish is not installed on this machine");
+            return;
+        };
+        let w = world();
+        let hook = w.data.join("hook.fish");
+        std::fs::write(&hook, script(Kind::Fish, &w.cli, &w.data).unwrap()).unwrap();
+        let body = format!(
+            "source {}\ncd {}\n{}",
+            fish_quote(&hook.to_string_lossy()),
+            fish_quote(&w.acme.to_string_lossy()),
+            show(Kind::Fish, "acme")
+        );
+        let out = Command::new(fish)
+            .args(["--no-config", "-c", &body])
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("HOME", w.data.parent().unwrap())
+            .current_dir(&w.mine)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(seen(&text)["acme CLAUDE_CONFIG_DIR"], "unset", "{text}");
+        assert_eq!(calls(&w), 0, "the CLI was never asked");
     }
 
     #[test]

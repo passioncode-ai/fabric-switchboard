@@ -91,6 +91,9 @@ struct Target {
     own_file: bool,
     /// Created when it does not exist.
     create: bool,
+    /// zsh's start file is missing and may live in another folder (`ZDOTDIR` set where this
+    /// process cannot see it): never created.
+    zdotdir_unknown: bool,
 }
 
 /// The start files of the shells present for `host`. None on Windows yet (PowerShell is node
@@ -110,6 +113,7 @@ fn targets(host: &Host) -> Vec<Target> {
         out.push(Target {
             kind: scripts::Kind::Zsh,
             create: host.login("zsh"),
+            zdotdir_unknown: host.zdotdir.is_none() && !exists(&zsh) && zdotdir_may_move(host),
             path: zsh,
             own_file: false,
         });
@@ -127,6 +131,7 @@ fn targets(host: &Host) -> Vec<Target> {
         out.push(Target {
             kind: scripts::Kind::Bash,
             create: host.login("bash"),
+            zdotdir_unknown: false,
             path: bash,
             own_file: false,
         });
@@ -138,9 +143,73 @@ fn targets(host: &Host) -> Vec<Target> {
             path: fish.join("conf.d").join(FISH_FILE),
             own_file: true,
             create: true,
+            zdotdir_unknown: false,
         });
     }
     out
+}
+
+/// Whether zsh may read its start files from another folder than the home this process sees.
+/// An app started from the Dock or at login does not inherit the `ZDOTDIR` a person exports in
+/// `~/.zshenv`, so any `~/.zshenv` counts (it may set it, or source a file that does), and a
+/// `~/.zprofile` that names `ZDOTDIR` or cannot be read.
+fn zdotdir_may_move(host: &Host) -> bool {
+    if std::fs::symlink_metadata(host.home.join(".zshenv")).is_ok() {
+        return true;
+    }
+    let zprofile = host.home.join(".zprofile");
+    match std::fs::symlink_metadata(&zprofile) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+        Ok(_) => std::fs::metadata(&zprofile)
+            .ok()
+            .filter(|m| m.is_file() && m.len() <= MAX_RC)
+            .and_then(|_| std::fs::read(&zprofile).ok())
+            .is_none_or(|bytes| bytes.windows(7).any(|w| w == b"ZDOTDIR")),
+    }
+}
+
+/// Whether `root` is the app's own data folder (`default`, from `crate::default_root`): only
+/// that one may change the person's start files, since every data folder would write the same
+/// marker into the same home.
+pub fn same_root(root: &Path, default: Option<&Path>) -> bool {
+    let Some(default) = default else {
+        return false;
+    };
+    root == default
+        || matches!(
+            (root.canonicalize(), default.canonicalize()),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+/// [`same_root`] against this process's default data folder.
+pub fn is_default_root(root: &Path) -> bool {
+    same_root(root, crate::default_root().ok().as_deref())
+}
+/// Whether `exe` is an app installed where people keep apps: on macOS inside `/Applications`
+/// or `~/Applications` (never a bundle opened from a download or build folder, nor a
+/// translocated copy); elsewhere any release build the app's caller calls installed.
+pub fn installed_app(exe: &Path, home: Option<&Path>) -> bool {
+    if !cfg!(target_os = "macos") {
+        return true;
+    }
+    let under = |folder: &Path| {
+        exe.strip_prefix(folder).is_ok_and(|rest| {
+            rest.components()
+                .any(|c| c.as_os_str().to_string_lossy().ends_with(".app"))
+        })
+    };
+    under(Path::new("/Applications")) || home.is_some_and(|h| under(&h.join("Applications")))
+}
+/// The CLI a hook names: [`crate::launch::agent_cli`] in a release build; a development build
+/// never names itself (its file goes with the next `cargo clean`), only an installed copy found
+/// the same way. None: no CLI to name.
+pub fn hook_cli() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return crate::launch::agent_cli();
+    }
+    let current = std::env::current_exe().ok()?.canonicalize().ok()?;
+    crate::launch::installed_cli(&current)
 }
 
 /// What the installer did to one start file.
@@ -151,6 +220,9 @@ pub enum State {
     RemovedByPerson,
     SkippedSymlink,
     SkippedOwner,
+    /// zsh's start file was not created: zsh may read it from another folder (`ZDOTDIR` set in
+    /// `~/.zshenv` or `~/.zprofile`, which an app started from the Dock does not see).
+    SkippedZdotdirUnknown,
     Unreadable,
 }
 
@@ -164,6 +236,10 @@ pub struct Entry {
     /// taking the block out takes that break too.
     #[serde(default)]
     pub newline_added: bool,
+    /// The installer created the file: taking the block out deletes it when nothing else is
+    /// left in it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub created: bool,
     #[serde(default)]
     pub at: i64,
 }
@@ -171,6 +247,17 @@ pub struct Entry {
 pub struct Record {
     #[serde(default)]
     pub files: Vec<Entry>,
+    /// The first-time notice the window has not acknowledged yet: kept across restarts, dropped
+    /// when the hook is no longer wanted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice_pending: Option<Notice>,
+}
+/// What the window's first-time notice names: the organization and its group whose presence
+/// wrote the first block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Notice {
+    pub organization: String,
+    pub group: String,
 }
 
 /// What one run did, for the log and the window's first-time notice.
@@ -209,6 +296,29 @@ fn write_record(root: &Path, record: &Record) {
         // A record that cannot be saved is written again on the next run; the start files are
         // already right.
         let _ = switchboard_core::private_fs::private_write(&record_path(root), &bytes);
+    }
+}
+
+/// Saves the first-time notice for the window, while a block is written (the owner, after the
+/// run that wrote the first one).
+pub fn set_notice(root: &Path, notice: Notice) {
+    let _lock = run_lock(root);
+    let mut record = read_record(root);
+    if record.files.iter().any(|e| e.state == State::Written) {
+        record.notice_pending = Some(notice);
+        write_record(root, &record);
+    }
+}
+/// The first-time notice the window has not acknowledged.
+pub fn pending_notice(root: &Path) -> Option<Notice> {
+    read_record(root).notice_pending
+}
+/// The window showed the notice: it is not shown again.
+pub fn acknowledge_notice(root: &Path) {
+    let _lock = run_lock(root);
+    let mut record = read_record(root);
+    if record.notice_pending.take().is_some() {
+        write_record(root, &record);
     }
 }
 
@@ -403,6 +513,35 @@ fn without(text: &str, range: std::ops::Range<usize>, newline_added: bool) -> St
 pub fn apply(root: &Path, host: &Host, organizations: bool, explicit: bool) -> Report {
     apply_with(root, host, organizations, explicit, &mut |_| {})
 }
+
+/// An advisory `flock` on the data folder itself, held for a whole run, so the owner's run and
+/// `switchboard shell on|off` or `uninstall` from another process never interleave between a
+/// start file's read and its rename. The folder, not a file in it: the record is replaced by a
+/// rename, which a lock on it would not survive, and a lock file would be one more thing in a
+/// data folder that may never have had an organization's group (or one `uninstall` empties).
+/// The store's own lock is `instance.lock`, a different file, so the two never meet.
+struct RunLock(#[allow(dead_code)] Option<std::fs::File>);
+/// Waits for the lock; a data folder that cannot be opened runs without it (nothing can be
+/// written there either).
+fn run_lock(root: &Path) -> RunLock {
+    let Ok(folder) = std::fs::File::open(root) else {
+        return RunLock(None);
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        loop {
+            // SAFETY: the descriptor is open for the call; the lock goes with the file.
+            if unsafe { libc::flock(folder.as_raw_fd(), libc::LOCK_EX) } == 0 {
+                break;
+            }
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                return RunLock(None);
+            }
+        }
+    }
+    RunLock(Some(folder))
+}
 /// [`apply`], calling `before_rename` with each start file's path just before its rename (a
 /// test changes the file there).
 fn apply_with(
@@ -412,6 +551,7 @@ fn apply_with(
     explicit: bool,
     before_rename: &mut dyn FnMut(&Path),
 ) -> Report {
+    let _lock = run_lock(root);
     let wanted = match map::choice(root) {
         map::Choice::On => true,
         map::Choice::Off => false,
@@ -427,7 +567,10 @@ fn apply_with(
         return report;
     }
     let now = crate::monitor::now();
-    let mut record = Record::default();
+    let mut record = Record {
+        notice_pending: before.notice_pending.clone().filter(|_| wanted),
+        ..Record::default()
+    };
     let targets = targets(host);
     if wanted {
         for target in &targets {
@@ -484,7 +627,12 @@ fn install_one(
         path: path_text.clone(),
         state,
         newline_added,
+        created: false,
         at: 0,
+    };
+    let ours = |newline_added: bool, created: bool| Entry {
+        created,
+        ..entry(State::Written, newline_added)
     };
     let previous = before.files.iter().find(|e| e.path == path_text);
     let hook = scripts::hook_path(root, target.kind);
@@ -505,6 +653,10 @@ fn install_one(
     };
     let (next, newline_added) = match &read {
         None if !target.create => return None,
+        None if target.zdotdir_unknown => {
+            report.skipped += 1;
+            return Some(entry(State::SkippedZdotdirUnknown, false));
+        }
         None => (block.clone(), false),
         Some(read) => match find(&read.text) {
             Found::Broken => {
@@ -544,14 +696,16 @@ fn install_one(
         report.no_hook = true;
         return previous.cloned();
     }
+    // Created now, or by an earlier run: given back by deleting it when only the block is left.
+    let created = read.is_none() || previous.is_some_and(|e| e.created);
     if read.as_ref().is_some_and(|r| r.text == next) {
         report.written += 1;
-        return Some(entry(State::Written, newline_added));
+        return Some(ours(newline_added, created));
     }
     match write_start(&target.path, &next, read.as_ref(), before_rename) {
         Wrote::Done => {
             report.written += 1;
-            Some(entry(State::Written, newline_added))
+            Some(ours(newline_added, created))
         }
         Wrote::Changed => {
             report.changed += 1;
@@ -603,6 +757,7 @@ fn remove_from(
             path: path.to_string_lossy().into_owned(),
             state,
             newline_added: false,
+            created: false,
             at: crate::monitor::now(),
         };
         if previous.is_some_and(|e| e.state == State::RemovedByPerson) {
@@ -629,7 +784,10 @@ fn remove_from(
         };
         let newline_added = previous.is_some_and(|e| e.newline_added);
         let next = without(&read.text, range, newline_added);
-        let result = if own_file && next.is_empty() {
+        // Switchboard's own file, or a start file the installer created: deleted when nothing
+        // else is left in it, so the home is as it was.
+        let created = own_file || previous.is_some_and(|e| e.created);
+        let result = if created && next.is_empty() {
             before_rename(&path);
             let now = std::fs::symlink_metadata(&path)
                 .ok()
@@ -659,6 +817,7 @@ fn remove_from(
 /// Takes every block out (`switchboard uninstall`), whatever the choice. Err: the files that
 /// still hold one.
 pub fn remove_all(root: &Path, host: &Host) -> Result<usize, Vec<String>> {
+    let _lock = run_lock(root);
     let before = read_record(root);
     let removal = remove_from(host, &targets(host), &before, &mut |_| {});
     let left: Vec<String> = removal
@@ -671,6 +830,7 @@ pub fn remove_all(root: &Path, host: &Host) -> Result<usize, Vec<String>> {
         root,
         &Record {
             files: removal.kept,
+            notice_pending: None,
         },
     );
     if left.is_empty() {
@@ -1010,6 +1170,163 @@ mod tests {
         std::fs::write(&fish, &text).unwrap();
         remove_all(&w.root, &w.host).unwrap();
         assert_eq!(std::fs::read_to_string(&fish).unwrap(), "set -gx MINE 1\n");
+    }
+
+    /// A GUI app does not see the `ZDOTDIR` a person sets in `~/.zshenv`: a `~/.zshrc` created
+    /// there would never be read, so none is created and the record says why.
+    #[test]
+    fn no_zshrc_is_created_when_zshenv_may_move_zdotdir() {
+        let w = world();
+        std::fs::write(
+            w.host.home.join(".zshenv"),
+            "export ZDOTDIR=\"$HOME/.config/zsh\"\n",
+        )
+        .unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 0, "{report:?}");
+        assert!(!zshrc(&w).exists(), "no start file zsh may never read");
+        assert_eq!(state_of(&w, &zshrc(&w)), Some(State::SkippedZdotdirUnknown));
+        // Any `.zshenv` may set it (or source a file that does): not created either.
+        let w = world();
+        std::fs::write(w.host.home.join(".zshenv"), ". \"$HOME/.cargo/env\"\n").unwrap();
+        assert_eq!(set_and_apply(&w, None, true).written, 0);
+        assert!(!zshrc(&w).exists());
+        // A `.zprofile` naming ZDOTDIR: not created.
+        let w = world();
+        std::fs::write(w.host.home.join(".zprofile"), "export ZDOTDIR=~/z\n").unwrap();
+        assert_eq!(set_and_apply(&w, None, true).written, 0);
+        assert!(!zshrc(&w).exists());
+        // A `.zprofile` that does not (Homebrew's line) leaves zsh reading `~/.zshrc`: created.
+        let w = world();
+        std::fs::write(
+            w.host.home.join(".zprofile"),
+            "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n",
+        )
+        .unwrap();
+        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert!(block_in(&std::fs::read_to_string(zshrc(&w)).unwrap()));
+        // Once the person makes their own `~/.zshrc`, the next run writes into it.
+        let w = world();
+        std::fs::write(w.host.home.join(".zshenv"), "export ZDOTDIR=$HOME\n").unwrap();
+        set_and_apply(&w, None, true);
+        std::fs::write(zshrc(&w), "mine\n").unwrap();
+        assert_eq!(apply(&w.root, &w.host, true, false).written, 1);
+        assert_eq!(state_of(&w, &zshrc(&w)), Some(State::Written));
+        // An existing `~/.zshrc` is written whatever `.zshenv` says.
+        let w = world();
+        std::fs::write(w.host.home.join(".zshenv"), "export ZDOTDIR=$HOME/z\n").unwrap();
+        std::fs::write(zshrc(&w), "own\n").unwrap();
+        assert_eq!(set_and_apply(&w, None, true).written, 1);
+    }
+
+    /// A start file the installer created is given back too: deleted when nothing of the
+    /// person's is left in it.
+    #[test]
+    fn a_start_file_the_installer_created_is_deleted_when_the_block_goes() {
+        let mut w = world();
+        w.host.login_shell = Some("bash".into());
+        let profile = w.host.home.join(".bash_profile");
+        assert!(!profile.exists());
+        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert!(block_in(&std::fs::read_to_string(&profile).unwrap()));
+        assert!(read_record(&w.root).files.iter().all(|e| e.created));
+        set_choice(&w.root, false).unwrap();
+        let off = apply(&w.root, &w.host, true, false);
+        assert_eq!(off.removed, 1, "{off:?}");
+        assert!(!profile.exists(), "the file the installer created is gone");
+        // One the person wrote into meanwhile keeps their lines.
+        let mut w = world();
+        w.host.login_shell = Some("bash".into());
+        let profile = w.host.home.join(".bash_profile");
+        set_and_apply(&w, None, true);
+        let mut text = std::fs::read_to_string(&profile).unwrap();
+        text.push_str("export MINE=1\n");
+        std::fs::write(&profile, &text).unwrap();
+        assert_eq!(remove_all(&w.root, &w.host), Ok(1));
+        assert_eq!(
+            std::fs::read_to_string(&profile).unwrap(),
+            "export MINE=1\n"
+        );
+        // A file the person had is never deleted, even when only the block was in it.
+        let mut w = world();
+        w.host.login_shell = Some("bash".into());
+        let profile = w.host.home.join(".bash_profile");
+        std::fs::write(&profile, "").unwrap();
+        set_and_apply(&w, None, true);
+        assert_eq!(remove_all(&w.root, &w.host), Ok(1));
+        assert_eq!(std::fs::read_to_string(&profile).unwrap(), "");
+    }
+
+    /// The owner's run and `shell on|off` never interleave: a second run waits for the first.
+    #[test]
+    fn a_second_run_waits_for_the_first() {
+        let w = world();
+        std::fs::write(zshrc(&w), "own\n").unwrap();
+        let path = zshrc(&w);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let mut other: Option<std::thread::JoinHandle<()>> = None;
+        let report = apply_with(&w.root, &w.host, true, false, &mut |p: &Path| {
+            if p != path || other.is_some() {
+                return;
+            }
+            // `shell off` from another process while this run is between its read and rename.
+            let (root, host, done) = (w.root.clone(), w.host.clone(), done_tx.clone());
+            other = Some(std::thread::spawn(move || {
+                set_choice(&root, false).unwrap();
+                apply(&root, &host, true, false);
+                done.send(()).unwrap();
+            }));
+            assert!(
+                done_rx
+                    .recv_timeout(std::time::Duration::from_millis(500))
+                    .is_err(),
+                "the second run went on while the first held the start files"
+            );
+        });
+        assert_eq!(report.written, 1, "{report:?}");
+        other.unwrap().join().unwrap();
+        // The `off` ran after the `on`: the file is back as it was and the record agrees.
+        assert_eq!(std::fs::read_to_string(zshrc(&w)).unwrap(), "own\n");
+        assert!(read_record(&w.root)
+            .files
+            .iter()
+            .all(|e| e.state != State::Written));
+    }
+
+    #[test]
+    fn only_the_apps_own_data_folder_and_an_installed_app_touch_the_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().canonicalize().unwrap().join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        assert!(same_root(&a, Some(&a)));
+        assert!(same_root(&link, Some(&a)), "the same folder through a link");
+        assert!(!same_root(&tmp.path().join("b"), Some(&a)));
+        assert!(!same_root(&a, None));
+        let home = Path::new("/Users/p");
+        let app = |dir: &str| PathBuf::from(dir).join("Fabric Switchboard.app/Contents/MacOS/app");
+        if cfg!(target_os = "macos") {
+            assert!(installed_app(&app("/Applications"), Some(home)));
+            assert!(installed_app(&app("/Users/p/Applications"), Some(home)));
+            assert!(installed_app(&app("/Applications/Utilities"), Some(home)));
+            assert!(!installed_app(&app("/Users/p/Downloads"), Some(home)));
+            assert!(!installed_app(
+                &app("/private/var/folders/x/T/AppTranslocation/0A1B"),
+                Some(home)
+            ));
+            assert!(!installed_app(
+                &app("/Users/p/src/target/release/bundle/macos"),
+                Some(home)
+            ));
+            assert!(!installed_app(&app("/Users/q/Applications"), Some(home)));
+            assert!(!installed_app(&app("/Users/p/Applications"), None));
+        } else {
+            assert!(installed_app(
+                Path::new("/usr/bin/fabric-switchboard"),
+                Some(home)
+            ));
+        }
     }
 
     #[test]

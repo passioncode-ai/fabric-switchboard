@@ -103,12 +103,20 @@ pub const LOGIN_ITEM_WINDOWS: &str = "Fabric Switchboard";
 pub const LOGIN_ITEM_LINUX: &str = ".config/autostart/Fabric Switchboard.desktop";
 
 /// The real places: `~/.local/bin` and, on macOS, the login Keychain.
-pub fn places() -> Places {
+pub fn places(root: &Path) -> Places {
+    places_for(root, crate::default_root().ok().as_deref())
+}
+/// The terminal hook's start files are looked at only for the app's own data folder: every
+/// data folder writes the same marker into the same home, so another one's uninstall must not
+/// take out the blocks the app's folder wrote (SB-183).
+fn places_for(root: &Path, default: Option<&Path>) -> Places {
     Places {
         bin: dirs::home_dir().map(|h| h.join(".local/bin")),
         remove_orphan_key,
         remove_login_item,
-        shell: crate::shell::install::Host::process(None),
+        shell: crate::shell::install::same_root(root, default)
+            .then(|| crate::shell::install::Host::process(None))
+            .flatten(),
     }
 }
 #[cfg(target_os = "macos")]
@@ -379,6 +387,22 @@ mod tests {
         std::fs::write(root.join("homes/x/history.jsonl"), "{}").unwrap();
         std::fs::write(root.join("usage-holds.json"), "{}").unwrap();
         (temp, root, vault)
+    }
+
+    /// SB-183: only the app's own data folder takes the terminal hook's blocks out of the home;
+    /// uninstalling another data folder never looks at the start files.
+    #[test]
+    fn only_the_apps_own_data_folder_takes_the_blocks_out() {
+        let temp = tempfile::tempdir().unwrap();
+        let (own, other) = (temp.path().join("own"), temp.path().join("other"));
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(places_for(&other, Some(&own)).shell.is_none());
+        assert!(places_for(&own, None).shell.is_none());
+        assert_eq!(
+            places_for(&own, Some(&own)).shell.is_some(),
+            crate::shell::install::Host::process(None).is_some()
+        );
     }
 
     #[test]

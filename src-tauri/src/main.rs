@@ -940,6 +940,23 @@ async fn set_analytics(
 ) -> Result<Value, String> {
     slot.runtime().await?.set_analytics(enabled, question)
 }
+/// SB-183 (node A-3): the terminal hook's first-time notice, `{organization, group}`, or null.
+/// It waits in `shell-hook.json` until the window acknowledges it, so a restart before the window
+/// showed it keeps it; node A-7 draws it.
+#[tauri::command]
+async fn shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
+    Ok(state
+        .runtime()
+        .await?
+        .shell_hook_notice()
+        .unwrap_or(Value::Null))
+}
+/// The window showed the first-time notice: never shown again.
+#[tauri::command]
+async fn acknowledge_shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.acknowledge_shell_hook_notice();
+    Ok(Value::Null)
+}
 /// Whether Switchboard opens at login (SB-28). Unavailable in a development build and the smoke
 /// check.
 #[tauri::command]
@@ -1139,6 +1156,8 @@ fn main() {
             set_language,
             login_item,
             set_login_item,
+            shell_hook_notice,
+            acknowledge_shell_hook_notice,
             update_status,
             set_auto_update,
             restart_to_update,

@@ -207,23 +207,37 @@ switchboard shell on                # put it back, with or without an organizati
   `<data>/shell-hook`: no store lock, no owner, so a busy or stopped owner never holds a terminal.
   It always exits 0 and never writes to the error stream; anything it cannot read (no map, a map
   of another version or over 1 MiB, the hook turned off, a relative or unknown folder, a bad
-  argument) answers `none`. Budget 25 ms (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
+  argument) answers `none`. The Claude home is answered only in the group's folder itself: Claude
+  Code reads Switchboard's route only from the folder it starts in, so in a subfolder the Claude
+  field is `-` (a group with no Codex account answers `none` there). Budget 25 ms
+  (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
 - `shell init <zsh|bash|fish>` prints the hook script, naming this executable and the data folder,
   for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in `.zshrc`
   (bash likewise), `switchboard shell init fish | source` in fish's. On every change of folder it
   asks `shell env` and exports the group's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
   `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
   them back exactly when you leave; a variable you change while inside stays yours. It prints
-  nothing, never fails the prompt, and does nothing in a terminal Switchboard launched.
-- On a computer with a group bound to an organization, the installed app puts one marked block
+  nothing, never fails the prompt, and does nothing in a terminal Switchboard launched. A CLI that
+  is gone, too old for `shell env` or failing reads as `none`, so the values it set are given back;
+  zsh waits at most ten seconds for an answer. fish runs the hook in interactive shells only.
+- On a computer with a group bound to an organization, the installed app (in `/Applications` or
+  `~/Applications` on macOS) puts one marked block
   (`# >>> Fabric Switchboard: shell hook (SB-183) >>>` … `# <<< Fabric Switchboard <<<`) at the end
-  of the start file of each shell present: `.zshrc` (in `ZDOTDIR` when set), bash's login file on
+  of the start file of each shell present: `.zshrc` (in `ZDOTDIR` when set; never created when
+  there is none and `~/.zshenv` exists, or `~/.zprofile` names `ZDOTDIR`, since the app cannot
+  see where zsh reads it: `shell status` then gives `eval "$(switchboard shell init zsh)"` to add
+  yourself), bash's login file on
   macOS (`.bash_profile`, `.bash_login` or `.profile`) and `.bashrc` on Linux, and fish's own file
   `~/.config/fish/conf.d/fabric-switchboard.fish`. It reads the hook script only when it is there.
   A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
   `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
-  written back. `shell off` gives every file back byte for byte, and `switchboard uninstall` does
-  the same.
+  written back. `shell off` gives every file back byte for byte (a start file Switchboard created
+  and that holds nothing else is deleted), and `switchboard uninstall` does the same.
+- `shell on` and `shell off` act for Switchboard's own data folder only: with another
+  `--data-dir` they answer “Only Switchboard's own data folder can change your terminals' start
+  files. Run this command without --data-dir.” and change nothing, and `uninstall` of another
+  data folder leaves the start files alone. The hook names the installed `switchboard` (a
+  development build never names itself; with none installed, `shell on` says so).
 - `shell status` reads the same files and the installer's record and never fails: `hook` is `on`,
   `off`, `default_on` (no choice made and a group belongs to an organization) or `default_off`;
   `terminal.hook_loaded` says whether this terminal exported `SWITCHBOARD_SHELL_HOOK=1`; `here` is
