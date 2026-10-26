@@ -970,6 +970,102 @@ mod tests {
             crate::spend::WINDOW_ONLY
         );
     }
+    #[tokio::test]
+    async fn a_group_holding_a_ceiling_is_deleted_only_in_the_window_and_takes_it_along() {
+        // Risk 2 (C fix cycle 2, C-Q7): deleting a group drops its ceiling, a loosening an agent
+        // may not make (C-Q1). Through the listener and offline it is refused, the ceiling kept;
+        // the window deletes it, and a group saved again under the same id inherits nothing.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let remove = |by: Surface| Operation::RemoveProject {
+            pool: alpha.pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                if by == Surface::Window {
+                    crate::spend::WINDOW_ONLY
+                } else {
+                    crate::spend::GROUP_HOLDS_CEILING
+                },
+                "{by:?}"
+            );
+        }
+        // Offline the same: no owner answers in this other data folder, the refusal comes from
+        // spend.json itself, before the store's group is touched.
+        let offline = tempfile::tempdir().unwrap();
+        crate::spend::set_ceiling(
+            offline.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Cli))
+                .await
+                .unwrap_err(),
+            crate::spend::GROUP_HOLDS_CEILING
+        );
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        assert!(store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .any(|p| p.pool == alpha.pool));
+        assert_eq!(crate::spend::read(tmp.path()).unwrap().ceilings.len(), 1);
+        // The window deletes it in its own process; the ceiling goes with it.
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(crate::spend::read(tmp.path()).unwrap().ceilings.is_empty());
+        let again = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        assert_eq!(again.pool, alpha.pool, "the same id comes back");
+        let view = crate::spend::view(tmp.path(), &store.snapshot().unwrap(), now).unwrap();
+        assert!(view["ceilings"].as_array().unwrap().is_empty());
+        // A group without a ceiling is deleted from the CLI as before.
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn descriptor_is_private_and_symlink_is_rejected() {

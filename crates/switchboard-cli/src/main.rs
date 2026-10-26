@@ -1549,7 +1549,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .map(|u| folder(&Some(u.clone())))
                     .collect::<Result<Vec<_>, _>>()?,
             },
-            Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
+            Project::Delete { pool } => Operation::RemoveProject {
+                pool: pool.clone(),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
             Project::Suggest {
                 from_hook: true, ..
             } => project_suggest_hook_and_exit(&root).await,

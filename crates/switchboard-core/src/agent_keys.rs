@@ -210,30 +210,14 @@ impl Store {
             .find(|k| k.service == service && k.pool.as_deref() == pool))
     }
     /// SB-144: the key an agent starting in `folder` runs on: its project's own key, else the
-    /// machine's. A project that was deleted leaves its key unused, never in the way.
+    /// machine's. A project that was deleted leaves its key unused, never in the way. The choice
+    /// is [`key_in`], shared with the runtime's spending gate and chains view.
     pub fn agent_key_in(
         &self,
         service: &str,
         folder: Option<&std::path::Path>,
     ) -> Result<Option<AgentKey>, String> {
-        let snapshot = self.snapshot()?;
-        let pool = folder
-            .and_then(|f| snapshot.project_for(f))
-            .map(|p| p.pool.clone());
-        let own = pool.as_ref().and_then(|p| {
-            snapshot
-                .agent_keys
-                .iter()
-                .find(|k| k.service == service && k.pool.as_ref() == Some(p))
-        });
-        Ok(own
-            .or_else(|| {
-                snapshot
-                    .agent_keys
-                    .iter()
-                    .find(|k| k.service == service && k.pool.is_none())
-            })
-            .cloned())
+        Ok(key_in(&self.snapshot()?, service, folder).cloned())
     }
 
     /// The key's value, for a launched agent's environment only. Never returned to the window.
@@ -282,4 +266,25 @@ impl Store {
         let _ = self.vault.delete(&entry.id);
         Ok(true)
     }
+}
+
+/// The saved key of `service` an agent starting in `folder` runs on (SB-144): the key of the
+/// group `Snapshot::project_for` names for the folder, else the machine's; `None` when neither is
+/// saved. One rule for [`Store::agent_key_in`] and every reader that must name the same key (the
+/// runtime's spending gate and chains view).
+pub fn key_in<'a>(
+    snapshot: &'a Snapshot,
+    service: &str,
+    folder: Option<&std::path::Path>,
+) -> Option<&'a AgentKey> {
+    let pool = folder
+        .and_then(|f| snapshot.project_for(f))
+        .map(|p| p.pool.as_str());
+    let saved = |pool: Option<&str>| {
+        snapshot
+            .agent_keys
+            .iter()
+            .find(|k| k.service == service && k.pool.as_deref() == pool)
+    };
+    pool.and_then(|p| saved(Some(p))).or_else(|| saved(None))
 }

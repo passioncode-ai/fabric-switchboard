@@ -208,8 +208,13 @@ pub enum Operation {
         #[serde(default)]
         organization: Option<String>,
     },
+    /// Deletes a group. `by` names the surface (C-Q7): a group holding a spending ceiling is
+    /// deleted only by the window, since its ceiling goes with it; the CLI and MCP are refused.
+    /// Left out, a request counts as the CLI's.
     RemoveProject {
         pool: String,
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// Makes a pool's folder capability worthless and writes a new one into its folders (an
     /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
@@ -2695,6 +2700,9 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
         } | Operation::SetCeiling {
             by: spend::Surface::Window,
             ..
+        } | Operation::RemoveProject {
+            by: spend::Surface::Window,
+            ..
         }
     )
     .then_some(spend::WINDOW_ONLY)
@@ -4334,8 +4342,13 @@ async fn execute(
             let map = blocking::run(|| roots::disk_map(&under, &snapshot));
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
-        Operation::RemoveProject { pool } => {
-            let project = store.remove_project(&pool)?;
+        Operation::RemoveProject { pool, by } => {
+            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock.
+            let (project, pruned) =
+                spend::remove_group(root, &pool, by, || store.remove_project(&pool))?;
+            if pruned {
+                store.setting_changed();
+            }
             // SB-121: its folders are not adopted by another project by themselves afterwards.
             if suggest::remember_removed(root, &project.pool, &project.folders, monitor::now())
                 .is_err()
@@ -6287,7 +6300,10 @@ mod owner_tests {
         // An account left in a deleted project's pool goes back to default by itself.
         runtime.execute(move_to("app")).await.unwrap();
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         assert_eq!(pool_of(&runtime), "app");
@@ -6525,7 +6541,10 @@ mod owner_tests {
         assert_eq!(folders(&runtime).len(), 2);
         // Removing the whole project remembers its folders too.
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         runtime

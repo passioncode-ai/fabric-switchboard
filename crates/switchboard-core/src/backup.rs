@@ -81,7 +81,7 @@ pub const SETTING_FILES: &[&str] = &[
 const MAX_SETTING: u64 = 4096;
 /// The runtime's `spend::MAX_BYTES`: a test there fails when the two part (a spend.json the
 /// runtime writes must always fit a backup).
-pub const MAX_SPEND_SETTING: u64 = 64 * 1024;
+pub const MAX_SPEND_SETTING: u64 = 128 * 1024;
 fn setting_limit(name: &str) -> u64 {
     if name == "spend.json" {
         MAX_SPEND_SETTING
@@ -700,12 +700,24 @@ pub fn restore(
         if SETTING_FILES.contains(&name.as_str())
             && value.len() as u64 <= setting_limit(&name)
             && !path.exists()
-            && private_fs::private_write(&path, format!("{value}\n").as_bytes()).is_ok()
+            && private_fs::private_write(&path, &restored_bytes(&name, &value)).is_ok()
         {
             result.settings += 1;
         }
     }
     Ok(result)
+}
+
+/// A setting as it is written back. A JSON setting comes back byte for byte as its owner wrote it
+/// (they write no line end, and the backup's trim keeps every byte of such a file), so a file of
+/// exactly its read limit stays readable (`spend.json`, C fix cycle 2). A switch word keeps its
+/// line end.
+fn restored_bytes(name: &str, value: &str) -> Vec<u8> {
+    if name.ends_with(".json") {
+        value.as_bytes().to_vec()
+    } else {
+        format!("{value}\n").into_bytes()
+    }
 }
 
 /// macOS key: one generic password, 64 hex characters, written through `security -i`.
@@ -1044,26 +1056,36 @@ mod tests {
                 )
             })
             .collect();
-        let spend = format!(
-            r#"{{"version":1,"ceilings":[{{"scope":{{"kind":"machine"}},"cents":500,"set_at":1}},{}]}}"#,
+        let body = format!(
+            r#""version":1,"ceilings":[{{"scope":{{"kind":"machine"}},"cents":500,"set_at":1}},{}]}}"#,
             ceilings.join(",")
         );
-        assert!(spend.len() > 4096 && spend.len() < 64 * 1024);
+        assert!(body.len() > 4096 && body.len() < MAX_SPEND_SETTING as usize);
+        // C fix cycle 2: exactly the limit, padded inside the object (the backup's trim keeps
+        // it); a restore that added a line end made it one byte too long to read.
+        let spend = format!(
+            "{{{}{body}",
+            " ".repeat(MAX_SPEND_SETTING as usize - body.len() - 1)
+        );
+        assert_eq!(spend.len() as u64, MAX_SPEND_SETTING);
         std::fs::write(original.root().join("spend.json"), &spend).unwrap();
         let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
         let fresh = store(&temp.path().join("two"));
         let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
         assert_eq!(restored.settings, 1);
         assert_eq!(
-            std::fs::read_to_string(fresh.root().join("spend.json"))
-                .unwrap()
-                .trim_end(),
-            spend
+            std::fs::read_to_string(fresh.root().join("spend.json")).unwrap(),
+            spend,
+            "byte for byte, no line end added"
         );
         // A file past the limit is not carried (nor restored): never a truncated copy.
         let third = store(&temp.path().join("three"));
         save(&third, "synthetic-b", "token-b-secret");
-        std::fs::write(third.root().join("spend.json"), vec![b' '; 64 * 1024 + 1]).unwrap();
+        std::fs::write(
+            third.root().join("spend.json"),
+            vec![b' '; MAX_SPEND_SETTING as usize + 1],
+        )
+        .unwrap();
         let big = write(&third, &backups, &keys, 2_000).unwrap().unwrap();
         let fourth = store(&temp.path().join("four"));
         assert_eq!(

@@ -610,7 +610,10 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
     state
         .runtime()
         .await?
-        .execute(Operation::RemoveProject { pool })
+        .execute(Operation::RemoveProject {
+            pool,
+            by: switchboard_runtime::spend::Surface::Window,
+        })
         .await
 }
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.

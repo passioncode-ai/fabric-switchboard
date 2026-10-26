@@ -18,9 +18,11 @@ use std::sync::Mutex;
 use switchboard_core::{workflow_id_valid, ChainScope, Snapshot};
 
 pub const FILE: &str = "spend.json";
-/// The backup carries this file whole (`backup::setting_limit`): 256 ceilings, 64 questions and
-/// 256 baselines fit with room.
-pub const MAX_BYTES: u64 = 64 * 1024;
+/// The backup carries this file whole (`backup::setting_limit`). The largest file the count caps
+/// and field rules allow (256 ceilings and 64 questions on 64-character group ids, 256 baselines,
+/// extreme amounts and times) is about 104 KiB, so a write within the caps is never refused for
+/// its size (`the_largest_file_the_caps_allow_fits_under_the_limit`).
+pub const MAX_BYTES: u64 = 128 * 1024;
 const VERSION: u32 = 1;
 /// A ceiling is whole cents from $0.01 to $1,000, the estate's monthly total (authority L0).
 pub const MIN_CENTS: u32 = 1;
@@ -29,14 +31,31 @@ pub const MAX_CENTS: u32 = 100_000;
 /// started on an almost empty key dies at the provider after the offer, which stops the chain.
 pub const MIN_REMAINING_USD: f64 = 0.50;
 pub const MAX_CEILINGS: usize = 256;
+/// Task ceilings are never pruned (a task's end is the engine's, not Switchboard's), so they take
+/// at most this many slots: the machine's and every group's ceiling keep room of their own.
+pub const MAX_TASK_CEILINGS: usize = 192;
+/// Group ceilings: the slots left besides the tasks' and the machine's one.
+pub const MAX_GROUP_CEILINGS: usize = MAX_CEILINGS - MAX_TASK_CEILINGS - 1;
 pub const MAX_QUESTIONS: usize = 64;
 pub const MAX_BASELINES: usize = 256;
 const MAX_SKIPPED: usize = 8;
 const DAY: i64 = 86_400;
 /// Answered questions and task baselines are kept this long.
 const KEEP: i64 = 30 * DAY;
+/// An open question about a task is kept this long after it was asked: a task's end is not
+/// something Switchboard sees, and the question must not hold a slot forever.
+const TASK_QUESTION_AGE: i64 = 7 * DAY;
 
-pub const UNREADABLE: &str = "Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Restore it from a backup, or delete it to start over with no ceilings.";
+pub const UNREADABLE: &str = "Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.";
+/// A write that would pass `MAX_BYTES`. The count caps keep every file this build writes under
+/// it, so this guards against a cap raised without its size.
+pub const TOO_LARGE: &str = "The spending ceilings file is full. Clear a task ceiling in the Switchboard window, then try again.";
+pub const TASK_CEILINGS_FULL: &str =
+    "At most 192 task ceilings. Clear one in the Switchboard window first.";
+pub const GROUP_CEILINGS_FULL: &str =
+    "At most 63 group ceilings. Clear one in the Switchboard window first.";
+/// Deleting a group drops its ceiling, which loosens it: only the window does that (C-Q7).
+pub const GROUP_HOLDS_CEILING: &str = "This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.";
 pub const OUT_OF_RANGE: &str = "Enter an amount from $0.01 to $1,000.";
 pub const NO_OWN_KEY: &str = "Give this group its own key under API keys first.";
 pub const NO_GROUP: &str = "That group id names no group.";
@@ -75,6 +94,10 @@ fn version() -> u32 {
 /// otherwise read an absent `Option` as `None`, a clear nobody asked for).
 pub(crate) fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     Option::<f64>::deserialize(d)
+}
+/// The surface a request that names none is taken for: never the window (C-Q1).
+pub(crate) fn agent_surface() -> Surface {
+    Surface::Cli
 }
 impl Default for SpendFile {
     fn default() -> Self {
@@ -326,10 +349,15 @@ fn write(root: &Path, file: &SpendFile) -> Result<(), String> {
         return Err(UNREADABLE.into());
     }
     let bytes = serde_json::to_vec(file).map_err(|_| UNREADABLE)?;
+    write_bytes(root, &bytes)
+}
+/// The last step of [`write`]: up to `MAX_BYTES` inclusive, the limit [`read`] takes, and nothing
+/// written past it.
+fn write_bytes(root: &Path, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() as u64 > MAX_BYTES {
-        return Err(UNREADABLE.into());
+        return Err(TOO_LARGE.into());
     }
-    switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
+    switchboard_core::private_fs::private_write(&root.join(FILE), bytes)
 }
 
 /// Whether a group has its own OpenRouter key (SB-144): only such a group takes a daily ceiling.
@@ -338,6 +366,55 @@ pub fn group_has_own_key(snapshot: &Snapshot, pool: &str) -> bool {
         .agent_keys
         .iter()
         .any(|k| k.service == "openrouter" && k.pool.as_deref() == Some(pool))
+}
+
+/// The OpenRouter key a paid step started in `folder` spends: the choice `Store::agent_key_in`
+/// makes (`agent_keys::key_in`, one function for both), for the gate's `PaidStep::key` (C-5) and
+/// the chains view. `None` when no OpenRouter key is saved.
+pub fn key_slot(snapshot: &Snapshot, folder: Option<&Path>) -> Option<KeySlot> {
+    switchboard_core::agent_keys::key_in(snapshot, "openrouter", folder).map(|k| match &k.pool {
+        Some(pool) => KeySlot::Group(pool.clone()),
+        None => KeySlot::Machine,
+    })
+}
+
+/// Deletes a group through `remove` under the write lock, then drops what spend.json holds for
+/// it (its ceiling, its questions, the task baselines counted on its key), so a group saved again
+/// under the same id inherits nothing. From the CLI or MCP a group that holds a ceiling is
+/// refused (`GROUP_HOLDS_CEILING`, C-Q7): deleting it would drop the ceiling, a loosening only
+/// the window makes (C-Q1). A file that cannot be read refuses every surface, since whether the
+/// group holds a ceiling cannot be told. Answers the removal's answer and whether spend.json
+/// changed. Should the write fail after the group is gone, the next change prunes the ceiling of
+/// a group the snapshot no longer holds, and `decide` never counts it meanwhile.
+pub fn remove_group<T>(
+    root: &Path,
+    pool: &str,
+    by: Surface,
+    remove: impl FnOnce() -> Result<T, String>,
+) -> Result<(T, bool), String> {
+    let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut file = read(root)?;
+    let scope = ChainScope::Project {
+        pool: pool.to_owned(),
+    };
+    if by != Surface::Window && file.ceilings.iter().any(|c| c.scope == scope) {
+        return Err(GROUP_HOLDS_CEILING.into());
+    }
+    let removed = remove()?;
+    let before = file.clone();
+    file.ceilings.retain(|c| c.scope != scope);
+    file.questions.retain(|q| q.scope != scope);
+    // `machine` names the machine key's baselines, never a group's.
+    file.baselines
+        .retain(|b| b.key != pool || pool == "machine");
+    let changed = file != before;
+    if changed {
+        match write(root, &file) {
+            Ok(()) => log("removed", &scope),
+            Err(_) => log("remove_failed", &scope),
+        }
+    }
+    Ok((removed, changed))
 }
 
 /// Drops what removed groups and time leave behind. A clock set back drops nothing: an age is
@@ -355,11 +432,12 @@ pub(crate) fn prune(file: &mut SpendFile, snapshot: &Snapshot, now: i64) {
         scope_exists(&q.scope)
             && match q.answered_at {
                 Some(at) => !older_than(at, KEEP),
-                // A daily ceiling's question no longer applies after the next UTC day.
-                None => {
-                    matches!(q.scope, ChainScope::Workflow { .. })
-                        || day(now) <= day(q.reached_at) + 1
-                }
+                // A daily ceiling's question no longer applies after the next UTC day; a task's
+                // is kept 7 days.
+                None => match q.scope {
+                    ChainScope::Workflow { .. } => !older_than(q.reached_at, TASK_QUESTION_AGE),
+                    _ => day(now) <= day(q.reached_at) + 1,
+                },
             }
     });
     file.baselines
@@ -454,8 +532,18 @@ pub fn set_ceiling(
         let Some(cents) = value else {
             return Ok(None);
         };
-        if file.ceilings.len() >= MAX_CEILINGS {
-            return Err("At most 256 spending ceilings. Clear one first.".into());
+        // The machine's one ceiling always fits; tasks and groups have slots of their own.
+        let same_kind =
+            |c: &&Ceiling| std::mem::discriminant(&c.scope) == std::mem::discriminant(&scope);
+        let held = file.ceilings.iter().filter(same_kind).count();
+        match scope {
+            ChainScope::Workflow { .. } if held >= MAX_TASK_CEILINGS => {
+                return Err(TASK_CEILINGS_FULL.into())
+            }
+            ChainScope::Project { .. } if held >= MAX_GROUP_CEILINGS => {
+                return Err(GROUP_CEILINGS_FULL.into())
+            }
+            _ => {}
         }
         let ceiling = Ceiling {
             scope: scope.clone(),
@@ -471,7 +559,10 @@ pub fn set_ceiling(
 }
 
 /// Opens the question for a reached ceiling, once per scope and value (C-5 calls it). Answers its
-/// id; `None` when every slot holds an open question.
+/// id. When every slot is taken, the oldest answered question makes room, then the oldest open
+/// task question; a machine or group question then takes the oldest open question's slot, so it
+/// always fits. `None` only for a task question while every slot holds an open machine or group
+/// question.
 pub fn open_question(
     root: &Path,
     snapshot: &Snapshot,
@@ -490,15 +581,30 @@ pub fn open_question(
             return Ok((Some(q.id.clone()), false));
         }
         if file.questions.len() >= MAX_QUESTIONS {
-            // Room is made from answered questions, oldest first; open ones are never dropped.
-            match file
+            let answered = file
                 .questions
                 .iter()
                 .enumerate()
                 .filter(|(_, q)| q.answer.is_some())
                 .min_by_key(|(_, q)| q.answered_at)
-                .map(|(i, _)| i)
-            {
+                .map(|(i, _)| i);
+            let oldest_open = |task_only: bool| {
+                file.questions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, q)| {
+                        q.answer.is_none()
+                            && (!task_only || matches!(q.scope, ChainScope::Workflow { .. }))
+                    })
+                    .min_by_key(|(_, q)| q.reached_at)
+                    .map(|(i, _)| i)
+            };
+            let room = answered.or_else(|| oldest_open(true)).or_else(|| {
+                (!matches!(scope, ChainScope::Workflow { .. }))
+                    .then(|| oldest_open(false))
+                    .flatten()
+            });
+            match room {
                 Some(i) => {
                     file.questions.remove(i);
                 }
@@ -1557,5 +1663,450 @@ mod tests {
                 reached: Some((alpha(), 300, 3.5))
             }
         );
+    }
+
+    fn wf(i: usize) -> ChainScope {
+        ChainScope::Workflow {
+            id: format!("wf_{i:016x}"),
+        }
+    }
+
+    /// A valid spend.json of exactly `len` bytes: a machine ceiling, padded inside the object so
+    /// a backup's trim keeps every byte.
+    fn exact(len: usize) -> Vec<u8> {
+        let mut file = SpendFile::default();
+        file.ceilings.push(Ceiling {
+            scope: ChainScope::Machine,
+            cents: 500,
+            set_at: T,
+            doubled_from: None,
+        });
+        let body = serde_json::to_vec(&file).unwrap();
+        let mut out = b"{".to_vec();
+        out.resize(len - body.len() + 1, b' ');
+        out.extend_from_slice(&body[1..]);
+        assert_eq!(out.len(), len);
+        out
+    }
+
+    struct Keys(Mutex<Option<[u8; 32]>>);
+    impl switchboard_core::backup::BackupKey for Keys {
+        fn load(&self) -> Result<Option<[u8; 32]>, String> {
+            Ok(*self.0.lock().unwrap())
+        }
+        fn create(&self, key: &[u8; 32]) -> Result<bool, String> {
+            let mut k = self.0.lock().unwrap();
+            if k.is_some() {
+                return Ok(false);
+            }
+            *k = Some(*key);
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn a_spend_file_of_exactly_the_limit_comes_back_from_a_backup_readable() {
+        // Break 1 (C fix cycle 2): a file of exactly MAX_BYTES was carried by the backup, but the
+        // restore added a line end and the read then refused it as unreadable.
+        use std::sync::Arc;
+        use switchboard_core::{AuthKind, Credential, MemoryVault, Provider, Store};
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let one = Store::open(temp.path().join("one"), Arc::new(MemoryVault::default())).unwrap();
+        one.add(
+            "Fixture".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "fixture-only").unwrap(),
+        )
+        .unwrap();
+        let bytes = exact(MAX_BYTES as usize);
+        write_bytes(one.root(), &bytes).unwrap();
+        assert_eq!(read(one.root()).unwrap().ceilings[0].cents, 500);
+        let keys = Keys(Mutex::new(None));
+        let info = switchboard_core::backup::write(&one, &backups, &keys, T)
+            .unwrap()
+            .unwrap();
+        let two = Store::open(temp.path().join("two"), Arc::new(MemoryVault::default())).unwrap();
+        let restored =
+            switchboard_core::backup::restore(&two, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.settings, 1);
+        assert_eq!(
+            std::fs::read(two.root().join(FILE)).unwrap(),
+            bytes,
+            "byte for byte"
+        );
+        assert_eq!(read(two.root()).unwrap().ceilings[0].cents, 500);
+    }
+
+    /// The largest file the count caps and the field rules allow.
+    fn largest() -> SpendFile {
+        let pool = |i: usize| format!("{i:0>64}");
+        let long = |c: char| std::iter::repeat_n(c, 64).collect::<String>();
+        SpendFile {
+            version: VERSION,
+            ceilings: (0..MAX_CEILINGS)
+                .map(|i| Ceiling {
+                    scope: ChainScope::Project { pool: pool(i) },
+                    cents: MAX_CENTS,
+                    set_at: i64::MIN,
+                    doubled_from: Some(MAX_CENTS),
+                })
+                .collect(),
+            questions: (0..MAX_QUESTIONS)
+                .map(|i| Question {
+                    id: format!("q_{i:016x}"),
+                    scope: ChainScope::Project { pool: pool(i) },
+                    cents: MAX_CENTS,
+                    spent: f64::MAX,
+                    reached_at: i64::MIN,
+                    answer: Some(Answer::Double),
+                    answered_at: Some(i64::MIN),
+                    answered_by: Some(Surface::Window),
+                })
+                .collect(),
+            baselines: (0..MAX_BASELINES)
+                .map(|i| Baseline {
+                    workflow: format!("wf_{i:016x}"),
+                    key: pool(i),
+                    usage: f64::MAX,
+                    at: i64::MIN,
+                })
+                .collect(),
+            last_handover: Some(LastHandover {
+                at: i64::MIN,
+                workflow: WF.into(),
+                outcome: long('o'),
+                skipped: (0..MAX_SKIPPED)
+                    .map(|_| Skipped {
+                        agent: long('a'),
+                        reason: long('r'),
+                    })
+                    .collect(),
+            }),
+        }
+    }
+
+    #[test]
+    fn the_largest_file_the_caps_allow_fits_under_the_limit() {
+        // Break 1: 256 ceilings, 64 questions and 256 baselines with 64-character pools did not
+        // fit 64 KiB, so a write near the caps was refused as if the file were unreadable.
+        let file = largest();
+        assert!(validate(&file));
+        let size = serde_json::to_vec(&file).unwrap().len() as u64;
+        assert!(size < MAX_BYTES, "{size} bytes, limit {MAX_BYTES}");
+        let root = tempfile::tempdir().unwrap();
+        write(root.path(), &file).unwrap();
+        assert_eq!(read(root.path()).unwrap(), file);
+    }
+
+    #[test]
+    fn a_provider_read_that_is_negative_nan_or_huge_is_never_counted_as_spend() {
+        // Risk 3: decide filters each usage read; a negative or NaN read is unknown (a denial),
+        // a huge one is spend that reaches the ceiling. Never a step that runs.
+        let unknown = Verdict::Skip {
+            reason: "spend_unknown",
+            reached: None,
+        };
+        let reached = |v: &Verdict| {
+            matches!(
+                v,
+                Verdict::Skip {
+                    reason: "ceiling_reached",
+                    ..
+                }
+            )
+        };
+        let daily = |v: f64| {
+            Some(KeyRead {
+                limit_remaining: Some(9.0),
+                usage: Some(1.0),
+                usage_daily: Some(v),
+            })
+        };
+        let mut machine = SpendFile::default();
+        machine.ceilings.push(Ceiling {
+            scope: ChainScope::Machine,
+            cents: 500,
+            set_at: T,
+            doubled_from: None,
+        });
+        let mut group = SpendFile::default();
+        group.ceilings.push(Ceiling {
+            scope: alpha(),
+            cents: 500,
+            set_at: T,
+            doubled_from: None,
+        });
+        let s = snapshot();
+        let on_machine = step(KeySlot::Machine);
+        let on_alpha = step(KeySlot::Group("alpha".into()));
+        for (value, bad) in [(-1.0, true), (f64::NAN, true), (1e308, false)] {
+            // On the step's own key, machine and group ceilings alike.
+            for (file, on) in [(&machine, &on_machine), (&group, &on_alpha)] {
+                let v = decide(
+                    file,
+                    &s,
+                    on,
+                    &Reads {
+                        key: daily(value),
+                        others: vec![],
+                    },
+                );
+                if bad {
+                    assert_eq!(v, unknown, "{value} on the step's key");
+                } else {
+                    assert!(reached(&v), "{value} on the step's key: {v:?}");
+                }
+            }
+            // On another saved key, which the machine ceiling adds up.
+            let v = decide(
+                &machine,
+                &s,
+                &on_machine,
+                &Reads {
+                    key: daily(0.0),
+                    others: vec![daily(value)],
+                },
+            );
+            if bad {
+                assert_eq!(v, unknown, "{value} on another key");
+            } else {
+                assert!(reached(&v), "{value} on another key: {v:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn two_surfaces_setting_one_ceiling_at_once_never_loosen_it() {
+        // Risk 4: the window sets $10 while the CLI sets $20 as a first ceiling. Whichever runs
+        // first, the result is $10: the CLI's $20 is a raise once the window's $10 is saved.
+        // Without the write lock both read an empty file and the CLI's $20 can win.
+        let s = snapshot();
+        for i in 0..300 {
+            let root = tempfile::tempdir().unwrap();
+            let barrier = std::sync::Barrier::new(2);
+            std::thread::scope(|t| {
+                for (usd, by) in [(10.0, Surface::Window), (20.0, Surface::Cli)] {
+                    let (root, s, barrier) = (root.path(), &s, &barrier);
+                    t.spawn(move || {
+                        barrier.wait();
+                        let _ = set_ceiling(root, s, ChainScope::Machine, Some(usd), by, T);
+                    });
+                }
+            });
+            let file = read(root.path()).unwrap();
+            assert_eq!(file.ceilings.len(), 1, "iteration {i}");
+            assert_eq!(file.ceilings[0].cents, 1000, "iteration {i}");
+        }
+    }
+
+    #[test]
+    fn four_scopes_set_at_once_are_all_kept() {
+        // Risk 4: one read-modify-write at a time; without the lock a write drops another's.
+        let s = snapshot();
+        for i in 0..300 {
+            let root = tempfile::tempdir().unwrap();
+            let barrier = std::sync::Barrier::new(4);
+            let scopes = [ChainScope::Machine, alpha(), wf(1), wf(2)];
+            std::thread::scope(|t| {
+                for scope in scopes.clone() {
+                    let (root, s, barrier) = (root.path(), &s, &barrier);
+                    t.spawn(move || {
+                        barrier.wait();
+                        set_ceiling(root, s, scope, Some(3.0), Surface::Window, T).unwrap();
+                    });
+                }
+            });
+            let file = read(root.path()).unwrap();
+            for scope in &scopes {
+                assert!(
+                    file.ceilings.iter().any(|c| &c.scope == scope),
+                    "iteration {i}: {scope:?} lost"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_machine_question_always_fits_and_open_task_questions_age_out() {
+        // Risk 5: 64 open task questions left no room, so a machine ceiling reached asked
+        // nothing. The oldest open task question makes room; a task question is kept 7 days.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        for i in 0..MAX_QUESTIONS {
+            open_question(root.path(), &s, &wf(i), 100, 1.0, T + i as i64)
+                .unwrap()
+                .unwrap();
+        }
+        assert_eq!(open(root.path()).len(), MAX_QUESTIONS);
+        let machine = open_question(root.path(), &s, &ChainScope::Machine, 500, 5.0, T + 100)
+            .unwrap()
+            .expect("a machine question always fits");
+        let held = open(root.path());
+        assert_eq!(held.len(), MAX_QUESTIONS);
+        assert!(held.iter().any(|q| q.id == machine));
+        assert!(
+            !held.iter().any(|q| q.scope == wf(0)),
+            "the oldest task question made room"
+        );
+        // A group question fits the same way.
+        assert!(open_question(root.path(), &s, &alpha(), 500, 5.0, T + 101)
+            .unwrap()
+            .is_some());
+        // Eight days on, the open task questions are gone; the next write drops them.
+        let later = T + 8 * DAY;
+        open_question(root.path(), &s, &ChainScope::Machine, 700, 7.0, later).unwrap();
+        assert!(
+            open(root.path())
+                .iter()
+                .all(|q| !matches!(q.scope, ChainScope::Workflow { .. })),
+            "open task questions older than 7 days age out"
+        );
+    }
+
+    #[test]
+    fn task_ceilings_leave_room_for_the_machine_and_the_groups() {
+        // Risk 5: 256 task ceilings refused a first machine ceiling. Tasks take at most 192.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        for i in 0..192 {
+            set_ceiling(root.path(), &s, wf(i), Some(1.0), Surface::Cli, T).unwrap();
+        }
+        assert_eq!(
+            set_ceiling(root.path(), &s, wf(192), Some(1.0), Surface::Cli, T).unwrap_err(),
+            TASK_CEILINGS_FULL
+        );
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Cli,
+            T,
+        )
+        .unwrap();
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Cli, T).unwrap();
+        assert_eq!(read(root.path()).unwrap().ceilings.len(), 194);
+        // Groups take at most 63, so the machine's one always fits beside 192 tasks.
+        let mut many = snapshot();
+        for i in 0..MAX_GROUP_CEILINGS {
+            let pool = format!("g{i}");
+            many.projects.push(group(&pool));
+            many.agent_keys.push(key(Some(&pool)));
+        }
+        let other = tempfile::tempdir().unwrap();
+        for i in 0..MAX_GROUP_CEILINGS {
+            let scope = ChainScope::Project {
+                pool: format!("g{i}"),
+            };
+            set_ceiling(other.path(), &many, scope, Some(1.0), Surface::Cli, T).unwrap();
+        }
+        assert_eq!(
+            set_ceiling(other.path(), &many, alpha(), Some(1.0), Surface::Cli, T).unwrap_err(),
+            GROUP_CEILINGS_FULL
+        );
+        set_ceiling(
+            other.path(),
+            &many,
+            ChainScope::Machine,
+            Some(1.0),
+            Surface::Cli,
+            T,
+        )
+        .unwrap();
+        assert_eq!(MAX_TASK_CEILINGS + MAX_GROUP_CEILINGS + 1, MAX_CEILINGS);
+    }
+
+    #[test]
+    fn a_write_past_the_limit_is_refused_with_its_own_sentence_and_nothing_written() {
+        // Break 1: the size refusal is not "unreadable"; the file on disk stays as it was.
+        let root = tempfile::tempdir().unwrap();
+        write_bytes(root.path(), &exact(MAX_BYTES as usize)).unwrap();
+        let before = std::fs::read(root.path().join(FILE)).unwrap();
+        assert_eq!(
+            write_bytes(root.path(), &exact(MAX_BYTES as usize + 1)).unwrap_err(),
+            TOO_LARGE
+        );
+        assert_eq!(std::fs::read(root.path().join(FILE)).unwrap(), before);
+        assert_ne!(TOO_LARGE, UNREADABLE);
+    }
+
+    #[test]
+    fn deleting_a_group_takes_its_ceiling_questions_and_baselines_and_keeps_the_rest() {
+        // Risk 2 (C-Q7): only the window deletes a group that holds a ceiling; a group without
+        // one is deleted from anywhere; what spend.json held for it goes with it.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Machine,
+            Some(9.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+        open_question(root.path(), &s, &alpha(), 500, 5.0, T).unwrap();
+        let mut file = read(root.path()).unwrap();
+        for key in ["alpha", "machine"] {
+            file.baselines.push(Baseline {
+                workflow: WF.into(),
+                key: key.into(),
+                usage: 1.0,
+                at: T,
+            });
+        }
+        write(root.path(), &file).unwrap();
+        let before = std::fs::read(root.path().join(FILE)).unwrap();
+        let mut removed = false;
+        for by in [Surface::Cli, Surface::Mcp] {
+            assert_eq!(
+                remove_group(root.path(), "alpha", by, || {
+                    removed = true;
+                    Ok(())
+                })
+                .unwrap_err(),
+                GROUP_HOLDS_CEILING
+            );
+        }
+        assert!(!removed, "the group is never touched");
+        assert_eq!(std::fs::read(root.path().join(FILE)).unwrap(), before);
+        // A group with nothing in spend.json is deleted from the CLI, the file unchanged.
+        assert_eq!(
+            remove_group(root.path(), "beta", Surface::Cli, || Ok(7)).unwrap(),
+            (7, false)
+        );
+        // The window deletes alpha; its ceiling, question and baseline go, the machine's stay.
+        assert_eq!(
+            remove_group(root.path(), "alpha", Surface::Window, || Ok(())).unwrap(),
+            ((), true)
+        );
+        let after = read(root.path()).unwrap();
+        assert_eq!(after.ceilings.len(), 1);
+        assert_eq!(after.ceilings[0].scope, ChainScope::Machine);
+        assert!(after.questions.is_empty());
+        assert_eq!(after.baselines.len(), 1);
+        assert_eq!(after.baselines[0].key, "machine");
+        // A removal that fails changes nothing.
+        set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
+        assert_eq!(
+            remove_group(root.path(), "alpha", Surface::Window, || Err::<(), _>(
+                "Project not found.".to_string()
+            ))
+            .unwrap_err(),
+            "Project not found."
+        );
+        assert_eq!(read(root.path()).unwrap().ceilings.len(), 2);
+        // An unreadable file refuses every surface.
+        std::fs::write(root.path().join(FILE), b"{").unwrap();
+        for by in [Surface::Window, Surface::Cli] {
+            assert_eq!(
+                remove_group(root.path(), "beta", by, || Ok(())).unwrap_err(),
+                UNREADABLE
+            );
+        }
     }
 }

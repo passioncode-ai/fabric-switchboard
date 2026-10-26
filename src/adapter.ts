@@ -187,14 +187,16 @@ const safeErrors = new Set([
   "This account's Kimi MCP settings (mcp.json) cannot be read, so Switchboard did not change them. Fix or remove that file, then try again.",
   'A chain holds at most 8 agents.',
   // Spending ceilings (SB-72, C-4): each names the fix.
-  'Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Restore it from a backup, or delete it to start over with no ceilings.',
+  'Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.',
   'Enter an amount from $0.01 to $1,000.',
   'Give this group its own key under API keys first.',
   'That group id names no group.',
   'Doubling a ceiling is answered in the Switchboard window.',
   'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.',
   'No open question with that id: it was answered, or its ceiling changed or was removed.',
-  'At most 256 spending ceilings. Clear one first.',
+  'At most 192 task ceilings. Clear one in the Switchboard window first.',
+  'At most 63 group ceilings. Clear one in the Switchboard window first.',
+  'The spending ceilings file is full. Clear a task ceiling in the Switchboard window, then try again.',
   // Launch in place (SB-75).
   'Launching in place runs on macOS and Linux for now.',
   'Agent arguments are at most 16 plain values of up to 1024 characters each.',

@@ -46,25 +46,13 @@ pub(crate) fn folder_for(snapshot: &Snapshot, scope: &ChainScope) -> Option<Path
     }
 }
 
-/// The OpenRouter key a Hermes or OpenCode step in `folder` spends (`Store::agent_key_in`'s
-/// rule): the group's own key, else this computer's; none when neither is saved.
-fn key_scope(snapshot: &Snapshot, folder: Option<&Path>) -> Option<&'static str> {
-    let openrouter = |pool: Option<&str>| {
-        snapshot
-            .agent_keys
-            .iter()
-            .any(|k| k.service == "openrouter" && k.pool.as_deref() == pool)
-    };
-    let group = folder
-        .and_then(|f| snapshot.project_for(f))
-        .map(|p| p.pool.as_str());
-    if group.is_some_and(|g| openrouter(Some(g))) {
-        Some("group")
-    } else if openrouter(None) {
-        Some("machine")
-    } else {
-        None
-    }
+/// The OpenRouter key a Hermes or OpenCode step in `folder` spends: `spend::key_slot`, the very
+/// choice `Store::agent_key_in` makes (`agent_keys::key_in`); none when neither key is saved.
+pub(crate) fn key_scope(snapshot: &Snapshot, folder: Option<&Path>) -> Option<&'static str> {
+    crate::spend::key_slot(snapshot, folder).map(|slot| match slot {
+        crate::spend::KeySlot::Group(_) => "group",
+        crate::spend::KeySlot::Machine => "machine",
+    })
 }
 
 /// One view per step of `chain`, in order.
@@ -458,5 +446,72 @@ mod tests {
         assert!(read
             .iter()
             .all(|v| v["state"] == "skipped" && v["reason"] == "agent_settings_unreadable"));
+    }
+
+    #[test]
+    fn the_view_and_the_gate_name_the_key_a_launch_in_the_folder_uses() {
+        // Risk 7 (C fix cycle 2): a folder held by two groups. The group with an account of its
+        // own is the one `Snapshot::project_for` names; `Store::agent_key_in`, the chains view and
+        // the gate's `spend::key_slot` must all pick that group's key, or the machine's.
+        use std::sync::Arc;
+        use switchboard_core::{Credential, MemoryVault, Store};
+        let temp = tempfile::tempdir().unwrap();
+        let store =
+            Store::open(temp.path().join("store"), Arc::new(MemoryVault::default())).unwrap();
+        let shared = temp.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = store
+            .save_project(None, "a", std::slice::from_ref(&shared), &[])
+            .unwrap();
+        let account = store
+            .add(
+                "Fixture".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "fixture-only").unwrap(),
+            )
+            .unwrap();
+        let b = store
+            .save_project(None, "b", std::slice::from_ref(&shared), &[account.id])
+            .unwrap();
+        let agree = |expect: Option<crate::spend::KeySlot>| {
+            let snapshot = store.snapshot().unwrap();
+            let chosen = store
+                .agent_key_in("openrouter", Some(&shared))
+                .unwrap()
+                .map(|k| match k.pool {
+                    Some(pool) => crate::spend::KeySlot::Group(pool),
+                    None => crate::spend::KeySlot::Machine,
+                });
+            assert_eq!(chosen, expect, "Store::agent_key_in");
+            assert_eq!(
+                crate::spend::key_slot(&snapshot, Some(&shared)),
+                expect,
+                "spend::key_slot"
+            );
+            assert_eq!(
+                key_scope(&snapshot, Some(&shared)),
+                expect.as_ref().map(|slot| match slot {
+                    crate::spend::KeySlot::Group(_) => "group",
+                    crate::spend::KeySlot::Machine => "machine",
+                }),
+                "chain_view::key_scope"
+            );
+        };
+        agree(None);
+        // Only the first-listed group has its own key; the folder's group is b: the machine key.
+        store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-machine", None)
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&a.pool), "sk-or-v1-a", None)
+            .unwrap();
+        agree(Some(crate::spend::KeySlot::Machine));
+        // b's own key is the one.
+        store
+            .set_agent_key_for("openrouter", Some(&b.pool), "sk-or-v1-b", None)
+            .unwrap();
+        agree(Some(crate::spend::KeySlot::Group(b.pool.clone())));
     }
 }
