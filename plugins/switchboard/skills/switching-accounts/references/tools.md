@@ -94,10 +94,16 @@ listed.
 
 ### `switchboard_onboarding`: `path?` (absolute folder), `host?` (`claude` or `codex`)
 
-Where setting Switchboard up stands: `{complete, host, folder, steps[]}`, steps in order
+Where setting Switchboard up stands: `{complete, degraded, host, folder, steps[]}`, steps in order
 `owner`, `accounts`, `project` (the folder's group), `mcp`, `proving_call`, each `{id, state, summary, next}`.
+Those five are all on a computer without organizations, plus one optional `organization` step
+when PassionCode.ai is connected and lists none. With organizations, `organization` follows,
+then `org_group`, `seat`, `hook` and `launch` for each, each carrying `organization: {id, name}`.
 `state` is `done`, `todo` (run `next.command`, or call `next.tool`), `needs_person` (tell
-the person `next.person`) or `optional`. Reads only; the same as
+the person `next.person`; run `next.command` or one of `next.alternatives` once they agree) or
+`optional`. `next.turn_on` and `next.turn_off` (the `hook` step) are the person's switches: run
+one only when the person asks. `degraded` names reads that failed (`snapshot`, `sign_ins`,
+`sessions`); the step each touches says so. Reads only; the same as
 `switchboard onboard --status --json`. The guide is `switchboard onboard`.
 
 ### `switchboard_project_context`: `path?` (absolute folder)

@@ -1507,16 +1507,30 @@ impl Runtime {
     /// home could not be removed yet (it is retried before the next sign-in and on every repeated
     /// Finish). A repeated Finish returns the same account and never captures again (SB-42).
     fn finish_login(&self, id: &str) -> Result<Value, String> {
+        // SB-160 (B-4): the receipt reads the account as stored now (a repeated Finish after a
+        // move reads where it went), and says `in_cli` when the ordinary CLI is signed in to it,
+        // as `accounts capture` does: such an account cannot join a group until the CLI switches.
         let receipt = |account: &Account, cleaned: bool, again: bool| {
-            let mut value = json!(account);
+            let snapshot = self.store.snapshot().ok();
+            let stored = snapshot
+                .as_ref()
+                .and_then(|s| s.accounts.iter().find(|a| a.id == account.id))
+                .unwrap_or(account);
+            let mut value = json!(stored);
             value["login_cleanup"] = json!(if cleaned { "done" } else { "pending" });
             value["signed_in_again"] = json!(again);
-            if let Some(offer) = self
-                .store
-                .snapshot()
-                .ok()
-                .and_then(|s| organization_offer(&s, account))
+            if let Some(mut offer) = snapshot
+                .as_ref()
+                .and_then(|s| organization_offer(s, stored))
             {
+                let current = self.current_accounts().unwrap_or(Value::Null);
+                if ["claude", "codex"].iter().any(|p| {
+                    current[*p]["account_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.iter().any(|v| v == stored.id.as_str()))
+                }) {
+                    offer["in_cli"] = json!(true);
+                }
                 value["organization_group"] = offer;
             }
             value
@@ -2779,15 +2793,28 @@ const RETRY_PENDING: i64 = 600;
 /// project when it is still missing this long after it was first seen missing.
 const VANISH_LOOK: i64 = 300;
 const VANISH_CONFIRM: i64 = 300;
-/// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 /// SB-160 (B-4, SCN-077): the one group of the account's organization when the account landed
 /// outside it, `{pool, name}`, for the person to move it there (nothing moves here). None for a
-/// personal account, an organization with no group or several, or an account already in it.
+/// personal account, an organization with no group or several, an account already in it, or one
+/// whose identity the group already holds under another account.
 fn organization_offer(snapshot: &switchboard_core::Snapshot, account: &Account) -> Option<Value> {
     let organization = snapshot.attribution(account).organization?;
     let group = snapshot.organization_group(&organization)?;
-    (group.pool != account.pool).then(|| json!({"pool": group.pool, "name": group.name}))
+    let held = account.external_identity.as_ref().is_some_and(|identity| {
+        snapshot.accounts.iter().any(|a| {
+            a.pool == group.pool
+                && a.provider == account.provider
+                && a.external_identity.as_ref().is_some_and(|i| {
+                    // The core store's own identity test (`ExternalIdentity::matches`).
+                    i.account_id.is_some()
+                        && i.account_id == identity.account_id
+                        && i.organization_id == identity.organization_id
+                })
+        })
+    });
+    (group.pool != account.pool && !held).then(|| json!({"pool": group.pool, "name": group.name}))
 }
+/// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
 /// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
 enum Reported {
@@ -5415,7 +5442,7 @@ mod owner_tests {
             runtime.logins.lock().unwrap().insert(id.clone(), login);
             runtime.finish_login(&id).unwrap()
         };
-        let a = save(&runtime.store, "synthetic-a", "default");
+        let a = save(&runtime.store, "synthetic-c", "default");
         // No organization: no field.
         assert!(finish(a.clone()).get("organization_group").is_none());
         let acme = runtime
@@ -5478,6 +5505,94 @@ mod owner_tests {
             )
             .unwrap();
         assert!(finish(a).get("organization_group").is_none());
+    }
+    #[tokio::test]
+    async fn a_new_seat_the_cli_is_signed_in_to_says_so_in_its_receipt() {
+        // SB-160 (B-4): the ordinary CLI is signed in as `synthetic-a`; a sign-in that saved that
+        // same identity outside its organization's group is offered the group with `in_cli`, as
+        // `accounts capture` is, so the window offers no move the group would refuse.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let acme = runtime
+            .store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let home = root.path().join("staging-cli");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, a);
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert_eq!(
+            runtime.finish_login(&id).unwrap()["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work", "in_cli": true})
+        );
+    }
+    #[tokio::test]
+    async fn a_repeated_finish_reads_where_the_account_is_now() {
+        // SB-160 (B-4): finish, move the account into its group, finish again: the second
+        // receipt reads the stored account, not the copy kept from the first, and offers nothing.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let acme = runtime
+            .store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let a = save(&runtime.store, "synthetic-c", "default");
+        let home = root.path().join("staging-again");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, a.clone());
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert_eq!(
+            runtime.finish_login(&id).unwrap()["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work"})
+        );
+        runtime
+            .execute(Operation::MoveAccount {
+                id: a.id.clone(),
+                pool: group.pool.clone(),
+            })
+            .await
+            .unwrap();
+        let again = runtime.finish_login(&id).unwrap();
+        assert_eq!(again["pool"], group.pool.as_str(), "{again}");
+        assert!(again.get("organization_group").is_none(), "{again}");
+        // The group already holds this identity under another account: nothing to offer.
+        let d = save(&runtime.store, "synthetic-d", "default");
+        save(&runtime.store, "synthetic-d", &group.pool);
+        let home = root.path().join("staging-held");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, d);
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert!(runtime
+            .finish_login(&id)
+            .unwrap()
+            .get("organization_group")
+            .is_none());
     }
     #[test]
     fn completed_sign_ins_are_bounded() {

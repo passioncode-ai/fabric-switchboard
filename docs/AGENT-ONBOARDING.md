@@ -17,10 +17,14 @@ between them when one runs out, and gives coding agents its tools over MCP.
    - `needs_person`: tell the person `next.person` in your own words. When `next.command` is
      present, you may run it to start the step for them (for example, it opens the sign-in in a
      Terminal window), then wait for them.
-   - `optional`: not required to finish; follow its `next` only when you have not already
+   - `optional`: not required to finish; run its `next.command` only when you have not already
      completed it.
+   - `next.turn_on` and `next.turn_off` are the person's switches, never a step for you: run
+     one only when the person asks for it.
 3. Run `switchboard onboard --status --json` again after every step. It reads the computer each
-   time and writes nothing, so it is always safe to repeat.
+   time and writes nothing, so it is always safe to repeat. When `degraded` is not empty, part of
+   what the steps read could not be read (`snapshot`, `sign_ins`, `sessions`); the step it touches
+   says so in its summary.
 
 ## The steps
 
@@ -40,9 +44,9 @@ organization listed for the person, one optional `organization` step says so.
 | Step | What it checks | Whose |
 |---|---|---|
 | `organization` | At least one organization exists on this computer | done, or optional |
-| `org_group` | The organization has exactly one group bound to it | you: import the administrator's settings file (`next.command`), or make the group (`next.alternatives`); with two groups, the person keeps one |
+| `org_group` | The organization has exactly one group bound to it | the person: ask whether the administrator gave a settings file (then you run `next.command`) or which folders the group takes (then you run `next.alternatives`); with two groups, the person says which one stays, then you run `next.command` on the others |
 | `seat` | That group holds an account of the organization that is switched on, not used on another machine and still signed in | the person signs in with the organization's address; you may start `next.command` (the sign-in opens in the group) |
-| `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`) | optional: on by default. `next.turn_off` is the command that turns it off: never run it unless the person asks |
+| `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`): on by default, and working once a start file holds the hook | optional. `next.turn_off` turns it off and `next.turn_on` turns it back on: never run either unless the person asks. `next.command` (`shell status`) only reads |
 | `launch` | A session ran in the organization's context (`org:<id>`) | optional: `next.command` launches one in a folder of the group |
 
 ## Rules

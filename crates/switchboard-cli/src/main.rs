@@ -1824,22 +1824,36 @@ pub(crate) async fn onboard_status(
         // `hook` step reads `shell status` (SB-183's record), never the start files.
         probe.passioncode =
             switchboard_runtime::vesta::status(root).is_ok_and(|v| v["connected"] == true);
-        let saved: Option<switchboard_core::Snapshot> = serde_json::from_value(snapshot).ok();
+        // Read leniently: the owner answering may be another version (its snapshot may carry
+        // keys this CLI does not know). What could not be read is named, never dropped.
+        let (saved, partial) = onboarding::read_snapshot(&snapshot);
+        if partial {
+            probe.degraded.push("snapshot".into());
+        }
         if saved.as_ref().is_some_and(|s| !s.organizations.is_empty()) {
-            let monitor = call(root, Operation::MonitorStatus).await?;
-            probe.sign_in_required = monitor["sign_in_required"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|id| id.as_str().map(str::to_owned))
-                .collect();
-            let sessions = call(root, Operation::Sessions { all: true }).await?;
-            probe.contexts = sessions["sessions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|s| s["context"].as_str().map(str::to_owned))
-                .collect();
+            // A failed read leaves its list empty and is named in the step it touches.
+            match call(root, Operation::MonitorStatus).await {
+                Ok(monitor) => {
+                    probe.sign_in_required = monitor["sign_in_required"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect()
+                }
+                Err(_) => probe.degraded.push("sign_ins".into()),
+            }
+            match call(root, Operation::Sessions { all: true }).await {
+                Ok(sessions) => {
+                    probe.contexts = sessions["sessions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|s| s["context"].as_str().map(str::to_owned))
+                        .collect()
+                }
+                Err(_) => probe.degraded.push("sessions".into()),
+            }
             probe.shell = Some(shell::status(Some(root), Some(&folder)));
         }
         probe.snapshot = saved;
@@ -3115,5 +3129,166 @@ mod mcp_parity {
             })
             .collect();
         assert!(found.is_empty(), "{found:#?}");
+    }
+}
+
+/// SB-202: every command `switchboard onboard --status` names (`next.command`, the person's
+/// `turn_on` and `turn_off`, and `alternatives`) parses as a command of this CLI, so the checklist
+/// never tells an agent or a person to run one that does not exist.
+#[cfg(test)]
+mod onboard_commands {
+    use super::{onboarding, Cli};
+    use clap::Parser;
+    use serde_json::{json, Value};
+    use std::path::PathBuf;
+
+    fn acme() -> onboarding::Probe {
+        let mut snapshot = switchboard_core::Snapshot::default();
+        snapshot
+            .organizations
+            .push(switchboard_core::organizations::Organization {
+                id: "o-acme".into(),
+                name: "Acme Inc".into(),
+                domains: vec!["acme.com".into()],
+                provider_organizations: vec![],
+                created_at: 1,
+                vesta_id: None,
+            });
+        snapshot.projects.push(switchboard_core::Project {
+            pool: "acme-work".into(),
+            name: "Acme work".into(),
+            folders: vec!["/work/acme".into()],
+            created_at: 1,
+            sources: vec![],
+            organization: Some("o-acme".into()),
+        });
+        snapshot.accounts.push(switchboard_core::Account {
+            id: "a-1".into(),
+            label: "me@acme.com".into(),
+            provider: switchboard_core::Provider::Claude,
+            kind: switchboard_core::AuthKind::OAuth,
+            pool: "acme-work".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        });
+        onboarding::Probe {
+            folder: Some(PathBuf::from("/work/acme app")),
+            host: Some(onboarding::Host::Claude),
+            snapshot: Some(snapshot),
+            shell: Some(json!({"hook": "default_on"})),
+            ..Default::default()
+        }
+    }
+    /// Every state a step can be in, as far as it changes what the step names.
+    fn probes() -> Vec<onboarding::Probe> {
+        let mut out = vec![
+            onboarding::Probe::default(),
+            onboarding::Probe {
+                folder: Some(PathBuf::from("/work/my app")),
+                host: Some(onboarding::Host::Codex),
+                ..Default::default()
+            },
+        ];
+        let mut none = acme();
+        none.snapshot.as_mut().unwrap().organizations.clear();
+        none.passioncode = true;
+        out.push(none);
+        for hook in ["on", "default_on", "off", "default_off", "unknown"] {
+            let mut probe = acme();
+            probe.shell = Some(json!({"hook": hook}));
+            out.push(probe);
+        }
+        let mut unbound = acme();
+        unbound.snapshot.as_mut().unwrap().projects[0].organization = None;
+        out.push(unbound);
+        let mut two = acme();
+        let snapshot = two.snapshot.as_mut().unwrap();
+        let mut second = snapshot.projects[0].clone();
+        second.pool = "acme-two".into();
+        second.name = "Acme two".into();
+        snapshot.projects.push(second);
+        out.push(two);
+        let mut seatless = acme();
+        seatless.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        out.push(seatless);
+        out
+    }
+    /// Shell words: single quotes as `onboarding` writes them; a `<placeholder>` is one word.
+    fn words(command: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut word = String::new();
+        let (mut quoted, mut placeholder, mut any) = (false, false, false);
+        for c in command.chars() {
+            match c {
+                '\'' if !placeholder => {
+                    quoted = !quoted;
+                    any = true;
+                }
+                '<' if !quoted => {
+                    placeholder = true;
+                    any = true;
+                    word.push('x');
+                }
+                '>' if placeholder => placeholder = false,
+                _ if placeholder => {}
+                ' ' if !quoted => {
+                    if any {
+                        out.push(std::mem::take(&mut word));
+                    }
+                    any = false;
+                }
+                _ => {
+                    word.push(c);
+                    any = true;
+                }
+            }
+        }
+        if any {
+            out.push(word);
+        }
+        out
+    }
+
+    #[test]
+    fn every_command_the_checklist_names_exists() {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut checked = 0;
+        for probe in probes() {
+            let answer = onboarding::steps(&probe);
+            for step in answer["steps"].as_array().unwrap() {
+                let next = &step["next"];
+                let mut commands: Vec<(&str, &Value)> = ["command", "turn_on", "turn_off"]
+                    .into_iter()
+                    .map(|key| (key, &next[key]))
+                    .collect();
+                for alternative in next["alternatives"].as_array().into_iter().flatten() {
+                    commands.push(("alternatives", alternative));
+                }
+                for (key, command) in commands {
+                    let Some(command) = command.as_str() else {
+                        continue;
+                    };
+                    let args = words(command);
+                    // `claude mcp add` and `codex mcp add` belong to the agents, not this CLI.
+                    if args[0] != "switchboard" {
+                        continue;
+                    }
+                    seen.insert(key);
+                    checked += 1;
+                    if let Err(error) = Cli::try_parse_from(&args) {
+                        panic!("{} ({key}) does not parse: {error}", step["id"]);
+                    }
+                }
+            }
+        }
+        assert!(checked >= 15, "{checked}");
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            ["alternatives", "command", "turn_off", "turn_on"]
+        );
     }
 }

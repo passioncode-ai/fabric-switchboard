@@ -426,6 +426,7 @@ check(() => {
   assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com' }), null, 'a personal seat: no offer');
   const inCli = { ...offer, in_cli: true };
   assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', organization_group: inCli }), null, 'the CLI account cannot move yet');
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', pool: 'default', login_cleanup: 'done', signed_in_again: false, organization_group: inCli }), null, 'a login finish receipt with in_cli (B-4): no move');
   assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', inCli), 'Switch Claude Code to another account first to move me@acme.com to group “Acme work”.');
   assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', offer), '');
   assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', undefined), '');
