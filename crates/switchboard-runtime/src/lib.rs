@@ -344,6 +344,10 @@ pub enum Operation {
         /// SB-144: a project's pool for its own key; none: the machine's key.
         #[serde(default)]
         pool: Option<String>,
+        /// C-Q9: replacing the own key of a group that holds a spending ceiling is the window's.
+        /// Left out, a request counts as the CLI's.
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// The saved key's metadata and, with `credit`, what it may still spend (asked of the
     /// service). Never the key.
@@ -361,11 +365,14 @@ pub enum Operation {
         #[serde(default)]
         pool: Option<String>,
     },
-    /// Removes the saved key and its vault item.
+    /// Removes the saved key and its vault item. C-Q9: for a group that holds a spending ceiling,
+    /// only the window removes it. Left out, `by` counts as the CLI's.
     AgentKeyRemove {
         service: String,
         #[serde(default)]
         pool: Option<String>,
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// SB-144: every saved key of a service with the project it is for (none: the machine's),
     /// and every project with or without one. Never a key.
@@ -969,11 +976,38 @@ impl Runtime {
                 .await?
             ));
         }
+        // C-Q8: a paid start by hand takes the hand-over turn and passes its spend gate before
+        // the owner transaction, the order the automatic fallback takes them in: its gate and
+        // launch run together and never beside a hand-over's, and a slow spend read holds up no
+        // other operation. Only a start that is paid takes the turn; its account is resolved
+        // first (`paid_start`). A fallback step already holds it and passed its own gate
+        // (`fallback::gated`).
+        let mut operation = operation;
+        let paid = if fallback::gated() {
+            None
+        } else {
+            self.paid_start(&mut operation)?
+        };
+        let _turn = match &paid {
+            Some((workflow, dir, kind)) => {
+                let turn = fallback::HAND_OVER.lock().await;
+                fallback::gate_by_hand(&self.store, &self.root, workflow.as_deref(), dir, *kind)
+                    .await?;
+                Some(turn)
+            }
+            None => None,
+        };
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
         let _mutation = self.mutations.lock().await;
         let reported = Reported::of(&operation, &self.store);
-        let result = execute(self.store.clone(), &self.root, Some(self), operation).await;
+        let run = execute(self.store.clone(), &self.root, Some(self), operation);
+        // The gate passed above: the operation's own gate is not run again.
+        let result = if paid.is_some() {
+            fallback::as_gated(run).await
+        } else {
+            run.await
+        };
         if let (Ok(_), Some(reported)) = (&result, reported) {
             self.report(&reported);
         }
@@ -1113,6 +1147,90 @@ impl Runtime {
                     &[("result", oplog::Field::Code("unreadable"))],
                 )
             }
+        }
+    }
+    /// C-Q8: whether `operation` is a paid start by hand, and what its spend gate needs: the
+    /// workflow (a continue), the folder whose key it spends and what it spends. The account is
+    /// resolved first: `Continue` on the default agent is given the account chosen here, so the
+    /// operation runs on the account that was gated; `LaunchAgent` through the proxy on the
+    /// pool's selected account, which is paid only when it is an API-key account (a subscription
+    /// account is refused by the launch itself, never as an unknown spend). A start the operation
+    /// refuses before its gate (arguments without `--in-place`, an in-place continue on Windows)
+    /// is not gated here; the refusals the gate preceded run here in the same order.
+    fn paid_start(
+        &self,
+        operation: &mut Operation,
+    ) -> Result<Option<(Option<String>, PathBuf, fallback::Paid)>, String> {
+        let root = &self.root;
+        match operation {
+            Operation::LaunchAgent {
+                working_directory,
+                via: AgentVia::Openrouter,
+                ..
+            } => Ok(Some((
+                None,
+                projects::project_dir(root, working_directory)?,
+                fallback::Paid::OpenRouter,
+            ))),
+            Operation::LaunchAgent {
+                pool,
+                working_directory,
+                via: AgentVia::Proxy,
+                ..
+            } => {
+                let api_key = self
+                    .store
+                    .selected_account(Provider::Claude, pool)
+                    .is_some_and(|a| a.kind == AuthKind::ApiKey);
+                if !api_key {
+                    return Ok(None);
+                }
+                Ok(Some((
+                    None,
+                    projects::project_dir(root, working_directory)?,
+                    fallback::Paid::ApiKeyAccount,
+                )))
+            }
+            Operation::Launch {
+                id,
+                working_directory,
+                in_place,
+                args,
+                ..
+            } => {
+                if !*in_place && !args.is_empty() {
+                    return Ok(None);
+                }
+                let Some(kind) = fallback::paid_kind(&self.store.snapshot()?, id) else {
+                    return Ok(None);
+                };
+                Ok(Some((
+                    None,
+                    projects::project_dir(root, working_directory)?,
+                    kind,
+                )))
+            }
+            Operation::Continue {
+                workflow_id,
+                id,
+                working_directory,
+                in_place,
+                ..
+            } => {
+                if *in_place && cfg!(windows) {
+                    return Ok(None);
+                }
+                if id.is_empty() {
+                    *id = continue_default(root, self, workflow_id, working_directory)?;
+                }
+                let Some(kind) = fallback::paid_kind(&self.store.snapshot()?, id) else {
+                    return Ok(None);
+                };
+                let directory =
+                    continue_checks(&self.store, root, workflow_id, id, working_directory)?;
+                Ok(Some((Some(workflow_id.clone()), directory, kind)))
+            }
+            _ => Ok(None),
         }
     }
     /// `Operation::ContinueToConsole`: the hand-over the automatic fallback makes with "Open
@@ -2908,6 +3026,12 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
         } | Operation::RemoveProject {
             by: spend::Surface::Window,
             ..
+        } | Operation::AgentKeySet {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::AgentKeyRemove {
+            by: spend::Surface::Window,
+            ..
         }
     )
     .then_some(spend::WINDOW_ONLY)
@@ -2956,6 +3080,73 @@ where
             result => return result,
         }
     }
+}
+/// SB-120: the account a `Continue` that names none runs on, the machine's default agent:
+/// OpenCode and Hermes run on the OpenRouter key; Claude Code, Codex and Kimi Code on the account a
+/// one-step chain of that agent would choose now. Resolved once, before the spend gate (C-Q8).
+fn continue_default(
+    root: &Path,
+    runtime: &Runtime,
+    workflow_id: &str,
+    working_directory: &Path,
+) -> Result<String, String> {
+    match agent_settings::read(root)?.default.as_deref() {
+        Some(hermes::HERMES_TARGET) => Ok(hermes::HERMES_TARGET.to_owned()),
+        Some(launch::OPENCODE_TARGET) => Ok(launch::OPENCODE_TARGET.to_owned()),
+        Some(agent) => {
+            agent_settings::usable(root, agent)?;
+            if !continuation::valid_workflow_id(workflow_id) {
+                return Err(continuation::BAD_WORKFLOW_ID.into());
+            }
+            let folder = working_directory
+                .canonicalize()
+                .map_err(|_| "Choose an existing project directory.")?;
+            // The executor is read first, so its own exhausted account is never the one chosen.
+            let shown = continuation::show(&continuation::observatory()?, workflow_id)?;
+            fallback::account_for_default(
+                runtime,
+                agent,
+                &continuation::executor_of(&shown),
+                &folder,
+                monitor::now(),
+            )
+        }
+        None => Err(agent_settings::NAME_AN_ACCOUNT.into()),
+    }
+}
+/// The refusals a `Continue` on `id` meets before its spend gate and offer: an agent the person
+/// disabled for taking over work (SB-120), a malformed workflow id, a folder that does not exist.
+/// Answers the canonical folder.
+fn continue_checks(
+    store: &Store,
+    root: &Path,
+    workflow_id: &str,
+    id: &str,
+    working_directory: &Path,
+) -> Result<PathBuf, String> {
+    let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
+        Some(id.to_owned())
+    } else if store.kimi_account(id).is_ok() {
+        Some("kimi-code".to_owned())
+    } else {
+        store
+            .snapshot()?
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
+    };
+    if let Some(a) = agent {
+        if agent_settings::disabled(root, &a)? {
+            return Err(agent_settings::DISABLED.into());
+        }
+    }
+    if !continuation::valid_workflow_id(workflow_id) {
+        return Err(continuation::BAD_WORKFLOW_ID.into());
+    }
+    working_directory
+        .canonicalize()
+        .map_err(|_| "Choose an existing project directory.".to_string())
 }
 async fn execute(
     store: Arc<Store>,
@@ -3288,6 +3479,29 @@ async fn execute(
             "handovers": handovers::pending(root),
         })),
         Operation::HandoverTake { id } => {
+            // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
+            // with the hand-over turn, when a console takes it. Refused, it stays waiting: the
+            // window may double the ceiling meanwhile.
+            let paid = handovers::waiting(root, &id).and_then(|h| h.paid.map(|kind| (h, kind)));
+            let _turn = match &paid {
+                Some((waiting, kind)) => {
+                    let turn = if fallback::gated() {
+                        None
+                    } else {
+                        Some(fallback::HAND_OVER.lock().await)
+                    };
+                    fallback::gate_by_hand(
+                        &store,
+                        root,
+                        Some(&waiting.workflow),
+                        &waiting.dir,
+                        *kind,
+                    )
+                    .await?;
+                    turn
+                }
+                None => None,
+            };
             let taken = handovers::take(root, &id)?;
             Ok(json!({"handover": taken, "script": taken.script}))
         }
@@ -3451,8 +3665,19 @@ async fn execute(
             key,
             model,
             pool,
+            by,
         } => {
-            let saved = store.set_agent_key_for(&service, pool.as_deref(), &key, model)?;
+            // C-Q9: replacing a key whose spend a ceiling counts (a capped group's own, any key
+            // under a machine ceiling, a task ceiling's baseline key) starts that count again.
+            let replaces = service == "openrouter"
+                && store
+                    .agent_key_for(&service, pool.as_deref())
+                    .ok()
+                    .flatten()
+                    .is_some();
+            let saved = spend::guard_group_key(root, pool.as_deref(), replaces, by, || {
+                store.set_agent_key_for(&service, pool.as_deref(), &key, model)
+            })?;
             Ok(
                 json!({"service": saved.service, "pool": saved.pool, "saved_at": saved.saved_at, "model": saved.model}),
             )
@@ -3470,8 +3695,20 @@ async fn execute(
             let saved = store.set_agent_key_model_for(&service, pool.as_deref(), &model)?;
             Ok(json!({"service": saved.service, "pool": saved.pool, "model": saved.model}))
         }
-        Operation::AgentKeyRemove { service, pool } => {
-            Ok(json!({"removed": store.remove_agent_key_for(&service, pool.as_deref())?}))
+        Operation::AgentKeyRemove { service, pool, by } => {
+            // C-Q9: removing a key whose spend a ceiling counts moves its paid steps to a key the
+            // ceiling does not count, or out of a machine ceiling's sum. A key that is not saved
+            // removes nothing and loosens nothing.
+            let exists = service == "openrouter"
+                && store
+                    .agent_key_for(&service, pool.as_deref())
+                    .ok()
+                    .flatten()
+                    .is_some();
+            let removed = spend::guard_group_key(root, pool.as_deref(), exists, by, || {
+                store.remove_agent_key_for(&service, pool.as_deref())
+            })?;
+            Ok(json!({ "removed": removed }))
         }
         Operation::AgentKeys { service } => agent_keys::list(&store, &service),
         Operation::AgentKeyValue { service, folder } => {
@@ -3528,13 +3765,18 @@ async fn execute(
             via: AgentVia::Openrouter,
             model,
             ..
-        } => launch::launch_agent_openrouter(
-            root,
-            &store,
-            &agent,
-            model.as_deref(),
-            &working_directory,
-        ),
+        } => {
+            // C-Q8: on the OpenRouter key a launch in this folder uses, gated like a hand-over.
+            let dir = projects::project_dir(root, &working_directory)?;
+            fallback::gate_by_hand(&store, root, None, &dir, fallback::Paid::OpenRouter).await?;
+            launch::launch_agent_openrouter(
+                root,
+                &store,
+                &agent,
+                model.as_deref(),
+                &working_directory,
+            )
+        }
         Operation::LaunchAgent {
             agent,
             pool,
@@ -3543,6 +3785,17 @@ async fn execute(
             ..
         } => {
             let runtime = needs_owner()?;
+            // C-Q8: through the proxy on the pool's API-key account, gated like a hand-over. The
+            // selected account is read first: a subscription account (or none) is refused by the
+            // launch for what it is, never as an unknown spend.
+            if store
+                .selected_account(Provider::Claude, &pool)
+                .is_some_and(|a| a.kind == AuthKind::ApiKey)
+            {
+                let dir = projects::project_dir(root, &working_directory)?;
+                fallback::gate_by_hand(&store, root, None, &dir, fallback::Paid::ApiKeyAccount)
+                    .await?;
+            }
             launch::launch_agent(
                 root,
                 &store,
@@ -3570,6 +3823,11 @@ async fn execute(
             let runtime = needs_owner()?;
             if !in_place && !args.is_empty() {
                 return Err(launch::EXTRA_ARGS_INVALID.into());
+            }
+            // C-Q8: a session on an API-key account is a paid start, gated like a hand-over.
+            if let Some(kind) = fallback::paid_kind(&store.snapshot()?, &id) {
+                let dir = projects::project_dir(root, &working_directory)?;
+                fallback::gate_by_hand(&store, root, None, &dir, kind).await?;
             }
             if mode == "isolated" {
                 // An isolated session holds an access token only and is never renewed while it
@@ -3624,65 +3882,21 @@ async fn execute(
                 launch::start_terminal
             };
             let runtime = needs_owner()?;
-            // SB-120: no account named → the machine's default agent: OpenCode and Hermes run on
-            // the OpenRouter key; Claude Code, Codex and Kimi Code on the account a one-step chain
-            // of that agent would choose now.
+            // SB-120: no account named → the machine's default agent (`continue_default`).
             let id = if id.is_empty() {
-                match agent_settings::read(root)?.default.as_deref() {
-                    Some(hermes::HERMES_TARGET) => hermes::HERMES_TARGET.to_owned(),
-                    Some(launch::OPENCODE_TARGET) => launch::OPENCODE_TARGET.to_owned(),
-                    Some(agent) => {
-                        agent_settings::usable(root, agent)?;
-                        if !continuation::valid_workflow_id(&workflow_id) {
-                            return Err(continuation::BAD_WORKFLOW_ID.into());
-                        }
-                        let folder = working_directory
-                            .canonicalize()
-                            .map_err(|_| "Choose an existing project directory.")?;
-                        // The executor is read first, so its own exhausted account is never the
-                        // one chosen.
-                        let shown =
-                            continuation::show(&continuation::observatory()?, &workflow_id)?;
-                        fallback::account_for_default(
-                            runtime,
-                            agent,
-                            &continuation::executor_of(&shown),
-                            &folder,
-                            monitor::now(),
-                        )?
-                    }
-                    None => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
-                }
+                continue_default(root, runtime, &workflow_id, &working_directory)?
             } else {
                 id
             };
-            // SB-120: an agent the person disabled for taking over work takes no workflow.
-            let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
-                Some(id.clone())
-            } else if store.kimi_account(&id).is_ok() {
-                Some("kimi-code".to_owned())
-            } else {
-                store
-                    .snapshot()?
-                    .accounts
-                    .iter()
-                    .find(|a| a.id == id)
-                    .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
-            };
-            if let Some(a) = agent {
-                if agent_settings::disabled(root, &a)? {
-                    return Err(agent_settings::DISABLED.into());
-                }
-            }
             // Everything that can refuse runs before the offer, so a refusal leaves the workflow
             // exactly as it was; after the offer, a failed launch leaves it to lapse.
-            if !continuation::valid_workflow_id(&workflow_id) {
-                return Err(continuation::BAD_WORKFLOW_ID.into());
+            let directory = continue_checks(&store, root, &workflow_id, &id, &working_directory)?;
+            // C-Q8: a paid continue by hand (Hermes, OpenCode, an API-key account) passes the
+            // spend gate as a hand-over does, once: the automatic fallback's step passed its own.
+            if let Some(kind) = fallback::paid_kind(&store.snapshot()?, &id) {
+                fallback::gate_by_hand(&store, root, Some(&workflow_id), &directory, kind).await?;
             }
             let bin = continuation::observatory()?;
-            let directory = working_directory
-                .canonicalize()
-                .map_err(|_| "Choose an existing project directory.")?;
             // SB-107: Hermes Agent on the saved OpenRouter key, with the same order — every
             // refusal before the offer, a failed launch after it left to lapse.
             let other_agent = id == hermes::HERMES_TARGET
@@ -4554,9 +4768,15 @@ async fn execute(
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
         Operation::RemoveProject { pool, by } => {
-            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock.
-            let (project, pruned) =
-                spend::remove_group(root, &pool, by, || store.remove_project(&pool))?;
+            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock. C-Q9:
+            // its own OpenRouter key goes too, so a ceiling counting that key keeps the group.
+            let (project, pruned) = spend::remove_group(
+                root,
+                &pool,
+                by,
+                || Ok(store.agent_key_for("openrouter", Some(&pool))?.is_some()),
+                || store.remove_project(&pool),
+            )?;
             if pruned {
                 store.setting_changed();
             }

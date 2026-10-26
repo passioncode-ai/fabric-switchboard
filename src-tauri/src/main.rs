@@ -756,6 +756,7 @@ async fn openrouter_save(
             key,
             model,
             pool,
+            by: switchboard_runtime::spend::Surface::Window,
         })
         .await
 }
@@ -853,6 +854,7 @@ async fn openrouter_remove(pool: Option<String>, state: State<'_, Slot>) -> Resu
         .execute(Operation::AgentKeyRemove {
             service: "openrouter".into(),
             pool,
+            by: switchboard_runtime::spend::Surface::Window,
         })
         .await
 }

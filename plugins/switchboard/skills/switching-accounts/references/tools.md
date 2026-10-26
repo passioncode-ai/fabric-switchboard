@@ -11,9 +11,9 @@ Words: the person reads **group** for what tool names and fields call a project,
 group's id is its `pool` (`default` is the default group). **Automatic switching** is what tool
 names and fields call rotation. Say group and automatic switching to the person.
 
-`switchboard mcp --read-only` lists only the 23 tools that read (every tool under
-[Read tools](#read-tools)) and none of the 22 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 45 tools; each has a section below.
+`switchboard mcp --read-only` lists only the 24 tools that read (every tool under
+[Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
+isolated mode gets that set. The server lists 48 tools; each has a section below.
 
 ## Contents
 
@@ -184,6 +184,22 @@ and paid key use; a relative `folder` is refused. `presets` lists ready-made ord
 what each step would do now; `limits_known` is false when no Switchboard owner runs, so readiness
 cannot name a limited account; `last_handover` and `ceilings_unreadable` come from the spending
 ceilings' file.
+
+### `switchboard_ceilings`
+
+`{ceilings[], questions[], last_handover, limits}`: the spending ceilings for paid fallback
+agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account).
+A ceiling is `{scope, cents, usd, set_at, doubled_from, active, inactive_reason}`: `scope` as in
+a chain; this computer's and a group's count per UTC day, a task's on the key since its first
+paid hand-over; a group's ceiling whose own key was removed reads `active: false`,
+`inactive_reason: "no_own_key"`. Each open question is `{id, scope, cents, usd, double_usd,
+spent, reached_at}`: a paid step reached that ceiling at a hand-over and was skipped.
+`last_handover` is `{at, workflow, outcome, skipped[{agent, reason}]}` or null; `limits` names
+`min_usd`, `max_usd` and `min_remaining_usd` (a paid step is skipped on a key with less than
+that left of its own limit). Before every paid hand-over the key's spend is read from
+OpenRouter; a reached ceiling, a nearly spent key, or a ceiling whose spend cannot be read skips
+the step. A spending ceilings file that cannot be read is refused (*"Spending ceilings
+(spend.json) could not be read, …"*) and no paid agent is handed work until it reads again.
 
 ### `switchboard_openrouter_status`: `pool?`
 
@@ -375,6 +391,22 @@ and `headless`), else *“… cannot take over a workflow …”*. Claude Code a
 provider's accounts; any other agent on an API-key account or a paid key, never on a
 subscription sign-in. Returns `{chain}` (null when cleared).
 
+### `switchboard_ceiling_set`: `scope?`, `usd`
+
+Only when the operator asks. `scope` is `machine` (default), `project:<group id>` or
+`workflow:<wf_id>`; `usd` is dollars from 0.01 to 1000 (per UTC day for this computer and a
+group, since the first paid hand-over for a task). A first ceiling for a scope or a value no
+higher than the current one is accepted; raising or clearing one is refused (*"Raising or
+clearing a ceiling is done in the Switchboard window. …"*): tell the operator to do it in the
+window. Returns `{ceiling}` (`scope`, `cents`, `set_at`).
+
+### `switchboard_ceiling_answer`: `id`, `answer?`
+
+Only when the operator asks. Answers an open question from `switchboard_ceilings` with `keep`
+(the default and the only answer here): the ceiling stays as it is and the question closes.
+`double` is refused (*"Doubling a ceiling is answered in the Switchboard window."*), the
+question staying open for the operator in the window. Returns `{answer, ceiling}`.
+
 ### `switchboard_hermes_set`: `provider?`, `model?`
 
 Only when the operator asks. Runs Hermes's own `hermes config set model.provider` (first) and
@@ -408,3 +440,7 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |
 | "Statistics cover 1 to 90 days." | pass `days` from 1 to 90 |
+| "Raising or clearing a ceiling is done in the Switchboard window…" | set a first or a lower ceiling, or ask the operator to raise or clear it in the window |
+| "Doubling a ceiling is answered in the Switchboard window." | keep it here, or ask the operator to double it in the window |
+| "Give this group its own key under API keys first." | the operator saves the group's own OpenRouter key, then the ceiling |
+| "No open question with that id…" | call `switchboard_ceilings` for the open questions |

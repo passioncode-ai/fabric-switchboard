@@ -54,6 +54,8 @@ const ALLOWLIST = {
   // runtime spend.rs remove_group(): the window deletes a group with `by: window` (src-tauri
   // remove_project), so a group holding a ceiling is refused only to the CLI (C-Q7).
   'This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.': 'C-Q7: CLI only; the window deletes as the window',
+  'This group has a spending ceiling. Remove or replace its own key in the Switchboard window.': 'C-Q9: CLI and MCP only; the window removes and replaces as the window',
+  'A spending ceiling counts this key\'s spend. Remove or replace the key in the Switchboard window.': 'C-Q9: CLI and MCP only; the window removes and replaces as the window',
   'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
   // runtime shell/map.rs write(): the terminal hook's folder map is written only by the owner's
   // background bindings pass (SB-183, node A-4), which logs a refusal; no renderer request writes it.

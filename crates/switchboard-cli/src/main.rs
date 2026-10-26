@@ -146,6 +146,11 @@ enum Command {
         /// within two minutes opens it in Terminal.
         #[arg(long, conflicts_with = "mode")]
         to_console: bool,
+        /// Also give this task a spending ceiling, in dollars, before it is offered: counted on
+        /// the OpenRouter key since the task's first paid hand-over and checked at each automatic
+        /// hand-over. A first ceiling or a lower one; raising one is done in the Switchboard window.
+        #[arg(long, value_name = "USD")]
+        ceiling: Option<f64>,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -179,6 +184,14 @@ enum Command {
     Chain {
         #[command(subcommand)]
         command: ChainCommand,
+    },
+    /// Spending ceilings for paid fallback agents: a daily ceiling in dollars for this computer
+    /// or for a group on its own key, and one for a task counted since its first paid hand-over.
+    /// From here, set a first ceiling or a lower one, and keep one that was reached; raising,
+    /// doubling or clearing one is done in the Switchboard window.
+    Ceiling {
+        #[command(subcommand)]
+        command: CeilingCommand,
     },
     /// Groups (repositories with accounts of their own) and optional folder rules. The command
     /// is named `project`; a group's id is its `pool`.
@@ -734,6 +747,26 @@ enum ChainCommand {
         scope: String,
     },
 }
+#[derive(Subcommand)]
+enum CeilingCommand {
+    /// Every spending ceiling, the questions a reached one asked, and the last hand-over.
+    List,
+    /// Set a first ceiling for a scope, or lower one, in dollars from 0.01 to 1000.
+    Set {
+        /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
+        #[arg(long, default_value = "machine")]
+        scope: String,
+        /// Dollars: per UTC day for this computer and a group, since the task's first paid
+        /// hand-over for a task.
+        usd: f64,
+    },
+    /// Keep a reached ceiling as it is: answers its question. Doubling it is answered in the
+    /// Switchboard window.
+    Keep {
+        /// The question's id, `q_` and 16 hex digits (`switchboard ceiling list`).
+        id: String,
+    },
+}
 /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
 fn chain_scope(text: &str) -> Result<switchboard_core::ChainScope, String> {
     use switchboard_core::ChainScope;
@@ -1116,6 +1149,26 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         let stopped = owner.shutdown(DRAIN_DEADLINE).await;
         return Ok(json!({"state":"stopped", "drained": stopped.drained}));
     }
+    // `continue --ceiling`: the task's ceiling first, so a refusal (out of range, higher than
+    // the one set) stops the continue before anything is offered.
+    if let Command::Continue {
+        workflow_id,
+        ceiling: Some(usd),
+        ..
+    } = &cli.command
+    {
+        call(
+            &root,
+            Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Workflow {
+                    id: workflow_id.clone(),
+                },
+                usd: Some(*usd),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+        )
+        .await?;
+    }
     let operation = match &cli.command {
         Command::Accounts { command } => match command {
             Accounts::List => Operation::Snapshot,
@@ -1399,6 +1452,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 preset: None,
             },
         },
+        Command::Ceiling { command } => match command {
+            CeilingCommand::List => Operation::Ceilings,
+            CeilingCommand::Set { scope, usd } => Operation::SetCeiling {
+                scope: chain_scope(scope)?,
+                usd: Some(*usd),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+            CeilingCommand::Keep { id } => Operation::AnswerCeiling {
+                id: id.clone(),
+                answer: switchboard_runtime::spend::Answer::Keep,
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Status => Operation::AgentsOverview,
@@ -1436,6 +1502,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     key: read_secret()?,
                     model: model.clone(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::Status { pool } => Operation::AgentKeyStatus {
                     service: "openrouter".into(),
@@ -1450,6 +1517,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 OpenrouterCommand::Remove { pool } => Operation::AgentKeyRemove {
                     service: "openrouter".into(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::List => Operation::AgentKeys {
                     service: "openrouter".into(),
@@ -2506,6 +2574,23 @@ fn print_result(value: &Value, cli: &Cli) {
                 println!("preset {}: {}", text(&preset["id"]), agents.join(" → "));
             }
         }
+        Command::Ceiling {
+            command: CeilingCommand::List,
+        } => print_ceilings(value),
+        Command::Ceiling {
+            command: CeilingCommand::Set { .. },
+        } => println!(
+            "Ceiling for {}: ${:.2}.",
+            scope_label(&value["ceiling"]["scope"]),
+            dollars(&value["ceiling"])
+        ),
+        Command::Ceiling {
+            command: CeilingCommand::Keep { .. },
+        } => println!(
+            "Kept: the ceiling for {} stays ${:.2}.",
+            scope_label(&value["ceiling"]["scope"]),
+            dollars(&value["ceiling"])
+        ),
         Command::Chain {
             command: ChainCommand::Set { .. },
         } => println!("Chain set."),
@@ -2577,6 +2662,80 @@ fn print_result(value: &Value, cli: &Cli) {
             text(&value["proxy_address"])
         ),
         _ => print_value(value, false),
+    }
+}
+/// A ceiling's dollars: `usd` in a view, `cents` in a stored ceiling.
+fn dollars(ceiling: &Value) -> f64 {
+    ceiling["usd"]
+        .as_f64()
+        .or_else(|| ceiling["cents"].as_f64().map(|c| c / 100.0))
+        .unwrap_or_default()
+}
+/// `machine`, `project:<pool>` or `workflow:<wf_id>`, as `--scope` takes it.
+fn scope_label(scope: &Value) -> String {
+    match scope["kind"].as_str() {
+        Some("project") => format!("project:{}", scope["pool"].as_str().unwrap_or_default()),
+        Some("workflow") => format!("workflow:{}", scope["id"].as_str().unwrap_or_default()),
+        _ => "machine".to_owned(),
+    }
+}
+fn print_ceilings(value: &Value) {
+    let ceilings = value["ceilings"].as_array().cloned().unwrap_or_default();
+    if ceilings.is_empty() {
+        println!(
+            "No spending ceiling is set. Paid agents are bound only by their key's own limit."
+        );
+    }
+    for c in &ceilings {
+        let usd = c["usd"].as_f64().unwrap_or_default();
+        let measure = if c["scope"]["kind"] == "workflow" {
+            "since the task's first paid hand-over"
+        } else {
+            "a UTC day"
+        };
+        let inactive = if c["active"] == false {
+            " (inactive: this group has no key of its own now)"
+        } else {
+            ""
+        };
+        println!(
+            "{:28} ${usd:.2} {measure}{inactive}",
+            scope_label(&c["scope"])
+        );
+    }
+    for q in value["questions"].as_array().into_iter().flatten() {
+        let id = q["id"].as_str().unwrap_or_default();
+        println!(
+            "Reached: {} ${:.2} (${:.2} counted). Keep it: switchboard ceiling keep {id}. Double it in the Switchboard window.",
+            scope_label(&q["scope"]),
+            q["usd"].as_f64().unwrap_or_default(),
+            q["spent"].as_f64().unwrap_or_default(),
+        );
+    }
+    let last = &value["last_handover"];
+    if last.is_object() {
+        let skipped: Vec<String> = last["skipped"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                format!(
+                    "{} {}",
+                    s["agent"].as_str().unwrap_or_default(),
+                    s["reason"].as_str().unwrap_or_default()
+                )
+            })
+            .collect();
+        let skipped = if skipped.is_empty() {
+            String::new()
+        } else {
+            format!("; skipped: {}", skipped.join(", "))
+        };
+        println!(
+            "Last hand-over: {}, {}{skipped}",
+            utc(&last["at"]),
+            last["outcome"].as_str().unwrap_or_default()
+        );
     }
 }
 fn print_value(value: &Value, json_output: bool) {
@@ -2988,6 +3147,9 @@ mod mcp_parity {
         ("chain list", Tool("switchboard_chain_get")),
         ("chain set", Tool("switchboard_chain_set")),
         ("chain clear", Tool("switchboard_chain_set")),
+        ("ceiling list", Tool("switchboard_ceilings")),
+        ("ceiling set", Tool("switchboard_ceiling_set")),
+        ("ceiling keep", Tool("switchboard_ceiling_answer")),
         ("project list", Tool("switchboard_projects")),
         ("project show", Tool("switchboard_project_context")),
         ("project set", Tool("switchboard_project_set")),

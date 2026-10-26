@@ -197,6 +197,9 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_apply",
             "switchboard_chain_get",
             "switchboard_chain_set",
+            "switchboard_ceilings",
+            "switchboard_ceiling_set",
+            "switchboard_ceiling_answer",
             "switchboard_openrouter_status",
             "switchboard_hermes_status",
             "switchboard_hermes_set",
@@ -285,6 +288,11 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     assert!(
         read_names.contains(&"switchboard_chain_get")
             && !read_names.contains(&"switchboard_chain_set")
+    );
+    assert!(
+        read_names.contains(&"switchboard_ceilings")
+            && !read_names.contains(&"switchboard_ceiling_set")
+            && !read_names.contains(&"switchboard_ceiling_answer")
     );
     assert_eq!(
         reader.request(
@@ -732,6 +740,195 @@ fn fallback_chains_are_set_listed_and_cleared_from_the_cli() {
     )
     .unwrap();
     assert_eq!(after["data"]["effective"]["scope"]["kind"], "machine");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
+    // C-Q1: over MCP an agent reads ceilings, sets a first or a lower one and keeps a reached
+    // one; doubling, raising and clearing are the window's.
+    let (data, projects, owner, _) = fixture().await;
+    let mut agent = Agent::start(data.path(), projects.path(), &[], false);
+    let (error, empty) = agent.tool("switchboard_ceilings", json!({}));
+    assert!(!error, "{empty}");
+    assert_eq!(empty["ceilings"], json!([]));
+    // Risk 5: a body without usd, or with usd null, on a scope with no ceiling is refused with
+    // the one sentence, never answered as a success that clears nothing (ceiling null).
+    const USD: &str = "usd is a number of dollars from 0.01 to 1000.";
+    for body in [
+        json!({}),
+        json!({"usd": null}),
+        json!({"scope": "workflow:wf_0123456789abcdef"}),
+    ] {
+        let (error, refused) = agent.tool("switchboard_ceiling_set", body.clone());
+        assert!(error, "{body}: {refused}");
+        assert_eq!(refused.as_str(), Some(USD), "{body}");
+    }
+    let (error, set) = agent.tool("switchboard_ceiling_set", json!({"usd": 5}));
+    assert!(!error, "{set}");
+    assert_eq!(set["ceiling"]["cents"], 500);
+    let (error, raised) = agent.tool("switchboard_ceiling_set", json!({"usd": 8}));
+    assert!(
+        error && raised.as_str().unwrap().contains("Switchboard window"),
+        "{raised}"
+    );
+    let (error, missing) = agent.tool("switchboard_ceiling_set", json!({}));
+    assert!(error, "a body without usd is never a clear: {missing}");
+    assert_eq!(missing.as_str(), Some(USD));
+    let (error, lowered) = agent.tool(
+        "switchboard_ceiling_set",
+        json!({"scope": "machine", "usd": 4}),
+    );
+    assert!(!error, "{lowered}");
+    let (error, bad) = agent.tool(
+        "switchboard_ceiling_set",
+        json!({"scope": "everywhere", "usd": 1}),
+    );
+    assert!(error, "{bad}");
+    // The gate reached it: one question for $4.
+    let snapshot = owner.runtime.store.snapshot().unwrap();
+    let id = switchboard_runtime::spend::open_question(
+        data.path(),
+        &snapshot,
+        &switchboard_core::ChainScope::Machine,
+        400,
+        4.2,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+    )
+    .unwrap()
+    .unwrap();
+    let (_, listed) = agent.tool("switchboard_ceilings", json!({}));
+    assert_eq!(listed["questions"][0]["id"], id.as_str());
+    let (error, doubled) = agent.tool(
+        "switchboard_ceiling_answer",
+        json!({"id": id, "answer": "double"}),
+    );
+    assert!(error, "{doubled}");
+    assert_eq!(
+        doubled.as_str(),
+        Some(switchboard_runtime::spend::DOUBLE_IN_WINDOW)
+    );
+    let (_, still) = agent.tool("switchboard_ceilings", json!({}));
+    assert_eq!(still["ceilings"][0]["cents"], 400, "nothing doubled");
+    assert_eq!(
+        still["questions"].as_array().unwrap().len(),
+        1,
+        "still open"
+    );
+    let (error, kept) = agent.tool("switchboard_ceiling_answer", json!({"id": id}));
+    assert!(!error, "{kept}");
+    assert_eq!(kept["answer"], "keep");
+    assert_eq!(kept["ceiling"]["cents"], 400);
+    let (_, after) = agent.tool("switchboard_ceilings", json!({}));
+    assert_eq!(after["questions"], json!([]));
+}
+
+#[test]
+fn ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised() {
+    // C-6: `ceiling list|set|keep` and `continue --ceiling`; raising and doubling are the
+    // window's (C-Q1), so the CLI has no command for them.
+    let data = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_switchboard"))
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let out = |o: &std::process::Output| String::from_utf8_lossy(&o.stdout).into_owned();
+    let err = |o: &std::process::Output| String::from_utf8_lossy(&o.stderr).into_owned();
+    let empty = run(&["ceiling", "list"]);
+    assert!(empty.status.success(), "{}", err(&empty));
+    assert!(
+        out(&empty).contains("No spending ceiling is set"),
+        "{}",
+        out(&empty)
+    );
+    let set = run(&["ceiling", "set", "5"]);
+    assert!(set.status.success(), "{}", err(&set));
+    assert!(
+        out(&set).contains("Ceiling for machine: $5.00."),
+        "{}",
+        out(&set)
+    );
+    let raised = run(&["ceiling", "set", "8"]);
+    assert!(!raised.status.success());
+    assert!(
+        err(&raised).contains("Switchboard window"),
+        "{}",
+        err(&raised)
+    );
+    assert!(
+        run(&["ceiling", "set", "3"]).status.success(),
+        "a lower one"
+    );
+    let no_group = run(&["ceiling", "set", "--scope", "project:nogroup", "2"]);
+    assert!(!no_group.status.success());
+    assert!(
+        err(&no_group).contains("names no group"),
+        "{}",
+        err(&no_group)
+    );
+    let range = run(&[
+        "ceiling",
+        "set",
+        "--scope",
+        "workflow:wf_0123456789abcdef",
+        "2000",
+    ]);
+    assert!(err(&range).contains("Enter an amount from $0.01 to $1,000."));
+    let listed: Value =
+        serde_json::from_slice(&run(&["--json", "ceiling", "list"]).stdout).unwrap();
+    assert_eq!(listed["data"]["ceilings"][0]["usd"], 3.0);
+    // A reached ceiling's question (the gate writes it at a hand-over), kept from the CLI.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let file = json!({"version": 1, "ceilings": [{"scope": {"kind": "machine"}, "cents": 300, "set_at": now}],
+        "questions": [{"id": "q_0123456789abcdef", "scope": {"kind": "machine"}, "cents": 300, "spent": 3.1, "reached_at": now}]});
+    let path = data.path().join("spend.json");
+    std::fs::write(&path, file.to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let human = out(&run(&["ceiling", "list"]));
+    assert!(
+        human.contains("switchboard ceiling keep q_0123456789abcdef")
+            && human.contains("Double it in the Switchboard window"),
+        "{human}"
+    );
+    let kept = run(&["ceiling", "keep", "q_0123456789abcdef"]);
+    assert!(kept.status.success(), "{}", err(&kept));
+    assert!(out(&kept).contains("stays $3.00"), "{}", out(&kept));
+    let again = run(&["ceiling", "keep", "q_0123456789abcdef"]);
+    assert!(!again.status.success(), "answered once");
+    // `continue --ceiling`: the task's ceiling is set before anything is offered; an amount out
+    // of range refuses the continue itself.
+    let wf = "wf_0123456789abcdef";
+    let dir = data.path().to_str().unwrap();
+    let out_of_range = run(&["continue", wf, "--dir", dir, "--ceiling", "2000"]);
+    assert!(!out_of_range.status.success());
+    assert!(err(&out_of_range).contains("Enter an amount from $0.01 to $1,000."));
+    let _ = run(&["continue", wf, "--dir", dir, "--ceiling", "1.5"]);
+    let listed: Value =
+        serde_json::from_slice(&run(&["--json", "ceiling", "list"]).stdout).unwrap();
+    let task = listed["data"]["ceilings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["scope"]["kind"] == "workflow")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (task["scope"]["id"].as_str(), task["usd"].as_f64()),
+        (Some(wf), Some(1.5))
+    );
 }
 
 #[test]

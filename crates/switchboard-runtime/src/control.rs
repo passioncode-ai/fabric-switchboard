@@ -1066,6 +1066,427 @@ mod tests {
             .unwrap()
             .unwrap();
     }
+    #[tokio::test]
+    async fn a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window() {
+        // Break 3 (C-Q9): removing or replacing a capped group's own key moves its paid steps off
+        // the key its ceiling counts, a loosening only the window makes (C-Q1).
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let pool = Some(alpha.pool.clone());
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: pool.clone(),
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let expected = if by == Surface::Window {
+                crate::spend::WINDOW_ONLY
+            } else {
+                crate::spend::KEY_HOLDS_CEILING
+            };
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "remove {by:?}");
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "replace {by:?}");
+        }
+        let kept = store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.agent_key_secret(&kept).unwrap(),
+            "sk-or-v1-fixture",
+            "the key is kept"
+        );
+        // Offline the same: the refusal comes from spend.json before the key is touched. The
+        // offline store holds the same key (fix cycle 3: a key that is not saved removes nothing
+        // and is not refused).
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let offline_alpha = offline_store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        offline_store
+            .set_agent_key_for(
+                "openrouter",
+                Some(&offline_alpha.pool),
+                "sk-or-v1-fixture",
+                None,
+            )
+            .unwrap();
+        assert_eq!(offline_alpha.pool, alpha.pool);
+        crate::spend::set_ceiling(
+            offline.path(),
+            &offline_store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute(
+                offline_store.clone(),
+                offline.path(),
+                None,
+                remove(Surface::Cli)
+            )
+            .await
+            .unwrap_err(),
+            crate::spend::KEY_HOLDS_CEILING
+        );
+        assert!(offline_store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), replace(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_none());
+        // A group with no ceiling: its first key is saved and removed from the CLI as before.
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope,
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window() {
+        // Fix cycle 2, break 1 (C-Q9): the machine ceiling adds up every saved key's daily spend,
+        // and a task ceiling counts from its baseline key: removing or replacing such a key from
+        // the CLI or MCP would loosen the ceiling or misread the task.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-fixture", None)
+            .unwrap();
+        let now = crate::monitor::now();
+        let ceiling = |root: &std::path::Path, scope: ChainScope, usd: Option<f64>| {
+            crate::spend::set_ceiling(
+                root,
+                &store.snapshot().unwrap(),
+                scope,
+                usd,
+                Surface::Window,
+                now,
+            )
+            .unwrap();
+        };
+        ceiling(tmp.path(), ChainScope::Machine, Some(5.0));
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: None,
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: None,
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "remove {by:?}"
+            );
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "replace {by:?}"
+            );
+        }
+        let kept = store.agent_key_for("openrouter", None).unwrap().unwrap();
+        assert_eq!(store.agent_key_secret(&kept).unwrap(), "sk-or-v1-fixture");
+        // Offline the same, before the key is touched; the offline store holds a machine key.
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        offline_store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-fixture", None)
+            .unwrap();
+        ceiling(offline.path(), ChainScope::Machine, Some(5.0));
+        for by in [Surface::Cli, Surface::Mcp] {
+            assert_eq!(
+                crate::execute(offline_store.clone(), offline.path(), None, remove(by))
+                    .await
+                    .unwrap_err(),
+                crate::spend::KEY_COUNTED_BY_CEILING
+            );
+        }
+        assert!(offline_store
+            .agent_key_for("openrouter", None)
+            .unwrap()
+            .is_some());
+        // No machine ceiling, but a task ceiling counting from the machine key: the same.
+        ceiling(tmp.path(), ChainScope::Machine, None);
+        let task = ChainScope::Workflow {
+            id: "wf_0123456789abcdef".into(),
+        };
+        ceiling(tmp.path(), task, Some(2.0));
+        crate::spend::record_baseline(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            "wf_0123456789abcdef",
+            &crate::spend::KeySlot::Machine,
+            Some(1.0),
+            now,
+        )
+        .unwrap();
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, crate::spend::KEY_COUNTED_BY_CEILING, "task {by:?}");
+        }
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store.agent_key_for("openrouter", None).unwrap().is_none());
+        // With no ceiling counting it, the machine key is saved and removed from the CLI.
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Workflow {
+                id: "wf_0123456789abcdef".into(),
+            },
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_group_whose_own_key_a_ceiling_counts_is_deleted_only_in_the_window() {
+        // Fix cycle 3, break 1 (C-Q9): deleting a group removes its own key, so a machine ceiling
+        // (every saved key's spend) or a task ceiling whose baseline is that key would lose the
+        // count. From the CLI or MCP it is refused, through the listener and offline.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let now = crate::monitor::now();
+        let ceiling = |root: &std::path::Path,
+                       snapshot: &switchboard_core::Snapshot,
+                       scope: ChainScope,
+                       usd: Option<f64>| {
+            crate::spend::set_ceiling(root, snapshot, scope, usd, Surface::Window, now).unwrap();
+        };
+        let remove = |by: Surface| Operation::RemoveProject {
+            pool: alpha.pool.clone(),
+            by,
+        };
+        let kept = |store: &Store| {
+            let s = store.snapshot().unwrap();
+            assert!(
+                s.projects.iter().any(|p| p.pool == alpha.pool),
+                "group kept"
+            );
+            assert!(
+                store
+                    .agent_key_for("openrouter", Some(&alpha.pool))
+                    .unwrap()
+                    .is_some(),
+                "key kept"
+            );
+        };
+        // An offline store of its own, with the same group and key, in another data folder.
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let offline_alpha = offline_store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        assert_eq!(offline_alpha.pool, alpha.pool);
+        offline_store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let task = ChainScope::Workflow {
+            id: "wf_0123456789abcdef".into(),
+        };
+        // (a) a machine ceiling, (b) a task ceiling counting from alpha's key.
+        for case in ["machine", "task"] {
+            for (root, s) in [
+                (tmp.path(), store.snapshot().unwrap()),
+                (offline.path(), offline_store.snapshot().unwrap()),
+            ] {
+                if case == "machine" {
+                    ceiling(root, &s, ChainScope::Machine, Some(5.0));
+                } else {
+                    ceiling(root, &s, ChainScope::Machine, None);
+                    ceiling(root, &s, task.clone(), Some(2.0));
+                    crate::spend::record_baseline(
+                        root,
+                        &s,
+                        "wf_0123456789abcdef",
+                        &crate::spend::KeySlot::Group(alpha.pool.clone()),
+                        Some(1.0),
+                        now,
+                    )
+                    .unwrap();
+                }
+            }
+            for by in [Surface::Cli, Surface::Mcp] {
+                let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+                assert_eq!(
+                    refused,
+                    crate::spend::KEY_COUNTED_BY_CEILING,
+                    "{case} {by:?}"
+                );
+                kept(store);
+                let refused =
+                    crate::execute(offline_store.clone(), offline.path(), None, remove(by))
+                        .await
+                        .unwrap_err();
+                assert_eq!(
+                    refused,
+                    crate::spend::KEY_COUNTED_BY_CEILING,
+                    "offline {case} {by:?}"
+                );
+                kept(&offline_store);
+            }
+        }
+        // The window deletes it in its own process.
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(!store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .any(|p| p.pool == alpha.pool));
+        assert!(store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_none());
+    }
+    #[tokio::test]
+    async fn removing_a_key_that_does_not_exist_is_not_refused_as_counted() {
+        // Fix cycle 3: with a machine ceiling set, removing a key nobody saved removes nothing
+        // and loosens nothing; it must not answer that a ceiling counts the key.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        let answer = request(
+            tmp.path(),
+            &Operation::AgentKeyRemove {
+                service: "openrouter".into(),
+                pool: None,
+                by: Surface::Cli,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(answer["removed"], false);
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn descriptor_is_private_and_symlink_is_rejected() {
