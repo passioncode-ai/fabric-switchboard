@@ -425,8 +425,8 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
 `crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
 `continuation::{list_open, checkouts}`, called by the monitor after rotation.
 
-- **Trigger:** a chain applies (SB-71: the workflow's, else its executor account's project pool,
-  else the machine's — none set, nothing happens), and the executor of an open workflow without a
+- **Trigger:** a chain applies (SB-71: the workflow's, else its group's, else the machine's; none
+  set, nothing happens), and the executor of an open workflow without a
   waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
   executor's `accountRef`, only that account decides (one Switchboard does not hold decides
   nothing). When it names none, the executor is taken to be the ordinary CLI of its provider — but
@@ -488,9 +488,19 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
   phase 2). A Hermes executor at its limit is not detected yet.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
+  `no_usable_executor`, `no_checkout`, `engine_unreadable` or `group_ambiguous`; store event `fallback`
   `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
+- **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
+  names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it
+  holds the checkout; else the one group holding the checkout, whoever's account worked there
+  (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
+  group); else, with several groups holding it (SB-146) and none of them the executor's, the
+  executor account's group, logged `group_ambiguous`; with no group holding it, the executor
+  account's group as before. The engine is asked for the checkout whenever the workflow's, the
+  executor group's or the machine's chain is set, or any group has a chain. Tests
+  `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
+  `a_folder_in_two_groups_keeps_the_executors_group_and_logs_ambiguous`.
 
 - **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
 

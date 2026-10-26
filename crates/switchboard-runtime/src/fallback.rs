@@ -582,6 +582,37 @@ fn describe(snapshot: Option<&Snapshot>, account: &str) -> (String, String) {
         .map(|a| (provider_agent(a.provider).to_owned(), a.label.clone()))
         .unwrap_or_else(|| ("unknown".into(), String::new()))
 }
+/// The group whose chain a workflow checked out in `dir` follows (C-8, dossier C part E): the
+/// executor account's group when that group holds the checkout; else the one group holding it,
+/// whoever's account worked there (plain `claude` in a group's folder runs on the ordinary
+/// sign-in, which stays in the default group); else, with several groups holding it (SB-146) and
+/// none the executor's, the executor account's group, and `true` says the choice was ambiguous;
+/// with no group holding it, the executor account's group as before.
+pub(crate) fn chain_pool(
+    snapshot: &Snapshot,
+    executor_account: Option<&str>,
+    dir: &std::path::Path,
+) -> (Option<String>, bool) {
+    let own = executor_account.and_then(|a| {
+        snapshot
+            .accounts
+            .iter()
+            .find(|x| x.id == a)
+            .map(|x| x.pool.clone())
+    });
+    let holding = snapshot.projects_for(dir);
+    if holding.is_empty()
+        || own
+            .as_deref()
+            .is_some_and(|p| holding.iter().any(|g| g.pool == p))
+    {
+        return (own, false);
+    }
+    match holding.as_slice() {
+        [only] => (Some(only.pool.clone()), false),
+        _ => (own, true),
+    }
+}
 /// The pass with the hand-over as a parameter: the monitor passes `switchboard continue`'s own
 /// operation, a test a recorder.
 pub(crate) async fn pass_with<F, Fut>(runtime: &Runtime, now: i64, bin: &std::path::Path, act: F)
@@ -695,17 +726,26 @@ where
             },
         };
         examined += 1;
-        let pool = executor_account.as_deref().and_then(|a| {
+        // C-8: the group's chain is chosen by the checkout below, so the engine is asked for it
+        // whenever a chain could apply: the workflow's, the executor group's or the machine's
+        // (as before), or any group's.
+        let own_pool = executor_account.as_deref().and_then(|a| {
             snapshot
                 .accounts
                 .iter()
                 .find(|x| x.id == a)
                 .map(|x| x.pool.clone())
         });
-        let chain = match runtime.store.chain_for(Some(id), pool.as_deref()) {
-            Ok(Some(chain)) => chain,
-            _ => continue,
-        };
+        let may_apply = matches!(
+            runtime.store.chain_for(Some(id), own_pool.as_deref()),
+            Ok(Some(_))
+        ) || snapshot
+            .chains
+            .iter()
+            .any(|c| matches!(c.scope, switchboard_core::ChainScope::Project { .. }));
+        if !may_apply {
+            continue;
+        }
         runtime.fallback.mark(id, now);
         let shown = {
             let (bin, id) = (bin.to_path_buf(), id.to_owned());
@@ -721,6 +761,14 @@ where
         let Some(dir) = continuation::checkouts(&shown).into_iter().next() else {
             log("no_checkout");
             continue;
+        };
+        let (pool, ambiguous) = chain_pool(&snapshot, executor_account.as_deref(), &dir);
+        if ambiguous {
+            log("group_ambiguous");
+        }
+        let chain = match runtime.store.chain_for(Some(id), pool.as_deref()) {
+            Ok(Some(chain)) => chain,
+            _ => continue,
         };
         let steps = resolve_with(
             &snapshot,
@@ -1526,6 +1574,134 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| e.action == "fallback" && e.detail == "offered"));
+    }
+
+    /// C-8 (dossier C part E): a workflow worked in a group's folder by an account outside that
+    /// group (the ordinary Claude Code's account sits in the default group, which an ordinary
+    /// sign-in cannot leave) falls back along the group's chain, not the machine's.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli() {
+        use crate::fixtures::*;
+        use crate::monitor::now;
+        use std::sync::Arc;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let c = save(&runtime.store, "synthetic-c", "default");
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let group = runtime
+            .store
+            .save_project(
+                None,
+                "Alpha",
+                std::slice::from_ref(&repo_path),
+                std::slice::from_ref(&c.id),
+            )
+            .unwrap();
+        let projects = root.path().join("claude").join("projects").join("-p");
+        std::fs::create_dir_all(&projects).unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(now() - 60)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let line = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"timestamp":at,"quotaLimits":{"resetsAt":now()+3600}});
+        let file = projects.join("s.jsonl");
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        let profile = signed_in(Provider::Claude).unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime.limits.refresh(
+            &snapshot,
+            Some((&profile.identity, vec![a.id.clone()])),
+            &[file],
+            now(),
+        );
+        assert!(runtime.limits.limited_ids(now()).contains(&a.id));
+        let step = |agent: &str| Executor {
+            agent: agent.into(),
+            account_id: None,
+            key: None,
+        };
+        // The machine's chain names only Codex (no Codex account here: nothing to hand to); the
+        // group's names Claude Code, which its own account serves in its folder.
+        runtime
+            .store
+            .set_chain(ChainScope::Machine, vec![step("codex")])
+            .unwrap();
+        runtime
+            .store
+            .set_chain(
+                ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        let bin = engine(root.path(), &a.id, &repo_path);
+        let calls: Arc<Mutex<Vec<(String, String, PathBuf)>>> = Default::default();
+        let record = |wf: String, account: String, dir: PathBuf| {
+            let calls = calls.clone();
+            async move {
+                calls.lock().unwrap().push((wf, account, dir));
+                Ok(())
+            }
+        };
+        pass_with(&runtime, now(), &bin, record).await;
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![(WF.to_string(), c.id.clone(), repo_path.clone())],
+            "the group's chain, chosen by the checkout, hands it to the group's account"
+        );
+    }
+
+    #[test]
+    fn a_folder_in_two_groups_keeps_the_executors_group_and_logs_ambiguous() {
+        let group = |pool: &str, folder: &str| switchboard_core::Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![folder.into()],
+            created_at: 1,
+            sources: vec![],
+            organization: None,
+        };
+        let mut in_beta = account("in-beta", Provider::Claude, None);
+        in_beta.pool = "beta".into();
+        let snapshot = Snapshot {
+            accounts: vec![account("cli", Provider::Claude, None), in_beta],
+            projects: vec![
+                group("alpha", "/work/shared"),
+                group("beta", "/work/shared"),
+                group("gamma", "/work/gamma"),
+            ],
+            ..Default::default()
+        };
+        let pool_for = |executor: Option<&str>, dir: &str| {
+            chain_pool(&snapshot, executor, std::path::Path::new(dir))
+        };
+        // The executor's own group holds the checkout: it decides, never ambiguous.
+        assert_eq!(
+            pool_for(Some("in-beta"), "/work/shared/api"),
+            (Some("beta".into()), false)
+        );
+        // One group holds it: that group, whoever's account worked there.
+        assert_eq!(
+            pool_for(Some("cli"), "/work/gamma/src"),
+            (Some("gamma".into()), false)
+        );
+        assert_eq!(pool_for(None, "/work/gamma"), (Some("gamma".into()), false));
+        // Several groups hold it and the executor's is none of them: the executor's group
+        // (default here) stays, and the pass logs `group_ambiguous`.
+        assert_eq!(
+            pool_for(Some("cli"), "/work/shared"),
+            (Some("default".into()), true)
+        );
+        // No group holds it: as before, the executor's group.
+        assert_eq!(
+            pool_for(Some("in-beta"), "/elsewhere"),
+            (Some("beta".into()), false)
+        );
+        assert_eq!(pool_for(None, "/elsewhere"), (None, false));
     }
 
     #[cfg(unix)]
