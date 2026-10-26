@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-use switchboard_runtime::shell::map;
+use switchboard_runtime::shell::{map, scripts};
 
 #[derive(Subcommand)]
 pub enum ShellCmd {
@@ -35,6 +35,46 @@ pub enum ShellCmd {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// The hook script for a shell, for people who keep their own start files: put
+    /// `eval "$(switchboard shell init zsh)"` in `.zshrc` (bash likewise; fish:
+    /// `switchboard shell init fish | source`). It names this CLI and the data folder.
+    Init {
+        /// The shell.
+        #[arg(value_enum)]
+        shell: InitShell,
+    },
+}
+/// The shells `shell init` writes a hook for (PowerShell: node A-8 of 0.7.0).
+#[derive(Clone, Copy, ValueEnum)]
+pub enum InitShell {
+    Zsh,
+    Bash,
+    Fish,
+}
+impl InitShell {
+    pub fn kind(self) -> scripts::Kind {
+        match self {
+            InitShell::Zsh => scripts::Kind::Zsh,
+            InitShell::Bash => scripts::Kind::Bash,
+            InitShell::Fish => scripts::Kind::Fish,
+        }
+    }
+}
+
+/// `switchboard shell init <shell>`: the hook script, naming this executable and the data
+/// folder.
+pub fn init(data_dir: Option<&Path>, shell: InitShell) -> Result<String, String> {
+    let root = match data_dir {
+        Some(root) => root.to_owned(),
+        None => switchboard_runtime::default_root()?,
+    };
+    let cli = std::env::current_exe()
+        .and_then(|p| p.canonicalize())
+        .map_err(|_| "The path of this switchboard executable could not be read.".to_string())?;
+    scripts::script(shell.kind(), &cli, &root).ok_or_else(|| {
+        "The hook cannot name this executable or the data folder: a path is not absolute or not valid text."
+            .into()
+    })
 }
 #[derive(Clone, Copy, ValueEnum)]
 pub enum ShellKind {

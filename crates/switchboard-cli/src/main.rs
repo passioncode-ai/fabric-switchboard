@@ -1045,6 +1045,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
                 Ok(Value::Null)
             }
+            shell::ShellCmd::Init { shell: kind } => {
+                let script = shell::init(cli.data_dir.as_deref(), *kind)?;
+                if cli.json {
+                    Ok(json!({"shell": kind.kind().name(), "script": script}))
+                } else {
+                    print!("{script}");
+                    Ok(Value::Null)
+                }
+            }
         };
     }
     let root = cli.data_dir.clone().map(Ok).unwrap_or_else(default_root)?;
@@ -2672,6 +2681,17 @@ async fn start() -> ExitCode {
         {
             ExitCode::SUCCESS
         }
+        // `shell init` printed its script itself (in --json it answers the script as data).
+        Ok(Value::Null)
+            if matches!(
+                cli.command,
+                Command::Shell {
+                    command: shell::ShellCmd::Init { .. }
+                }
+            ) =>
+        {
+            ExitCode::SUCCESS
+        }
         Ok(value) => {
             print_result(&value, &cli);
             ExitCode::SUCCESS
@@ -2961,6 +2981,10 @@ mod mcp_parity {
         (
             "shell env",
             Not("SB-183: the terminal hook's own question on every change of folder, one line for a shell script; not an agent action"),
+        ),
+        (
+            "shell init",
+            Not("SB-183: prints the hook script for a person's own start file; not an agent action"),
         ),
         ("uninstall", Not(PERSON)),
     ];

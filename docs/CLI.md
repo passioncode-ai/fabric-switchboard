@@ -197,6 +197,7 @@ every folder there answers `none`.
 switchboard shell status            # the hook's state, this terminal, the folder's group and homes
 switchboard shell status --dir /w/acme --json
 switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every change of folder
+switchboard shell init zsh          # the hook script itself (also bash, fish)
 ```
 
 - `shell env` prints one line: `none`, or the group's pool, its context, the Claude shell home and
@@ -205,6 +206,13 @@ switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every c
   It always exits 0 and never writes to the error stream; anything it cannot read (no map, a map
   of another version or over 1 MiB, the hook turned off, a relative or unknown folder, a bad
   argument) answers `none`. Budget 25 ms (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
+- `shell init <zsh|bash|fish>` prints the hook script, naming this executable and the data folder,
+  for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in `.zshrc`
+  (bash likewise), `switchboard shell init fish | source` in fish's. On every change of folder it
+  asks `shell env` and exports the group's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
+  them back exactly when you leave; a variable you change while inside stays yours. It prints
+  nothing, never fails the prompt, and does nothing in a terminal Switchboard launched.
 - `shell status` reads the same files and the installer's record and never fails: `hook` is `on`,
   `off`, `default_on` (no choice made and a group belongs to an organization) or `default_off`;
   `terminal.hook_loaded` says whether this terminal exported `SWITCHBOARD_SHELL_HOOK=1`; `here` is

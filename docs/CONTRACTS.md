@@ -1374,6 +1374,50 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   three strings; an absent or broken record gives `[]`. Test:
   `shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails`.
 
+## The terminal hook's scripts (SB-183, node A-2, 2026-10-26)
+
+Code: `switchboard_runtime::shell::scripts` (`script`, `hook_path`), templates
+`crates/switchboard-runtime/src/shell/hook.zsh`, `hook.bash`, `hook.fish` and `core.sh` (the
+transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A "The hook scripts".
+
+- **Files.** `<data>/shell/hook.<zsh|bash|fish>`, 0600, each naming the CLI's absolute path and
+  the data folder, single-quoted for its shell (fish: `\\` and `\'`). A path that is not absolute,
+  not valid text or holds a control character gets no script (`script` answers None; `shell
+  init` refuses with “The hook cannot name this executable or the data folder: a path is not
+  absolute or not valid text.”). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
+- **Triggers.** zsh: `add-zsh-hook chpwd`, inside `emulate -L zsh`; bash: a `PROMPT_COMMAND` entry
+  (string form, macOS's bash 3.2) put first, acting only when `$PWD` changed and returning the
+  status the prompt shows; fish: `--on-variable PWD`. Each acts once at load. Loading twice
+  registers once (the `_switchboard_shell` guard). Tests: `bash_3_2_syntax_is_accepted` (`bash -n`
+  on `/bin/bash` 3.2.57 and `zsh -n`), `loading_twice_registers_once_and_bash_keeps_the_persons_prompt_command`,
+  `an_answer_of_another_form_changes_nothing_and_the_prompt_keeps_its_status`.
+- **The question.** `<cli> --data-dir <data> shell env --shell <shell> --dir "$PWD"`, stderr and
+  stdin closed. The answer is used only when it is `none` or four tab-separated fields with a
+  pool, a context and two homes that are `-` or absolute; anything else (and a CLI that is not
+  executable) changes nothing and prints nothing.
+- **The transition**, per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `SWITCHBOARD_CONTEXT`):
+  entering a folder where the answer names a value, the person's own (its value, or that it was
+  not set) is kept in a shell variable that is never exported, then the value is exported;
+  moving on, the new value; where the answer names none, the person's own is set back or unset.
+  A variable whose value is no longer what the hook set is the person's: the hook lets it go and
+  never writes over it. `SWITCHBOARD_SESSION` set (a terminal Switchboard launched): the hook does
+  not load. A home inside `<data>/shell/` found at load (a shell started from a hooked terminal,
+  which never sees its parent's saved values) is held with "not set" as the person's own, with
+  an `org:` context beside it. On load it exports `SWITCHBOARD_SHELL_HOOK=1`. The hook's own
+  variables (`_switchboard_*`) are never exported, `set -a` included (bash and zsh turn it off
+  around the hook's assignments). Tests (real `/bin/zsh` and `/bin/bash`; fish when installed,
+  else skipped with the reason): `entering_and_leaving_restores_unset_and_set_values`,
+  `a_value_the_person_set_inside_is_never_restored_over`, `a_launched_sessions_shell_is_never_touched`,
+  `the_saved_values_are_not_exported`, `a_missing_cli_prints_nothing`,
+  `paths_with_spaces_and_quotes_survive_every_shell`,
+  `a_shell_started_inside_an_organization_folder_gives_the_home_back_on_leaving`; CLI
+  `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli` (the printed script,
+  loaded by zsh and bash, with the real `shell env`). A variable set back is exported, whether or
+  not the person had exported it.
+- **Not covered.** fish was not installed on the machine that ran the tests (2026-10-26): its
+  script is written to the same rules and its tests skip with the reason. PowerShell is node A-8.
+
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 
 Code: `switchboard_runtime::shell::homes` (`rows`, `key`, `sync`), called from the owner's

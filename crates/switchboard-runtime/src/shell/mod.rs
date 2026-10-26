@@ -3,3 +3,4 @@
 //! dossier A part A. `map` is the folder map the hook reads on every change of folder.
 pub(crate) mod homes;
 pub mod map;
+pub mod scripts;

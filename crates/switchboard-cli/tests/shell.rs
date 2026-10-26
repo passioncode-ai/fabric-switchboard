@@ -414,3 +414,84 @@ fn shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails()
     assert!(!missing.exists());
     drop(lock);
 }
+
+/// SB-183 node A-2: the script `shell init` prints, loaded by a real zsh and bash, asks this
+/// very executable on every change of folder and moves the variables into the group's homes
+/// and back.
+#[cfg(unix)]
+#[test]
+fn shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli() {
+    let data = private_dir();
+    let root = data.path().canonicalize().unwrap();
+    let (_work, acme) = work();
+    write_map(&root, &acme);
+    let elsewhere = acme.parent().unwrap().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    for (shell, prompt) in [("zsh", ":"), ("bash", "eval \"$PROMPT_COMMAND\"")] {
+        let path = format!("/bin/{shell}");
+        if !Path::new(&path).exists() {
+            eprintln!("skipped: {shell} is not installed on this machine");
+            continue;
+        }
+        let printed = binary()
+            .arg("--data-dir")
+            .arg(&root)
+            .args(["shell", "init", shell])
+            .output()
+            .unwrap();
+        assert!(printed.status.success());
+        let script = String::from_utf8(printed.stdout).unwrap();
+        assert!(
+            script.contains(env!("CARGO_BIN_EXE_switchboard")) || script.contains("switchboard")
+        );
+        let hook = root.join(format!("hook-test.{shell}"));
+        std::fs::write(&hook, &script).unwrap();
+        let body = format!(
+            ". '{}'\ncd '{}'\n{prompt}\necho \"in=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"\ncd '{}'\n{prompt}\necho \"out=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"",
+            hook.display(),
+            acme.join("app").display(),
+            elsewhere.display()
+        );
+        let mut command = Command::new(&path);
+        if shell == "zsh" {
+            command.args(["-f", "-c", &body]);
+        } else {
+            command.args(["--noprofile", "--norc", "-c", &body]);
+        }
+        let out = command
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("CLAUDE_CONFIG_DIR", "/own home")
+            .current_dir(&elsewhere)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(&format!(
+                "in={} ctx=org:o-acme",
+                root.join("shell").join("claude-acme").display()
+            )),
+            "{shell}: {text}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(text.contains("out=/own home ctx=unset"), "{shell}: {text}");
+        assert!(
+            out.stderr.is_empty(),
+            "{shell}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // --json answers the script as data.
+    let json = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args(["--json", "shell", "init", "fish"])
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(value["data"]["shell"], "fish");
+    assert!(value["data"]["script"]
+        .as_str()
+        .unwrap()
+        .contains("--on-variable PWD"));
+}
