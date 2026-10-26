@@ -194,6 +194,10 @@ const safeErrors = new Set([
   'Give this group its own key under API keys first.',
   'That group id names no group.',
   'Doubling a ceiling is answered in the Switchboard window.',
+  // C-Q8: a paid start by hand (a launch from the window) refused by the spend gate.
+  'This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.',
+  'A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.',
+  'A spending ceiling covers this start and its spend could not be read, so no paid agent starts.',
   'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.',
   'No open question with that id: it was answered, or its ceiling changed or was removed.',
   'At most 192 task ceilings. Clear one in the Switchboard window first.',

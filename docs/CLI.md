@@ -414,8 +414,19 @@ or clearing one is done in the Switchboard window (*Raising or clearing a ceilin
 Switchboard window. From here, set a first ceiling or a lower one.*; *Doubling a ceiling is
 answered in the Switchboard window.*), so an agent never loosens a ceiling. `continue --ceiling`
 sets the task's ceiling before anything is offered (an amount out of range, or higher than the
-one set, refuses the continue); the ceiling is checked at the task's automatic hand-overs, not at
-this manual one. Test `ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`.
+one set, refuses the continue); the continue is then gated by it like a hand-over (C-Q8): every
+paid start through Switchboard (`continue`, also `--to-console` and on the default agent, onto
+Hermes, OpenCode or an API-key account; `agents launch --openrouter`; `agents launch` through the
+proxy on an API-key account; `launch <API-key account>`) is refused before anything is offered or
+started when a ceiling is reached (*A spending ceiling is reached, so no paid agent starts. Its
+question waits in the Switchboard window.*), when a covering ceiling's spend cannot be read (*A
+spending ceiling covers this start and its spend could not be read, so no paid agent starts.*) or
+when the key has less than $0.50 left of its own limit. Removing or replacing a capped group's
+own key (`agents openrouter remove|set --pool <group>`) is the window's (*This group has a
+spending ceiling. Remove or replace its own key in the Switchboard window.*, C-Q9). Tests
+`ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`,
+`a_paid_continue_by_hand_past_a_reached_machine_ceiling_is_refused_and_offers_nothing`,
+`a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`.
 
 ### Other coding agents
 

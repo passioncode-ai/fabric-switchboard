@@ -67,6 +67,15 @@ pub const DOUBLE_TOO_HIGH: &str =
 pub const WINDOW_ONLY: &str = "Only the Switchboard window answers as the window. Keep a ceiling from here, or double it in the window.";
 /// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
 /// lower one, never loosen one.
+/// C-Q9: removing or replacing a capped group's own key would move its paid steps off the key
+/// its ceiling counts (or reset that count), a loosening only the window makes (C-Q1).
+pub const KEY_HOLDS_CEILING: &str =
+    "This group has a spending ceiling. Remove or replace its own key in the Switchboard window.";
+/// C-Q8: a paid start by hand refused by the spend gate, by its reason code.
+pub const STOP_KEY_EXHAUSTED: &str =
+    "This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.";
+pub const STOP_CEILING_REACHED: &str = "A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.";
+pub const STOP_SPEND_UNKNOWN: &str = "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.";
 pub const RAISE_IN_WINDOW: &str = "Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.";
 pub const NO_QUESTION: &str =
     "No open question with that id: it was answered, or its ceiling changed or was removed.";
@@ -162,8 +171,10 @@ pub struct Baseline {
     pub workflow: String,
     /// `machine`, or the pool of the group whose own key the task ran on.
     pub key: String,
-    /// The key's total usage then, in dollars.
-    pub usage: f64,
+    /// The key's total usage then, in dollars; `null` when it could not be read at the task's
+    /// first paid hand-over, so a task ceiling set later counts its spend as unknown, never as
+    /// zero (C-5).
+    pub usage: Option<f64>,
     pub at: i64,
 }
 
@@ -310,7 +321,9 @@ fn validate(file: &SpendFile) -> bool {
         });
     let baselines_ok = file.baselines.len() <= MAX_BASELINES
         && file.baselines.iter().all(|b| {
-            workflow_id_valid(&b.workflow) && short_text_valid(&b.key) && amount_valid(b.usage)
+            workflow_id_valid(&b.workflow)
+                && short_text_valid(&b.key)
+                && b.usage.is_none_or(amount_valid)
         });
     let last_ok = file.last_handover.as_ref().is_none_or(|h| {
         workflow_id_valid(&h.workflow)
@@ -418,10 +431,50 @@ pub fn remove_group<T>(
     Ok((removed, changed))
 }
 
+/// The refusal a paid start by hand gets for the gate's reason code (C-Q8).
+pub fn refusal(reason: &str) -> &'static str {
+    match reason {
+        "key_exhausted" => STOP_KEY_EXHAUSTED,
+        "ceiling_reached" => STOP_CEILING_REACHED,
+        "ceilings_unreadable" => UNREADABLE,
+        _ => STOP_SPEND_UNKNOWN,
+    }
+}
+
+/// Removes or replaces a group's own OpenRouter key through `change` under the write lock (C-Q9):
+/// from the CLI or MCP a group that holds a ceiling is refused (`KEY_HOLDS_CEILING`), since its
+/// paid steps would leave the key the ceiling counts. `replaces` says whether the group has a key
+/// now (saving a first key loosens nothing). The machine's key (`pool` `None`) is never refused
+/// here: a machine ceiling then reads its spend as unknown. An unreadable file refuses every
+/// surface but the window, since whether the group holds a ceiling cannot be told.
+pub fn guard_group_key<T>(
+    root: &Path,
+    pool: Option<&str>,
+    replaces: bool,
+    by: Surface,
+    change: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    if let (Some(pool), true, false) = (pool, replaces, by == Surface::Window) {
+        let scope = ChainScope::Project {
+            pool: pool.to_owned(),
+        };
+        if read(root)?.ceilings.iter().any(|c| c.scope == scope) {
+            return Err(KEY_HOLDS_CEILING.into());
+        }
+    }
+    change()
+}
+
 /// Drops what removed groups and time leave behind. A clock set back drops nothing: an age is
 /// never negative.
-pub(crate) fn prune(file: &mut SpendFile, snapshot: &Snapshot, now: i64) {
-    let group_exists = |pool: &str| snapshot.projects.iter().any(|p| p.pool == pool);
+///
+/// With `snapshot` `None` nothing is dropped for a missing group, only for time: a hand-over's
+/// writes carry the snapshot of the start of their pass, which may be older than a ceiling the
+/// window set meanwhile for a new group.
+pub(crate) fn prune(file: &mut SpendFile, snapshot: Option<&Snapshot>, now: i64) {
+    let group_exists =
+        |pool: &str| snapshot.is_none_or(|s| s.projects.iter().any(|p| p.pool == pool));
     let scope_exists = |scope: &ChainScope| match scope {
         ChainScope::Project { pool } => group_exists(pool),
         _ => true,
@@ -476,7 +529,7 @@ fn log(action: &'static str, scope: &ChainScope) {
 /// change refuses or the file cannot be read.
 fn change<T>(
     root: &Path,
-    snapshot: &Snapshot,
+    snapshot: Option<&Snapshot>,
     now: i64,
     f: impl FnOnce(&mut SpendFile) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -524,7 +577,7 @@ pub fn set_ceiling(
             return Err(NO_OWN_KEY.into());
         }
     }
-    let set = change(root, snapshot, now, |file| {
+    let set = change(root, Some(snapshot), now, |file| {
         if by != Surface::Window {
             let current = file.ceilings.iter().find(|c| c.scope == scope);
             let loosens = match (current, value) {
@@ -573,17 +626,18 @@ pub fn set_ceiling(
 /// id. When every slot is taken, the oldest answered question makes room, then the oldest open
 /// task question; a machine or group question then takes the oldest open question's slot, so it
 /// always fits. `None` only for a task question while every slot holds an open machine or group
-/// question.
+/// question. `_snapshot` is the caller's, often from the start of a hand-over pass: it never
+/// drops a record of a group it does not hold (`prune` with `None`).
 pub fn open_question(
     root: &Path,
-    snapshot: &Snapshot,
+    _snapshot: &Snapshot,
     scope: &ChainScope,
     cents: u32,
     spent: f64,
     now: i64,
 ) -> Result<Option<String>, String> {
     let spent = if amount_valid(spent) { spent } else { 0.0 };
-    let opened = change(root, snapshot, now, |file| {
+    let opened = change(root, None, now, |file| {
         if let Some(q) = file
             .questions
             .iter()
@@ -653,7 +707,7 @@ pub fn answer(
     if answer == Answer::Double && by != Surface::Window {
         return Err(DOUBLE_IN_WINDOW.into());
     }
-    let (scope, ceiling) = change(root, snapshot, now, |file| {
+    let (scope, ceiling) = change(root, Some(snapshot), now, |file| {
         let index = file
             .questions
             .iter()
@@ -713,7 +767,7 @@ fn ceiling_view(snapshot: &Snapshot, c: &Ceiling) -> Value {
 /// The ceilings, open questions and last hand-over, for the window, CLI and MCP.
 pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String> {
     let mut file = read(root)?;
-    prune(&mut file, snapshot, now);
+    prune(&mut file, Some(snapshot), now);
     let mut open: Vec<&Question> = file
         .questions
         .iter()
@@ -746,19 +800,24 @@ pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String>
 /// the offer never loses it; an offer refused afterwards leaves a baseline that counts from a
 /// little earlier, which only counts more. When every slot is taken, the oldest baseline of a task
 /// with no ceiling makes room (at most 192 tasks hold a ceiling, so one always does). Answers
-/// whether it was written.
+/// whether it was written. `usage` `None` (the total could not be read) records a marker: a task
+/// ceiling set later counts the task's spend as unknown, never from zero. `_snapshot` drops
+/// nothing, as for [`open_question`].
 pub fn record_baseline(
     root: &Path,
-    snapshot: &Snapshot,
+    _snapshot: &Snapshot,
     workflow: &str,
     key: &KeySlot,
-    usage: f64,
+    usage: Option<f64>,
     now: i64,
 ) -> Result<bool, String> {
-    if !workflow_id_valid(workflow) || !amount_valid(usage) || !short_text_valid(key.name()) {
+    if !workflow_id_valid(workflow)
+        || !usage.is_none_or(amount_valid)
+        || !short_text_valid(key.name())
+    {
         return Ok(false);
     }
-    change(root, snapshot, now, |file| {
+    change(root, None, now, |file| {
         if file.baselines.iter().any(|b| b.workflow == workflow) {
             return Ok(false);
         }
@@ -797,7 +856,7 @@ pub fn record_baseline(
 /// does not accept is not recorded.
 pub fn record_handover(
     root: &Path,
-    snapshot: &Snapshot,
+    _snapshot: &Snapshot,
     last: LastHandover,
     now: i64,
 ) -> Result<(), String> {
@@ -812,7 +871,7 @@ pub fn record_handover(
     if !fits {
         return Ok(());
     }
-    change(root, snapshot, now, |file| {
+    change(root, None, now, |file| {
         file.last_handover = Some(last);
         Ok(())
     })
@@ -874,8 +933,12 @@ pub fn decide(file: &SpendFile, snapshot: &Snapshot, step: &PaidStep, reads: &Re
                     // No paid hand-over yet: nothing counted.
                     None => Some(0.0),
                     Some(b) if b.key != step.key.name() => None,
+                    // Its first paid hand-over ran with the total unread: unknown, never zero.
+                    Some(Baseline { usage: None, .. }) => None,
                     // A key whose total went down is another key: unknown, never zero.
-                    Some(b) => Some(usage - b.usage).filter(|d| *d >= 0.0),
+                    Some(Baseline {
+                        usage: Some(from), ..
+                    }) => Some(usage - from).filter(|d| *d >= 0.0),
                 }
             }
         }
@@ -1384,14 +1447,14 @@ mod tests {
         file.baselines.push(Baseline {
             workflow: WF.into(),
             key: "machine".into(),
-            usage: 1.0,
+            usage: Some(1.0),
             at: T,
         });
         write(root.path(), &file).unwrap();
         // The clock goes back a year: nothing is older than it was, so nothing goes.
         let earlier = T - 365 * DAY;
         let mut pruned = read(root.path()).unwrap();
-        prune(&mut pruned, &s, earlier);
+        prune(&mut pruned, Some(&s), earlier);
         assert_eq!(pruned, read(root.path()).unwrap());
         // A question asked "in the future" is still answered, and the ceiling it doubles is the
         // one it was asked about.
@@ -1410,13 +1473,13 @@ mod tests {
         // Time going forward again past 30 days drops the answered questions; the baseline of a
         // task that still has a ceiling stays (C-5), so the task is never counted from zero again.
         let mut later = file.clone();
-        prune(&mut later, &s, T + 31 * DAY);
+        prune(&mut later, Some(&s), T + 31 * DAY);
         assert!(later.questions.is_empty());
         assert_eq!(later.baselines.len(), 1);
         assert_eq!(later.ceilings.len(), 2, "ceilings never age out");
         let mut cleared = later.clone();
         cleared.ceilings.retain(|c| c.scope != task);
-        prune(&mut cleared, &s, T + 31 * DAY);
+        prune(&mut cleared, Some(&s), T + 31 * DAY);
         assert!(
             cleared.baselines.is_empty(),
             "without its ceiling it ages out"
@@ -1435,9 +1498,9 @@ mod tests {
             .unwrap()
             .unwrap();
         let mut f = read(root.path()).unwrap();
-        prune(&mut f, &s, T + DAY);
+        prune(&mut f, Some(&s), T + DAY);
         assert!(f.questions.iter().any(|q| q.id == daily));
-        prune(&mut f, &s, T + 3 * DAY);
+        prune(&mut f, Some(&s), T + 3 * DAY);
         assert!(!f.questions.iter().any(|q| q.id == daily));
     }
 
@@ -1460,14 +1523,14 @@ mod tests {
         file.baselines.push(Baseline {
             workflow: WF.into(),
             key: "alpha".into(),
-            usage: 1.0,
+            usage: Some(1.0),
             at: T,
         });
         write(root.path(), &file).unwrap();
         s.projects.retain(|p| p.pool != "alpha");
         s.agent_keys.retain(|k| k.pool.is_none());
         let mut f = read(root.path()).unwrap();
-        prune(&mut f, &s, T);
+        prune(&mut f, Some(&s), T);
         assert_eq!(f.ceilings.len(), 1);
         assert_eq!(f.ceilings[0].scope, ChainScope::Machine);
         assert!(f.questions.is_empty());
@@ -1598,7 +1661,7 @@ mod tests {
         task.baselines.push(Baseline {
             workflow: WF.into(),
             key: "machine".into(),
-            usage: 50.0,
+            usage: Some(50.0),
             at: T,
         });
         assert_eq!(
@@ -1867,7 +1930,7 @@ mod tests {
                 .map(|i| Baseline {
                     workflow: format!("wf_{i:016x}"),
                     key: pool(i),
-                    usage: f64::MAX,
+                    usage: Some(f64::MAX),
                     at: i64::MIN,
                 })
                 .collect(),
@@ -2152,7 +2215,7 @@ mod tests {
             file.baselines.push(Baseline {
                 workflow: WF.into(),
                 key: key.into(),
-                usage: 1.0,
+                usage: Some(1.0),
                 at: T,
             });
         }
@@ -2212,16 +2275,22 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let s = snapshot();
         let id = |i: usize| format!("wf_{i:016x}");
-        assert!(record_baseline(root.path(), &s, WF, &KeySlot::Machine, 10.0, T).unwrap());
-        assert!(!record_baseline(root.path(), &s, WF, &KeySlot::Machine, 12.0, T + 1).unwrap());
+        assert!(record_baseline(root.path(), &s, WF, &KeySlot::Machine, Some(10.0), T).unwrap());
+        assert!(
+            !record_baseline(root.path(), &s, WF, &KeySlot::Machine, Some(12.0), T + 1).unwrap()
+        );
         assert_eq!(
             read(root.path()).unwrap().baselines[0].usage,
-            10.0,
+            Some(10.0),
             "the first one stays"
         );
         // A negative read or a bad id records nothing.
-        assert!(!record_baseline(root.path(), &s, "wf_x", &KeySlot::Machine, 1.0, T).unwrap());
-        assert!(!record_baseline(root.path(), &s, &id(1), &KeySlot::Machine, -1.0, T).unwrap());
+        assert!(
+            !record_baseline(root.path(), &s, "wf_x", &KeySlot::Machine, Some(1.0), T).unwrap()
+        );
+        assert!(
+            !record_baseline(root.path(), &s, &id(1), &KeySlot::Machine, Some(-1.0), T).unwrap()
+        );
         // Full: the oldest baseline of a task with no ceiling makes room, never a capped one's.
         set_ceiling(
             root.path(),
@@ -2238,14 +2307,20 @@ mod tests {
                 &s,
                 &id(i),
                 &KeySlot::Machine,
-                1.0,
+                Some(1.0),
                 T + i as i64
             )
             .unwrap());
         }
-        assert!(
-            record_baseline(root.path(), &s, &id(9999), &KeySlot::Machine, 1.0, T + 9999).unwrap()
-        );
+        assert!(record_baseline(
+            root.path(),
+            &s,
+            &id(9999),
+            &KeySlot::Machine,
+            Some(1.0),
+            T + 9999
+        )
+        .unwrap());
         let file = read(root.path()).unwrap();
         assert_eq!(file.baselines.len(), MAX_BASELINES);
         assert!(

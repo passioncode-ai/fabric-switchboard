@@ -751,6 +751,18 @@ async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
     let (error, empty) = agent.tool("switchboard_ceilings", json!({}));
     assert!(!error, "{empty}");
     assert_eq!(empty["ceilings"], json!([]));
+    // Risk 5: a body without usd, or with usd null, on a scope with no ceiling is refused with
+    // the one sentence, never answered as a success that clears nothing (ceiling null).
+    const USD: &str = "usd is a number of dollars from 0.01 to 1000.";
+    for body in [
+        json!({}),
+        json!({"usd": null}),
+        json!({"scope": "workflow:wf_0123456789abcdef"}),
+    ] {
+        let (error, refused) = agent.tool("switchboard_ceiling_set", body.clone());
+        assert!(error, "{body}: {refused}");
+        assert_eq!(refused.as_str(), Some(USD), "{body}");
+    }
     let (error, set) = agent.tool("switchboard_ceiling_set", json!({"usd": 5}));
     assert!(!error, "{set}");
     assert_eq!(set["ceiling"]["cents"], 500);
@@ -761,6 +773,7 @@ async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
     );
     let (error, missing) = agent.tool("switchboard_ceiling_set", json!({}));
     assert!(error, "a body without usd is never a clear: {missing}");
+    assert_eq!(missing.as_str(), Some(USD));
     let (error, lowered) = agent.tool(
         "switchboard_ceiling_set",
         json!({"scope": "machine", "usd": 4}),
@@ -792,9 +805,10 @@ async fn ceiling_answer_double_over_mcp_is_refused_with_the_window_named() {
         "switchboard_ceiling_answer",
         json!({"id": id, "answer": "double"}),
     );
-    assert!(
-        error && doubled.as_str().unwrap().contains("Switchboard window"),
-        "{doubled}"
+    assert!(error, "{doubled}");
+    assert_eq!(
+        doubled.as_str(),
+        Some(switchboard_runtime::spend::DOUBLE_IN_WINDOW)
     );
     let (_, still) = agent.tool("switchboard_ceilings", json!({}));
     assert_eq!(still["ceilings"][0]["cents"], 400, "nothing doubled");

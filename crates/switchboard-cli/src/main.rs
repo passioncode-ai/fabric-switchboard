@@ -1502,6 +1502,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     key: read_secret()?,
                     model: model.clone(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::Status { pool } => Operation::AgentKeyStatus {
                     service: "openrouter".into(),
@@ -1516,6 +1517,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 OpenrouterCommand::Remove { pool } => Operation::AgentKeyRemove {
                     service: "openrouter".into(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::List => Operation::AgentKeys {
                     service: "openrouter".into(),

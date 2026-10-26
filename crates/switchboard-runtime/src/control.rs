@@ -1066,6 +1066,125 @@ mod tests {
             .unwrap()
             .unwrap();
     }
+    #[tokio::test]
+    async fn a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window() {
+        // Break 3 (C-Q9): removing or replacing a capped group's own key moves its paid steps off
+        // the key its ceiling counts, a loosening only the window makes (C-Q1).
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let pool = Some(alpha.pool.clone());
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: pool.clone(),
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let expected = if by == Surface::Window {
+                crate::spend::WINDOW_ONLY
+            } else {
+                crate::spend::KEY_HOLDS_CEILING
+            };
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "remove {by:?}");
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "replace {by:?}");
+        }
+        let kept = store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.agent_key_secret(&kept).unwrap(),
+            "sk-or-v1-fixture",
+            "the key is kept"
+        );
+        // Offline the same: the refusal comes from spend.json before the store is touched.
+        let offline = tempfile::tempdir().unwrap();
+        crate::spend::set_ceiling(
+            offline.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Cli))
+                .await
+                .unwrap_err(),
+            crate::spend::KEY_HOLDS_CEILING
+        );
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), replace(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_none());
+        // A group with no ceiling: its first key is saved and removed from the CLI as before.
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope,
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn descriptor_is_private_and_symlink_is_rejected() {
