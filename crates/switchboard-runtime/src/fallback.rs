@@ -11,7 +11,11 @@
 //! both ways — a Kimi executor at its limit is handed on, and a Kimi step takes a workflow; SB-107
 //! adds Hermes Agent on the saved OpenRouter key (its own credit ceiling). Another agent, a step
 //! pinned to a project's paid key, or Kimi Code on a paid key is skipped with its reason until
-//! its launch recipe and paid-key ceilings exist (SB-72, SB-96, SB-73 phase 2).
+//! its launch recipe and the project grant it needs exist (SB-96, SB-73 phase 2).
+//!
+//! A paid step passes the spend gate first (SB-72, iteration 0.7.0 C-5, [`spend_gate`]): its key's
+//! spend is read from OpenRouter only when such a step is reached, and a key nearly spent, a
+//! spending ceiling reached, or a covering ceiling whose spend cannot be read skips it.
 use crate::{continuation, oplog, Operation, Runtime};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -200,7 +204,7 @@ pub(crate) fn resolve_with(
                 };
             }
             // SB-107: Hermes runs on the saved OpenRouter key; a step that pins an account or a
-            // project's key waits for SB-72/SB-96.
+            // project's key waits for SB-96.
             if e.agent == crate::hermes::HERMES_TARGET {
                 return if e.account_id.is_some() || e.key.is_some() {
                     Step::Skip {
@@ -623,11 +627,31 @@ pub(crate) fn chain_pool_of(
     }
 }
 /// The pass with the hand-over as a parameter: the monitor passes `switchboard continue`'s own
-/// operation, a test a recorder.
+/// operation, a test a recorder. A paid step's spend is read from OpenRouter (C-5).
 pub(crate) async fn pass_with<F, Fut>(runtime: &Runtime, now: i64, bin: &std::path::Path, act: F)
 where
     F: Fn(String, String, PathBuf) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let store = runtime.store.clone();
+    let read = move |pool: Option<String>| {
+        let store = store.clone();
+        async move { crate::agent_keys::spend_read(&store, pool.as_deref()).await }
+    };
+    pass_with_reads(runtime, now, bin, act, read).await
+}
+/// [`pass_with`] with the spend read as a parameter too, so a test never reaches OpenRouter.
+pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
+    runtime: &Runtime,
+    now: i64,
+    bin: &std::path::Path,
+    act: F,
+    read: R,
+) where
+    F: Fn(String, String, PathBuf) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+    R: Fn(Option<String>) -> RFut,
+    RFut: std::future::Future<Output = Option<crate::spend::KeyRead>> + Send + 'static,
 {
     let Ok(snapshot) = runtime.store.snapshot() else {
         return;
@@ -796,12 +820,31 @@ where
             Some(&dir),
             &kimi,
         );
-        let outcome = hand_over(&act, id, &dir, &steps).await;
-        log(outcome);
+        let gate = |_agent: String, account: String| {
+            let (snapshot, dir, read) = (&snapshot, &dir, &read);
+            async move {
+                spend_gate(
+                    &runtime.root,
+                    snapshot,
+                    id,
+                    dir,
+                    &account,
+                    now,
+                    read,
+                    SPEND_READ_TIMEOUT,
+                )
+                .await
+            }
+        };
+        let done = hand_over(&act, &gate, id, &dir, &steps).await;
+        log(done.outcome);
+        record_last(&runtime.root, &snapshot, id, &done, now);
+        // The gate's records (a question, a baseline, this hand-over) ride the next backup.
+        runtime.store.setting_changed();
         let _ = runtime.store.record(
             "fallback",
             None,
-            if outcome == "offered" {
+            if done.outcome == "offered" {
                 "offered"
             } else {
                 "failed"
@@ -813,35 +856,224 @@ where
     }
 }
 
-/// Tries the chain's steps in order. A refusal before the offer moves on to the next step; once an
+/// Writes what a hand-over did to spend.json's `last_handover` (C-5): the chains view and the
+/// window read it. A file that cannot be written leaves the previous record; the log has it.
+fn record_last(
+    root: &std::path::Path,
+    snapshot: &Snapshot,
+    workflow: &str,
+    done: &HandOver,
+    now: i64,
+) {
+    let last = crate::spend::LastHandover {
+        at: now,
+        workflow: workflow.to_owned(),
+        outcome: done.outcome.to_owned(),
+        skipped: done
+            .skipped
+            .iter()
+            .map(|(agent, reason)| crate::spend::Skipped {
+                agent: agent.chars().take(64).collect(),
+                reason: (*reason).to_owned(),
+            })
+            .collect(),
+    };
+    if crate::spend::record_handover(root, snapshot, last, now).is_err() {
+        oplog::event("spend_gate", &[("record", oplog::Field::Code("unwritten"))]);
+    }
+}
+
+static HAND_OVER: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// What the spend gate says about one step about to be handed work (C-5).
+#[derive(Debug, PartialEq)]
+pub(crate) enum Gate {
+    Run,
+    Skip(&'static str),
+}
+
+/// What one hand-over did: its outcome code and every step passed over with its reason.
+#[derive(Debug, PartialEq)]
+pub(crate) struct HandOver {
+    pub outcome: &'static str,
+    pub skipped: Vec<(String, &'static str)>,
+}
+
+/// Tries the chain's steps in order, each through `gate` first (the spend gate for a paid step,
+/// C-5). A step the gate skips or a refusal before the offer moves on to the next step; once an
 /// offer exists (the launch failed after it) nothing else is tried — the offer lapses by itself.
-async fn hand_over<F, Fut>(
+/// With no step tried, the outcome is the first reason the gate gave, else `no_usable_executor`.
+async fn hand_over<F, Fut, G, GFut>(
     act: &F,
+    gate: &G,
     workflow: &str,
     dir: &std::path::Path,
     steps: &[Step],
-) -> &'static str
+) -> HandOver
 where
     F: Fn(String, String, PathBuf) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
+    G: Fn(String, String) -> GFut,
+    GFut: std::future::Future<Output = Gate>,
 {
-    let mut skipped_only = true;
+    // One hand-over at a time, its gate and launch together: two never both start on the last
+    // dollar under a ceiling (each sees what the other's launch left behind).
+    let _turn = HAND_OVER.lock().await;
+    let mut tried = false;
+    let mut gated: Option<&'static str> = None;
+    let mut skipped = Vec::new();
+    let done = |outcome, skipped| HandOver { outcome, skipped };
     for step in steps {
-        let Step::Run { account_id, .. } = step else {
-            continue;
+        let (agent, account_id) = match step {
+            Step::Skip { agent, reason } => {
+                skipped.push((agent.clone(), *reason));
+                continue;
+            }
+            Step::Run { agent, account_id } => (agent, account_id),
         };
-        skipped_only = false;
+        if let Gate::Skip(reason) = gate(agent.clone(), account_id.clone()).await {
+            skipped.push((agent.clone(), reason));
+            gated.get_or_insert(reason);
+            continue;
+        }
+        tried = true;
         match act(workflow.to_owned(), account_id.clone(), dir.to_path_buf()).await {
-            Ok(_) => return "offered",
-            Err(error) if error.starts_with("Offered ") => return "launch_failed",
+            Ok(_) => return done("offered", skipped),
+            Err(error) if error.starts_with("Offered ") => return done("launch_failed", skipped),
             Err(_) => continue,
         }
     }
-    if skipped_only {
-        "no_usable_executor"
-    } else {
-        "every_step_refused"
+    let outcome = match (tried, gated) {
+        (true, _) => "every_step_refused",
+        (false, Some(reason)) => reason,
+        (false, None) => "no_usable_executor",
+    };
+    done(outcome, skipped)
+}
+
+/// How long the gate waits for one key's spend: OpenRouter's own read gives up at 10 s.
+const SPEND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
+/// The spend gate for one step (SB-72, dossier C part D). Not paid (a subscription sign-in, Kimi
+/// Code): runs, nothing read. Paid: Hermes and OpenCode on the OpenRouter key a launch in `dir`
+/// uses (`spend::key_slot`, never the chain's group), and Claude Code or Codex on an API-key
+/// account (C-Q3). `read` asks OpenRouter for one saved key's spend by its pool (none: the
+/// machine's); it is called only here, for the step's key and, while a machine ceiling is set,
+/// for every other saved key at once, each within `limit`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn spend_gate<R, RFut>(
+    root: &std::path::Path,
+    snapshot: &Snapshot,
+    workflow: &str,
+    dir: &std::path::Path,
+    account_id: &str,
+    now: i64,
+    read: &R,
+    limit: std::time::Duration,
+) -> Gate
+where
+    R: Fn(Option<String>) -> RFut,
+    RFut: std::future::Future<Output = Option<crate::spend::KeyRead>> + Send + 'static,
+{
+    use crate::spend::{self, KeySlot, Verdict};
+    use switchboard_core::ChainScope;
+    let openrouter =
+        account_id == crate::hermes::HERMES_TARGET || account_id == crate::launch::OPENCODE_TARGET;
+    let api_key_account = !openrouter
+        && snapshot.accounts.iter().any(|a| {
+            a.id == account_id
+                && a.kind == switchboard_core::AuthKind::ApiKey
+                && matches!(a.provider, Provider::Claude | Provider::Codex)
+        });
+    if !openrouter && !api_key_account {
+        return Gate::Run;
     }
+    let verdict = |code: &'static str| {
+        oplog::event("spend_gate", &[("verdict", oplog::Field::Code(code))]);
+    };
+    let skip = |code: &'static str| {
+        verdict(code);
+        Gate::Skip(code)
+    };
+    // An unreadable spend.json hands nothing paid over: never "no ceilings".
+    let Ok(before) = spend::read(root) else {
+        return skip("ceilings_unreadable");
+    };
+    let slot = spend::key_slot(snapshot, Some(dir));
+    let key = slot.clone().unwrap_or(KeySlot::Machine);
+    let pool_of = |slot: &KeySlot| match slot {
+        KeySlot::Machine => None,
+        KeySlot::Group(pool) => Some(pool.clone()),
+    };
+    // Each read runs at once and is given up at `limit`: unknown, never zero.
+    let ask = |pool: Option<String>| {
+        let read = tokio::time::timeout(limit, read(pool));
+        tokio::spawn(async move { read.await.ok().flatten() })
+    };
+    let others_pools = match &slot {
+        Some(slot) if openrouter => crate::agent_keys::other_keys(snapshot, slot),
+        _ => Vec::new(),
+    };
+    let machine_ceiling =
+        |f: &spend::SpendFile| f.ceilings.iter().any(|c| c.scope == ChainScope::Machine);
+    // An API-key account spends no OpenRouter key: nothing is read for it (C-Q3).
+    let own = match &slot {
+        Some(slot) if openrouter => Some(ask(pool_of(slot))),
+        _ => None,
+    };
+    let others_asked: Vec<_> = if machine_ceiling(&before) {
+        others_pools.iter().cloned().map(ask).collect()
+    } else {
+        Vec::new()
+    };
+    let own = match own {
+        Some(handle) => handle.await.ok().flatten(),
+        None => None,
+    };
+    let mut others = Vec::new();
+    for handle in others_asked {
+        others.push(handle.await.ok().flatten());
+    }
+    // The ceilings as they are now, after the reads: one set meanwhile is obeyed. A machine
+    // ceiling set during the reads counts the keys not read as unknown.
+    let Ok(file) = spend::read(root) else {
+        return skip("ceilings_unreadable");
+    };
+    if machine_ceiling(&file) && others.len() < others_pools.len() {
+        others = vec![None; others_pools.len()];
+    }
+    let step = spend::PaidStep {
+        key: key.clone(),
+        workflow: Some(workflow),
+        api_key_account,
+    };
+    let reads = spend::Reads {
+        key: own.clone(),
+        others,
+    };
+    match spend::decide(&file, snapshot, &step, &reads) {
+        Verdict::Skip { reason, reached } => {
+            if let Some((scope, cents, spent)) = reached {
+                let _ = spend::open_question(root, snapshot, &scope, cents, spent, now);
+            }
+            return skip(reason);
+        }
+        Verdict::RunUnread => verdict("spend_unread"),
+        Verdict::Run => verdict("run"),
+    }
+    // A task's first paid hand-over records what its ceiling counts from, before the launch.
+    if let Some(usage) = own.and_then(|r| r.usage) {
+        let task_ceiling = file
+            .ceilings
+            .iter()
+            .any(|c| matches!(&c.scope, ChainScope::Workflow { id } if id == workflow));
+        if spend::record_baseline(root, snapshot, workflow, &key, usage, now).is_err()
+            && task_ceiling
+        {
+            return skip("spend_unknown");
+        }
+    }
+    Gate::Run
 }
 
 #[cfg(test)]
@@ -1930,8 +2162,9 @@ mod tests {
                 }
             }
         };
+        let open = |_: String, _: String| async { Gate::Run };
         assert_eq!(
-            hand_over(&act, WF, dir.path(), &steps).await,
+            hand_over(&act, &open, WF, dir.path(), &steps).await.outcome,
             "launch_failed"
         );
         assert_eq!(*tried.lock().unwrap(), ["refuses", "offered-then-failed"]);
@@ -1940,7 +2173,9 @@ mod tests {
             reason: "agent_not_automatic_yet",
         }];
         assert_eq!(
-            hand_over(&act, WF, dir.path(), &only_skips).await,
+            hand_over(&act, &open, WF, dir.path(), &only_skips)
+                .await
+                .outcome,
             "no_usable_executor"
         );
     }
@@ -1955,5 +2190,612 @@ mod tests {
         assert!(state.recently_tried("wf_0123456789abcdef", 1_000 + RETRY_SECONDS - 1));
         assert!(!state.recently_tried("wf_0123456789abcdef", 1_000 + RETRY_SECONDS));
         assert!(!state.recently_tried("wf_ffffffffffffffff", 1_000));
+    }
+
+    // ---- C-5: the spend gate (SB-72, dossier C part D) ----
+
+    use crate::spend::{self, KeyRead, Surface};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    const T: i64 = 1_800_000_000;
+    const WF2: &str = "wf_fedcba9876543210";
+    fn hermes() -> Step {
+        Step::Run {
+            agent: "hermes".into(),
+            account_id: crate::hermes::HERMES_TARGET.into(),
+        }
+    }
+    fn run(agent: &str, account: &str) -> Step {
+        Step::Run {
+            agent: agent.into(),
+            account_id: account.into(),
+        }
+    }
+    fn openrouter_key(pool: Option<&str>) -> switchboard_core::agent_keys::AgentKey {
+        switchboard_core::agent_keys::AgentKey {
+            id: format!("k-{}", pool.unwrap_or("machine")),
+            service: "openrouter".into(),
+            pool: pool.map(str::to_owned),
+            saved_at: 1,
+            model: None,
+        }
+    }
+    /// A group `alpha` holding `dir`, a subscription and an API-key Claude account, the machine's
+    /// OpenRouter key and, with `group_key`, alpha's own.
+    fn paid_snapshot(dir: &std::path::Path, group_key: bool) -> Snapshot {
+        let mut api = account("claude-api", Provider::Claude, Some(1.0));
+        api.kind = AuthKind::ApiKey;
+        let mut keys = vec![openrouter_key(None)];
+        if group_key {
+            keys.push(openrouter_key(Some("alpha")));
+        }
+        Snapshot {
+            accounts: vec![account("claude-sub", Provider::Claude, Some(1.0)), api],
+            projects: vec![switchboard_core::Project {
+                pool: "alpha".into(),
+                name: "Alpha".into(),
+                folders: vec![dir.display().to_string()],
+                created_at: 1,
+                sources: vec![],
+                organization: None,
+            }],
+            agent_keys: keys,
+            ..Default::default()
+        }
+    }
+    fn spend(limit_remaining: f64, usage: f64, usage_daily: f64) -> Option<KeyRead> {
+        Some(KeyRead {
+            limit_remaining: Some(limit_remaining),
+            usage: Some(usage),
+            usage_daily: Some(usage_daily),
+        })
+    }
+    /// A read that always answers `answer`, counting its calls.
+    fn fixed(
+        answer: Option<KeyRead>,
+        count: &Arc<AtomicUsize>,
+    ) -> impl Fn(Option<String>) -> std::future::Ready<Option<KeyRead>> {
+        let count = count.clone();
+        move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(answer.clone())
+        }
+    }
+    /// One hand-over through the real gate with `read`; answers it and the accounts handed work.
+    #[allow(clippy::too_many_arguments)]
+    async fn walk<R, RFut>(
+        root: &std::path::Path,
+        snapshot: &Snapshot,
+        dir: &std::path::Path,
+        workflow: &str,
+        steps: &[Step],
+        read: &R,
+        limit: std::time::Duration,
+        refuse: bool,
+    ) -> (HandOver, Vec<String>)
+    where
+        R: Fn(Option<String>) -> RFut,
+        RFut: std::future::Future<Output = Option<KeyRead>> + Send + 'static,
+    {
+        let acted: Arc<Mutex<Vec<String>>> = Default::default();
+        let act = |_: String, account: String, _: PathBuf| {
+            let acted = acted.clone();
+            async move {
+                acted.lock().unwrap().push(account);
+                if refuse {
+                    Err("Enable the account before continuing a workflow.".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+        };
+        let gate = |_: String, account: String| async move {
+            spend_gate(root, snapshot, workflow, dir, &account, T, read, limit).await
+        };
+        let done = hand_over(&act, &gate, workflow, dir, steps).await;
+        let acted = acted.lock().unwrap().clone();
+        (done, acted)
+    }
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+    fn dir_of(tmp: &tempfile::TempDir) -> PathBuf {
+        tmp.path().canonicalize().unwrap()
+    }
+    fn machine_ceiling(root: &std::path::Path, snapshot: &Snapshot, usd: f64) {
+        spend::set_ceiling(
+            root,
+            snapshot,
+            ChainScope::Machine,
+            Some(usd),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+    }
+    fn open_questions(root: &std::path::Path) -> usize {
+        spend::read(root)
+            .unwrap()
+            .questions
+            .iter()
+            .filter(|q| q.answer.is_none())
+            .count()
+    }
+
+    #[tokio::test]
+    async fn a_hermes_step_on_a_key_with_nothing_left_is_skipped_not_offered() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let count = Arc::new(AtomicUsize::new(0));
+        // $0.20 left of the key's own limit: below the $0.50 floor, with no ceiling set.
+        let read = fixed(spend(0.20, 9.8, 1.0), &count);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes(), run("claude-code", "claude-sub")],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(
+            acted,
+            ["claude-sub"],
+            "Hermes is never offered the workflow"
+        );
+        assert_eq!(done.outcome, "offered");
+        assert_eq!(done.skipped, [("hermes".to_string(), "key_exhausted")]);
+        let (alone, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(alone.outcome, "key_exhausted");
+    }
+
+    #[tokio::test]
+    async fn a_reached_group_ceiling_skips_the_paid_step_and_opens_one_question() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, true);
+        let group = ChainScope::Project {
+            pool: "alpha".into(),
+        };
+        spend::set_ceiling(
+            root.path(),
+            &snapshot,
+            group.clone(),
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let read = fixed(spend(40.0, 30.0, 5.0), &count);
+        for _ in 0..2 {
+            let (done, acted) = walk(
+                root.path(),
+                &snapshot,
+                &dir,
+                WF,
+                &[hermes()],
+                &read,
+                LIMIT,
+                false,
+            )
+            .await;
+            assert!(acted.is_empty());
+            assert_eq!(done.outcome, "ceiling_reached");
+        }
+        assert_eq!(
+            open_questions(root.path()),
+            1,
+            "one question per ceiling and value"
+        );
+        let file = spend::read(root.path()).unwrap();
+        assert_eq!(file.questions[0].scope, group);
+        assert_eq!(file.questions[0].cents, 500);
+        // Below it, the step runs: the group's key is the one read (alpha's own key).
+        let below = fixed(spend(40.0, 30.0, 4.99), &count);
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &below,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(done.outcome, "offered");
+    }
+
+    #[tokio::test]
+    async fn an_unread_balance_with_a_ceiling_is_a_denial_and_without_one_runs() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let count = Arc::new(AtomicUsize::new(0));
+        let unread = fixed(None, &count);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &unread,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(
+            (done.outcome, acted.len()),
+            ("offered", 1),
+            "no ceiling: it runs"
+        );
+        machine_ceiling(root.path(), &snapshot, 5.0);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &unread,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(done.outcome, "spend_unknown");
+    }
+
+    #[tokio::test]
+    async fn a_subscription_step_is_never_gated() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        // Even with spend.json unreadable and every key spent, a sign-in and Kimi Code run.
+        std::fs::write(root.path().join(spend::FILE), b"not json").unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let read = fixed(spend(0.0, 99.0, 99.0), &count);
+        for step in [run("claude-code", "claude-sub"), run("kimi-code", "kimi-a")] {
+            let (done, acted) = walk(
+                root.path(),
+                &snapshot,
+                &dir,
+                WF,
+                &[step],
+                &read,
+                LIMIT,
+                false,
+            )
+            .await;
+            assert_eq!(done.outcome, "offered");
+            assert_eq!(acted.len(), 1);
+        }
+        assert_eq!(count.load(Ordering::SeqCst), 0, "nothing read");
+        // A paid step with the file unreadable is skipped: never "no ceilings".
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(done.outcome, "ceilings_unreadable");
+    }
+
+    #[tokio::test]
+    async fn nothing_is_read_from_openrouter_when_no_paid_step_is_reached() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, true);
+        machine_ceiling(root.path(), &snapshot, 5.0);
+        let count = Arc::new(AtomicUsize::new(0));
+        let read = fixed(spend(40.0, 1.0, 1.0), &count);
+        // The subscription takes it first: the Hermes step after it is never reached.
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[run("claude-code", "claude-sub"), hermes()],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(done.outcome, "offered");
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        // Reached, it reads its own key and, under the machine ceiling, the other one too.
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert_eq!(done.outcome, "offered");
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_key_whose_read_times_out_is_unknown_under_a_ceiling_and_runs_without_one() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let slow = |_: Option<String>| async {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            spend(40.0, 1.0, 1.0)
+        };
+        let short = std::time::Duration::from_millis(50);
+        let started = std::time::Instant::now();
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &slow,
+            short,
+            false,
+        )
+        .await;
+        assert_eq!(done.outcome, "offered", "no ceiling: unread runs");
+        machine_ceiling(root.path(), &snapshot, 5.0);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &slow,
+            short,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(done.outcome, "spend_unknown");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "never waits out the read"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_whose_total_went_down_is_never_counted_as_less_spend() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let count = Arc::new(AtomicUsize::new(0));
+        // The first paid hand-over records the task's baseline at a total of $10.
+        let first = fixed(spend(40.0, 10.0, 2.0), &count);
+        walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &first,
+            LIMIT,
+            false,
+        )
+        .await;
+        let task = ChainScope::Workflow { id: WF.into() };
+        spend::set_ceiling(root.path(), &snapshot, task, Some(1.0), Surface::Cli, T).unwrap();
+        // The key now reports $4 in total: another key, or a reset. Unknown, never "-$6 spent".
+        let lower = fixed(spend(40.0, 4.0, 0.1), &count);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &lower,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(done.outcome, "spend_unknown");
+    }
+
+    #[tokio::test]
+    async fn two_hand_overs_racing_for_the_last_dollar_are_decided_one_after_the_other() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let mut snapshot = paid_snapshot(&dir, false);
+        snapshot.agent_keys.truncate(1);
+        machine_ceiling(root.path(), &snapshot, 5.0);
+        // $4.80 spent today; each hand-over spends $0.30 as soon as it starts.
+        let daily = Arc::new(Mutex::new(4.80_f64));
+        let read = {
+            let daily = daily.clone();
+            move |_: Option<String>| {
+                let daily = daily.clone();
+                async move {
+                    tokio::task::yield_now().await;
+                    let d = *daily.lock().unwrap();
+                    spend(40.0, 20.0 + d, d)
+                }
+            }
+        };
+        let gate_for = |workflow: &'static str| {
+            let (root, snapshot, dir, read) = (root.path(), &snapshot, &dir, &read);
+            move |_: String, account: String| async move {
+                spend_gate(root, snapshot, workflow, dir, &account, T, read, LIMIT).await
+            }
+        };
+        let act = |_: String, _: String, _: PathBuf| {
+            let daily = daily.clone();
+            async move {
+                tokio::task::yield_now().await;
+                *daily.lock().unwrap() += 0.30;
+                Ok(())
+            }
+        };
+        let (g1, g2) = (gate_for(WF), gate_for(WF2));
+        let steps = [hermes()];
+        let (a, b) = tokio::join!(
+            hand_over(&act, &g1, WF, &dir, &steps),
+            hand_over(&act, &g2, WF2, &dir, &steps)
+        );
+        let mut outcomes = [a.outcome, b.outcome];
+        outcomes.sort();
+        assert_eq!(outcomes, ["ceiling_reached", "offered"]);
+    }
+
+    #[tokio::test]
+    async fn a_ceiling_set_while_the_spend_is_read_is_obeyed() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, true);
+        // No ceiling when the gate starts; the window sets $1 for the machine during the read.
+        let read = {
+            let (root, snapshot) = (root.path().to_path_buf(), snapshot.clone());
+            move |pool: Option<String>| {
+                let (root, snapshot) = (root.clone(), snapshot.clone());
+                async move {
+                    if spend::read(&root).unwrap().ceilings.is_empty() {
+                        machine_ceiling(&root, &snapshot, 1.0);
+                    }
+                    pool.is_none().then_some(KeyRead {
+                        limit_remaining: Some(40.0),
+                        usage: Some(3.0),
+                        usage_daily: Some(0.2),
+                    })
+                }
+            }
+        };
+        // Only the machine key was read: the group's own key, which a machine ceiling adds up,
+        // was not, so the decision on the ceiling as it is now is unknown, never "under it".
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &read,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(done.outcome, "spend_unknown");
+    }
+
+    #[tokio::test]
+    async fn an_api_key_claude_step_under_a_ceiling_is_unknown_and_reads_nothing() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let count = Arc::new(AtomicUsize::new(0));
+        let read = fixed(spend(40.0, 1.0, 1.0), &count);
+        let step = [run("claude-code", "claude-api")];
+        let (done, _) = walk(root.path(), &snapshot, &dir, WF, &step, &read, LIMIT, false).await;
+        assert_eq!(done.outcome, "offered", "no ceiling: it runs");
+        machine_ceiling(root.path(), &snapshot, 5.0);
+        let (done, acted) =
+            walk(root.path(), &snapshot, &dir, WF, &step, &read, LIMIT, false).await;
+        assert!(acted.is_empty());
+        assert_eq!(
+            done.outcome, "spend_unknown",
+            "C-Q3: its spend cannot be read"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "OpenRouter is not its provider"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_restart_between_the_decision_and_the_offer_keeps_the_tasks_baseline() {
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let snapshot = paid_snapshot(&dir, false);
+        let count = Arc::new(AtomicUsize::new(0));
+        // The gate lets Hermes through at a total of $10, then the process ends before an offer
+        // (the step is refused here): the baseline is already on disk.
+        let at_ten = fixed(spend(40.0, 10.0, 1.0), &count);
+        let (done, _) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &at_ten,
+            LIMIT,
+            true,
+        )
+        .await;
+        assert_eq!(done.outcome, "every_step_refused");
+        let file = spend::read(root.path()).unwrap();
+        assert_eq!(file.baselines.len(), 1);
+        assert_eq!(
+            (file.baselines[0].usage, file.baselines[0].key.as_str()),
+            (10.0, "machine")
+        );
+        // The next process: a $1 task ceiling, the key at $11.50, so $1.50 counted.
+        let task = ChainScope::Workflow { id: WF.into() };
+        spend::set_ceiling(root.path(), &snapshot, task, Some(1.0), Surface::Cli, T).unwrap();
+        let later = fixed(spend(40.0, 11.5, 2.5), &count);
+        let (done, acted) = walk(
+            root.path(),
+            &snapshot,
+            &dir,
+            WF,
+            &[hermes()],
+            &later,
+            LIMIT,
+            false,
+        )
+        .await;
+        assert!(acted.is_empty());
+        assert_eq!(done.outcome, "ceiling_reached");
+        assert_eq!(
+            spend::read(root.path()).unwrap().baselines[0].usage,
+            10.0,
+            "kept"
+        );
+    }
+
+    #[test]
+    fn the_last_hand_over_is_recorded_with_its_skipped_steps() {
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = Snapshot::default();
+        let done = HandOver {
+            outcome: "offered",
+            skipped: vec![
+                ("hermes".into(), "ceiling_reached"),
+                ("kimi-code".into(), "no_usable_account"),
+            ],
+        };
+        record_last(root.path(), &snapshot, WF, &done, T);
+        let last = spend::read(root.path()).unwrap().last_handover.unwrap();
+        assert_eq!(
+            (last.at, last.workflow.as_str(), last.outcome.as_str()),
+            (T, WF, "offered")
+        );
+        assert_eq!(last.skipped[0].reason, "ceiling_reached");
+        assert_eq!(last.skipped[1].agent, "kimi-code");
     }
 }

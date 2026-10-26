@@ -442,12 +442,12 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   OpenRouter key they spend, `key_scope`) and Claude Code or Codex on an API-key account (C-Q3);
   `spend` is null: a read never starts the workflow engine, a hand-over or a network call, and a
   key's spend is read only at a paid hand-over (C-5). `last_handover` is spend.json's record
-  (written by C-5; null until then); `ceilings_unreadable: true` when spend.json cannot be read,
+  (written by the hand-over gate after every hand-over, below; null until the first); `ceilings_unreadable: true` when spend.json cannot be read,
   the chains staying readable. Tauri commands `chains` and `set_chain {scope, executors, preset?}`
   (labels and codes only). Tests `chain_view::tests` and
   `owner_tests::the_chain_view_names_why_each_step_would_be_skipped`.
-- The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
-  are SB-72.
+- The automatic fallback (SB-73, below) walks the chain that applies; its spend gate checks the
+  spending ceilings below (SB-72) before every paid step.
 - **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:
   `crates/switchboard-runtime/src/spend.rs`. `<data>/spend.json` (0600, at most 128 KiB, carried in
   backups, removed by `switchboard uninstall`), never `Snapshot`, so a 0.6.x build still reads the
@@ -474,7 +474,9 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   runs (`Only the Switchboard window answers as the window. ...`;
   `a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener`,
   `an_offline_command_cannot_answer_a_ceiling_as_the_window`). A removed group takes its
-  ceiling, questions and baselines along; answered questions and baselines go after 30 days, an
+  ceiling, questions and baselines along; answered questions and baselines go after 30 days (the
+  baseline of a task that still has a ceiling stays, so the task is never counted from zero
+  again: `a_clock_set_back_drops_nothing_and_answers_still_work`), an
   open daily question after the next UTC day, an open task question 7 days after it was asked; a
   clock set back drops nothing. When 64 questions are held, a new one takes the slot of the
   oldest answered question, else of the oldest open task question, and a machine or group
@@ -497,9 +499,8 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   spend.json), and its `switchboard uninstall` leaves `spend.json` behind, since 0.6.x does not know
   the file. A ceiling set or answered through `SetCeiling` or `AnswerCeiling` counts as a change
   for the next backup (`Store::setting_changed`, so the change-driven backup takes it within its
-  60 s spacing; `spending_ceilings_are_set_read_and_answered_through_the_runtime`); records the
-  gate writes (questions it opens, baselines, the last hand-over) ride the next change-driven or
-  daily backup until C-5 bumps the count for them too. `backup::MAX_SPEND_SETTING` equals
+  60 s spacing; `spending_ceilings_are_set_read_and_answered_through_the_runtime`), and so does
+  every hand-over, whose gate writes questions, baselines and the last hand-over (C-5, below). `backup::MAX_SPEND_SETTING` equals
   `spend::MAX_BYTES`, so every file this build writes is carried
   (`every_spend_file_this_build_writes_fits_a_backup`).
   `spend::decide` (pure; called by C-5) counts no ceiling of a group the snapshot no longer holds
@@ -581,7 +582,7 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
   session with the prompt as its first turn; the key is read from `switchboard agents key --service
   openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
-  ceiling. Measured 2026-10-12 with Hermes 0.21.4: an empty
+  ceiling, and since 0.7.0 the spend gate (below) decides whether the step starts. Measured 2026-10-12 with Hermes 0.21.4: an empty
   `HERMES_HOME` starts without the setup wizard, and the session lists
   `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
   **Rehearsed live 2026-10-12** (a 0.6.19 build on its own data folder, the real engine and
@@ -597,11 +598,53 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `hermes_config_escapes_every_value_into_plain_ascii`,
   `finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does`. Other agents,
   a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
-  (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
-  phase 2). A Hermes executor at its limit is not detected yet.
+  (`agent_not_automatic_yet`) until their launch recipes and the project grant they need exist
+  (SB-96, SB-73 phase 2). A Hermes executor at its limit is not detected yet.
+- **The spend gate (0.7.0, C-5; SB-72, dossier C part D).** Code: `fallback::spend_gate`, called
+  by `hand_over` before each `Step::Run`. Not paid, never gated and nothing read: a subscription
+  sign-in and Kimi Code on a saved Kimi account. Paid: Hermes and OpenCode, on the OpenRouter key
+  a launch in the checkout folder uses (`spend::key_slot`, never the chain's group), and Claude
+  Code or Codex on an API-key account (C-Q3; nothing is read for it, OpenRouter is not its
+  provider). For a paid step the gate reads `spend.json` (unreadable: skipped
+  `ceilings_unreadable`), then asks OpenRouter `GET /key` for that key
+  (`agent_keys::spend_read`, the 10 s read of `credit`, given up at 12 s) and, while a machine
+  ceiling is set, for every other saved OpenRouter key at once (`agent_keys::other_keys`); a
+  failed, refused or late read is unknown, never zero. It reads `spend.json` again after the
+  reads and decides on the ceilings as they are then (`spend::decide`): a machine ceiling set
+  during the reads counts the keys not read as unknown
+  (`a_ceiling_set_while_the_spend_is_read_is_obeyed`). Skips, each a reason of the hand-over and
+  the chain moving on: `key_exhausted` (less than $0.50 left of the key's own limit, with or
+  without a ceiling), `ceiling_reached` (the question opens once per scope and value,
+  `spend::open_question`), `spend_unknown` (a covering ceiling whose spend could not be read);
+  with no covering ceiling an unread key runs (`spend_unread` in the log). A step that runs on a
+  read total records the task's baseline (`spend::record_baseline`, the first one kept) before
+  the launch, so a restart between the decision and the offer never loses it
+  (`a_restart_between_the_decision_and_the_offer_keeps_the_tasks_baseline`); a baseline that
+  cannot be written skips the step as `spend_unknown` when a task ceiling covers it. One
+  hand-over at a time in the process (`HAND_OVER`, its gate and launch together), so two never
+  both start on the last dollar (`two_hand_overs_racing_for_the_last_dollar_are_decided_one_after_the_other`);
+  OpenRouter's own report of a key's spend may lag a running agent, so a ceiling decides whether
+  a step starts, never what a running session spends (the key's own limit bounds that). With no
+  step tried, the hand-over's outcome is the first skip the gate gave. Every hand-over writes
+  `last_handover {at, workflow, outcome, skipped: [{agent, reason}]}` (at most 8) to `spend.json`
+  and counts as a change for the next backup. Nothing is read from OpenRouter unless a paid step
+  is reached (`nothing_is_read_from_openrouter_when_no_paid_step_is_reached`). Tests in
+  `fallback::tests` (`a_hermes_step_on_a_key_with_nothing_left_is_skipped_not_offered`,
+  `a_reached_group_ceiling_skips_the_paid_step_and_opens_one_question`,
+  `an_unread_balance_with_a_ceiling_is_a_denial_and_without_one_runs`,
+  `a_subscription_step_is_never_gated`,
+  `a_key_whose_read_times_out_is_unknown_under_a_ceiling_and_runs_without_one`,
+  `a_key_whose_total_went_down_is_never_counted_as_less_spend`,
+  `an_api_key_claude_step_under_a_ceiling_is_unknown_and_reads_nothing`,
+  `the_last_hand_over_is_recorded_with_its_skipped_steps`) and
+  `agent_keys::tests::the_gate_reads_a_saved_keys_spend_and_an_unanswered_read_is_unknown`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`; store event `fallback`
-  `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
+  since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
+  gate skipped every step it reached and none was tried; log event `spend_gate` with `verdict`
+  (`run`, `spend_unread`, `key_exhausted`, `ceiling_reached`, `spend_unknown`,
+  `ceilings_unreadable`) for each paid step reached, or `record` `unwritten` when the last
+  hand-over could not be written; store event `fallback` `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
 - **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
   names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it

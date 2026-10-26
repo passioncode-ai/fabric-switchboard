@@ -68,6 +68,62 @@ async fn credit_at(base: &str, key: &str) -> Result<Value, &'static str> {
     }))
 }
 
+/// One key's spend for the hand-over gate (C-5): the numbers of a [`credit`] answer.
+pub(crate) fn key_read(credit: &Value) -> crate::spend::KeyRead {
+    let number = |name: &str| credit.get(name).and_then(Value::as_f64);
+    crate::spend::KeyRead {
+        limit_remaining: number("limit_remaining"),
+        usage: number("usage"),
+        usage_daily: number("usage_daily"),
+    }
+}
+
+/// The spend of the saved OpenRouter key `pool` names (none: the machine's), asked of OpenRouter
+/// at a paid hand-over (C-5) and nowhere else. `None` when no such key is saved, its value cannot
+/// be read from the vault, or OpenRouter refused or did not answer: an unknown, never a zero.
+pub(crate) async fn spend_read(store: &Store, pool: Option<&str>) -> Option<crate::spend::KeyRead> {
+    spend_read_at(store, pool, &base()).await
+}
+async fn spend_read_at(
+    store: &Store,
+    pool: Option<&str>,
+    base: &str,
+) -> Option<crate::spend::KeyRead> {
+    let entry = store.agent_key_for("openrouter", pool).ok()??;
+    let secret = store.agent_key_secret(&entry).ok()?;
+    let credit = credit_at(base, &secret).await.ok()?;
+    Some(key_read(&credit))
+}
+
+/// The spend of the key an agent started in `folder` runs on (`Store::agent_key_in`, the rule
+/// [`crate::spend::key_slot`] shares), or `None` as [`spend_read`].
+pub async fn credit_for(
+    store: &Store,
+    folder: Option<&std::path::Path>,
+) -> Option<crate::spend::KeyRead> {
+    let entry = store.agent_key_in("openrouter", folder).ok()??;
+    spend_read(store, entry.pool.as_deref()).await
+}
+
+/// Every saved OpenRouter key but the one `slot` names, by its pool (none: the machine's): the
+/// keys a machine ceiling adds up besides the step's own.
+pub(crate) fn other_keys(
+    snapshot: &switchboard_core::Snapshot,
+    slot: &crate::spend::KeySlot,
+) -> Vec<Option<String>> {
+    snapshot
+        .agent_keys
+        .iter()
+        .filter(|k| k.service == "openrouter")
+        .filter(|k| match (slot, &k.pool) {
+            (crate::spend::KeySlot::Machine, None) => false,
+            (crate::spend::KeySlot::Group(p), Some(q)) => p != q,
+            _ => true,
+        })
+        .map(|k| k.pool.clone())
+        .collect()
+}
+
 /// `{service, saved, saved_at, model, credit, credit_error}` — `credit` asked of OpenRouter when
 /// `with_credit` and a key is saved.
 pub async fn status(store: &Store, service: &str, with_credit: bool) -> Result<Value, String> {
@@ -234,5 +290,66 @@ mod tests {
             "http://127.0.0.1:9"
         );
         assert_eq!(pick_base(None), OPENROUTER_BASE);
+    }
+
+    #[tokio::test]
+    async fn the_gate_reads_a_saved_keys_spend_and_an_unanswered_read_is_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+        let base = stand_in(200).await;
+        assert_eq!(
+            spend_read_at(&store, None, &base).await,
+            None,
+            "no key saved"
+        );
+        store
+            .set_agent_key("openrouter", "sk-or-v1-synthetic", None)
+            .unwrap();
+        let read = spend_read_at(&store, None, &base).await.unwrap();
+        assert_eq!(read.limit_remaining, Some(3.25));
+        assert_eq!(read.usage, Some(11.5));
+        assert_eq!(read.usage_daily, Some(1.75));
+        assert_eq!(
+            spend_read_at(&store, Some("alpha"), &base).await,
+            None,
+            "a group without its own key"
+        );
+        let down = stand_in(500).await;
+        assert_eq!(
+            spend_read_at(&store, None, &down).await,
+            None,
+            "unknown, never zero"
+        );
+        store
+            .set_agent_key("openrouter", "sk-or-v1-revoked", None)
+            .unwrap();
+        assert_eq!(
+            spend_read_at(&store, None, &base).await,
+            None,
+            "a refused key"
+        );
+        // The other keys a machine ceiling adds up: every saved one but the step's own.
+        let snapshot = switchboard_core::Snapshot {
+            agent_keys: ["machine", "alpha", "beta"]
+                .iter()
+                .map(|p| switchboard_core::agent_keys::AgentKey {
+                    id: format!("k-{p}"),
+                    service: "openrouter".into(),
+                    pool: (*p != "machine").then(|| (*p).to_string()),
+                    saved_at: 1,
+                    model: None,
+                })
+                .collect(),
+            ..Default::default()
+        };
+        use crate::spend::KeySlot;
+        assert_eq!(
+            other_keys(&snapshot, &KeySlot::Machine),
+            [Some("alpha".to_string()), Some("beta".to_string())]
+        );
+        assert_eq!(
+            other_keys(&snapshot, &KeySlot::Group("alpha".into())),
+            [None, Some("beta".to_string())]
+        );
     }
 }

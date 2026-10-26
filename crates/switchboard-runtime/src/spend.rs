@@ -10,7 +10,8 @@
 //! downgrade. A file that cannot be read, or that was edited into something this build does not
 //! accept, is an error, never "no ceilings": nothing paid is handed over until it reads again.
 //!
-//! This module stores, validates and decides; the hand-over gate that calls [`check`] is C-5.
+//! This module stores, validates and decides; the hand-over gate that calls [`decide`] and writes
+//! the baselines and the last hand-over is `fallback::spend_gate` (C-5).
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -440,8 +441,18 @@ pub(crate) fn prune(file: &mut SpendFile, snapshot: &Snapshot, now: i64) {
                 },
             }
     });
-    file.baselines
-        .retain(|b| (b.key == "machine" || group_exists(&b.key)) && !older_than(b.at, KEEP));
+    // A task that still has a ceiling keeps its baseline past 30 days: dropping it would count
+    // the task from zero again at its next hand-over.
+    let ceilings = &file.ceilings;
+    let has_ceiling = |workflow: &str| {
+        ceilings
+            .iter()
+            .any(|c| matches!(&c.scope, ChainScope::Workflow { id } if id == workflow))
+    };
+    file.baselines.retain(|b| {
+        (b.key == "machine" || group_exists(&b.key))
+            && (!older_than(b.at, KEEP) || has_ceiling(&b.workflow))
+    });
 }
 
 fn log(action: &'static str, scope: &ChainScope) {
@@ -727,6 +738,84 @@ pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String>
             "min_remaining_usd": MIN_REMAINING_USD,
         },
     }))
+}
+
+/// Records a task's baseline, the key's total usage at its first paid hand-over (C-5, C-Q2):
+/// what its task ceiling counts from. A task that has one keeps it, so a later hand-over never
+/// moves it forward. The gate writes it before the launch, so a restart between the decision and
+/// the offer never loses it; an offer refused afterwards leaves a baseline that counts from a
+/// little earlier, which only counts more. When every slot is taken, the oldest baseline of a task
+/// with no ceiling makes room (at most 192 tasks hold a ceiling, so one always does). Answers
+/// whether it was written.
+pub fn record_baseline(
+    root: &Path,
+    snapshot: &Snapshot,
+    workflow: &str,
+    key: &KeySlot,
+    usage: f64,
+    now: i64,
+) -> Result<bool, String> {
+    if !workflow_id_valid(workflow) || !amount_valid(usage) || !short_text_valid(key.name()) {
+        return Ok(false);
+    }
+    change(root, snapshot, now, |file| {
+        if file.baselines.iter().any(|b| b.workflow == workflow) {
+            return Ok(false);
+        }
+        if file.baselines.len() >= MAX_BASELINES {
+            let ceilings = &file.ceilings;
+            let oldest = file
+                .baselines
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| {
+                    !ceilings.iter().any(
+                        |c| matches!(&c.scope, ChainScope::Workflow { id } if *id == b.workflow),
+                    )
+                })
+                .min_by_key(|(_, b)| b.at)
+                .map(|(i, _)| i);
+            match oldest {
+                Some(i) => {
+                    file.baselines.remove(i);
+                }
+                None => return Ok(false),
+            }
+        }
+        file.baselines.push(Baseline {
+            workflow: workflow.to_owned(),
+            key: key.name().to_owned(),
+            usage,
+            at: now,
+        });
+        Ok(true)
+    })
+}
+
+/// Records what the last hand-over pass did (C-5), for the chains view and the window: the
+/// outcome code and the steps passed over with their reasons, at most 8. A workflow id the file
+/// does not accept is not recorded.
+pub fn record_handover(
+    root: &Path,
+    snapshot: &Snapshot,
+    last: LastHandover,
+    now: i64,
+) -> Result<(), String> {
+    let mut last = last;
+    last.skipped.truncate(MAX_SKIPPED);
+    let fits = workflow_id_valid(&last.workflow)
+        && short_text_valid(&last.outcome)
+        && last
+            .skipped
+            .iter()
+            .all(|s| short_text_valid(&s.agent) && short_text_valid(&s.reason));
+    if !fits {
+        return Ok(());
+    }
+    change(root, snapshot, now, |file| {
+        file.last_handover = Some(last);
+        Ok(())
+    })
 }
 
 /// The decision for one paid step, in order: the key's own limit nearly spent, a ceiling reached,
@@ -1318,12 +1407,20 @@ mod tests {
         let file = read(root.path()).unwrap();
         let doubled = file.ceilings.iter().find(|c| c.scope == task).unwrap();
         assert_eq!(doubled.cents, 400);
-        // Time going forward again past 30 days drops the answered questions and the baseline.
+        // Time going forward again past 30 days drops the answered questions; the baseline of a
+        // task that still has a ceiling stays (C-5), so the task is never counted from zero again.
         let mut later = file.clone();
         prune(&mut later, &s, T + 31 * DAY);
         assert!(later.questions.is_empty());
-        assert!(later.baselines.is_empty());
+        assert_eq!(later.baselines.len(), 1);
         assert_eq!(later.ceilings.len(), 2, "ceilings never age out");
+        let mut cleared = later.clone();
+        cleared.ceilings.retain(|c| c.scope != task);
+        prune(&mut cleared, &s, T + 31 * DAY);
+        assert!(
+            cleared.baselines.is_empty(),
+            "without its ceiling it ages out"
+        );
         // An open daily question stays answerable through the next UTC day, then goes.
         set_ceiling(
             root.path(),
@@ -2108,5 +2205,56 @@ mod tests {
                 UNREADABLE
             );
         }
+    }
+
+    #[test]
+    fn a_tasks_first_baseline_stays_and_a_full_list_makes_room_without_losing_a_capped_task() {
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let id = |i: usize| format!("wf_{i:016x}");
+        assert!(record_baseline(root.path(), &s, WF, &KeySlot::Machine, 10.0, T).unwrap());
+        assert!(!record_baseline(root.path(), &s, WF, &KeySlot::Machine, 12.0, T + 1).unwrap());
+        assert_eq!(
+            read(root.path()).unwrap().baselines[0].usage,
+            10.0,
+            "the first one stays"
+        );
+        // A negative read or a bad id records nothing.
+        assert!(!record_baseline(root.path(), &s, "wf_x", &KeySlot::Machine, 1.0, T).unwrap());
+        assert!(!record_baseline(root.path(), &s, &id(1), &KeySlot::Machine, -1.0, T).unwrap());
+        // Full: the oldest baseline of a task with no ceiling makes room, never a capped one's.
+        set_ceiling(
+            root.path(),
+            &s,
+            ChainScope::Workflow { id: WF.into() },
+            Some(1.0),
+            Surface::Cli,
+            T,
+        )
+        .unwrap();
+        for i in 1..MAX_BASELINES {
+            assert!(record_baseline(
+                root.path(),
+                &s,
+                &id(i),
+                &KeySlot::Machine,
+                1.0,
+                T + i as i64
+            )
+            .unwrap());
+        }
+        assert!(
+            record_baseline(root.path(), &s, &id(9999), &KeySlot::Machine, 1.0, T + 9999).unwrap()
+        );
+        let file = read(root.path()).unwrap();
+        assert_eq!(file.baselines.len(), MAX_BASELINES);
+        assert!(
+            file.baselines.iter().any(|b| b.workflow == WF),
+            "the capped task keeps it"
+        );
+        assert!(
+            !file.baselines.iter().any(|b| b.workflow == id(1)),
+            "the oldest uncapped went"
+        );
     }
 }
