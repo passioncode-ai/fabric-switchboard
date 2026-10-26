@@ -2,25 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-10-26 (later): iteration 0.7.0 «first organization» in progress, waves 1 and 2 merged
+## 2026-10-26 (evening): iteration 0.7.0 «first organization», waves 1 to 3 merged
 
-- **Where.** Branch `iteration/0.7.0` (not on `main` yet); the run's record is
-  `docs/runs/2026-10-26-iteration-0.7.0/` on that branch: `canvas.md` (dossiers A, B, C, waves, node state, rounds),
-  `questions.md` (A-Q1 to A-Q8, B-Q1 to B-Q6, C-Q1 to C-Q7: assumed, closed, or queued with fabric-workspace as Q-I).
+- **Where.** Branch `iteration/0.7.0` at `97e698f` (not on `main` yet); the run's record is
+  `docs/runs/2026-10-26-iteration-0.7.0/` on that branch: `canvas.md` (dossiers A, B, C, waves, node state, rounds,
+  D-1 design), `questions.md` (A-Q1 to A-Q8, B-Q1 to B-Q6, C-Q1 to C-Q9, C-N1, C-N2: assumed, closed, or queued with
+  fabric-workspace as Q-I).
 - **Done.** Wave 1: scenarios SCN-074 to SCN-084, SCR-03, FLW-04/05 (`d4fef33`), the shell home measurement A-0
-  (`bfee6c4`). Wave 2, merged at `1cd483b` and green (fmt, clippy, 587 runtime tests, CLI, core, typecheck, docs):
-  A-1/A-5 shell map and the person's folders, A-10/A-11/B-2 contexts for every agent and organization queries,
-  B-5 an ended seat (R3, two rounds, adversarial), C-8/C-4/C-2 chains by checkout, spending ceilings, readiness
-  (C-4 R3, two rounds, adversarial).
-- **Release gate.** Fabric Dashboards reads the new `agent` field of sessions (adopted in its 0.8.6, board
-  `c8e089bb`; confirm it is published before 0.7.0 ships).
-- **Constraint.** The MacBook's disk fell to 0.2 to 6 GB free several times: one builder at a time,
-  `CARGO_INCREMENTAL=0`, debug info off, the target dir deleted between builders; a green run counts only when its
-  output names the node's tests.
-- **Exact next task.** Wave 3 on `iteration/0.7.0`, one builder at a time: A-4 (shell homes and the map writer),
-  A-2 (hook scripts, R3), A-3 (rc installer, default on, R3); then B-3 (onboard steps) and B-4 (sign-in receipt);
-  then C-5 (the spend gate at hand-over, R3) and C-6 (CLI and MCP ceilings, R3). Each node: TDD, blind rounds by risk
-  class, merge, then the merged gate.
+  (`bfee6c4`). Wave 2 merged at `1cd483b`. Wave 3 merged: `w3/shell` (A-4 shell homes and map writer, A-2 hooks R3,
+  A-3 rc installer R3) `4af3af1`; `w3/person` (B-3 organization checklist, B-4 sign-in receipt) `a6701ad`;
+  `w3/spend` (C-5 spend gate at hand-over R3, C-6 ceilings from CLI and MCP R3, three fix cycles, loop guard reached)
+  `dc734fd`. Merged gate on `dc734fd`: clippy `-D warnings` exit 0, `cargo test` core, runtime (669 passed,
+  1 ignored), cli 0 failed, `check-error-vocabulary`, `check-locale`, `check_docs`, `check_plugin` exit 0.
+- **Filed.** SB-212 (operator 2026-10-26: keep what a launched session did and its call chain; node D-1 in wave 4,
+  Dashboards part asked on board thread `62d78b7f`), SB-213 to SB-217 (non-blocking findings of the C-5/C-6 seam
+  read, decisions C-N1 and C-N2).
+- **Release gate.** Fabric Dashboards reads the new `agent` field of sessions (its 0.8.6); the hand-over record's new
+  optional `paid` field was announced on `62d78b7f` (answer before 2026-11-12).
+- **Constraint.** The MacBook's disk is at 3 to 4 GB free: one builder at a time, `CARGO_INCREMENTAL=0`, debug info
+  off, the target dir deleted between builders; a green run counts only when its output names the node's tests.
+- **Exact next task.** Wave 4 on `iteration/0.7.0`, one builder at a time: D-1 (SB-212, no UI, design in
+  `canvas.md` § D-1 design) beside the UI nodes in sequence A-7, A-8, B-6, B-7, B-8, C-3, C-7, each string through
+  Copylot (en-US, ru-RU), then the WebKit pass of the window in both themes. Target 2026-11-05; wave 5 docs and the
+  release by 2026-11-12 to 14.
 
 ## 2026-10-26: 0.6.83 hotfix (H-1 owner stalls, limit stops settled, one update restart in 6 hours)
 
