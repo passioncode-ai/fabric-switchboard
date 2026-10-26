@@ -8,6 +8,7 @@ pub mod attribution;
 mod bindings;
 mod blocking;
 mod carry;
+mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
@@ -3068,10 +3069,77 @@ async fn execute(
         }
         Operation::Chains { workflow, pool } => {
             let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
+            let snapshot = store.snapshot()?;
+            // C-2: what each step would do now, read like the fallback's own pass but never
+            // starting the engine, a hand-over or a network call (a paid step's spend is null).
+            let readiness = if snapshot.chains.is_empty() {
+                serde_json::Map::new()
+            } else {
+                let now = monitor::now();
+                let mut limited = runtime.map_or_else(HashSet::new, |r| r.limits.limited_ids(now));
+                if let Some(r) = runtime {
+                    limited.extend(r.kimi_watch.limited(now));
+                }
+                let sign_in: HashSet<String> =
+                    refresh_state.sign_in_required(&store).into_iter().collect();
+                let settings = agent_settings::read(root);
+                let settings_readable = settings.is_ok();
+                let disabled: HashSet<String> = settings
+                    .map(|s| s.disabled.into_iter().collect())
+                    .unwrap_or_default();
+                let wants = |agent: &str| {
+                    snapshot
+                        .chains
+                        .iter()
+                        .any(|c| c.executors.iter().any(|e| e.agent == agent))
+                };
+                let kimi_usable = |id: &str| kimi::continuation_preflight(root, &store, id).is_ok();
+                let kimi_used = |id: &str| runtime.map_or(0.0, |r| r.kimi_watch.used(id));
+                let kimi = fallback::KimiChoice {
+                    ids: snapshot
+                        .kimi_accounts
+                        .iter()
+                        .map(|k| k.id.clone())
+                        .collect(),
+                    usable: &kimi_usable,
+                    used: &kimi_used,
+                    hermes_ready: wants(hermes::HERMES_TARGET)
+                        && launch::hermes_continuation_ready(&store),
+                    opencode_ready: wants(launch::OPENCODE_TARGET)
+                        && launch::opencode_continuation_ready(&store),
+                    disabled,
+                };
+                let catalog = agent_catalog::catalog();
+                let installed = |agent: &str| {
+                    catalog["agents"]
+                        .as_array()
+                        .and_then(|all| all.iter().find(|a| a["id"] == agent))
+                        .is_some_and(|a| agent_settings::installed(a).is_some())
+                };
+                chain_view::readiness(
+                    &snapshot,
+                    &chain_view::Inputs {
+                        limited: &limited,
+                        sign_in: &sign_in,
+                        kimi: &kimi,
+                        installed: &installed,
+                        settings_readable,
+                    },
+                )
+            };
+            // The last hand-over is spend.json's record (C-5 writes it); an unreadable file keeps
+            // the chains readable and says so.
+            let (last_handover, ceilings_unreadable) = match spend::read(root) {
+                Ok(file) => (json!(file.last_handover), false),
+                Err(_) => (Value::Null, true),
+            };
             Ok(json!({
-                "chains": store.snapshot()?.chains,
+                "chains": snapshot.chains,
                 "effective": effective,
                 "presets": agent_catalog::presets(),
+                "readiness": readiness,
+                "last_handover": last_handover,
+                "ceilings_unreadable": ceilings_unreadable,
             }))
         }
         Operation::SetChain {
@@ -7115,6 +7183,84 @@ mod owner_tests {
             .await
             .unwrap();
         assert_eq!(cleared["ceiling"], Value::Null);
+    }
+    #[tokio::test]
+    async fn the_chain_view_names_why_each_step_would_be_skipped() {
+        // C-2 (dossier C part A): `Chains` adds, per chain set, what each step would do now and
+        // the last hand-over from spend.json, without the engine, a hand-over or a network call.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        runtime
+            .execute(Operation::AgentEnable {
+                agent: "codex".into(),
+                enabled: false,
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![
+                    switchboard_core::Executor {
+                        agent: "codex".into(),
+                        account_id: None,
+                        key: None,
+                    },
+                    switchboard_core::Executor {
+                        agent: "hermes".into(),
+                        account_id: None,
+                        key: Some("demo/prod/OPENROUTER_API_KEY".into()),
+                    },
+                ],
+                preset: None,
+            })
+            .await
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+            })
+            .await
+            .unwrap();
+        let steps = view["readiness"]["machine"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["state"], "skipped");
+        assert_eq!(steps[0]["reason"], "agent_disabled");
+        assert_eq!(steps[1]["state"], "not_automatic");
+        assert_eq!(steps[1]["reason"], "key_pinned");
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["ceilings_unreadable"], false);
+        // The last hand-over is read from spend.json, never from Snapshot events.
+        std::fs::write(
+            root.path().join(spend::FILE),
+            r#"{"version":1,"last_handover":{"at":5,"workflow":"wf_0123456789abcdef","outcome":"no_step","skipped":[{"agent":"codex","reason":"agent_disabled"}]}}"#,
+        )
+        .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["last_handover"]["outcome"], "no_step");
+        assert_eq!(
+            view["last_handover"]["skipped"][0]["reason"],
+            "agent_disabled"
+        );
+        // An unreadable spend.json keeps the chains readable and says so.
+        std::fs::write(root.path().join(spend::FILE), b"{broken").unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["ceilings_unreadable"], true);
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["chains"].as_array().unwrap().len(), 1);
     }
     #[tokio::test]
     async fn an_offline_command_cannot_answer_a_ceiling_as_the_window() {

@@ -414,8 +414,29 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   workflow's chain, else the project's, else the machine's, else none.
 - Removing an account drops executors pinned to it; removing a project drops its chain; a chain left
   empty is dropped (`chains::prune`).
-- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets}`; `Operation::SetChain
-  {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
+- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets, readiness, last_handover,
+  ceilings_unreadable}`; `Operation::SetChain {scope, executors, preset?}` → `{chain}`; a preset id
+  (`subscriptions-first`) stands for the list. MCP `switchboard_chain_get` returns the same answer.
+- **Readiness (0.7.0, C-2; SB-71 screen, SB-73 status).** Code:
+  `crates/switchboard-runtime/src/chain_view.rs`. `readiness` holds, for every chain set, keyed
+  `machine`, `project:<pool>` or `workflow:<id>`, one view per step of what it would do now:
+  `{agent, name, state: ready|skipped|not_automatic|not_installed, reason, paid, account_id?,
+  account_label?, key_scope?: group|machine, key?, spend?}`, built on the fallback's own
+  `resolve_with` with no executor and no workflow, after these checks in order: agents-settings.json
+  unreadable (`skipped`, `agent_settings_unreadable`), a step pinned to a key (`not_automatic`,
+  `key_pinned`, the vault name in `key`, never a value), an agent the fallback cannot run
+  (`not_automatic`, `agent_not_automatic_yet`), a disabled agent (`skipped`, `agent_disabled`), an
+  agent not on this computer (`not_installed`); then the resolution's skip reason
+  (`no_usable_account`, or `sign_in_required` for a pinned account that needs a new sign-in). A
+  group's chain is read for the group's first folder, so its account rules (SB-102) apply; this
+  computer's and a task's chains with no folder. `paid` is Hermes and OpenCode (with the
+  OpenRouter key they spend, `key_scope`) and Claude Code or Codex on an API-key account (C-Q3);
+  `spend` is null: a read never starts the workflow engine, a hand-over or a network call, and a
+  key's spend is read only at a paid hand-over (C-5). `last_handover` is spend.json's record
+  (written by C-5; null until then); `ceilings_unreadable: true` when spend.json cannot be read,
+  the chains staying readable. Tauri commands `chains` and `set_chain {scope, executors, preset?}`
+  (labels and codes only). Tests `chain_view::tests` and
+  `owner_tests::the_chain_view_names_why_each_step_would_be_skipped`.
 - The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
   are SB-72.
 - **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:

@@ -751,6 +751,37 @@ async fn openrouter_save(
         })
         .await
 }
+/// SB-71 (C-2): every fallback chain, the presets, what each step would do now (`readiness`) and
+/// the last hand-over. Labels and codes only, never a credential.
+#[tauri::command]
+async fn chains(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Chains {
+            workflow: None,
+            pool: None,
+        })
+        .await
+}
+/// Sets a scope's chain in order (an empty list clears it); a preset id may stand for the list.
+#[tauri::command]
+async fn set_chain(
+    scope: switchboard_core::ChainScope,
+    executors: Vec<switchboard_core::Executor>,
+    preset: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SetChain {
+            scope,
+            executors,
+            preset,
+        })
+        .await
+}
 /// SB-120: every catalog agent — installed, enabled for switching, default, command.
 #[tauri::command]
 async fn agents_overview(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1163,6 +1194,8 @@ fn main() {
             organization_assign,
             passioncode,
             agents_overview,
+            chains,
+            set_chain,
             agent_enable,
             agent_default,
             openrouter_models,
