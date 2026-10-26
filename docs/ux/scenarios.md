@@ -81,6 +81,17 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-071 | Keep organizations current from PassionCode.ai | draft |
 | SCN-072 | Keep an account signed in on another machine out of this one | draft |
 | SCN-073 | Answer the usage question before anything is sent | draft |
+| SCN-074 | Plain `claude` and `codex` in an organization's folders run in its context | draft |
+| SCN-075 | Turn the terminal hook off or on | draft |
+| SCN-076 | Set up an organization's work on a new computer | draft |
+| SCN-077 | A new seat of an organization lands in its group | draft |
+| SCN-078 | A seat the organization removed reads as ended | draft |
+| SCN-079 | An organization the person left on PassionCode.ai stays here, marked | draft |
+| SCN-080 | See and set the fallback chain in the window | draft |
+| SCN-081 | Give a group its own fallback chain | draft |
+| SCN-082 | See whether a chain can take work now | draft |
+| SCN-083 | Cap what paid agents may spend a day | draft |
+| SCN-084 | A ceiling is reached: double it or keep it | draft |
 ## SCN-001 — First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -817,21 +828,21 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** The operator decides, on their own machine, which agents continue a task when the accounts of its agent run out — for the whole machine, for one project, or for one task — so the switch, when it comes, follows their order and never hands a subscription to an agent that may not use it.
 **Preconditions:** Switchboard installed; for a pinned account, the account saved; for a paid key, its name in the Project Observatory vault.
-**Entry point:** CLI `switchboard chain set|list|clear`; MCP `switchboard_chain_set` / `switchboard_chain_get` (an agent acts only when the operator asks). An app screen comes later (SB-71 remainder).
+**Entry point:** Agents → *Fallback chains* (since 0.7.0: SCN-080 for this computer, SCN-081 for a group, SCN-082 for whether a chain can take work now); CLI `switchboard chain set|list|clear`; MCP `switchboard_chain_set` / `switchboard_chain_get` (an agent acts only when the operator asks).
 **Steps:**
 1. `switchboard chain set --preset subscriptions-first` → the machine's chain reads claude-code → codex → kimi-code → hermes (`switchboard chain list`).
 2. For one project or one task, `switchboard chain set --scope project:<pool>|workflow:<wf_id> <agent>[@account|#key] …` → `chain list --workflow <wf_id>` shows that chain under “applies”.
 3. `switchboard chain clear --scope …` → the next wider chain applies again; with none set, nothing applies.
 **Alt paths:** an agent that loads no MCP server or takes no prompt without a person (Aider) → “aider cannot take over a workflow …”, nothing saved; another agent pinned to a Claude or ChatGPT sign-in → “Another agent runs on an API-key account or a paid key, never on a subscription sign-in.”; a key value instead of a vault name → refused; a removed account or project → the executors and chains that named it are dropped.
 **Expected result:** the order is stored and shown; when an executor hits its limit, the automatic fallback walks it (SCN-040, SB-73 — Claude Code, Codex, since SB-99 Kimi Code on saved Kimi accounts, since SB-107 Hermes and since SB-119 OpenCode on the saved OpenRouter key). An agent disabled on the Agents page stays in the chain and is skipped (SCN-057).
-**UI elements:** CLI output (`machine  claude-code → codex → …`, `applies: …`, presets); MCP results `{chains, effective, presets}`, `{chain}`.
+**UI elements:** CLI output (`machine  claude-code → codex → …`, `applies: …`, presets, and since 0.7.0 one readiness line under each chain); MCP results `{chains, effective, presets}` (since 0.7.0 also `readiness` and `last_handover`, additive), `{chain}`; the window's *Fallback chains* panel and its editor (SCR-03).
 **States covered:** none set, machine only, project and task chains over it, cleared, pruned after a removal, refused (agent, pin, key, scope).
-**Errors & recovery:** every refusal names the fix and saves nothing; a wrong chain is replaced by setting it again or cleared.
+**Errors & recovery:** every refusal names the fix and saves nothing; a wrong chain is replaced by setting it again or cleared. The window shows the same refusal text in its editor (SCN-080).
 **Status:** draft
-**Meaning:** XA-01 decisions D-3 (chains are the operator's, per machine/project/task) and D-4 (MCP for everything), operator 2026-10-06.
-**Coverage:** `chains::tests` (5, switchboard-core), `owner_tests::fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve`, `fallback_chains_are_set_listed_and_cleared_from_the_cli`, `handshake_lists_tools_and_rejects_malformed_messages` (MCP chain tools).
+**Meaning:** XA-01 decisions D-3 (chains are the operator's, per machine/project/task) and D-4 (MCP for everything), operator 2026-10-06. Amended for 0.7.0 (decision D-5 of 2026-10-25, dossier C node C-1): the window screen exists, so "An app screen comes later (SB-71 remainder)" is gone.
+**Coverage:** `chains::tests` (5, switchboard-core), `owner_tests::fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve`, `fallback_chains_are_set_listed_and_cleared_from_the_cli`, `handshake_lists_tools_and_rejects_malformed_messages` (MCP chain tools). The 0.7.0 additions (window entry, readiness line, `readiness` and `last_handover` fields): NOT_RUN, none yet (nodes C-2, C-3).
 **Product:** unobserved
-**Traces:** SB-71, CONTRACTS → Fallback chains, [XA-01](../packets/cross-agent-continuation.md)
+**Traces:** SB-71, CONTRACTS → Fallback chains, [XA-01](../packets/cross-agent-continuation.md), SCN-080, SCN-081, SCN-082
 
 ## SCN-040 — Work moves on by itself when an agent's accounts run out
 
@@ -843,16 +854,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. The executor hits its limit (Claude Code writes a limit marker, or a managed request is refused) → within a minute Switchboard reads the open workflows and finds it.
 2. Switchboard walks the chain: the first agent with a usable account (not the executor's, not limited, not needing a new sign-in) gets the workflow, offered with reason `limit` once the executor has been silent for two minutes.
 3. Terminal opens that agent's session in the workflow's checkout → it accepts the handoff and continues from the checkpoint (SCN-038).
-**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code in the chain → a saved Kimi Code account takes it (the pinned one, else the least used; never a limited, signed-out or busy one); Terminal runs its first turn as `kimi -p` without approvals, then `kimi -c` resumes it interactively (SB-99); the executor is Kimi Code on a saved account → handed on once Switchboard's background view (every 10 minutes while a chain is set) finds that account at 100 %; Hermes in the chain → Hermes Agent takes it on the saved OpenRouter key, on the model the person's Hermes runs on OpenRouter, else the key's default, the handoff as its first turn in an interactive session listed under Sessions as *Hermes Agent* with its model (SB-107; passed over while Hermes, the key or the `switchboard` command is missing, and refused before the offer — the chain moves on — when neither model is set); OpenCode in the chain → OpenCode takes it on the saved OpenRouter key and its default model, the handoff as its first message (SCN-060, SB-119; passed over while OpenCode, the key, the model or the `switchboard` command is missing); an agent disabled for taking over work on the Agents page → skipped as `agent_disabled` before anything else is weighed (SB-120); agents-settings.json unreadable → nothing is handed over in that pass (`agent_settings_unreadable` in the log); a step pinned to a paid key, or Kimi Code on a paid key → skipped until SB-72 and SB-73 phase 2; the same workflow is not tried again for 15 minutes; a workflow whose executor names no account is handed over only while it is worked — it wrote within the hour (SB-129), so an idle or forgotten workflow never follows the ordinary CLI's limit.
+**Alt paths:** no chain applies → nothing happens; a step's account is refused before the offer → the next step is tried; the launch fails after the offer → nothing else is tried and the offer lapses; the workflow has no checkout here → skipped (`no_checkout` in the log); Kimi Code in the chain → a saved Kimi Code account takes it (the pinned one, else the least used; never a limited, signed-out or busy one); Terminal runs its first turn as `kimi -p` without approvals, then `kimi -c` resumes it interactively (SB-99); the executor is Kimi Code on a saved account → handed on once Switchboard's background view (every 10 minutes while a chain is set) finds that account at 100 %; Hermes in the chain → Hermes Agent takes it on the saved OpenRouter key, on the model the person's Hermes runs on OpenRouter, else the key's default, the handoff as its first turn in an interactive session listed under Sessions as *Hermes Agent* with its model (SB-107; passed over while Hermes, the key or the `switchboard` command is missing, and refused before the offer — the chain moves on — when neither model is set); OpenCode in the chain → OpenCode takes it on the saved OpenRouter key and its default model, the handoff as its first message (SCN-060, SB-119; passed over while OpenCode, the key, the model or the `switchboard` command is missing); an agent disabled for taking over work on the Agents page → skipped as `agent_disabled` before anything else is weighed (SB-120); agents-settings.json unreadable → nothing is handed over in that pass (`agent_settings_unreadable` in the log); a step pinned to a paid key (`agent#project/env/NAME`) → skipped as `agent_not_automatic_yet` until the project's grant can be checked (SB-96; no longer waiting for ceilings, which exist since 0.7.0), and Kimi Code on a paid key → skipped until SB-73 phase 2; a paid step (Hermes or OpenCode on an OpenRouter key, or Claude Code or Codex on an API-key account while a ceiling covers it) whose key has less than $0.50 left of its own limit → skipped as `key_exhausted` before any offer, with or without a Switchboard ceiling (0.7.0, SB-72); a paid step that would pass a spending ceiling → skipped as `ceiling_reached`, and the question of SCN-084 opens; a ceiling covers the step and its spend cannot be read (OpenRouter refused or did not answer, or an API-key account whose spend Switchboard cannot read) → skipped as `spend_unknown`, an unknown read being a denial; no ceiling covers the step and its key's balance cannot be read → it runs, the provider still enforces the key's own limit, and the log says `spend_unread`; `spend.json` unreadable → nothing paid is handed over in that pass (fail closed); a subscription step and Kimi Code on a saved Kimi account are never gated; the workflow is worked in a group's folder by an account outside that group (the ordinary Claude Code's, for example plain `claude` there) → the group's chain applies, chosen by the checkout folder before the executor's account (0.7.0, dossier C part E), and a checkout held by several groups keeps the executor account's group and logs `group_ambiguous`; the same workflow is not tried again for 15 minutes; a workflow whose executor names no account is handed over only while it is worked — it wrote within the hour (SB-129), so an idle or forgotten workflow never follows the ordinary CLI's limit.
 **Expected result:** the task continues on another agent from where it stopped; the old session is left alone and, if it writes again, Observatory refuses it (`LeaseLost`).
-**UI elements:** the launched Terminal session; log event `fallback` and the store event `fallback` (Activity).
-**States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account, agent disabled).
-**Errors & recovery:** every outcome is logged with a fixed code; a lapsed offer is retried after the window or by hand with `switchboard continue`.
+**UI elements:** the launched Terminal session; log event `fallback` and the store event `fallback` (Activity, unchanged: *Hand-over offered* or *failed*); since 0.7.0 one system notification per hand-over offered, and the last hand-over with its skipped steps' reasons on Agents → *Fallback chains* (SCN-082) and in MCP `switchboard_chain_get` (`last_handover`).
+**States covered:** nothing to do (no chain, nothing limited), offered and launched, moved down the chain, launch failed after the offer, skipped (no checkout, agent not automatic yet, no usable account, agent disabled, key exhausted, ceiling reached, spend unknown), group chain by checkout, group ambiguous.
+**Errors & recovery:** every outcome is logged with a fixed code; a lapsed offer is retried after the window or by hand with `switchboard continue`; a step skipped for money is tried again at the next pass once the ceiling was doubled (SCN-084), the next UTC day began, or the key was topped up.
 **Status:** draft
-**Meaning:** XA-01 decision D-1 (automatic), operator 2026-10-06.
-**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`); Kimi Code (SB-99): `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`, `a_kimi_executor_is_limited_only_by_its_named_saved_account`, `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`; Hermes (SB-107): `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`, `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`; OpenCode and the disabled skip (SB-119/120): `an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first`, `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`.
+**Meaning:** XA-01 decision D-1 (automatic), operator 2026-10-06. Amended for 0.7.0 (D-5 of 2026-10-25, dossier C parts D and E; answers C-Q3 and C-Q5 in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md)): the spend gate at the switch, the group's chain by the checkout folder, the status of the last hand-over.
+**Coverage:** `fallback::tests` (resolve, executor_limited, cadence, `a_limited_executor_hands_its_workflow_to_the_next_agent_of_its_chain` with a stand-in engine and a real limit marker, `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`); Kimi Code (SB-99): `a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used`, `a_kimi_executor_is_limited_only_by_its_named_saved_account`, `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`; Hermes (SB-107): `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`, `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`; OpenCode and the disabled skip (SB-119/120): `an_opencode_step_runs_on_the_key_and_a_disabled_agent_is_skipped_first`, `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`. The 0.7.0 additions (spend gate, group chain by checkout, notification, last hand-over): NOT_RUN, none yet (nodes C-5, C-7, C-8).
 **Product:** unobserved
-**Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md)
+**Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md), SB-72, SCN-082, SCN-083, SCN-084, FLW-05
 
 ## SCN-041 — Use Switchboard in Russian
 
@@ -1052,43 +1063,44 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the `switchboard` CLI is on the agent's `PATH` (or the agent was given its path).
 **Entry point:** the person asks the agent to set Switchboard up; the agent runs `switchboard onboard`, or an embedded console's setup session starts it with that guide.
 **Steps:**
-1. The agent runs `switchboard onboard` and follows the guide; `switchboard onboard --status --json` lists five steps — `owner`, `accounts`, `project`, `mcp`, `proving_call` — each `done`, `todo` (with the command the agent runs), `needs_person` (with what to tell the person) or `optional`.
+1. The agent runs `switchboard onboard` and follows the guide; `switchboard onboard --status --json` lists five steps — `owner`, `accounts`, `project`, `mcp`, `proving_call` — (on a computer with an organization, since 0.7.0, five more after them: `organization`, `org_group`, `seat`, `hook`, `launch`, SCN-076) each `done`, `todo` (with the command the agent runs), `needs_person` (with what to tell the person) or `optional`.
 2. `owner` not running → the agent asks the person to open the app (or allow `switchboard serve`).
 3. `accounts` empty → the agent may start `switchboard login begin --provider <its provider>`; the person finishes the sign-in in the Terminal window. Keeping the account the ordinary CLI is signed in to (`accounts capture`) only when the person says so.
 4. `project` → offered once: only if the person wants accounts kept for the folder, and with the accounts named.
 5. `mcp` not registered → the agent runs the printed `claude mcp add …` or `codex mcp add …`.
 6. `proving_call` → the agent calls `switchboard_accounts`; a server registered during the session is loaded by the next one, so the agent asks for a new session if the tool is missing.
 7. The agent re-reads the status after every step and, when it is complete, tells the person what is set up.
-**Alt paths:** the agent is not recognised → `mcp` asks for `--host claude|codex`; no data folder yet → no accounts and no project, and nothing is created by reading; a relative `--folder` is refused.
+**Alt paths:** the agent is not recognised → `mcp` asks for `--host claude|codex`; no data folder yet → no accounts and no project, and nothing is created by reading; a relative `--folder` is refused; a computer with an organization (0.7.0, SB-202) → `complete` stays false until the organization's group holds a signed-in seat of it, and the agent relays the `seat` step's `person` line to the person (SCN-076); a computer without one keeps exactly the five steps.
 **Expected result:** a person who never opened the tour has accounts, the MCP server and a proved call, having done only the sign-in and the app start themselves.
 **UI elements:** the CLI's text and JSON answers, the MCP tool `switchboard_onboarding`; in the window, Agents → *Connect an agent* → *Set up with your coding agent*: the prompt (“Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.”) with *Copy*, then one line per agent; “Claude Code: Switchboard tools registered.” / “… not registered.”, the same for Codex CLI; and “An agent has called Switchboard: {client}.” or “No agent has called Switchboard yet.”; *Or register the tools yourself* keeps the commands. The tour's last step outlines the prompt's *Copy* (SCN-035). Every *Copy* reads *Copied* for two seconds after it copied, beside the screen-reader announcement (0.6.82, UX-19).
 **States covered:** fresh machine, partly set up, complete, unknown agent, server registered but not yet loaded.
 **Errors & recovery:** every step is read again on each run; a half-written agent config reads as not registered and is right on the next run.
 **Status:** draft
 **Meaning:** operator's agents-first strategy, 2026-10-10: the coding agent does every setup step it can; the interface shows the result.
-**Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`); `agentSetupFacts` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 (Agents panel and tour step 5 with the prompt's *Copy* outlined).
+**Coverage:** `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage` (crates/switchboard-cli/tests/commands.rs), `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection` (crates/switchboard-cli/tests/mcp.rs); live read on the operator's machine 2026-10-11 (owner and accounts done, MCP not registered with Claude — confirmed by `claude mcp get switchboard`); `agentSetupFacts` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 (Agents panel and tour step 5 with the prompt's *Copy* outlined). The 0.7.0 organization steps: NOT_RUN, none yet (node B-3); the guard `a_machine_without_organizations_keeps_the_five_steps` is planned there.
 **Product:** unobserved
-**Traces:** SCN-035, SCN-001
+**Traces:** SCN-035, SCN-001, SCN-076
 
 ## SCN-051 — See which sessions Switchboard launched are running
 
 **Persona:** P-01
-**Goal:** Know which Claude Code and Codex sessions Switchboard started are still running, on which account and in which folder.
+**Goal:** Know which sessions Switchboard started are still running (Claude Code and Codex, and since 0.7.0 Kimi Code, Hermes Agent, OpenCode, agents launched on the OpenRouter key and agents launched through the proxy), on which account or key, in which folder, and in whose context.
 **Preconditions:** the app runs (it owns the list); sessions launched by Switchboard 0.6.18 or later (earlier launches wrote no record).
 **Entry point:** Activity → *Sessions*, above the journal; for agents and other products, `switchboard sessions` and the MCP tool `switchboard_sessions` (SB-95).
 **Steps:**
 1. Open Activity → *Sessions* lists each session that is starting or running: “{provider} · {account}”, its state (*Running*, *Starting*), its folder, and how it runs — “Managed · follows the {pool} pool” or “Isolated”, “in Terminal” or “in an embedded terminal” — with “started {date}” once its script has run. A session that runs in an organization's context carries that organization's badge beside its name, titled “Runs in {name}'s context.” (SB-110, SB-111); a personal session carries none. The context is fixed when the session starts.
+1a. Since 0.7.0 (SB-201) the same holds for every launch: a Kimi Code session (launch and continuation), a Hermes Agent or OpenCode continuation, an agent launched directly on the OpenRouter key and an agent launched through the proxy each record their context and set `SWITCHBOARD_CONTEXT`, so their rows carry the badge and `switchboard sessions` names the context. An OpenRouter agent's row reads “{agent} · {model}”; an agent's context follows the group whose key it runs on (the group's own key, else the machine's key, which is personal), and a proxy agent's follows its account. Rows of agents launched before 0.7.0 have no record and are not listed.
 2. A session ends (its window closed, the agent quit) → it leaves the list at the next refresh (once a minute, or Refresh).
-**Alt paths:** none running → “No session Switchboard launched is running. Sessions started outside Switchboard are not listed.”; the read fails → “Sessions are unavailable. Refresh to retry.”; while reading → “Reading sessions…”. Russian: «Сессии», «Работает», «Запускается», «Управляемая · следует за пулом {pool}», «Изолированная», «в Terminal», «во встроенном терминале».
+**Alt paths:** a Kimi Code session in an organization's folder → its row reads personal (no badge): a Kimi account belongs to no organization and the more private context wins; it is launched, not refused, and the row says the truth (A-Q6, assumed; refusing it is a later row); a plain `claude` or `codex` started in a hooked terminal (SCN-074) is not a session Switchboard launched and is not listed; none running → “No session Switchboard launched is running. Sessions started outside Switchboard are not listed.”; the read fails → “Sessions are unavailable. Refresh to retry.”; while reading → “Reading sessions…”. Russian: «Сессии», «Работает», «Запускается», «Управляемая · следует за пулом {pool}», «Изолированная», «в Terminal», «во встроенном терминале».
 **Expected result:** a person sees at a glance what Switchboard has running, without opening Terminal windows to find out.
 **UI elements:** the *Sessions* panel on Activity (rows with provider, account, state, the organization badge for an organization's context, folder, how it runs, start time).
-**States covered:** loading, empty, error, starting, running.
+**States covered:** loading, empty, error, starting, running; personal and organization context for every provider and agent.
 **Errors & recovery:** a failed read keeps the last list and says to refresh.
 **Status:** draft
-**Meaning:** fabric-dashboards' agents-first request item 3 (2026-10-10) and packet SS-01's Sessions view; acting on a session (open its folder, drain, close) is the rest of SB-65.
-**Coverage:** `sessionStateLabel`, `sessionHow` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 in English and Russian (two sessions: managed running, isolated starting in place); the list itself: `a_launch_records_its_session_and_the_list_follows_its_process`.
+**Meaning:** fabric-dashboards' agents-first request item 3 (2026-10-10) and packet SS-01's Sessions view; acting on a session (open its folder, drain, close) is the rest of SB-65. Amended for 0.7.0 (SB-201, dossier A part B).
+**Coverage:** `sessionStateLabel`, `sessionHow` in `scripts/test-ui-logic.mjs`; WebKit demo walk-through 2026-10-11 in English and Russian (two sessions: managed running, isolated starting in place); the list itself: `a_launch_records_its_session_and_the_list_follows_its_process`. The 0.7.0 rows (Kimi Code, Hermes, OpenCode, OpenRouter and proxy agent launches with their context): NOT_RUN, none yet (nodes A-10, A-11).
 **Product:** unobserved
-**Traces:** SCN-016, SCN-050
+**Traces:** SCN-016, SCN-050, SB-201, SCN-074
 
 ## SCN-052 — An agent keeps working when its account hits a limit
 
@@ -1201,16 +1213,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Create the project, or add a folder to it → within one background pass (30 s) the folder's `.claude/settings.local.json` carries the project's route; `switchboard project bindings` lists it.
 2. Start a new session there → its requests go through Switchboard's proxy to the project's pool; rotation moves only among the project's accounts.
 3. Remove the folder or the project → the route goes again; the person's own settings in that file stay.
-**Alt paths:** A running session keeps its account until it is restarted. A folder whose settings file is not valid JSON is left alone and reported. A value the person changed is never overwritten back or removed. When every project account is at its limit, sessions there stop on the limit instead of spending another project's accounts.
-**Expected result:** project work spends project accounts; nothing else changes for the person.
+**Alt paths:** A running session keeps its account until it is restarted. A folder whose settings file is not valid JSON is left alone and reported. A value the person changed is never overwritten back or removed. When every project account is at its limit, sessions there stop on the limit instead of spending another project's accounts. A group bound to an organization, started from a terminal with Switchboard's shell hook (0.7.0, SB-183, SCN-074) → besides the accounts, the session's home moves too: it runs in the group's shell home with `SWITCHBOARD_CONTEXT=org:<id>`, so its sign-in, history, memory and user-scope servers are the organization's and no personal sign-in reaches the proxy; the folder's `settings.local.json` still carries the route and the folder's capability. Without the hook (a non-interactive start, an IDE's own binary, the hook turned off) or in a personal group, this scenario stays as it was: accounts routed, home the person's.
+**Expected result:** project work spends project accounts; nothing else changes for the person, except that in an organization's folders a hooked terminal also keeps the organization's history apart from the person's (SCN-074).
 **UI elements:** none beyond the project card; CLI `project bindings`.
-**States covered:** bound, unchanged, removed, skipped (broken file), port changed.
-**Errors & recovery:** a broken settings file is reported in the log (`claude_binding` skipped) and left for the person to fix.
+**States covered:** bound, unchanged, removed, skipped (broken file), port changed; organization folder with and without the shell hook.
+**Errors & recovery:** a broken settings file is reported in the log (`claude_binding` skipped) and left for the person to fix. A folder skipped because its values are the person's gets no shell home either: the hook leaves it alone.
 **Status:** draft
-**Meaning:** operator 2026-10-14 (SB-118).
-**Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet.
+**Meaning:** operator 2026-10-14 (SB-118). Amended for 0.7.0: what the shell hook adds in organization folders (decision D-3 of 2026-10-25, dossier A part A).
+**Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet. The 0.7.0 addition (shell home in organization folders): NOT_RUN, none yet (nodes A-0, A-4, A-6).
 **Product:** unobserved
-**Traces:** SB-118 packet
+**Traces:** SB-118 packet, SB-183, SCN-074
 
 ## SCN-057 — See which coding agents are installed and choose which take over work
 **Persona:** P-01
@@ -1364,16 +1376,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. *Add key…* on a project → the key (a password field) and a default model → “Key saved for “Alpha Web”. Agents started in its folders run on it.”
 3. Launch Hermes, OpenCode or any agent on OpenRouter from a folder of that project → it runs on the project's key and model; from a folder of another project, or of none, on the machine's key. Two agents in two projects run at the same time, each on its own key.
 4. *Change model*, *Replace key* or *Remove key* on the project → after removal its agents use the machine's key again.
-**Alt paths:** an id that names no group is refused (CLI: “That group id names no group. Choose a group, or none for the key every folder uses.”); deleting a project deletes its key, so a later project of the same pool never inherits it; a backup brings a project's key back only together with its project; an agent's key command names its folder (`switchboard agents key --service openrouter --dir <folder>`; without `--dir`, the current folder).
+**Alt paths:** an id that names no group is refused (CLI: “That group id names no group. Choose a group, or none for the key every folder uses.”); deleting a project deletes its key, so a later project of the same pool never inherits it; a backup brings a project's key back only together with its project; an agent's key command names its folder (`switchboard agents key --service openrouter --dir <folder>`; without `--dir`, the current folder). Since 0.7.0 (SB-72, SCN-083): each group key row and the machine key panel also show the daily spending ceiling (“Daily ceiling: not set” or “Daily ceiling: ${usd}”, with *Set ceiling…*) beside the key's own limit and its reset; a group on the machine's key cannot take a daily ceiling of its own and says so; *Remove key* on a group with a ceiling leaves the ceiling shown as inactive, never silently deleted.
 **Expected result:** the key used is decided at each launch from the launch folder; the key's value never appears in the window, a file, an argument or a log.
-**UI elements:** API keys page in the navigation (0.6.82, D-2: Statistics keeps “tokens” for counted usage), *Machine key · OpenRouter* panel, *Group keys* list (group, state, *Add key…* / *Change model* / *Replace key* / *Remove key*), key dialog titled with the project's name, notices naming the project; on Agents an *OpenRouter keys* panel with *Open API keys*.
-**States covered:** reading, no projects, project with its own key, project on the machine's key, no key at all, saved, replaced, removed, refused pool.
+**UI elements:** API keys page in the navigation (0.6.82, D-2: Statistics keeps “tokens” for counted usage), *Machine key · OpenRouter* panel, *Group keys* list (group, state, *Add key…* / *Change model* / *Replace key* / *Remove key*, and since 0.7.0 the ceiling line and *Set ceiling…*), key dialog titled with the project's name, notices naming the project; on Agents an *OpenRouter keys* panel with *Open API keys*.
+**States covered:** reading, no projects, project with its own key, project on the machine's key, no key at all, saved, replaced, removed, refused pool; with a daily ceiling, without one, ceiling inactive after the key's removal.
 **Errors & recovery:** every refusal names the fix; a failed save leaves no metadata row and no vault item.
 **Status:** draft
-**Meaning:** operator request 2026-10-19 (SB-144).
-**Coverage:** `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines` (core storage), launch tests asserting `--dir` in every key command, MCP handshake; checked in WebKit on the demo in English and Russian (a project key added from Tokens, notice, no page errors).
+**Meaning:** operator request 2026-10-19 (SB-144). Amended for 0.7.0 (D-5 of 2026-10-25, dossier C node C-1): the group key row shows its daily ceiling.
+**Coverage:** `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines` (core storage), launch tests asserting `--dir` in every key command, MCP handshake; checked in WebKit on the demo in English and Russian (a project key added from Tokens, notice, no page errors). The 0.7.0 ceiling line: NOT_RUN, none yet (nodes C-4, C-7).
 **Product:** unobserved
-**Traces:** SB-144
+**Traces:** SB-144, SB-72, SCN-083
 
 ## SCN-066 — Codex in a project's folders uses the project's Codex accounts
 **Persona:** P-01
@@ -1385,16 +1397,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. *Turn on* → “Codex sessions in project folders now use their projects' Codex accounts. Start a new Codex session to pick it up.”; the state reads “On: Codex goes through Switchboard.”
 3. Start `codex` in a folder of that project → its requests run on the project's account (Activity journals them under it); start it in any other folder → it runs on the person's own sign-in.
 4. *Turn off* → Codex's settings lose Switchboard's lines; the person's own lines were never touched.
-**Alt paths:** the read fails → the reason and *Retry*; the section reads Codex's settings again on Refresh and whenever the groups or the Codex accounts in them change (0.6.82, UX-03); Codex already has another `model_provider` → the section names the line, *Turn on* is disabled, nothing is written; Codex's settings do not parse → nothing is written, the reason is shown; no project has a Codex account → the section says to move one in first; Switchboard quits → its lines leave Codex's settings and a new Codex uses the person's sign-in; it starts again → they come back.
+**Alt paths:** the read fails → the reason and *Retry*; the section reads Codex's settings again on Refresh and whenever the groups or the Codex accounts in them change (0.6.82, UX-03); Codex already has another `model_provider` → the section names the line, *Turn on* is disabled, nothing is written; Codex's settings do not parse → nothing is written, the reason is shown; no project has a Codex account → the section says to move one in first; Switchboard quits → its lines leave Codex's settings and a new Codex uses the person's sign-in; it starts again → they come back. A group bound to an organization, in a terminal with Switchboard's shell hook (0.7.0, SB-183, SCN-074) → `codex` there runs on that group's Codex account through the group's own Codex shell home, whatever this switch says, and the person's `~/.codex/config.toml` is not touched for it; the section says so in one line under the state (“In {organization}'s folders, terminals with the shell hook use its Codex accounts whether this is on or off.”, draft copy); a folder the proxy does not map is refused upstream with no sign-in rather than run on the person's account; Switchboard not running → that `codex` fails to connect (closed), unlike the switch's own route, which falls back to the person's sign-in when Switchboard quits; an organization's group with no Codex account → `codex` there keeps the person's own sign-in in 0.7.0 (A-Q2, assumed), said by `switchboard shell status`.
 **Expected result:** which account a Codex session uses follows the folder it runs in, with no per-folder file.
-**UI elements:** section heading, explanation, state line, projects line, conflict line, *Turn on* / *Turn off*.
-**States covered:** reading, off, on and applied, on but not applied, conflict, unreadable, no project with a Codex account.
+**UI elements:** section heading, explanation, state line, projects line, conflict line, *Turn on* / *Turn off*; since 0.7.0 the organization line.
+**States covered:** reading, off, on and applied, on but not applied, conflict, unreadable, no project with a Codex account; organization folder in a hooked terminal (switch on or off).
 **Errors & recovery:** every refusal names its cause and leaves Codex's file as it was.
 **Status:** draft
-**Meaning:** operator request 2026-10-19 (SB-143).
-**Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo.
+**Meaning:** operator request 2026-10-19 (SB-143). Amended for 0.7.0: organization folders route Codex through the shell home whatever the switch (decision D-3 of 2026-10-25, dossier A part A item 3).
+**Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo. The 0.7.0 organization route: NOT_RUN, none yet (nodes A-0, A-4, A-6, A-7).
 **Product:** unobserved
-**Traces:** SB-143
+**Traces:** SB-143, SB-183, SCN-074
 
 ## SCN-067 — See which accounts and agents work where, and where tokens go
 **Persona:** P-01
@@ -1496,16 +1508,16 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 3. Each organization of the person appears on *Organizations* with its name and domains and a *PassionCode.ai* mark; one with the same name or a shared domain that the person had typed is linked rather than duplicated, keeping its accounts.
 4. Switchboard reads them again at start and every 6 hours; a renamed organization or a new domain shows up by itself, and accounts on the new domain get its badge.
 5. *Disconnect* → the token is deleted from the vault; the organizations stay as local ones.
-**Alt paths:** *Deny* in the browser → “PassionCode.ai was not connected: access was denied.”; no answer within 5 minutes or *Cancel* → nothing changes, and a cancel reads as a plain notice, not an error; a cancel that itself fails is reported (0.6.82, UX-21); the state line wraps and carries its full text as a title (VIS-11); the person left an organization on PassionCode.ai → it stays as a local organization, no longer marked; PassionCode.ai unreachable → the last copy stays in force and the panel says when it was read; the grant ended or was revoked → “Sign in to PassionCode.ai again” with *Connect…*; the person has not signed in through their identity provider for a while → “Sign in to PassionCode.ai in your browser, then read again”.
+**Alt paths:** *Deny* in the browser → “PassionCode.ai was not connected: access was denied.”; no answer within 5 minutes or *Cancel* → nothing changes, and a cancel reads as a plain notice, not an error; a cancel that itself fails is reported (0.6.82, UX-21); the state line wraps and carries its full text as a title (VIS-11); the person left an organization on PassionCode.ai → it stays as a local organization, its *PassionCode.ai* mark replaced by the line of SCN-079 (since 0.7.0, SB-160: “Not in your PassionCode.ai organizations since {date}…”), its groups still bound; PassionCode.ai unreachable → the last copy stays in force and the panel says when it was read; the grant ended or was revoked → “Sign in to PassionCode.ai again” with *Connect…*; the person has not signed in through their identity provider for a while → “Sign in to PassionCode.ai in your browser, then read again”.
 **Expected result:** the organizations Switchboard uses are the person's PassionCode.ai memberships, current within 6 hours; nothing about accounts leaves the computer (only the read of the person's own memberships goes out).
 **UI elements:** the PassionCode.ai panel on *Organizations* (state line, *Connect…*, *Read now*, *Disconnect*), the waiting line with *Cancel*, the *PassionCode.ai* mark on a linked organization's card.
 **States covered:** not connected; waiting for the browser; connected and current; read failed (unreachable); sign in again; provider sign-in needed; disconnected.
 **Errors & recovery:** every failure keeps the last organizations and names the next step.
 **Status:** draft
-**Meaning:** operator 2026-10-21 (SB-159), board thread `63af7559` (decision `25edcc48`, Vesta VES-APP-TOKEN `9f7c7618`).
-**Coverage:** core `vesta` cases, runtime `vesta::tests` (loopback, exchange, refresh, 401 classes against a synthetic server), ui-logic SB-159 case, WebKit demo.
+**Meaning:** operator 2026-10-21 (SB-159), board thread `63af7559` (decision `25edcc48`, Vesta VES-APP-TOKEN `9f7c7618`). Amended for 0.7.0: leaving is marked (SB-160, SCN-079); the old alt path said only "no longer marked".
+**Coverage:** core `vesta` cases, runtime `vesta::tests` (loopback, exchange, refresh, 401 classes against a synthetic server), ui-logic SB-159 case, WebKit demo. The 0.7.0 released line: NOT_RUN, none yet (node B-7).
 **Product:** unobserved
-**Traces:** SB-159
+**Traces:** SB-159, SB-160, SCN-079
 
 ## SCN-072: Keep an account signed in on another machine out of this one
 **Persona:** P-01
@@ -1547,3 +1559,265 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `crates/switchboard-runtime/src/analytics.rs` tests `nothing_is_queued_or_sent_before_the_answer_not_even_from_a_background_start`, `an_answer_of_on_reports_the_held_start_once_and_nothing_from_before_it`, `an_answer_of_off_sends_nothing_then_or_after_a_restart`, `the_answer_is_this_apps_own_and_never_written_to_the_shared_file`, `an_upgraded_install_asks_once_and_is_not_counted_as_new`, `an_unreadable_state_asks_again_and_never_reports_a_second_install`, `answering_on_after_another_app_turned_the_switch_off_keeps_it_off`, `an_answer_of_off_holds_while_the_shared_switch_stays_off`, `through_the_runtime_nothing_leaves_before_the_answer_then_the_start_and_the_day`; uninstall `uninstall_forgets_the_usage_answer`; `scripts/test-ui-logic.mjs` (`usageQuestion`, `usageQuestionText`, `usageAnswerText`, `tourWaits`, the wiring, the background status read); browser demo 2026-10-24 (WebKit, 740 and 1100 px, light and dark, English and Russian).
 **Product:** unobserved
 **Traces:** SCN-044, SCN-035, SB-69
+
+## SCN-074: Plain `claude` and `codex` in an organization's folders run in its context
+
+**Persona:** P-01, as a member of an organization (a person who works for a company on the same computer as their own work)
+**Goal:** A terminal session the person starts themselves, `claude` or `codex` typed in a folder of a group bound to an organization, runs in that organization's context (its home, its history, its accounts, `SWITCHBOARD_CONTEXT=org:<id>`), so the company's work never mixes with the person's own; leaving the folder gives the person's own settings back exactly (operator decision D-3 of 2026-10-25: on by default on a computer holding an organization's group, off by one command; RM-28 CX-26).
+**Preconditions:** the installed app (its owner writes the hook; `serve`, a development build and `--data-dir` never do); at least one group bound to an organization (SCN-070) with at least one folder; an interactive zsh, bash, fish or PowerShell terminal; the hook not turned off (SCN-075).
+**Entry point:** none for the set-up: the owner writes it at start, or when the first organization's group appears in a background pass. The person opens a new terminal and changes into a folder of the group. CLI `switchboard shell status` says what applies; `switchboard shell init <zsh|bash|fish|pwsh>` prints the hook for people who keep their own dotfiles.
+**Steps:**
+1. The first group bound to an organization appears on a computer running the installed app → the owner writes the group's shell homes (`<data>/shell/claude-<pool>` and, for a group with a Codex account, `<data>/shell/codex-<pool>`, one per group, A-Q1), the folder map, the hook files, and one marked block into the start file of each shell present (zsh `.zshrc`; bash the login file on macOS, `.bashrc` on Linux; fish its own file under `~/.config/fish/conf.d/`; PowerShell `profile.ps1` for each edition installed) → one system notification, once: “Terminals now work in {organization}'s context in its folders” with “New terminals opened in {group}'s folders run claude and codex on {organization}'s accounts and history. Turn this off under Groups.”
+2. Open a new terminal and change into a folder of that group (or a subfolder, or a worktree inside it) → nothing is printed; the hook keeps the person's own `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `SWITCHBOARD_CONTEXT` (a value, or "was not set") in shell variables that are not exported, then exports the group's shell homes and `SWITCHBOARD_CONTEXT=org:<id>`.
+3. Run `claude` → it starts without asking for a sign-in, in the group's shell home: the organization's history, memory, user-scope MCP servers (the Fabric board server included, as launches get it) and settings; the person's carried `CLAUDE.md`, skills, commands, agents, plugins and hooks are linked in (macOS and Linux); its requests go through Switchboard's proxy to the group's accounts (SCN-056), and no personal sign-in travels with them. The person's own `~/.claude` history gains nothing.
+4. Run `codex` in a group that has a Codex account → it runs on that group's Codex account through the group's Codex shell home, whatever *Codex in group folders* says (SCN-066); the person's `~/.codex/config.toml` is not touched.
+5. Change into a folder of another organization's group → that group's homes and context; the person's saved values stay saved.
+6. Change into a folder outside every organization's group → the person's values come back exactly: set back to what they were, or unset if they were not set.
+7. `switchboard shell status` → one line each: the hook's state for this computer (on, off, on by default), whether this terminal has the hook loaded, the current folder's group and context, the Claude home, the Codex home or “codex: your own sign-in (this group has no Codex account)”, and each start file with its state (SCN-075).
+**Alt paths:** a terminal opened before the block was written has no hook until it is reopened; a terminal with the hook picks up a new or changed group at its next change of folder, at most 30 s after the background pass that wrote the map. An organization's group with no Codex account → `codex` there keeps the person's own sign-in in 0.7.0, and `shell status` says so (A-Q2, assumed). A personal group, a folder in no group, or a folder whose `settings.local.json` values are the person's (SCN-056 leaves it alone) → the hook changes nothing. A terminal that Switchboard itself launched (`SWITCHBOARD_SESSION` set) → the hook does nothing. The person sets `CLAUDE_CONFIG_DIR` (or one of the others) by hand while inside → the hook stops managing that variable and never writes over it on leaving. A session started without an interactive shell (`claude -p` from a script or cron, an IDE's own bundled binary, Fabric Dashboards' console) gets no hook: its accounts are still routed by SCN-056 and SCN-066, its home stays the person's. `claude --resume` in a hooked terminal lists the conversations of that shell home, not those of sessions Switchboard launched for the same group (A-Q1, assumed). Claude Code may show its notice that claude.ai connectors are off because another sign-in source is set: an organization's home has no claude.ai login, so nothing is lost (A-Q5, assumed). A Kimi Code session in an organization's folder is not changed by the hook and reads personal (SCN-051). The last organization's group leaves this computer (removed, or turned personal) → the default block is taken out of every start file (an explicit *Turn on* keeps it), the shell homes stay on disk as history, and terminals still open restore the person's values at their next change of folder. A start file that is a symbolic link (dotfile managers) is never written: `shell status` shows the line to add by hand (`switchboard shell init <shell>`, A-Q3, assumed). An offline native operation of Switchboard run from a hooked terminal in an organization's folder is refused like one run from any Switchboard home: “This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.” Windows (PowerShell 5.1 and 7): the hook wraps the prompt and acts when the location changed; the profile is found through the Documents folder, OneDrive-redirected Documents included, for each edition installed; the shell homes there carry no linked `CLAUDE.md`, skills or hooks of the person (A-Q7, assumed), so organization sessions start without them; an execution policy that stops profiles reads `policy_blocked` (SCN-075). `cmd.exe` and Git Bash are not covered. **The Windows path is not yet verified on Windows (SB-02).**
+**Expected result:** in a terminal with the hook, `claude` and `codex` started in an organization's folders use that organization's context (home, history, accounts, `SWITCHBOARD_CONTEXT=org:<id>`); everywhere else the terminal is the person's own, byte for byte; the person was told once and can turn it off in one action.
+**UI elements:** one system notification; the marked block in each start file (`# >>> Fabric Switchboard: shell hook (SB-183) >>>` … `# <<< Fabric Switchboard <<<`); the CLI's `shell status`, `shell init <shell>` and `shell env` answers; in the window, the Groups section of SCN-075 (no other window change).
+**States covered:** no organization (nothing written), written and notified, inside an organization's folder, moved between groups, left, personal or unbound folder, launched session's shell, a value the person set inside, non-interactive start, open terminal not yet reloaded, map stale, owner not running, hook file missing, last organization gone, Windows.
+**Errors & recovery:** Switchboard not running → the shell home still points at its proxy, as SB-118's folder files already do, so `claude` there fails to connect and `codex` in an organization's folder fails too: closed, never on the person's account; open the app and run it again. The folder map missing, unreadable or of an unknown version, or the hook turned off → `switchboard shell env` answers `none` and the terminal keeps the person's values; it always exits 0 and never writes to the error stream, so a terminal never breaks because of Switchboard, and it answers within 25 ms without the owner or the store's lock. The hook file or the CLI missing (the app removed) → the guarded line in the start file does nothing and prints nothing. A Codex request from a folder the proxy does not map → refused upstream with no sign-in (closed).
+**Status:** draft
+**Meaning:** SB-183, operator decision D-3 of 2026-10-25 (default on, off by one command; PowerShell added 2026-10-26, X-16); design [dossier A](../runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; answers A-Q1, A-Q2, A-Q3, A-Q5, A-Q7 as assumed in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md) (A-Q4 asked of Appvillis IT).
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes A-0 measurement, A-1 map and `shell env`, A-2 scripts, A-3 install, A-4 homes, A-5 the person's folders, A-8 PowerShell).
+**Product:** unobserved
+**Traces:** SB-183, SB-110, D-3, SCN-056, SCN-066, SCN-070, SCN-075
+
+## SCN-075: Turn the terminal hook off or on
+
+**Persona:** P-01
+**Goal:** See whether Switchboard's shell hook is in the person's terminals and which start files it changed, and take it out (or put it back) in one action, from the window, the CLI or an agent, with every file given back byte for byte.
+**Preconditions:** the app or the CLI installed. The window section appears once any group exists.
+**Entry point:** Groups → *Terminals in organization folders* (beside *Codex in group folders*); CLI `switchboard shell status|on|off|init <shell>`; MCP `switchboard_shell_hook` (read, and set when the operator asks).
+**Steps:**
+1. Open Groups → the section reads its state: “On: new terminals in {organization}'s folders work in its context.” (on by default), with one line per start file (“zsh: ~/.zshrc, added”, “fish: its own file, added”) and *Turn off*.
+2. *Turn off* → the choice `off` is saved, every block and the fish file are taken out (each file byte-identical to before), and the notice reads “The terminal hook is off. New terminals keep your own settings; terminals already open switch back at their next change of folder.”; the state reads “Off.” with *Turn on*.
+3. *Turn on* → the choice `on` is saved and the block is written for every shell present, with or without an organization → “The terminal hook is on. New terminals in organization folders work in their context.”
+4. The same from a terminal: `switchboard shell off` / `switchboard shell on` / `switchboard shell status`; an agent reads and sets it with `switchboard_shell_hook` only when the operator asks (dashboard parity).
+5. `switchboard uninstall` → the blocks come out before the data folder goes; nothing outside the markers changes.
+**Alt paths:** no group bound to an organization and no choice made → “Off: no group belongs to an organization on this computer.” with *Turn on*; a start file that is a symbolic link → “{file} is a link, so Switchboard did not change it. Add this line yourself:” with the `switchboard shell init <shell>` line and *Copy* (`skipped_symlink`); a file another user owns → `skipped_owner`, said; a file that is not readable or not UTF-8 → `unreadable`, said, nothing written; the person deleted the block by hand → “You took the block out of {file}. Switchboard will not add it back; Turn on adds it again.” (`removed_by_person`); a file that changed while it was being written → left as it is and tried again at the next owner start; a development build, `serve` or a test never writes the person's files and the section says “Only the installed app changes terminal settings.”; on Windows, an execution policy of `Restricted` or `AllSigned` → “PowerShell's execution policy ({policy}) stops profiles from loading, so the hook is inactive. Switchboard does not change it. Whoever manages this computer can allow signed-or-local scripts for your user.” (`policy_blocked`; the policy is read only while writing, never changed, A-Q4); **the Windows states are not yet verified on Windows (SB-02).**
+**Expected result:** the person can see and choose, in one action anywhere, whether their terminals follow organization folders; `off` is final until they turn it on, and no file keeps a trace of Switchboard after `off` or uninstall.
+**UI elements:** section heading, explanation, state line, one line per start file with its state, *Turn off* / *Turn on*, *Copy* beside an `init` line, notice; CLI and MCP answers.
+**States covered:** reading, on by default (organization present), default with no organization, on, off, per file: added, link skipped, owner skipped, unreadable, removed by the person, policy blocked (Windows); development build; read failed; save failed.
+**Errors & recovery:** the read fails → “The terminal hook's state could not be read.” with the reason and *Retry*; a save that fails keeps the previous state and names the cause; a file that could not be written leaves the others written and shows its own state; turning off always succeeds for files Switchboard wrote and never touches a line outside its markers.
+**Status:** draft
+**Meaning:** SB-183, decision D-3 of 2026-10-25 (off by one command); [dossier A](../runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A "On by default, safely"; A-Q3 and A-Q4 in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md).
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes A-3 install and uninstall, A-7 window section and MCP, A-8 PowerShell).
+**Product:** unobserved
+**Traces:** SB-183, D-3, SCN-074, SCN-066
+
+## SCN-076: Set up an organization's work on a new computer
+
+**Persona:** P-01, as a member of an organization (a new employee, or a person adding a company to their own computer)
+**Goal:** Get a computer ready for an organization's work by following one checklist that the window, the person's coding agent and the runbook all read the same way: the organization is known, its group exists, the person's own seat is in it and signed in, terminals in its folders work in its context, and one launch proved it (SB-202).
+**Preconditions:** Switchboard installed; the person has, or will get, a seat of the organization at the provider (an invitation to their own address). For the window card, an organization exists on this computer (typed, SCN-069, or from PassionCode.ai, SCN-071).
+**Entry point:** the window, after the usage question (SCN-073) and the tour (SCN-035): the card above Accounts and at the top of *Organizations*; the person's coding agent: `switchboard onboard`, MCP `switchboard_onboarding` (SCN-050); the runbook `docs/ORGANIZATION.md` (English and Russian, B-Q4).
+**Steps:**
+1. Connect PassionCode.ai on *Organizations* (SCN-071; the browser consent is the person's) or add the organization by hand → the organization appears; once the usage question and the tour are done, the card “Set up {organization} on this computer” shows above Accounts with five steps, each marked *Done*, *To do*, *Needs you* or *Optional*, and one action for the first step not done.
+2. *Group for {organization}* is to do → *+ Group for {organization}* opens the group dialog (SCN-070) with the organization chosen and its seats already on this computer preselected; *Save group* → the step reads *Done*. Or, from a terminal, import the administrator's settings file: `switchboard settings import <file> --under <your code folder> --apply`.
+3. *Your seat* needs you → *Sign in with your {organization} address* → the official sign-in starts in that group (SCN-003) → when it finishes, the account is in the group with the organization's badge (by its address's domain) and the step reads *Done* (SCN-077).
+4. *Terminals* reads its state from the terminal hook (SCN-074, SCN-075): “Terminals in {group}'s folders work in {organization}'s context.” (*Optional*: on by default; the line names the one command that turns it off).
+5. *First launch* (*Optional*) → launch a session in a folder of the group → Activity shows it with the organization's badge (SCN-051).
+6. Every step done or optional → the card goes; `switchboard onboard --status --json` answers `"complete": true`.
+7. The empty Accounts page on a computer with an organization's group and no account leads with the seat instead of the general first-account line: “Sign in with your {organization} address. It goes to the group {group}.” with *Sign in with your {organization} address* as the page's one primary action.
+**Alt paths:** *Hide* on the card → it stays only at the top of *Organizations* until the checklist is complete. Several organizations → one card per organization not set up yet, newest first. No organization on this computer → no card, today's empty Accounts page (SCN-001) and today's five `onboard` steps (SCN-050). PassionCode.ai connected but listing no organization for the person → the `organization` step reads *Optional* in `onboard` (“PassionCode.ai lists no organization for you yet.”) and the window shows no card. Two groups bound to the same organization → *Group for {organization}* reads *To do* and names both: “Keep one group for {organization} on this computer.”, with no action of its own. The seat is signed in on another computer as well → mark it there or here as used on another machine (SCN-072). The coding agent path: `onboard` lists the five extra steps after the first five; `seat` is `needs_person` and the agent relays “Sign in with your {organization} address.” to the person. Windows: the same checklist; the runbook's Windows column names `switchboard.exe` beside the app (no `~/.local/bin` link), the PowerShell profile hook, a `--under` folder holding the person's checkouts, the Windows credential store and the notification-area icon; **that column reads “not yet verified on a Windows machine” until SB-02 runs (B-Q6).**
+**Expected result:** a person with no prior setup ends with the organization's group holding their own signed-in seat and a launch in its context, having done only the browser consent and the sign-in themselves; the window, the agent and the runbook agree on what is left.
+**UI elements:** the organization card (title, five step lines with their state, one action, *Hide*), the empty Accounts line and its primary action, the group dialog prefilled, the sign-in banner; `onboard` text and JSON; the runbook.
+**States covered:** no organization (nothing shown), card waiting for the usage question and the tour, each step in each state, hidden, several organizations, two groups for one organization, complete (card gone), empty Accounts on an organization computer, read failed, Windows (unverified).
+**Errors & recovery:** the checklist cannot be read → the card shows “The setup could not be read. Refresh to retry.” and keeps the last steps it showed; a sign-in that fails or is cancelled → SCN-003's recovery, the step stays *Needs you*; a group save refused because it holds another context's account → SCN-070's refusal, the dialog stays open; a refused settings import → the CLI names the fix and changes nothing.
+**Status:** draft
+**Meaning:** SB-202 (window first run and runbook) and the agent half of SB-125, decision D-6 of 2026-10-25; [dossier B](../runs/2026-10-26-iteration-0.7.0/dossier-b-organization-person.md) 3.1, 3.2, 3.5. Resolution recorded here: the dossier lists *Connect PassionCode.ai…* as the card's first action, but the card appears only once an organization exists, so connecting stays on *Organizations* (SCN-071) and in the runbook.
+**Copy:** every quoted string here is draft copy, and so is the runbook; they go through copywriting and Copylot (en-US, ru-RU) in wave 4 before they ship. “Seat” enters `docs/brand/terminology.md` first.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes B-2, B-3 checklist, B-8 window, B-9 runbook; B-10 is the live run on SB-125).
+**Product:** unobserved
+**Traces:** SB-202, SB-125, D-6, SCN-050, SCN-035, SCN-073, SCN-069, SCN-070, SCN-071, SCN-074, FLW-04
+
+## SCN-077: A new seat of an organization lands in its group
+
+**Persona:** P-01, as a member of an organization
+**Goal:** When the person signs in to a seat of their organization, it ends up in the organization's group, where its folders will use it, and never in the default group where the ordinary Claude Code's automatic switching could spend it; Switchboard never moves an account without the person (SB-160, joining).
+**Preconditions:** an organization with exactly one group bound to it on this computer (SCN-070); the person's seat at the provider.
+**Entry point:** the organization card or the empty Accounts page (SCN-076); or any other sign-in or *Add to Switchboard* (SCN-003, SCN-018).
+**Steps:**
+1. *Sign in with your {organization} address* → the sign-in starts in the organization's group → on finishing, “{label} signed in. It is in group “{group}”.” and the card's seat step reads *Done*.
+2. The person signs in from *+ Add account* instead (the default group), or keeps the account the CLI is signed in to → the account is attributed to the organization by its address (or by the person's word, SCN-069), and the notice adds *Move it to {group}*.
+3. *Move it to {group}* → the account moves as in SCN-062 → “{label} moved to group “{group}”.”
+4. An agent finishing the sign-in reads `organization_group: {pool, name}` in the `login finish` receipt, tells the person, and moves the account only when the person says so (`switchboard accounts move`).
+**Alt paths:** the organization has no group, or two → no offer; the account is already in the organization's group, or is personal → no offer and no receipt field; the account is the one the ordinary Claude Code or Codex is signed in to → it cannot join a group, so the notice says “Switch Claude Code to another account first to move {label} to {group}.” instead of offering the move; a seat on an address outside the organization's domains is personal until the person places it (SCN-069) or until PassionCode.ai supplies the provider organization (a later release).
+**Expected result:** an organization's seat is in its group after one action at most, and never moved without the person.
+**UI elements:** sign-in banner, the notice with *Move it to {group}*, the move as in SCN-062; the receipt field in CLI and MCP.
+**States covered:** signed in from the card (lands in the group), signed in elsewhere (offered), moved, offer not shown (no group, several groups, already there, personal, ordinary CLI's account), refused move.
+**Errors & recovery:** the move is refused (a second copy of the same login in that group, the group deleted meanwhile) → SCN-062's messages, nothing moves; a failed sign-in → SCN-003.
+**Status:** draft
+**Meaning:** SB-160 (Switchboard's part of joining), [dossier B](../runs/2026-10-26-iteration-0.7.0/dossier-b-organization-person.md) 3.3; AGENTS.md and the MCP instructions keep account moves explicit.
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes B-2, B-4).
+**Product:** unobserved
+**Traces:** SB-160, SB-202, SCN-062, SCN-069, SCN-070, SCN-076, FLW-04
+
+## SCN-078: A seat the organization removed reads as ended
+
+**Persona:** P-01, as a member of an organization that removed their seat (they left, or the seat was reassigned)
+**Goal:** When an organization takes a seat away at the provider, the person sees in plain words that the seat has ended and whom to ask, and Switchboard stops choosing it, instead of a repeating failed check (SB-160, leaving).
+**Preconditions:** a saved account attributed to an organization; the provider rejects its credential.
+**Entry point:** none: the background monitor finds it; Accounts and Groups show it.
+**Steps:**
+1. The provider rejects the seat: a Claude renewal answered `invalid_grant`, or a usage check whose 401 survives a fresh renewal; for Codex (never renewed while inactive) a 401 on two scheduled checks in a row → the account joins the set of accounts that need a sign-in, until its credential changes.
+2. Accounts → its card reads “{label}'s sign-in has ended. If {organization} removed your seat, ask its administrator; to keep using it, sign in again.” with *Sign in again*; automatic switching, fallback chains (SCN-082 shows the step skipped) and recovery never choose it.
+3. A group whose organization seats have all ended → its card reads “None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.”
+4. *Sign in again* with a seat that still exists → the account is usable again; the line goes.
+**Alt paths:** a personal account rejected the same way → today's text, “This account's sign-in has ended. Sign in to it again.”; a single Codex 401 → not a verdict: the card shows a failed check as today; a 403 → never a verdict (it can be a plan or region refusal); any other status → not a verdict; a group where none of the accounts belongs to its organization any more → SCN-070's line (SB-170) is shown instead of this one; with automatic switching on, a group's next requests go to another of its signed-in seats as for any account that needs a sign-in; a request already in flight on the ended seat gets the provider's answer, and nothing is replayed (only SB-98's 429 moves a request; B-Q3, assumed); Fabric Dashboards' recovery read sees the account as needing a sign-in.
+**Expected result:** a removed seat is named as ended with the organization and the way out; nothing keeps trying to spend it.
+**UI elements:** the account card's line and *Sign in again*; the group card's line.
+**States covered:** ended by renewal, ended by usage (Claude), ended by two checks (Codex), single 401 (not ended), 403 (not ended), signed in again, all of a group's seats ended, personal account.
+**Errors & recovery:** a check that cannot reach the provider is never a verdict; a sign-in again that fails → SCN-003's recovery; the log records `seat_ended {provider, by, organization}` with codes only, no label and no organization name.
+**Status:** draft
+**Meaning:** SB-160 (Switchboard's part of leaving), [dossier B](../runs/2026-10-26-iteration-0.7.0/dossier-b-organization-person.md) 3.4; B-Q3 assumed in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md). Whether Anthropic answers a removed Team seat with `invalid_grant` or a 401 is not measured; both are covered.
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes B-5 detection, B-6 text).
+**Product:** unobserved
+**Traces:** SB-160, SB-170, SCN-070, SCN-052, SCN-082
+
+## SCN-079: An organization the person left on PassionCode.ai stays here, marked
+
+**Persona:** P-01, as a former member of an organization
+**Goal:** When the person leaves an organization on PassionCode.ai, Switchboard says so on its card and keeps everything as it was, so the former employer's folders still refuse the person's own accounts and the person decides what to remove (SB-159 decided "keep on leaving").
+**Preconditions:** PassionCode.ai connected (SCN-071); an organization that came from it.
+**Entry point:** none: the next read (at start, or every 6 hours, or *Read now*); *Organizations* shows it.
+**Steps:**
+1. A read no longer lists the organization → its card loses the *PassionCode.ai* mark and reads “Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.”
+2. The organization, its group's binding, its accounts and their statistics stay; nothing is deleted.
+3. *Remove…* on the card (SCN-069) → the confirmation → the organization goes and its groups turn personal (SCN-070).
+**Alt paths:** the person is added back → the next read links it again by name or domain and the line goes; PassionCode.ai unreachable → nothing changes, the last copy stays in force (SCN-071); *Disconnect* is not leaving: organizations stay local with no released line; an older build reading the connection file after a downgrade may read the connection as unreadable, and connecting again repairs it.
+**Expected result:** leaving is visible, with its date, and costs nothing until the person removes it.
+**UI elements:** the released line on the organization card, *Remove…*.
+**States covered:** released, rejoined, read failed, removed by the person, disconnected.
+**Errors & recovery:** a read that fails changes nothing; the log records `organization_released {count}` only.
+**Status:** draft
+**Meaning:** SB-160, [dossier B](../runs/2026-10-26-iteration-0.7.0/dossier-b-organization-person.md) 3.4 "Leaving PassionCode.ai"; amends SCN-071's alt path.
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (node B-7).
+**Product:** unobserved
+**Traces:** SB-160, SB-159, SCN-069, SCN-070, SCN-071
+
+## SCN-080: See and set the fallback chain in the window
+
+**Persona:** P-01
+**Goal:** The operator sees and sets, in the window, which agents take over a task when its accounts run out, and in what order, without the CLI (SB-71; XA-01 "a Fallback section").
+**Preconditions:** the app runs. At least one agent that can take over work is installed for a chain to be useful.
+**Entry point:** Agents → *Fallback chains*, between *Installed* and *Available to install* (SCR-03).
+**Steps:**
+1. Open Agents → the panel's lead line reads “When a task's accounts run out, Switchboard hands it to the next agent in its chain. Nothing is handed over until a chain is set.”; the row *This computer* reads “Not set” with *Use Subscriptions first* and *Edit…*.
+2. *Use Subscriptions first* → the row shows the chain in order, “Claude Code → Codex → Kimi Code → Hermes”, with *Edit…* and *Clear*; the notice reads “This computer's chain is set.”; readiness lines appear under it (SCN-082).
+3. *Edit…* → the dialog “Fallback chain: This computer” lists the steps in order; each step has an agent (the five that can take over work: Claude Code, Codex, Kimi Code, Hermes, OpenCode), an account (“Any account with room” by default, or one of the saved accounts that agent may use), *Move up*, *Move down* and *Remove*; *+ Add agent* until there are 8.
+4. *Save* → the whole list is saved → “This computer's chain is saved.”; the row shows the new order.
+5. *Clear* → “Clear this computer's chain? Nothing is handed over while no chain applies.” → *Clear chain* → the row reads “Not set”.
+**Alt paths:** a step set from the CLI naming another agent → kept and marked “Not automatic yet”; a step pinned to a key (`agent#project/env/NAME`) → shown read-only as “Pinned to key {name}: not automatic yet (waits for project grants)” and kept unless removed; the window never creates a key pin (SB-96); an agent named in the chain but not installed → “Not installed”; an agent disabled under *Installed* stays in the chain and reads as skipped (SCN-057); the account choice offers only accounts the core rules accept for that agent (another agent never on a subscription sign-in, Kimi Code only on Kimi accounts, Claude Code only on Claude accounts, Codex only on Codex accounts); every control is a button with an accessible name, no drag-only control; *Cancel* or Escape closes the dialog and keeps the saved chain.
+**Expected result:** the chain the operator sees is the one the automatic fallback will walk (SCN-040), and it is set without a terminal.
+**UI elements:** the *Fallback chains* panel, the *This computer* row with its chips, *Use Subscriptions first*, *Edit…*, *Clear*, the editor dialog (step rows with agent and account selects, *Move up*, *Move down*, *Remove*, *+ Add agent*, *Save*, *Cancel*), the clear confirmation, notices.
+**States covered:** reading, not set, set, editing, saving, saved, refused, cleared, read failed, eight steps (no more added), a step not automatic, a key pin, an agent not installed.
+**Errors & recovery:** the read fails → “Chains are unavailable. Refresh to retry.” and the last known chains stay, marked as possibly out of date; a save refused by the core (for example an agent on a subscription sign-in, or an account removed meanwhile) → its own text in the dialog, which stays open, and nothing is saved; a save that fails → the previous chain stays and the cause is named.
+**Status:** draft
+**Meaning:** SB-71 remainder (the screen), decision D-5 of 2026-10-25; [dossier C](../runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) part B. The CLI and MCP of SCN-039 stay as they are.
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes C-2 read and IPC, C-3 panel and editor).
+**Product:** unobserved
+**Traces:** SB-71, D-5, SCN-039, SCN-040, SCN-057, SCR-03
+
+## SCN-081: Give a group its own fallback chain
+
+**Persona:** P-01
+**Goal:** A group's tasks fall back along the group's own order (its own agents and accounts), while the rest of the computer keeps this computer's chain; tasks worked in a group's folder get the group's chain whoever's account started them.
+**Preconditions:** at least one group (SCN-068).
+**Entry point:** Agents → *Fallback chains* → a group's row; Groups → a group card's *Fallback* line, which leads to that row.
+**Steps:**
+1. The panel lists one row per group under *This computer*: “Uses this computer's chain” with *Set for this group…*, or the group's own chain with *Edit…* and *Clear*.
+2. *Set for this group…* → the editor of SCN-080 titled “Fallback chain: {group}” → *Save* → “{group}'s chain is saved.”; the Groups card reads “Fallback: own chain”.
+3. *Clear* on the group → “Clear {group}'s chain? Its tasks use this computer's chain again.” → *Clear chain* → the row and the Groups card read “Uses this computer's chain” / “Fallback: this computer's chain”.
+4. Rows per task (chains an agent or the CLI set for one workflow) show the short workflow id and its chain, with *Edit…* and *Clear*; there is no form to add one in the window.
+5. A task worked in a folder of the group runs out of accounts → the group's chain is the one walked, even when the task ran on an account outside the group (the ordinary Claude Code's account, for example plain `claude` there).
+**Alt paths:** no groups → only the *This computer* row and the line “A group gets its own chain once you create one under Groups.”; a group deleted → its chain goes with it; a task's checkout in several groups → the executor account's group applies and the log says `group_ambiguous`; a step pinned to an account another group keeps for itself → saved, and its readiness reads skipped (SCN-082).
+**Expected result:** each group's tasks follow the order set for that group, chosen by the folder the task works in.
+**UI elements:** group rows with *Set for this group…*, *Edit…*, *Clear*; task rows; the Groups card's *Fallback* line as a link; the editor and confirmation of SCN-080.
+**States covered:** no groups, group on this computer's chain, group with its own chain, cleared, task rows, ambiguous folder, read failed.
+**Errors & recovery:** as SCN-080: refusals in the dialog, nothing saved; a failed read keeps the last rows.
+**Status:** draft
+**Meaning:** SB-71, D-5 of 2026-10-25; [dossier C](../runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) parts B and E (the group's chain by the checkout).
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes C-3, C-8).
+**Product:** unobserved
+**Traces:** SB-71, D-5, SCN-039, SCN-040, SCN-068, SCN-080, SCR-03
+
+## SCN-082: See whether a chain can take work now
+
+**Persona:** P-01
+**Goal:** Before a limit is hit, see whether each step of a chain could take a task right now and why not, and after a hand-over see what happened, so a chain that would silently skip everything is noticed (SB-73 status).
+**Preconditions:** at least one chain set (SCN-080, SCN-081).
+**Entry point:** Agents → *Fallback chains*; CLI `switchboard chain list` (one readiness line under each chain); MCP `switchboard_chain_get` (`readiness`, `last_handover`).
+**Steps:**
+1. Under each chain row, one short line per step: “Ready: {account}”, “Ready: {group} key, ${remaining} left (read {age} ago)”, “Skipped: no account with room”, “Skipped: disabled under Installed”, “Not automatic yet”, “Not installed”, “Skipped: today's ceiling reached”, “Skipped: less than $0.50 left on the key”, “Skipped: spend could not be read”, or “Skipped: needs a sign-in” (an ended seat, SCN-078).
+2. Under the panel: “Last hand-over: {time}, {outcome}” with the skipped steps and their reasons; none yet → “No hand-over yet.”
+3. A hand-over is offered → one system notification: “{agent} took over a task in {folder}.”
+**Alt paths:** a paid step whose spend was never read → “Spend not read yet”: opening the panel never starts a hand-over, the workflow engine or a network call, so paid steps show the last spend read with its age; a group's readiness is read for its first folder, so a folder the group's rules refuse reads skipped; no chain set → no readiness lines; Activity keeps its *Hand-over offered* or *failed* entries as before.
+**Expected result:** the operator knows, at a glance, which agent would take the next task and why the others would not.
+**UI elements:** readiness lines under each row, the last hand-over line, the system notification; the CLI line and MCP fields.
+**States covered:** ready (account, key), each skip reason, not automatic, not installed, spend not read yet, last hand-over offered, failed, every step skipped, none yet, read failed.
+**Errors & recovery:** a failed read keeps the last lines under the panel's “Chains are unavailable. Refresh to retry.” (SCN-080); readiness never acts, so nothing is retried from it.
+**Status:** draft
+**Meaning:** SB-73 status remainder, SB-71; [dossier C](../runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) part A and D (notification).
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes C-2 `chain_view`, C-3 lines, C-5 `last_handover`, C-7 notification).
+**Product:** unobserved
+**Traces:** SB-73, SB-71, SCN-040, SCN-080, SCN-081, SCR-03, FLW-05
+
+## SCN-083: Cap what paid agents may spend a day
+
+**Persona:** P-01
+**Goal:** Put a daily dollar ceiling on what paid fallback agents may start spending, for this computer and for a group, and a ceiling for one task, checked before every paid hand-over, beside the key's own provider limit (SB-72, decision D-5 of 2026-10-25; authority rule: a ceiling is a question, not a wall).
+**Preconditions:** at least one saved OpenRouter key (SCN-045, SCN-065); for a group ceiling, the group's own key.
+**Entry point:** API keys → the *Machine key · OpenRouter* panel and each row of *Group keys*; CLI `switchboard ceiling list|set|clear|keep` and `switchboard continue --ceiling <usd>`; MCP `switchboard_ceilings` (read), `switchboard_ceiling_set` (write, when the operator asks).
+**Steps:**
+1. Open API keys → the machine key panel reads “Daily ceiling: not set” with *Set ceiling…*, beside “Key's own limit: ${limit}, resets daily” read from OpenRouter (measured 2026-10-26 on this computer: one machine key, limit $10, daily reset, C-Q5).
+2. *Set ceiling…* → a dialog: amount in dollars per UTC day, and “Counts every OpenRouter key saved in Switchboard, added up per UTC day.” → *Save* → “Daily ceiling for this computer: ${usd}.”
+3. On a group with its own key → *Set ceiling…* → the same dialog for that group's key → “Daily ceiling for {group}: ${usd}.”
+4. A task ceiling: `switchboard continue --ceiling <usd>`, or `switchboard ceiling set --scope workflow:<id>`, counted on the key since the task's first paid hand-over and checked only at a switch; the window lists it read-only with the label “Counted on the key since the first paid hand-over; other work on the same key counts too.”
+5. At every paid hand-over (Hermes or OpenCode on an OpenRouter key; Claude Code or Codex on an API-key account while a ceiling covers them) Switchboard reads the key's spend first: less than $0.50 left on the key's own limit → skipped; a ceiling reached → skipped and the question of SCN-084 opens; spend unreadable while a ceiling covers the step → skipped; otherwise the step runs (SCN-040). Subscriptions and Kimi Code on a saved Kimi account are never gated.
+6. *Clear* → “Remove {scope}'s daily ceiling? Paid agents are then bound only by the key's own limit.” → *Remove ceiling* → “Daily ceiling: not set”.
+**Alt paths:** a group on the machine key → *Set ceiling…* is unavailable with “Give this group its own key under API keys first.” (CLI and MCP refuse with the same words); the key's own limit is monthly, or higher than the group's daily ceiling → “A running agent can spend up to the key's own limit; Switchboard's ceiling only decides whether it is started.”; the group's key removed → its ceiling reads “Inactive: this group has no key of its own now.” and is never silently deleted; an API-key Claude Code or Codex step under a ceiling → its spend cannot be read, so it is always skipped as spend unknown, and readiness says so (C-Q3, assumed); no ceiling covers a step and its balance cannot be read → it runs, the provider enforces the key's own limit; the machine ceiling also counts spend on the same keys from launches outside the fallback, which errs toward stopping; Switchboard never changes a key's own limit at the provider (C-Q4, assumed); values outside $0.01 to $1,000 → “Enter an amount from $0.01 to $1,000.”; a second ceiling for the same scope replaces the first.
+**Expected result:** no paid agent is started past a ceiling the operator set, and the operator sees both limits, Switchboard's and the key's own, side by side.
+**UI elements:** the ceiling line and *Set ceiling…* on the machine key panel and on each group key row, the key's own limit and its reset, the warning line, the ceiling dialog (amount, explanation, *Save*, *Cancel*), *Clear* with its confirmation, the inactive line, the read-only task ceiling rows; CLI and MCP answers.
+**States covered:** reading, no key, not set, set (machine, group, task), inactive, warning (monthly or higher key limit), refused (no own key, out of range), saved, cleared, read failed, ceilings unreadable.
+**Errors & recovery:** a save that fails keeps the previous value and names the cause; the ceilings file cannot be read → “Spending ceilings could not be read, so no paid agent is handed work until they are.” with how to restore it from a backup; OpenRouter does not answer at a switch → the covered step is skipped as spend unknown and tried again at the next pass.
+**Status:** draft
+**Meaning:** SB-72, decision D-5 of 2026-10-25; [dossier C](../runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) parts C and D; C-Q2 (task measure, labelled), C-Q3, C-Q4 assumed and C-Q5 closed in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md); analytics: counts only, `chains` and `ceilings` in `app_active`, no new event (C-Q6, assumed). Terms proposed for the brand pack: spending ceiling «потолок расходов», daily ceiling «дневной потолок», the key's own limit «собственный лимит ключа».
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes C-4 storage, C-5 gate, C-6 CLI and MCP, C-7 window).
+**Product:** unobserved
+**Traces:** SB-72, D-5, SCN-040, SCN-045, SCN-065, SCN-084, FLW-05
+
+## SCN-084: A ceiling is reached: double it or keep it
+
+**Persona:** P-01, the operator, in their own window
+**Goal:** When a paid step reaches a ceiling, the operator is asked one question, “double it or keep it”, with no option recommended; only the operator in the window may double, anyone may keep, and a doubled ceiling asks again when it is reached (authority rule on ceilings; C-Q1).
+**Preconditions:** a ceiling set (SCN-083); a paid step reached it at a hand-over.
+**Entry point:** a system notification; a banner on Agents and on API keys; CLI `switchboard ceiling keep`; MCP `switchboard_ceiling_answer` (keep only).
+**Steps:**
+1. A paid step reaches the ceiling → the step is skipped and the chain moves on; one question opens for that scope and value; one system notification: “Daily ceiling ${usd} for {scope} reached. Double it or keep it in Switchboard.” (nothing to answer in the notification itself).
+2. Open the window → a banner on Agents and on API keys: “{scope}'s daily ceiling of ${usd} is reached.” with two buttons of equal weight, *Double to ${2 × usd}* and *Keep ${usd}*: neither is primary, neither is preselected, none is recommended.
+3. *Double to ${2 × usd}* → the ceiling becomes twice the value, the question closes, and the task may be tried again at the next pass → “Daily ceiling for {scope} is now ${2 × usd}.” Reaching the new value asks again.
+4. *Keep ${usd}* → the question closes and the value stays → “Daily ceiling for {scope} stays ${usd}. Paid agents wait until it resets.”
+**Alt paths:** *double* from the CLI or MCP → refused with “Doubling a ceiling is answered in the Switchboard window.”; *keep* from the CLI or MCP → accepted; several questions open → one banner per question, oldest first; a question whose group or task was removed → it goes with it; a task ceiling asks the same question for the task; a new UTC day under a daily ceiling → paid steps may run again, and an open question that no longer applies stays answerable until answered or until the day after; answered questions are kept 30 days.
+**Expected result:** no ceiling rises without the operator's own answer in the window, and every rise is tied to the value it doubled.
+**UI elements:** system notification; the banner with two equal buttons on Agents and API keys; notices; CLI and MCP answers.
+**States covered:** open question, doubled, kept, double refused outside the window, several open, removed scope, new day.
+**Errors & recovery:** a save that fails leaves the question open and names the cause; the ceilings file cannot be read → no paid hand-over (SCN-083) and the banner says it could not read the question.
+**Status:** draft
+**Meaning:** SB-72, D-5 of 2026-10-25; fabric-workspace `knowledge/authority.md` ceiling question (cited in [dossier C](../runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) section 2); C-Q1 assumed in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md): the window only.
+**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
+**Coverage:** NOT_RUN, none yet: scenario written before code (nodes C-4 questions, C-6 keep-only answer, C-7 banner and notification).
+**Product:** unobserved
+**Traces:** SB-72, D-5, SCN-083, SCN-040, FLW-05
