@@ -1197,6 +1197,107 @@ mod tests {
         renew_due(&runtime, start, &mut schedule).await;
         assert!(schedule.due_at.iter().any(|(i, _)| *i == id));
     }
+    /// B-5 fix cycle 2 (adversarial round): the schedule is built while the seat is live and the
+    /// verdict comes afterwards, as it does on a running owner. A seat not yet due leaves the
+    /// schedule at the next pass (the rebuild's filter, moved by `verdict_generation`); a seat
+    /// that is due and is ended by its own renewal (`invalid_grant`) leaves it in that very pass
+    /// (the `SignInRequired` drop). Either way an idle hour reads nothing more from the vault.
+    #[tokio::test]
+    async fn a_verdict_after_the_schedule_was_built_takes_the_seat_out() {
+        let open = || async {
+            let root = tempfile::tempdir().unwrap();
+            let vault = Arc::new(CountingVault {
+                inner: MemoryVault::default(),
+                gets: Default::default(),
+            });
+            let runtime = Runtime::open_with(root.path().to_owned(), vault.clone(), seat::NATIVE)
+                .await
+                .unwrap();
+            (root, vault, runtime)
+        };
+        let seat = |runtime: &Runtime, expires_at: i64| {
+            let mut credential = crate::fixtures::credential("synthetic-b");
+            credential.expires_at = Some(expires_at);
+            let id = runtime
+                .store
+                .upsert(
+                    "synthetic-b".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    credential.clone(),
+                    Some(crate::fixtures::identity("synthetic-b")),
+                )
+                .unwrap()
+                .id;
+            (id, credential)
+        };
+        let reads = |vault: &CountingVault| vault.gets.load(std::sync::atomic::Ordering::SeqCst);
+
+        // Not yet due: due half an hour from now, inside the idle hour.
+        let (_root, vault, runtime) = open().await;
+        let start = now();
+        let (id, credential) = seat(&runtime, start + crate::refresh::MARGIN_SECONDS + 1800);
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, start, &mut schedule).await;
+        assert!(
+            schedule
+                .due_at
+                .iter()
+                .any(|(i, at)| *i == id && *at > start),
+            "built while the seat is live: scheduled, not yet due"
+        );
+        // A usage check ends the seat after the schedule was built.
+        runtime.refresh.reject(&id, &credential);
+        renew_due(&runtime, start, &mut schedule).await;
+        let before = reads(&vault);
+        for k in 1..=60 {
+            renew_due(&runtime, start + k * RENEW_RETRY_SECONDS, &mut schedule).await;
+        }
+        assert_eq!(
+            reads(&vault) - before,
+            0,
+            "a seat ended before it came due is never read on a timer"
+        );
+        assert!(schedule.due_at.iter().all(|(i, _)| *i != id));
+        assert!(!schedule.retry_at.contains_key(&id));
+
+        // Due now, and its own renewal ends it (`invalid_grant`).
+        let server = seat::server(&[200], (400, json!({"error": "invalid_grant"}))).await;
+        let (_root, vault, runtime) = open().await;
+        runtime
+            .refresh
+            .set_endpoint(format!("{}/token", server.base));
+        let start = now();
+        let (id, _) = seat(&runtime, start + 60);
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, start, &mut schedule).await;
+        assert_eq!(
+            server.grants.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the due seat was renewed once and refused"
+        );
+        assert_eq!(
+            runtime.refresh.sign_in_required(&runtime.store),
+            vec![id.clone()]
+        );
+        assert!(
+            schedule.due_at.iter().all(|(i, _)| *i != id) && !schedule.retry_at.contains_key(&id),
+            "the pass that ended the seat takes it out of the schedule"
+        );
+        renew_due(&runtime, start + RENEW_RETRY_SECONDS, &mut schedule).await;
+        let before = reads(&vault);
+        for k in 2..=61 {
+            renew_due(&runtime, start + k * RENEW_RETRY_SECONDS, &mut schedule).await;
+        }
+        assert_eq!(
+            reads(&vault) - before,
+            0,
+            "an ended seat is not read on a timer"
+        );
+        assert_eq!(server.grants.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(schedule.due_at.iter().all(|(i, _)| *i != id));
+    }
     /// N1 round 3 (adversarial): a vault read that failed while the renewal schedule was built (a
     /// locked keychain, a `security` timeout) must not drop the account from the schedule until
     /// some credential is written: the next pass reads it again.
@@ -2576,6 +2677,44 @@ mod tests {
             let mut expected = vec![b.clone(), c.clone()];
             expected.sort();
             assert_eq!(both, expected);
+            // B-5 fix cycle 2: a credential with the same access token and a new refresh token
+            // (a renewal by another client that kept the access token) is a new credential too.
+            let mut renewed_elsewhere = store.stored_credential(&b).unwrap();
+            renewed_elsewhere.refresh_token = Some("synthetic-b-renewed-elsewhere".into());
+            store
+                .upsert(
+                    "synthetic-b".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    renewed_elsewhere,
+                    Some(identity("synthetic-b")),
+                )
+                .unwrap();
+            assert_eq!(state.sign_in_required(&store), vec![c.clone()]);
+            assert!(!state.is_dead(&store, &b));
+            let mut same_access = codex_credential("synthetic-c-token", now() + 86_400);
+            same_access.refresh_token = Some("synthetic-c-renewed-elsewhere".into());
+            store
+                .upsert(
+                    "synthetic-c".into(),
+                    Provider::Codex,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    same_access,
+                    Some(identity("synthetic-c")),
+                )
+                .unwrap();
+            assert!(state.sign_in_required(&store).is_empty());
+            assert!(!state.is_dead(&store, &c));
+            // Both rejected again, for the sign-ins below.
+            assert_eq!(run(&store, &state, &b, &gate).await.unwrap_err(), SIGN_IN);
+            let _ = run(&store, &state, &c, &gate).await;
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            assert_eq!(run(&store, &state, &c, &gate).await.unwrap_err(), SIGN_IN);
+            let mut both = state.sign_in_required(&store);
+            both.sort();
+            assert_eq!(both, expected);
             // *Sign in again*: a new credential for each.
             let mut again = credential("synthetic-b");
             again.refresh_token = Some("synthetic-b-new-login".into());
@@ -2620,6 +2759,53 @@ mod tests {
                 );
                 assert!(state.sign_in_required(&store).is_empty(), "{usage:?}");
                 assert!(!state.is_dead(&store, &b), "{usage:?}");
+            }
+            // B-5 fix cycle 2: a 401 whose forced renewal does not happen (NotNeeded: a lineage
+            // Claude Swap renews, an account without a captured identity; Active: an account
+            // Claude Code used a moment ago) met no fresh token, so it is no verdict either.
+            for case in ["claude-swap", "no-identity", "recently-active"] {
+                let server = server(&[401], renewed()).await;
+                let (_root, store) = store();
+                let state = RefreshState::at(format!("{}/token", server.base));
+                let b = match case {
+                    "no-identity" => {
+                        let b = store
+                            .upsert(
+                                "synthetic-b".into(),
+                                Provider::Claude,
+                                AuthKind::OAuth,
+                                "default".into(),
+                                credential("synthetic-b"),
+                                None,
+                            )
+                            .unwrap()
+                            .id;
+                        assert!(store.snapshot().unwrap().accounts[0]
+                            .external_identity
+                            .as_ref()
+                            .is_none_or(|i| i.account_id.is_none()));
+                        b
+                    }
+                    _ => claude_seat(&store),
+                };
+                match case {
+                    "claude-swap" => state.hold_for_test("synthetic-b"),
+                    "recently-active" => state.note_active(&identity("synthetic-b")),
+                    _ => {}
+                }
+                let gate = gate(&server);
+                for _ in 0..3 {
+                    let error = run(&store, &state, &b, &gate).await.unwrap_err();
+                    assert_eq!(error, switchboard_proxy::REJECTED, "{case}");
+                }
+                assert_eq!(
+                    server.grants.load(Ordering::SeqCst),
+                    0,
+                    "{case}: no renewal"
+                );
+                assert_eq!(server.probes.load(Ordering::SeqCst), 3, "{case}");
+                assert!(state.sign_in_required(&store).is_empty(), "{case}");
+                assert!(!state.is_dead(&store, &b), "{case}");
             }
         }
 

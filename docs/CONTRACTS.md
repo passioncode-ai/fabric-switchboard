@@ -1103,7 +1103,14 @@ provider once past a usage verdict, without a renewal: a 401 keeps the verdict, 
 takes it back (`RefreshState::lift_verdict`); a lineage the token endpoint refused is not asked
 past. Nothing moves a session or replays a request (B-Q3). Known limit: the proxy's own failover
 (SB-98's 429 move and SB-101's unusable-route failover) does not read this set, so a request on a
-group's route can still be moved to an ended seat; a board row follows.
+group's route can still be moved to an ended seat (board row SB-211). An ended seat that is a
+group's selected route stops renewing, so its token runs out and the route falls to the recorded
+SB-101 failover for an expired token: the pool moves to its next usable account, and a group with
+no other usable seat answers the session 409 ("Select a usable account in this pool first.").
+The Codex row's 60 s spacing is measured in wall-clock time (`monitor::now`), not a monotonic
+clock: a forward jump of the machine's clock between two Codex 401s can shorten it, so two checks
+less than a minute apart may give a verdict; a person's check (`monitor::check_by_person`) takes a
+wrong verdict back on the provider's next answer that is not a 401.
 Both an `invalid_grant` (also from `refresh::renew_idle_live`, once per lineage) and this verdict
 log `seat_ended {provider, by: renewal|usage, organization: true|false}` once. Evidence:
 `monitor::tests::seat::*`
@@ -1118,6 +1125,8 @@ log `seat_ended {provider, by: renewal|usage, organization: true|false}` once. E
 `a_codex_401_near_its_local_expiry_is_no_verdict`,
 `the_account_codex_uses_is_never_marked_ended`),
 `monitor::tests::an_ended_seat_leaves_the_renewal_schedule_until_its_credential_changes`,
+`monitor::tests::a_verdict_after_the_schedule_was_built_takes_the_seat_out`,
+`usage_gate_tests::a_persons_usage_operation_lifts_a_verdict_through_the_owner_and_the_offline_arm`,
 `refresh::tests::invalid_grant_logs_the_seat_as_ended_by_renewal`,
 `refresh::tests::an_idle_live_lineage_rejected_by_the_provider_is_dead`,
 `oplog::tests::a_flag_is_written_as_a_json_boolean`.
