@@ -639,11 +639,7 @@ fn session_id(path: &Path) -> String {
 
 /// Transcript files of ordinary Claude Code sessions changed within the window, newest first.
 pub(crate) fn transcript_files(now: i64) -> Vec<PathBuf> {
-    let root = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")));
-    let Some(root) = root else {
+    let Some(root) = crate::person::claude_dir() else {
         return vec![];
     };
     recent_files(&root.join("projects"), now)

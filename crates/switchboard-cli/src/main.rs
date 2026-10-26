@@ -1,5 +1,6 @@
 //! Headless account operations; credentials are accepted only from bounded stdin.
 mod mcp;
+mod shell;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::{
@@ -204,6 +205,13 @@ enum Command {
         /// The coding agent being set up; default: the one this command runs inside, when known.
         #[arg(long, value_enum)]
         host: Option<HostArg>,
+    },
+    /// The terminal hook: in a group bound to an organization, plain `claude` and `codex`
+    /// started from a terminal run in that group's homes and context. `shell status` says what
+    /// applies; `shell env` is what the hook asks on every change of folder.
+    Shell {
+        #[command(subcommand)]
+        command: shell::ShellCmd,
     },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
@@ -1019,6 +1027,19 @@ fn read_secret() -> Result<String, String> {
     Ok(input.trim().to_owned())
 }
 async fn run(cli: &Cli) -> Result<Value, String> {
+    // Before the data folder is resolved: these read files only and never fail (SB-183).
+    match &cli.command {
+        Command::Shell {
+            command: shell::ShellCmd::Status { dir },
+        } => return Ok(shell::status(cli.data_dir.as_deref(), dir.as_deref())),
+        Command::Shell {
+            command: shell::ShellCmd::Env { dir, .. },
+        } => {
+            shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
+            return Ok(Value::Null);
+        }
+        _ => {}
+    }
     let root = cli.data_dir.clone().map(Ok).unwrap_or_else(default_root)?;
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
@@ -1577,6 +1598,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Serve
         | Command::Mcp { .. }
+        | Command::Shell { .. }
         | Command::Uninstall { .. }
         | Command::Onboard { .. } => unreachable!(),
     };
@@ -1773,7 +1795,7 @@ pub(crate) async fn onboard_status(
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .unwrap_or_default();
-    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let codex_home = switchboard_runtime::person::codex_home();
     let hosts = match probe.host {
         Some(host) => vec![host],
         None => vec![onboarding::Host::Claude, onboarding::Host::Codex],
@@ -2031,6 +2053,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Shell { .. } => print!("{}", shell::status_text(value)),
         Command::Onboard { status: false, .. } => print!("{}", text(&value["guide"])),
         Command::Onboard { status: true, .. } => {
             for step in value["steps"].as_array().into_iter().flatten() {
@@ -2499,6 +2522,12 @@ fn print_value(value: &Value, json_output: bool) {
 /// on every platform instead of the platform's default.
 const STACK_BYTES: usize = 16 * 1024 * 1024;
 fn main() -> ExitCode {
+    // `shell env` runs on every change of folder in a hooked terminal: answered here, before the
+    // runtime starts, within its 25 ms budget (SB-183).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if let Some(code) = shell::env_fast_path(&args) {
+        return code;
+    }
     let runtime = std::thread::Builder::new()
         .name("switchboard-main".into())
         .stack_size(STACK_BYTES)
@@ -2605,7 +2634,17 @@ async fn start() -> ExitCode {
         }
     };
     match run(&cli).await {
-        Ok(_) if matches!(cli.command, Command::Mcp { .. }) => ExitCode::SUCCESS,
+        Ok(_)
+            if matches!(
+                cli.command,
+                Command::Mcp { .. }
+                    | Command::Shell {
+                        command: shell::ShellCmd::Env { .. }
+                    }
+            ) =>
+        {
+            ExitCode::SUCCESS
+        }
         Ok(value) => {
             print_result(&value, &cli);
             ExitCode::SUCCESS
@@ -2888,6 +2927,14 @@ mod mcp_parity {
         ("backup now", Tool("switchboard_backup_now")),
         ("backup restore", Not(PERSON)),
         ("onboard", Tool("switchboard_onboarding")),
+        (
+            "shell status",
+            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
+        ),
+        (
+            "shell env",
+            Not("SB-183: what the terminal hook asks on every change of folder; a person or agent reads the same through shell status"),
+        ),
         ("uninstall", Not(PERSON)),
     ];
 

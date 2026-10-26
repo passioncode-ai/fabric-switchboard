@@ -283,7 +283,7 @@ export const RU: Record<string, string> = {
   "Keep switchboard.exe from the download folder, or add it to PATH.": "Оставьте switchboard.exe в папке, куда он был загружен, или добавьте его в PATH.",
   "Finish an existing sign-in before starting another.": "Завершите текущий вход, прежде чем начинать новый.",
   "This account's sign-in has ended. Sign in to it again.": "Вход в этот аккаунт больше не действует. Войдите в него снова.",
-  "This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.": "Эта сессия работает в домашней папке Switchboard. Переключайте обычный Claude Code из приложения или из обычного терминала.",
+  "This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.": "Эта сессия работает в домашней папке Switchboard или в терминале в папке организации. Запустите это из другого терминала.",
   "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute.": "Switchboard ещё не сохранил продлённый вход этого аккаунта. Повторите через минуту.",
   "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).": "Claude Code работает на аккаунте, который не сохранён в Switchboard; при переключении из него будет выполнен выход. Сначала добавьте его: «Сейчас используется» → «Добавить в Switchboard».",
   "The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.": "Вход в Claude Code не совпадает с аккаунтом, указанным в его настройках. Войдите в Claude Code заново (claude /login) и повторите.",

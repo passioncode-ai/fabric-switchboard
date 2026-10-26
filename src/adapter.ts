@@ -254,7 +254,7 @@ const safeErrors = new Set([
   'Keep switchboard.exe from the download folder, or add it to PATH.',
   'Finish an existing sign-in before starting another.',
   "This account's sign-in has ended. Sign in to it again.",
-  'This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.',
+  "This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.",
   "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute.",
   'Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).',
   'The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.',

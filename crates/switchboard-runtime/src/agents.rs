@@ -54,7 +54,7 @@ pub fn setup() -> Value {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .unwrap_or_default();
-    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let codex_home = crate::person::codex_home();
     let cli = agent_cli();
     let bundled = bundled_cli();
     let linked = user_bin()

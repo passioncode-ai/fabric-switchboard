@@ -1884,7 +1884,7 @@ fn refuse_home_inside(home: &Path, root: Option<PathBuf>) -> Result<(), String> 
         home.starts_with(root)
     });
     if inside {
-        return Err("This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.".into());
+        return Err("This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.".into());
     }
     Ok(())
 }

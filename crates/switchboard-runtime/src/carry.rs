@@ -30,12 +30,13 @@ const CLAUDE_AUTH_KEYS: &[&str] = &[
     "forceLoginOrgUUID",
 ];
 
-/// The operator's Claude Code user folder, as their own sessions see it.
+/// The operator's Claude Code user folder, as their own sessions see it (never one of
+/// Switchboard's homes, SB-183).
 pub(crate) fn claude_user_dir() -> Option<PathBuf> {
-    std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
+    claude_user_dir_from(&crate::person::Sources::process())
+}
+pub(crate) fn claude_user_dir_from(sources: &crate::person::Sources) -> Option<PathBuf> {
+    crate::person::claude_dir_from(sources)
 }
 /// The operator's Pi folder (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
 pub(crate) fn pi_user_dir() -> Option<PathBuf> {
@@ -290,6 +291,36 @@ mod tests {
             std::fs::read_to_string(home.path().join(".claude.json")).unwrap(),
             "[1]",
             "not an object: left as it is"
+        );
+    }
+
+    #[test]
+    fn a_launch_from_a_hooked_terminal_links_from_the_persons_folder() {
+        // SB-183: a terminal with the shell hook exports the group's shell home as
+        // CLAUDE_CONFIG_DIR. A launch (or `serve`) started there must still carry the person's
+        // own CLAUDE.md, skills and hooks, never the shell home's.
+        let person = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let own = person.path().join(".claude");
+        std::fs::create_dir_all(own.join("skills")).unwrap();
+        std::fs::write(own.join("CLAUDE.md"), "the person's rules").unwrap();
+        let shell_home = data.path().join("shell").join("claude-acme");
+        std::fs::create_dir_all(&shell_home).unwrap();
+        std::fs::write(shell_home.join("CLAUDE.md"), "the shell home's").unwrap();
+        let env =
+            |name: &str| (name == "CLAUDE_CONFIG_DIR").then(|| shell_home.clone().into_os_string());
+        let sources = crate::person::Sources {
+            env: &env,
+            home: Some(person.path().to_owned()),
+            data: Some(data.path().to_owned()),
+        };
+        let user = claude_user_dir_from(&sources).unwrap();
+        assert_eq!(user, own);
+        let launched = tempfile::tempdir().unwrap();
+        assert_eq!(link_into(launched.path(), &user, CLAUDE_LINKS), 2);
+        assert_eq!(
+            std::fs::read_to_string(launched.path().join("CLAUDE.md")).unwrap(),
+            "the person's rules"
         );
     }
 
