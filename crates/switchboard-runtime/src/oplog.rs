@@ -3,8 +3,8 @@
 //! source the background watches (locked, refused, absent). It answers "did it prompt, and why"
 //! from evidence instead of from memory.
 //!
-//! Values never enter it, by construction: an event and every field are `&'static str` codes
-//! or integers, so a credential, a path, an email or a provider's message cannot be passed in.
+//! Values never enter it, by construction: an event and every field are `&'static str` codes,
+//! integers or booleans, so a credential, a path, an email or a provider's message cannot be passed in.
 //! The file is `switchboard.log` in `~/Library/Logs/Fabric Switchboard/` (macOS), mode 0600,
 //! rotated by size: five files of at most 5 MB each.
 use serde_json::{Map, Value};
@@ -19,12 +19,13 @@ pub const FILE: &str = "switchboard.log";
 const CAP_BYTES: u64 = 5 * 1024 * 1024;
 const KEEP_FILES: usize = 5;
 
-/// One field of an event: a fixed code or a number. There is deliberately no string variant
-/// that takes an owned or borrowed runtime value.
-#[derive(Clone, Copy, Debug)]
+/// One field of an event: a fixed code, a number or a yes/no. There is deliberately no string
+/// variant that takes an owned or borrowed runtime value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Code(&'static str),
     Number(i64),
+    Flag(bool),
 }
 
 pub struct Log {
@@ -128,6 +129,7 @@ fn line(event: &'static str, fields: &[(&'static str, Field)], at: i64) -> Strin
             match field {
                 Field::Code(code) => Value::String((*code).into()),
                 Field::Number(number) => Value::from(*number),
+                Field::Flag(flag) => Value::from(*flag),
             },
         );
     }
@@ -182,8 +184,10 @@ pub fn install(log: Log) {
     let _ = GLOBAL.set(log);
 }
 #[cfg(test)]
+type Captured = Vec<(&'static str, Vec<(&'static str, Field)>)>;
+#[cfg(test)]
 thread_local! {
-    static CAPTURED: std::cell::RefCell<Option<Vec<&'static str>>> =
+    static CAPTURED: std::cell::RefCell<Option<Captured>> =
         const { std::cell::RefCell::new(None) };
 }
 /// Tests: runs `f` and answers the names of the events this thread logged meanwhile, whether
@@ -193,6 +197,15 @@ pub(crate) fn capture<R>(f: impl FnOnce() -> R) -> (R, Vec<&'static str>) {
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
     let result = f();
     let events = CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default());
+    (result, events.into_iter().map(|(name, _)| name).collect())
+}
+/// Tests: as `capture`, for a future polled on this thread (a current-thread test runtime), with
+/// each event's fields.
+#[cfg(test)]
+pub(crate) async fn capture_async<R>(f: impl std::future::Future<Output = R>) -> (R, Captured) {
+    CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    let result = f.await;
+    let events = CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default());
     (result, events)
 }
 /// Writes to the installed log; a process without one (tests, offline commands) writes nothing.
@@ -200,7 +213,7 @@ pub fn event(event: &'static str, fields: &[(&'static str, Field)]) {
     #[cfg(test)]
     CAPTURED.with(|c| {
         if let Some(events) = c.borrow_mut().as_mut() {
-            events.push(event);
+            events.push((event, fields.to_vec()));
         }
     });
     if let Some(log) = GLOBAL.get() {
@@ -251,6 +264,22 @@ mod tests {
         assert_eq!(written[0]["outcome"], "drained");
         assert_eq!(written[0]["millis"], 42);
         assert!(written[0]["at"].as_str().unwrap().ends_with('Z'));
+    }
+
+    #[test]
+    fn a_flag_is_written_as_a_json_boolean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = Log::at(tmp.path().join("logs"), CAP_BYTES, KEEP_FILES);
+        log.event(
+            "seat_ended",
+            &[
+                ("provider", Field::Code("codex")),
+                ("organization", Field::Flag(true)),
+            ],
+        );
+        let written = lines(log.dir(), FILE);
+        assert_eq!(written[0]["organization"], Value::Bool(true));
+        assert_eq!(written[0]["provider"], "codex");
     }
 
     #[cfg(unix)]

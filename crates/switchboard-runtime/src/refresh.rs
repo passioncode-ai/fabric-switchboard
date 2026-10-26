@@ -27,6 +27,10 @@ const RESPONSE_CAP: usize = 64 * 1024;
 /// `claude` process that has not yet re-read the Keychain; it is treated as active.
 pub(crate) const RECENTLY_ACTIVE_SECONDS: i64 = 900;
 pub(crate) const SIGN_IN: &str = "This account's sign-in has ended. Sign in to it again.";
+/// B-5 (SB-160): a Codex seat (never renewed while inactive) reads as ended on a 401 from two
+/// checks in a row at least this far apart: the background's first retry comes after 180 s, a
+/// person pressing *Check* twice within it is not a second scheduled check.
+pub(crate) const REJECTION_SPACING: i64 = 60;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -53,6 +57,13 @@ pub(crate) struct RefreshState {
     endpoint: Mutex<String>,
     /// Account id → hash of the refresh token the provider rejected.
     dead: Mutex<HashMap<String, String>>,
+    /// B-5 (SB-160): account id → fingerprint of the stored credential a usage check found
+    /// rejected (a 401 that survived a fresh renewal, or a Codex 401 on two checks in a row).
+    /// In memory only, never in the journal: a restart forgets it and the next check finds it
+    /// again, so a provider's mistake costs at most one run.
+    rejected: Mutex<HashMap<String, String>>,
+    /// Codex: account id → (credential fingerprint, time) of a 401 not yet repeated.
+    first_rejection: Mutex<HashMap<String, (String, i64)>>,
     /// SB-182: the last `sign_in_required` answer, with the store's credential write count
     /// (PRD-01) and the rejected lineages it was computed from.
     sign_in_cache: Mutex<SignInCache>,
@@ -174,6 +185,8 @@ impl RefreshState {
         Self {
             endpoint: Mutex::new(endpoint),
             dead: Mutex::new(HashMap::new()),
+            rejected: Mutex::new(HashMap::new()),
+            first_rejection: Mutex::new(HashMap::new()),
             sign_in_cache: Mutex::new(None),
             backoff: Mutex::new(HashMap::new()),
             seen_active: Mutex::new(HashMap::new()),
@@ -322,6 +335,13 @@ impl RefreshState {
             *at = refused.then(now);
         }
     }
+    /// Tests: moves the time of `id`'s unrepeated Codex 401 back by `seconds`.
+    #[cfg(test)]
+    pub(crate) fn age_first_rejection_for_test(&self, id: &str, seconds: i64) {
+        if let Some((_, at)) = self.first_rejection.lock().unwrap().get_mut(id) {
+            *at -= seconds;
+        }
+    }
     #[cfg(test)]
     pub(crate) fn mark_dead_for_test(&self, store: &Store, id: &str) {
         let token = store.stored_credential(id).unwrap().refresh_token.unwrap();
@@ -369,19 +389,64 @@ impl RefreshState {
             .and_then(|seen| seen.get(id).copied())
             .is_some_and(|at| time >= at && time - at < RECENTLY_ACTIVE_SECONDS)
     }
-    /// True while the stored lineage of `id` is the one the provider rejected.
+    /// True while the stored lineage of `id` is the one the provider rejected, or (B-5) the
+    /// stored credential is the one a usage check found rejected. Nothing remembered for `id`:
+    /// answered without a vault read.
     pub(crate) fn is_dead(&self, store: &Store, id: &str) -> bool {
+        let dead = self.dead.lock().ok().and_then(|d| d.get(id).cloned());
+        let rejected = self.rejected.lock().ok().and_then(|r| r.get(id).cloned());
+        if dead.is_none() && rejected.is_none() {
+            return false;
+        }
         let Ok(credential) = store.stored_credential(id) else {
             return false;
         };
-        let Some(token) = credential.refresh_token.as_deref() else {
-            return false;
+        dead.is_some_and(|hash| {
+            credential
+                .refresh_token
+                .as_deref()
+                .map(fingerprint)
+                .as_deref()
+                == Some(hash.as_str())
+        }) || rejected.is_some_and(|hash| hash == credential_fingerprint(&credential))
+    }
+    /// B-5 (SB-160): the provider rejected `credential` of `id` for good on a usage check (a 401
+    /// that survived a fresh renewal). The account needs a sign-in until its credential changes.
+    pub(crate) fn reject(&self, id: &str, credential: &Credential) {
+        if let Ok(mut first) = self.first_rejection.lock() {
+            first.remove(id);
+        }
+        if let Ok(mut rejected) = self.rejected.lock() {
+            rejected.insert(id.to_owned(), credential_fingerprint(credential));
+        }
+    }
+    /// B-5: a Codex usage check answered 401 for `credential` at `time`. True when it is the
+    /// second in a row for the same credential, at least `REJECTION_SPACING` after the first:
+    /// the account is then rejected (`reject`).
+    pub(crate) fn note_rejection(&self, id: &str, credential: &Credential, time: i64) -> bool {
+        let print = credential_fingerprint(credential);
+        let repeated = {
+            let Ok(mut first) = self.first_rejection.lock() else {
+                return false;
+            };
+            match first.get(id) {
+                Some((seen, at)) if *seen == print => time - at >= REJECTION_SPACING,
+                _ => {
+                    first.insert(id.to_owned(), (print, time));
+                    false
+                }
+            }
         };
-        self.dead
-            .lock()
-            .ok()
-            .and_then(|d| d.get(id).cloned())
-            .is_some_and(|hash| hash == fingerprint(token))
+        if repeated {
+            self.reject(id, credential);
+        }
+        repeated
+    }
+    /// B-5: a usage check of `id` got an answer other than a provider's 401: no row of 401s.
+    pub(crate) fn clear_rejection(&self, id: &str) {
+        if let Ok(mut first) = self.first_rejection.lock() {
+            first.remove(id);
+        }
     }
     /// Accounts whose stored lineage the provider rejected and nothing has replaced since.
     /// SB-182: the answer is kept while neither the stored credentials
@@ -390,14 +455,19 @@ impl RefreshState {
     /// read every rejected account's credential from the vault each time, and took up to 18 s
     /// on 2026-10-23 with six of them.
     pub(crate) fn sign_in_required(&self, store: &Store) -> Vec<String> {
-        let dead: Vec<(String, String)> = match self.dead.lock() {
-            Ok(dead) => {
-                let mut pairs: Vec<_> = dead.iter().map(|(i, h)| (i.clone(), h.clone())).collect();
-                pairs.sort();
-                pairs
-            }
+        let mut dead: Vec<(String, String)> = match self.dead.lock() {
+            Ok(dead) => dead.iter().map(|(i, h)| (i.clone(), h.clone())).collect(),
             Err(_) => return vec![],
         };
+        // B-5: a credential a usage check found rejected, told apart from a lineage by its prefix.
+        if let Ok(rejected) = self.rejected.lock() {
+            dead.extend(
+                rejected
+                    .iter()
+                    .map(|(i, h)| (i.clone(), format!("{REJECTED_PREFIX}{h}"))),
+            );
+        }
+        dead.sort();
         if dead.is_empty() {
             return vec![];
         }
@@ -429,13 +499,16 @@ impl RefreshState {
         // never hides one.
         let (ids, certain) = crate::blocking::run(|| {
             let mut certain = true;
-            let ids: Vec<String> = dead
+            let mut ids: Vec<String> = dead
                 .iter()
                 .filter(|(id, hash)| match store.stored_credential(id) {
-                    Ok(c) => {
-                        c.refresh_token.as_deref().map(fingerprint).as_deref()
-                            == Some(hash.as_str())
-                    }
+                    Ok(c) => match hash.strip_prefix(REJECTED_PREFIX) {
+                        Some(print) => credential_fingerprint(&c) == print,
+                        None => {
+                            c.refresh_token.as_deref().map(fingerprint).as_deref()
+                                == Some(hash.as_str())
+                        }
+                    },
                     Err(e) if e == switchboard_core::ACCOUNT_NOT_FOUND => false,
                     Err(_) => {
                         certain = false;
@@ -444,6 +517,8 @@ impl RefreshState {
                 })
                 .map(|(id, _)| id.clone())
                 .collect();
+            // A lineage and a usage verdict of one account name it once (the pairs are sorted).
+            ids.dedup();
             (ids, certain)
         });
         // A credential stored while these were read may have replaced one: keep nothing then.
@@ -481,6 +556,39 @@ fn now() -> i64 {
 }
 fn fingerprint(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
+}
+/// B-5: the stored credential as a whole (access and refresh token), so that any new token, a
+/// sign-in or a renewal by someone else, clears a usage check's verdict.
+fn credential_fingerprint(credential: &Credential) -> String {
+    fingerprint(&format!(
+        "{}\n{}",
+        credential.access_token,
+        credential.refresh_token.as_deref().unwrap_or_default()
+    ))
+}
+/// Marks, in `sign_in_required`'s cache key, a credential a usage check found rejected.
+const REJECTED_PREFIX: &str = "credential:";
+/// B-5 (SB-160): logs that the provider ended `id`'s seat, `by` `renewal` (`invalid_grant`) or
+/// `usage` (a usage check's verdict). Codes only: no label, no organization name.
+pub(crate) fn seat_ended(store: &Store, id: &str, by: &'static str) {
+    let Ok(snapshot) = store.snapshot() else {
+        return;
+    };
+    let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) else {
+        return;
+    };
+    let organization = snapshot.attribution(account).organization.is_some();
+    crate::oplog::event(
+        "seat_ended",
+        &[
+            (
+                "provider",
+                crate::oplog::Field::Code(account.provider.as_str()),
+            ),
+            ("by", crate::oplog::Field::Code(by)),
+            ("organization", crate::oplog::Field::Flag(organization)),
+        ],
+    );
 }
 
 /// Due when the access token is expired or within the margin, and a refresh token exists.
@@ -598,6 +706,7 @@ fn granted(
             // A sign-in stored while the grant was out replaced the rejected lineage (SB-179):
             // the account does not need one.
             if state.is_dead(store, id) {
+                seat_ended(store, id, "renewal");
                 Outcome::SignInRequired
             } else {
                 Outcome::NotNeeded
@@ -1782,6 +1891,34 @@ mod tests {
             )
             .unwrap();
         assert!(state.sign_in_required(&store).is_empty());
+    }
+    /// B-5 (SB-160): an `invalid_grant` is a seat that ended by renewal; logged once, with codes
+    /// only. A dead lineage asked again logs nothing more.
+    #[tokio::test]
+    async fn invalid_grant_logs_the_seat_as_ended_by_renewal() {
+        let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(url);
+        let id = id_of(&store, "synthetic-b", "default");
+        let (outcome, events) =
+            crate::oplog::capture_async(ensure_fresh(&store, SIGNED_IN_A, &state, &id, false))
+                .await;
+        assert_eq!(outcome, Outcome::SignInRequired);
+        assert_eq!(
+            events,
+            vec![(
+                "seat_ended",
+                vec![
+                    ("provider", crate::oplog::Field::Code("claude")),
+                    ("by", crate::oplog::Field::Code("renewal")),
+                    ("organization", crate::oplog::Field::Flag(false)),
+                ]
+            )]
+        );
+        let (_, again) =
+            crate::oplog::capture_async(ensure_fresh(&store, SIGNED_IN_A, &state, &id, true)).await;
+        assert!(again.is_empty());
     }
     #[tokio::test]
     async fn transient_failures_back_off_and_keep_the_token() {
