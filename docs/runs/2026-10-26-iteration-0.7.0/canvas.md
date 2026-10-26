@@ -54,7 +54,7 @@ Questions: [questions.md](questions.md).
 | Node | Branch, last commit | Rounds | State |
 |---|---|---|---|
 | A-1, A-5 | `w2/shell` `fe36db4` | r1 seam fail (capture, wildcard match, map rule); r2 unit fail (a Windows-only test path); fixed | **merged** (`b0ae360`) |
-| A-10, A-11, B-2 | `w2/context` `f4139e3` | r1 unit pass, seam fail (provider collision); r2 blocker closed, consumer fix needed | **merged** (`388cde9`); Fabric Dashboards adopted `agent` in 0.8.6 (`c8e089bb`), publish to confirm |
+| A-10, A-11, B-2 | `w2/context` `f4139e3` | r1 unit pass, seam fail (provider collision); r2 blocker closed, consumer fix needed | **merged** (`388cde9`); Fabric Dashboards adopted `agent` in 0.8.6 (`c8e089bb`), published 2026-10-26 03:23 UTC (0.8.7 installed): release gate cleared |
 | B-5 (R3) | `w2/seat` `20d9ec1` | r1 unit pass, seam fail; r2 adversarial: 8 plants uncaught, all now caught (each re-planted by the builder) | **merged** (`f7d145f`) |
 | C-8, C-4 (R3), C-2 | `w2/chains` `f061d36` | r1 seam fail (SetCeiling not window-only, Chains.effective, a Russian page name); r2 adversarial: 14 of 16 plants caught, an exact-size restore broke; fixed, every plant now caught | **merged** (`1cd483b`) |
 
