@@ -65,17 +65,21 @@ pub const DOUBLE_TOO_HIGH: &str =
     "Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.";
 /// A request that names the window but did not come from the window's own process (C-Q1).
 pub const WINDOW_ONLY: &str = "Only the Switchboard window answers as the window. Keep a ceiling from here, or double it in the window.";
-/// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
-/// lower one, never loosen one.
 /// C-Q9: removing or replacing a capped group's own key would move its paid steps off the key
 /// its ceiling counts (or reset that count), a loosening only the window makes (C-Q1).
 pub const KEY_HOLDS_CEILING: &str =
     "This group has a spending ceiling. Remove or replace its own key in the Switchboard window.";
+/// C-Q9: removing or replacing a key whose spend another ceiling counts: any saved key while a
+/// machine ceiling adds them up, or the key a task ceiling counts from (its baseline).
+pub const KEY_COUNTED_BY_CEILING: &str =
+    "A spending ceiling counts this key's spend. Remove or replace the key in the Switchboard window.";
 /// C-Q8: a paid start by hand refused by the spend gate, by its reason code.
 pub const STOP_KEY_EXHAUSTED: &str =
     "This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.";
 pub const STOP_CEILING_REACHED: &str = "A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.";
 pub const STOP_SPEND_UNKNOWN: &str = "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.";
+/// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
+/// lower one, never loosen one.
 pub const RAISE_IN_WINDOW: &str = "Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.";
 pub const NO_QUESTION: &str =
     "No open question with that id: it was answered, or its ceiling changed or was removed.";
@@ -398,8 +402,10 @@ pub fn key_slot(snapshot: &Snapshot, folder: Option<&Path>) -> Option<KeySlot> {
 /// refused (`GROUP_HOLDS_CEILING`, C-Q7): deleting it would drop the ceiling, a loosening only
 /// the window makes (C-Q1). A file that cannot be read refuses every surface, since whether the
 /// group holds a ceiling cannot be told. Answers the removal's answer and whether spend.json
-/// changed. Should the write fail after the group is gone, the next change prunes the ceiling of
-/// a group the snapshot no longer holds, and `decide` never counts it meanwhile.
+/// changed. Should the write fail after the group is gone, the file keeps the ceiling until the
+/// next write that prunes with a snapshot (`set_ceiling`, `answer`: `change` with `Some`; the
+/// hand-over's writes prune with `None` and keep it), and `decide` and `view` never count it
+/// meanwhile: a ceiling of a group the snapshot does not hold covers nothing.
 pub fn remove_group<T>(
     root: &Path,
     pool: &str,
@@ -441,12 +447,14 @@ pub fn refusal(reason: &str) -> &'static str {
     }
 }
 
-/// Removes or replaces a group's own OpenRouter key through `change` under the write lock (C-Q9):
-/// from the CLI or MCP a group that holds a ceiling is refused (`KEY_HOLDS_CEILING`), since its
-/// paid steps would leave the key the ceiling counts. `replaces` says whether the group has a key
-/// now (saving a first key loosens nothing). The machine's key (`pool` `None`) is never refused
-/// here: a machine ceiling then reads its spend as unknown. An unreadable file refuses every
-/// surface but the window, since whether the group holds a ceiling cannot be told.
+/// Removes or replaces a saved OpenRouter key through `change` under the write lock (C-Q9): the
+/// machine's key with `pool` `None`, else that group's own. From the CLI or MCP a key whose spend a
+/// ceiling counts is refused, since a removed key leaves the count (its paid steps move to another
+/// key) and a new one starts it again: a group's own key while the group holds a ceiling
+/// (`KEY_HOLDS_CEILING`); any key while a machine ceiling adds every saved key's daily spend up,
+/// and the key a task ceiling counts from, its baseline (`KEY_COUNTED_BY_CEILING`). `replaces`
+/// says whether the slot has a key now (saving a first key loosens nothing). An unreadable file
+/// refuses every surface but the window, since whether a ceiling counts the key cannot be told.
 pub fn guard_group_key<T>(
     root: &Path,
     pool: Option<&str>,
@@ -455,12 +463,27 @@ pub fn guard_group_key<T>(
     change: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
     let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
-    if let (Some(pool), true, false) = (pool, replaces, by == Surface::Window) {
-        let scope = ChainScope::Project {
-            pool: pool.to_owned(),
-        };
-        if read(root)?.ceilings.iter().any(|c| c.scope == scope) {
-            return Err(KEY_HOLDS_CEILING.into());
+    if replaces && by != Surface::Window {
+        let file = read(root)?;
+        if let Some(pool) = pool {
+            let scope = ChainScope::Project {
+                pool: pool.to_owned(),
+            };
+            if file.ceilings.iter().any(|c| c.scope == scope) {
+                return Err(KEY_HOLDS_CEILING.into());
+            }
+        }
+        let name = pool.unwrap_or("machine");
+        let counted = file.ceilings.iter().any(|c| match &c.scope {
+            ChainScope::Machine => true,
+            ChainScope::Workflow { id } => file
+                .baselines
+                .iter()
+                .any(|b| &b.workflow == id && b.key == name),
+            ChainScope::Project { .. } => false,
+        });
+        if counted {
+            return Err(KEY_COUNTED_BY_CEILING.into());
         }
     }
     change()

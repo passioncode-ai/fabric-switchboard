@@ -454,7 +454,8 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   store after a downgrade. Content: `{version: 1, ceilings: [{scope, cents, set_at,
   doubled_from?}], questions: [{id: "q_" + 16 hex, scope, cents, spent, reached_at, answer?:
   keep|double, answered_at?, answered_by?: window|cli|mcp}], baselines: [{workflow, key: machine
-  or a pool, usage, at}], last_handover?}`; at most 256 ceilings (one per `ChainScope`: the
+  or a pool, usage (a number, or null when the key's total could not be read at the task's first
+  paid hand-over), at}], last_handover?}`; at most 256 ceilings (one per `ChainScope`: the
   machine's, at most 63 groups' and at most 192 tasks', so the machine's and a group's always
   have room: `At most 192 task ceilings. ...`, `At most 63 group ceilings. ...`;
   `task_ceilings_leave_room_for_the_machine_and_the_groups`), 64 questions, 256 baselines. The
@@ -635,8 +636,21 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   the same lock and the same gate cover every paid start by hand (C-Q8): `continue` (also
   `--to-console` and on the default agent) onto Hermes, OpenCode or an API-key account,
   `agents launch --via openrouter`, `agents launch` through the proxy on an API-key account, and
-  `launch` on an API-key account (`fallback::gate_by_hand`; `Runtime::execute` takes `HAND_OVER`
-  before the owner transaction, the order a hand-over takes them in). A start by hand the gate
+  `launch` on an API-key account (`fallback::gate_by_hand`). `Runtime::execute` resolves the
+  start's account first (`paid_start`: the default agent's account for a `continue` that names
+  none, the pool's selected account for a launch through the proxy, where a subscription account
+  is refused by the launch itself as `AGENT_SUBSCRIPTION_REFUSED`, never as an unknown spend), and
+  only a start that is paid takes `HAND_OVER` and passes its gate, both before the owner
+  transaction, the order a hand-over takes them in; a slow spend read holds up no other operation
+  and no start that is not paid
+  (`a_slow_paid_gate_by_hand_holds_up_neither_a_read_nor_a_subscription_launch`,
+  `a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling`). A paid
+  hand-over queued for a console records what it spends (`paid` in its record) and passes the
+  gate again, with `HAND_OVER`, when a console takes it (`HandoverTake`: refused, it stays
+  waiting) and when the background opens it in Terminal (`handovers::sweep`: refused, it is taken
+  without a start, log `handover outcome=spend_refused`)
+  (`a_queued_paid_hand_over_is_gated_again_when_it_is_taken`,
+  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). A start by hand the gate
   skips is refused with the reason's sentence (`spend::refusal`: `STOP_KEY_EXHAUSTED`,
   `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`) before anything is offered or
   started; a paid continue writes the task's baseline like a hand-over. The fallback's own step
@@ -646,8 +660,10 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `a_paid_continue_by_hand_past_a_reached_machine_ceiling_is_refused_and_offers_nothing`,
   `a_paid_continue_by_hand_writes_the_tasks_baseline`,
   `an_agent_launched_on_the_openrouter_key_past_a_ceiling_is_refused`). One pass's gates together
-  take at most `GATE_BUDGET` (20 s): each read gets what is left of it, at most 12 s, and a read
-  cut short is unknown (`two_slow_paid_steps_end_inside_the_passes_gate_budget`). A task's first
+  take at most `GATE_BUDGET` (20 s), across all its workflows (at most 4): the budget starts once,
+  before the pass's first workflow, each read gets what is left of it, at most 12 s, and a read
+  cut short is unknown (`two_slow_paid_steps_end_inside_the_passes_gate_budget`,
+  `a_passes_gates_stay_inside_one_budget_across_its_workflows`). A task's first
   paid hand-over whose key total could not be read records a baseline with `usage: null`, so a
   task ceiling set later reads `spend_unknown`, never zero
   (`a_first_paid_hand_over_with_its_total_unread_leaves_a_later_task_ceiling_unknown`). The
@@ -655,11 +671,14 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   the start of their pass and prune only by age, never a missing group, so a ceiling the window
   set meanwhile for a new group survives them
   (`a_ceiling_set_meanwhile_for_a_new_group_survives_the_hand_overs_writes`). Removing or
-  replacing the own OpenRouter key of a group that holds a ceiling is the window's (C-Q9):
-  `AgentKeyRemove` and `AgentKeySet` carry `by`, and the CLI and MCP are refused with
-  `KEY_HOLDS_CEILING` under the spend write lock (`spend::guard_group_key`), through the control
-  listener and offline
-  (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`).
+  replacing a saved OpenRouter key whose spend a ceiling counts is the window's (C-Q9):
+  `AgentKeyRemove` and `AgentKeySet` carry `by`, and the CLI and MCP are refused under the spend
+  write lock (`spend::guard_group_key`), through the control listener and offline: a group's own
+  key while the group holds a ceiling (`KEY_HOLDS_CEILING`); any saved key, the machine's
+  included, while a machine ceiling adds them up, and the key a task ceiling counts from, its
+  baseline (`KEY_COUNTED_BY_CEILING`). A first key is saved as before
+  (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`,
+  `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`).
   OpenRouter's own report of a key's spend may lag a running agent, so a ceiling decides whether
   a step starts, never what a running session spends (the key's own limit bounds that). With no
   step tried, the hand-over's outcome is the first skip the gate gave. Every hand-over writes

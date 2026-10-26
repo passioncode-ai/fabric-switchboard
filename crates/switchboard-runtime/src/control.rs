@@ -1185,6 +1185,126 @@ mod tests {
             .unwrap()
             .unwrap();
     }
+    #[tokio::test]
+    async fn a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window() {
+        // Fix cycle 2, break 1 (C-Q9): the machine ceiling adds up every saved key's daily spend,
+        // and a task ceiling counts from its baseline key: removing or replacing such a key from
+        // the CLI or MCP would loosen the ceiling or misread the task.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-fixture", None)
+            .unwrap();
+        let now = crate::monitor::now();
+        let ceiling = |root: &std::path::Path, scope: ChainScope, usd: Option<f64>| {
+            crate::spend::set_ceiling(
+                root,
+                &store.snapshot().unwrap(),
+                scope,
+                usd,
+                Surface::Window,
+                now,
+            )
+            .unwrap();
+        };
+        ceiling(tmp.path(), ChainScope::Machine, Some(5.0));
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: None,
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: None,
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "remove {by:?}"
+            );
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "replace {by:?}"
+            );
+        }
+        let kept = store.agent_key_for("openrouter", None).unwrap().unwrap();
+        assert_eq!(store.agent_key_secret(&kept).unwrap(), "sk-or-v1-fixture");
+        // Offline the same, before the store is touched.
+        let offline = tempfile::tempdir().unwrap();
+        ceiling(offline.path(), ChainScope::Machine, Some(5.0));
+        for by in [Surface::Cli, Surface::Mcp] {
+            assert_eq!(
+                crate::execute_offline(offline.path().to_owned(), remove(by))
+                    .await
+                    .unwrap_err(),
+                crate::spend::KEY_COUNTED_BY_CEILING
+            );
+        }
+        // No machine ceiling, but a task ceiling counting from the machine key: the same.
+        ceiling(tmp.path(), ChainScope::Machine, None);
+        let task = ChainScope::Workflow {
+            id: "wf_0123456789abcdef".into(),
+        };
+        ceiling(tmp.path(), task, Some(2.0));
+        crate::spend::record_baseline(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            "wf_0123456789abcdef",
+            &crate::spend::KeySlot::Machine,
+            Some(1.0),
+            now,
+        )
+        .unwrap();
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, crate::spend::KEY_COUNTED_BY_CEILING, "task {by:?}");
+        }
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store.agent_key_for("openrouter", None).unwrap().is_none());
+        // With no ceiling counting it, the machine key is saved and removed from the CLI.
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Workflow {
+                id: "wf_0123456789abcdef".into(),
+            },
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
     #[cfg(unix)]
     #[tokio::test]
     async fn descriptor_is_private_and_symlink_is_rejected() {

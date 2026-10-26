@@ -545,6 +545,7 @@ pub(crate) fn queue_handover(
         .map(PathBuf::from)
         .ok_or_else(|| "Offered, but the session script is missing.".to_string())?;
     let (agent, label) = describe(snapshot, account);
+    let paid = snapshot.and_then(|s| paid_kind(s, account));
     let handover = crate::handovers::Handover {
         id: crate::handovers::new_id(),
         workflow,
@@ -554,6 +555,7 @@ pub(crate) fn queue_handover(
         script: script.clone(),
         offered_until: answer["offeredUntil"].as_str().unwrap_or_default().into(),
         created_at: now,
+        paid,
     };
     if crate::handovers::record(root, &handover).is_err() {
         if !crate::handovers::offer_live(&handover, crate::monitor::now()) {
@@ -638,15 +640,17 @@ where
         let store = store.clone();
         async move { crate::agent_keys::spend_read(&store, pool.as_deref()).await }
     };
-    pass_with_reads(runtime, now, bin, act, read).await
+    pass_with_reads(runtime, now, bin, act, read, GATE_BUDGET).await
 }
-/// [`pass_with`] with the spend read as a parameter too, so a test never reaches OpenRouter.
+/// [`pass_with`] with the spend read and the gates' budget as parameters too, so a test never
+/// reaches OpenRouter and never waits the whole [`GATE_BUDGET`].
 pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
     runtime: &Runtime,
     now: i64,
     bin: &std::path::Path,
     act: F,
     read: R,
+    budget: std::time::Duration,
 ) where
     F: Fn(String, String, PathBuf) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
@@ -692,7 +696,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         used: &kimi_used,
         // The OpenRouter key is read only for a chain that has the agent (the idle budget).
         hermes_ready: wants(crate::hermes::HERMES_TARGET)
-            && crate::launch::hermes_continuation_ready(&runtime.store),
+            && (test_hermes_ready() || crate::launch::hermes_continuation_ready(&runtime.store)),
         opencode_ready: wants(crate::launch::OPENCODE_TARGET)
             && crate::launch::opencode_continuation_ready(&runtime.store),
         disabled,
@@ -729,6 +733,10 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             .collect();
         crate::launch::launched_session_running(&runtime.root, provider, &ids)
     };
+    // The pass's gates together stay inside the budget: it starts once, before the first
+    // workflow, so up to WORKFLOWS_PER_PASS hand-overs (and their waits for the hand-over turn)
+    // share it.
+    let budget_end = tokio::time::Instant::now() + budget;
     let mut examined = 0;
     for workflow in &workflows {
         if examined >= WORKFLOWS_PER_PASS {
@@ -820,8 +828,6 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             Some(&dir),
             &kimi,
         );
-        // The pass's gates together stay inside GATE_BUDGET.
-        let budget_end = tokio::time::Instant::now() + GATE_BUDGET;
         let gate = |_agent: String, account: String| {
             let (snapshot, dir, read) = (&snapshot, &dir, &read);
             async move {
@@ -885,6 +891,18 @@ fn record_last(
     }
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    /// A test's Hermes Agent, ready for a chain step without an installed `hermes`.
+    pub(crate) static TEST_HERMES_READY: ();
+}
+fn test_hermes_ready() -> bool {
+    #[cfg(test)]
+    return TEST_HERMES_READY.try_with(|_| ()).is_ok();
+    #[cfg(not(test))]
+    false
+}
+
 /// One paid start at a time, its gate and launch together (C-5, C-Q8): two never both start on
 /// the last dollar under a ceiling. The automatic fallback holds it across a whole hand-over; a
 /// start by hand (`Runtime::execute`) takes it before the owner transaction, the same order.
@@ -897,14 +915,22 @@ tokio::task_local! {
     static GATED: ();
 }
 
+/// Runs `work` as a step that holds [`HAND_OVER`] and passed its gate: a start by hand that
+/// `Runtime::execute` gated before the owner transaction, so the operation's own gate is not run
+/// again.
+pub(crate) async fn as_gated<F: std::future::Future>(work: F) -> F::Output {
+    GATED.scope((), work).await
+}
+
 /// Whether this task is a hand-over step that already holds [`HAND_OVER`] and passed its gate.
 pub(crate) fn gated() -> bool {
     GATED.try_with(|_| ()).is_ok()
 }
 
-/// How long one pass's spend gates may take together: each read gets what is left of it (at most
-/// [`SPEND_READ_TIMEOUT`]), so a chain of slow paid steps never holds a pass longer. A read cut
-/// short is unknown, never zero.
+/// How long one pass's spend gates may take together, across all its workflows (at most
+/// `WORKFLOWS_PER_PASS`): the budget starts once, before the pass's first workflow, and each read
+/// gets what is left of it (at most [`SPEND_READ_TIMEOUT`]), so slow paid steps never hold a pass
+/// longer. A read cut short is unknown, never zero. A start by hand has a budget of its own.
 pub(crate) const GATE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The read limit for a gate that starts now: at most `cap`, inside a budget that ends at `end`.
@@ -1014,11 +1040,14 @@ where
     }
 }
 
-/// What a paid start spends (C-5, C-Q3, C-Q8).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Paid {
+/// What a paid start spends (C-5, C-Q3, C-Q8). A queued hand-over records it (`paid`), so it is
+/// gated again when a console or the background takes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Paid {
     /// The OpenRouter key a launch in its folder uses: Hermes, OpenCode, any agent launched
     /// `--via openrouter`.
+    #[serde(rename = "openrouter")]
     OpenRouter,
     /// A Claude Code or Codex API-key account, whose spend Switchboard cannot read.
     ApiKeyAccount,
@@ -1188,8 +1217,9 @@ pub(crate) async fn gate_by_hand(
     let read = |pool: Option<String>| -> ReadFuture {
         #[cfg(test)]
         if let Some(f) = &test_read {
-            let answer = f(pool.clone());
-            return Box::pin(std::future::ready(answer));
+            // Answered when polled, as a read over the network is.
+            let f = f.clone();
+            return Box::pin(async move { f(pool) });
         }
         #[cfg(not(test))]
         let _ = &test_read;
@@ -3253,6 +3283,25 @@ mod tests {
             .unwrap_err();
         assert_eq!(refused, spend::STOP_CEILING_REACHED);
         // Through the proxy on an API-key account: its spend is unknown under the ceiling.
+        let api = runtime
+            .store
+            .add(
+                "API".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "fixture-only",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        runtime
+            .store
+            .select(Provider::Claude, "default", &api.id)
+            .unwrap();
         let refused = TEST_READ
             .scope(
                 test_read(None, &count),
@@ -3317,5 +3366,263 @@ mod tests {
             [crate::continuation::MANAGED_NOT_FOR_AGENT.to_string()],
             "gated once: the step reached the next refusal"
         );
+    }
+
+    /// A stand-in for `project-observatory` with two open workflows, `WF` and `WF2`, both executed
+    /// by `account` in the checkout `repo`.
+    #[cfg(unix)]
+    fn engine_two(dir: &std::path::Path, account: &str, repo: &std::path::Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let one = |id: &str| {
+            json!({"workflowId": id, "status": "open", "pendingHandoff": null,
+            "silentSeconds": 600, "lease": {"executor": {"provider": "claude-code", "accountRef": account}}})
+        };
+        let list = json!({"workflows": [one(WF), one(WF2)]});
+        let show = json!({"workflowId": WF, "status": "open", "pendingHandoff": null,
+            "checkpoint": {"executor": {"provider": "claude-code"},
+                "body": {"artifacts": [{"kind": "git", "path": repo}]}},
+            "lease": {"executor": {"provider": "claude-code", "accountRef": account}},
+            "credentials": []});
+        let path = dir.join("project-observatory");
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\ncase \"$3\" in\n list) cat <<'J'\n{list}\nJ\n;;\n show) cat <<'J'\n{show}\nJ\n;;\nesac\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_passes_gates_stay_inside_one_budget_across_its_workflows() {
+        // Fix cycle 2, break 2: GATE_BUDGET bounds one pass's gates together, not each
+        // workflow's. Scaled down: a 3 s budget, two workflows each with a paid step whose read
+        // answers after 10 s. Budgeted per workflow the reads ran 3 s each, 6 s together; per
+        // pass, 3 s together. Measured as the time spent inside the reads, since a hand-over
+        // turn held by another test (it is one per process) may hold the pass up before them.
+        use crate::fixtures::*;
+        use crate::monitor::now;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let projects = root.path().join("claude").join("projects").join("-p");
+        std::fs::create_dir_all(&projects).unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(now() - 60)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let line = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"timestamp":at,"quotaLimits":{"resetsAt":now()+3600}});
+        let file = projects.join("s.jsonl");
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        let profile = signed_in(Provider::Claude).unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime.limits.refresh(
+            &snapshot,
+            Some((&profile.identity, vec![a.id.clone()])),
+            &[file],
+            now(),
+        );
+        runtime
+            .store
+            .set_agent_key_for("openrouter", None, "sk-or-fixture-only", None)
+            .unwrap();
+        machine_ceiling(root.path(), &runtime.store.snapshot().unwrap(), 5.0);
+        runtime
+            .store
+            .set_chain(
+                ChainScope::Machine,
+                vec![Executor {
+                    agent: "hermes".into(),
+                    account_id: None,
+                    key: None,
+                }],
+            )
+            .unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        let bin = engine_two(root.path(), &a.id, &dir_of(&repo));
+        let acted = Arc::new(AtomicUsize::new(0));
+        let act = |_: String, _: String, _: PathBuf| {
+            let acted = acted.clone();
+            async move {
+                acted.fetch_add(1, Ordering::SeqCst);
+                Ok::<(), String>(())
+            }
+        };
+        /// Adds the time a read ran, until it answered or was given up, to the total.
+        struct Timed(Arc<Mutex<std::time::Duration>>, tokio::time::Instant);
+        impl Drop for Timed {
+            fn drop(&mut self) {
+                *self.0.lock().unwrap() += self.1.elapsed();
+            }
+        }
+        let reading: Arc<Mutex<std::time::Duration>> = Default::default();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let slow = |_: Option<String>| {
+            let (reads, reading) = (reads.clone(), reading.clone());
+            async move {
+                let _timed = Timed(reading, tokio::time::Instant::now());
+                reads.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                spend(40.0, 1.0, 1.0)
+            }
+        };
+        let budget = std::time::Duration::from_secs(3);
+        TEST_HERMES_READY
+            .scope(
+                (),
+                pass_with_reads(&runtime, now(), &bin, act, slow, budget),
+            )
+            .await;
+        let took = *reading.lock().unwrap();
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "both workflows' steps were gated"
+        );
+        assert_eq!(
+            acted.load(Ordering::SeqCst),
+            0,
+            "unknown spend hands nothing over"
+        );
+        assert!(
+            took < budget + std::time::Duration::from_millis(1500),
+            "two workflows' reads ran {took:?}, past the pass's {budget:?} budget"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_slow_paid_gate_by_hand_holds_up_neither_a_read_nor_a_subscription_launch() {
+        // Fix cycle 2, risk 3: a paid start by hand takes the hand-over turn and passes its gate
+        // before the owner transaction, and a start that is not paid takes no turn at all.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), Some(5.0)).await;
+        let sub = crate::fixtures::save(&runtime.store, "synthetic-sub", "default");
+        let reading = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let slow: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
+            let reading = reading.clone();
+            Arc::new(move |_| {
+                reading.store(true, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                spend(40.0, 1.0, 1.0)
+            })
+        };
+        let paid = runtime.execute(continue_on(crate::hermes::HERMES_TARGET, &dir, "managed"));
+        let probes = async {
+            let waited = tokio::time::Instant::now();
+            while !reading.load(Ordering::SeqCst) {
+                assert!(
+                    waited.elapsed() < std::time::Duration::from_secs(5),
+                    "the paid gate never read"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            let second = std::time::Duration::from_secs(1);
+            tokio::time::timeout(second, runtime.execute(Operation::Snapshot))
+                .await
+                .expect("a snapshot answers within 1 s")
+                .unwrap();
+            // A subscription launch with arguments it refuses: an answer, not a start.
+            let answer = tokio::time::timeout(
+                second,
+                runtime.execute(Operation::Launch {
+                    id: sub.id.clone(),
+                    mode: "isolated".into(),
+                    working_directory: dir.clone(),
+                    in_place: false,
+                    args: vec!["--x".into()],
+                }),
+            )
+            .await
+            .expect("a subscription launch answers within 1 s");
+            assert_eq!(answer.unwrap_err(), crate::launch::EXTRA_ARGS_INVALID);
+        };
+        let (paid, ()) = TEST_READ
+            .scope(slow, async { tokio::join!(paid, probes) })
+            .await;
+        // The gate passed; "managed" is then refused for Hermes, before anything is offered.
+        assert_eq!(
+            paid.unwrap_err(),
+            crate::continuation::MANAGED_NOT_FOR_AGENT
+        );
+    }
+
+    #[tokio::test]
+    async fn a_queued_paid_hand_over_is_gated_again_when_it_is_taken() {
+        // Fix cycle 2, risk 4: a to-console hand-over passed the gate when it was queued; the
+        // ceiling reached since then refuses it when a console takes it.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), Some(5.0)).await;
+        crate::handovers::set_enabled(root.path(), true).unwrap();
+        let handover = crate::handovers::Handover {
+            id: crate::handovers::new_id(),
+            workflow: WF.into(),
+            agent: "hermes".into(),
+            account_label: "Hermes Agent".into(),
+            dir: dir.clone(),
+            script: root.path().join("hermes.command"),
+            offered_until: "2099-10-13T01:00:00Z".into(),
+            created_at: crate::monitor::now(),
+            paid: Some(Paid::OpenRouter),
+        };
+        crate::handovers::record(root.path(), &handover).unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let refused = TEST_READ
+            .scope(
+                test_read(spend(40.0, 30.0, 6.0), &count),
+                runtime.execute(Operation::HandoverTake {
+                    id: handover.id.clone(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::STOP_CEILING_REACHED);
+        assert_eq!(count.load(Ordering::SeqCst), 1, "the key was read");
+        assert_eq!(
+            crate::handovers::pending(root.path()),
+            vec![handover.clone()],
+            "still waiting: the window may double the ceiling"
+        );
+        // Under the ceiling it is taken as before.
+        let taken = TEST_READ
+            .scope(
+                test_read(spend(40.0, 30.0, 1.0), &count),
+                runtime.execute(Operation::HandoverTake {
+                    id: handover.id.clone(),
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(taken["handover"]["id"], handover.id);
+    }
+
+    #[tokio::test]
+    async fn a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling() {
+        // Fix cycle 2, risk 5: the route's account is read first; a subscription account is
+        // refused for what it is, never as an unknown spend.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let runtime = paid_runtime(root.path(), Some(5.0)).await;
+        let oauth = crate::fixtures::save(&runtime.store, "synthetic-a", "agents");
+        runtime
+            .store
+            .select(Provider::Claude, "agents", &oauth.id)
+            .unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let refused = TEST_READ
+            .scope(
+                test_read(None, &count),
+                runtime.execute(Operation::LaunchAgent {
+                    agent: "goose".into(),
+                    pool: "agents".into(),
+                    working_directory: dir_of(&repo),
+                    via: crate::AgentVia::Proxy,
+                    model: None,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused, switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED);
     }
 }

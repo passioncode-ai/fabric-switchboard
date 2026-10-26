@@ -263,7 +263,28 @@ impl Pass {
         crate::kimi::watch(&runtime.root, &runtime.store, &runtime.kimi_watch, time).await;
         crate::fallback::pass(runtime, time).await;
         // SB-108: a hand-over no console took in two minutes opens in Terminal.
-        crate::handovers::sweep(&runtime.root, time, crate::launch::start_terminal);
+        // C-Q8: a paid one passes the spend gate again first.
+        crate::handovers::sweep(
+            &runtime.root,
+            time,
+            crate::launch::start_terminal,
+            |h: crate::handovers::Handover| async move {
+                match h.paid {
+                    Some(kind) => {
+                        crate::fallback::gate_by_hand(
+                            &runtime.store,
+                            &runtime.root,
+                            Some(&h.workflow),
+                            &h.dir,
+                            kind,
+                        )
+                        .await
+                    }
+                    None => Ok(()),
+                }
+            },
+        )
+        .await;
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

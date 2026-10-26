@@ -42,6 +42,11 @@ pub struct Handover {
     /// The engine's offer deadline (RFC 3339), as it answered.
     pub offered_until: String,
     pub created_at: i64,
+    /// What a paid start spends (C-Q8): Hermes and OpenCode the OpenRouter key, an API-key
+    /// Claude Code or Codex account its own. Absent for a subscription or Kimi Code account. A
+    /// paid hand-over passes the spend gate again when it is taken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid: Option<crate::fallback::Paid>,
 }
 
 pub fn id_valid(id: &str) -> bool {
@@ -131,6 +136,19 @@ pub fn pending(root: &Path) -> Vec<Handover> {
     found
 }
 
+/// One hand-over still waiting, without taking it: what a paid one's spend gate needs before it
+/// is taken (C-Q8).
+pub(crate) fn waiting(root: &Path, id: &str) -> Option<Handover> {
+    if !id_valid(id) {
+        return None;
+    }
+    let folder = dir(root);
+    if fs::symlink_metadata(folder.join(format!("{id}.taken"))).is_ok() {
+        return None;
+    }
+    read(&folder.join(format!("{id}.json")))
+}
+
 /// Takes a hand-over once, retaining an exclusive receipt even after a crash.
 pub fn take(root: &Path, id: &str) -> Result<Handover, String> {
     take_at(root, id, crate::monitor::now())
@@ -177,7 +195,21 @@ fn read_taken(path: &Path, id: &str) -> Option<Handover> {
 /// took within `CONSOLE_WAIT` seconds, or one beyond `MAX_WAITING`, is taken and opened with
 /// `start` (Terminal); an unreadable or expired pending record is removed. Returns how many
 /// were opened. All `.taken` receipts remain until uninstall or explicit reconciliation.
-pub(crate) fn sweep(root: &Path, now: i64, start: fn(&Path) -> Result<(), String>) -> usize {
+///
+/// A paid hand-over (`paid`) passed the spend gate when it was queued; it passes `gate` again,
+/// holding the hand-over turn, before Terminal opens it (C-Q8). One the gate refuses is taken
+/// without a start (log `handover outcome=spend_refused`), so its spend is not read again every
+/// pass; its offer lapses by itself.
+pub(crate) async fn sweep<G, GFut>(
+    root: &Path,
+    now: i64,
+    start: fn(&Path) -> Result<(), String>,
+    gate: G,
+) -> usize
+where
+    G: Fn(Handover) -> GFut,
+    GFut: std::future::Future<Output = Result<(), String>>,
+{
     let folder = dir(root);
     let Ok(entries) = fs::read_dir(&folder) else {
         return 0;
@@ -198,6 +230,19 @@ pub(crate) fn sweep(root: &Path, now: i64, start: fn(&Path) -> Result<(), String
     let mut opened = 0;
     for (n, handover) in waiting.iter().enumerate() {
         if n >= overflow && now.saturating_sub(handover.created_at) < CONSOLE_WAIT {
+            continue;
+        }
+        let _turn = match handover.paid {
+            Some(_) => Some(crate::fallback::HAND_OVER.lock().await),
+            None => None,
+        };
+        if handover.paid.is_some() && gate(handover.clone()).await.is_err() {
+            if take_at(root, &handover.id, now).is_ok() {
+                crate::oplog::event(
+                    "handover",
+                    &[("outcome", crate::oplog::Field::Code("spend_refused"))],
+                );
+            }
             continue;
         }
         if let Ok(taken) = take_at(root, &handover.id, now) {
@@ -231,6 +276,7 @@ mod tests {
             script: format!("/data/kimi/sessions/x/{id}.command").into(),
             offered_until: "2099-10-13T01:00:00Z".into(),
             created_at,
+            paid: None,
         }
     }
 
@@ -263,13 +309,16 @@ mod tests {
     }
 
     static STARTED: AtomicUsize = AtomicUsize::new(0);
+    fn ungated(_: Handover) -> std::future::Ready<Result<(), String>> {
+        panic!("a hand-over that is not paid was gated")
+    }
     fn counted(_: &Path) -> Result<(), String> {
         STARTED.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
-    #[test]
-    fn a_hand_over_no_console_takes_opens_in_terminal_after_two_minutes() {
+    #[tokio::test]
+    async fn a_hand_over_no_console_takes_opens_in_terminal_after_two_minutes() {
         let root = tempfile::tempdir().unwrap();
         record(root.path(), &handover("ho-000000000001", 1_000)).unwrap();
         record(root.path(), &handover("ho-000000000002", 1_100)).unwrap();
@@ -280,14 +329,23 @@ mod tests {
         .unwrap();
         let before = STARTED.load(Ordering::SeqCst);
         // Within the wait nothing opens; the unreadable record goes.
-        assert_eq!(sweep(root.path(), 1_000 + CONSOLE_WAIT - 1, counted), 0);
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT - 1, counted, ungated).await,
+            0
+        );
         assert!(!root.path().join("handovers/ho-00000000000b.json").exists());
         assert_eq!(pending(root.path()).len(), 2);
         // The first one's wait is over: Terminal opens it, once.
-        assert_eq!(sweep(root.path(), 1_000 + CONSOLE_WAIT, counted), 1);
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT, counted, ungated).await,
+            1
+        );
         assert_eq!(STARTED.load(Ordering::SeqCst) - before, 1);
         assert_eq!(pending(root.path())[0].id, "ho-000000000002");
-        assert_eq!(sweep(root.path(), 1_000 + CONSOLE_WAIT, counted), 0);
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT, counted, ungated).await,
+            0
+        );
     }
 
     #[test]
@@ -303,8 +361,8 @@ mod tests {
         assert!(!id_valid("ho-0123456789AB") && !id_valid("hx-0123456789ab"));
     }
 
-    #[test]
-    fn an_expired_or_invalid_offer_never_opens_a_session() {
+    #[tokio::test]
+    async fn an_expired_or_invalid_offer_never_opens_a_session() {
         let root = tempfile::tempdir().unwrap();
         let mut expired = handover("ho-000000000001", 100);
         expired.offered_until = "1970-01-01T00:02:00Z".into();
@@ -316,7 +374,7 @@ mod tests {
         fn never(_: &Path) -> Result<(), String> {
             panic!("expired offer launched")
         }
-        assert_eq!(sweep(root.path(), 1000, never), 0);
+        assert_eq!(sweep(root.path(), 1000, never, ungated).await, 0);
         assert!(pending(root.path()).is_empty());
     }
 
@@ -341,8 +399,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_crash_after_claim_never_reoffers_or_replays_the_pending_record() {
+    #[tokio::test]
+    async fn a_crash_after_claim_never_reoffers_or_replays_the_pending_record() {
         let root = tempfile::tempdir().unwrap();
         let h = handover("ho-000000000001", 100);
         record(root.path(), &h).unwrap();
@@ -353,7 +411,52 @@ mod tests {
         fn never(_: &Path) -> Result<(), String> {
             panic!("an ambiguous claim was replayed")
         }
-        assert_eq!(sweep(root.path(), 1000, never), 0);
+        assert_eq!(sweep(root.path(), 1000, never, ungated).await, 0);
         assert!(receipt.is_file());
+    }
+
+    #[tokio::test]
+    async fn a_paid_hand_over_the_gate_refuses_is_taken_without_a_start() {
+        // Fix cycle 2, risk 4: a queued paid hand-over passes the spend gate again before
+        // Terminal opens it; refused, it is taken without a start and never read again.
+        let root = tempfile::tempdir().unwrap();
+        let mut paid = handover("ho-000000000001", 1_000);
+        paid.agent = "hermes".into();
+        paid.paid = Some(crate::fallback::Paid::OpenRouter);
+        record(root.path(), &paid).unwrap();
+        let gated = std::sync::Arc::new(AtomicUsize::new(0));
+        let refuse = |h: Handover| {
+            let gated = gated.clone();
+            async move {
+                assert_eq!(h.workflow, "wf_0123456789abcdef");
+                gated.fetch_add(1, Ordering::SeqCst);
+                Err::<(), String>(crate::spend::STOP_CEILING_REACHED.into())
+            }
+        };
+        fn never(_: &Path) -> Result<(), String> {
+            panic!("a refused paid hand-over was started")
+        }
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT, never, refuse).await,
+            0
+        );
+        assert_eq!(gated.load(Ordering::SeqCst), 1);
+        assert!(pending(root.path()).is_empty());
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT, never, refuse).await,
+            0
+        );
+        assert_eq!(gated.load(Ordering::SeqCst), 1, "read once, not every pass");
+        // One the gate lets through opens in Terminal as before.
+        let mut second = handover("ho-000000000002", 1_000);
+        second.paid = Some(crate::fallback::Paid::ApiKeyAccount);
+        record(root.path(), &second).unwrap();
+        let before = STARTED.load(Ordering::SeqCst);
+        let pass = |_: Handover| std::future::ready(Ok::<(), String>(()));
+        assert_eq!(
+            sweep(root.path(), 1_000 + CONSOLE_WAIT, counted, pass).await,
+            1
+        );
+        assert_eq!(STARTED.load(Ordering::SeqCst) - before, 1);
     }
 }
