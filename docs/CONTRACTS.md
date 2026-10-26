@@ -1179,7 +1179,7 @@ Two readers still follow the process's variables as they are. `projects::detect_
 session is asking) reads `CODEX_HOME` only to recognise a home Switchboard launched. The native
 sign-in context, `external::context`, reads `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and refuses a
 Switchboard home rather than reading past it: `capture_current` and `capture_current_cached`
-(`accounts capture` and the owner's “in use now” probe), `activate_claude` and `lock_live` answer
+(`accounts capture` and the owner's “in use now” probe; the background probe may answer the source's locked or needs-access state first, and never captures), `activate_claude` and `lock_live` answer
 “This session runs in a Switchboard home or a terminal in an organization's folder. Run this from
 another terminal.” when it lies inside the data folder (Copylot reports 21ec4932 en-US and
 a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts` carry it). The refusal applies where the
