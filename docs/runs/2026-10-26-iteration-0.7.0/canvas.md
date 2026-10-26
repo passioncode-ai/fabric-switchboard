@@ -79,3 +79,14 @@ read split.
 ## D-1 (added 2026-10-26)
 
 Operator request 2026-10-26: keep what a launched session did and show who launched it, from which project, where it stopped and where the work went. Backlog SB-212 (`3171e45`). Dashboards part asked on the board (thread `62d78b7f-629f-4867-8c83-265e1a8a5763`, copy to fabric-workspace). Schema to post on that thread when the node starts.
+
+### D-1 design (2026-10-26)
+
+Measured: a launch home is reused (`runtimes/<provider>-<pool>`, `homes/<account>`), and every launch overwrites its `.session.json` (`crates/switchboard-runtime/src/launch.rs:2663-2678`), so only the latest launch of a home is known; `runtimes/claude-agents` held 49 Claude Code transcripts and one record on 2026-10-26. Transcripts are kept by Claude Code itself for the home's `cleanupPeriodDays` (90, from the linked operator settings).
+
+1. **One record per launch.** `<data>/launches/<launch_id>.json` (0600, append-only, written at launch, updated by the hooks below), kept 90 days like the transcripts; `.session.json` keeps the current state and gains `launch_id`.
+2. **Who launched it.** `launched_by`: `surface` (`window`, `cli`, `mcp`, `fallback`, `recovery`, `dashboards`), `caller_launch_id` (the `SWITCHBOARD_LAUNCH_ID` the caller's own session carries: every launched session gets it in its environment, so a session that launches another names its parent with no help), `caller_project` (the group or repository of the caller's folder), `caller_program` (process name only, never a command line), and optional `by` and `parent` a runner sets (`switchboard launch --by voc-learn --parent <id>`).
+3. **What it did.** The plugin's `SessionStart` hook writes `provider_session_id` and `transcript` (the hook input's `session_id` and `transcript_path`); Codex: its rollout file. `Stop` writes `last_turn_at` and `turns`; the end writes `ended_at` and `ended` (`finished`, `limit`, `killed`, `unknown`).
+4. **Where it went.** `continued_as`: the hand-over id, the workflow checkpoint or the launch id of the session that took the work over (recovery, fallback, `continue`).
+5. **Reading.** `switchboard sessions --history` (all launches, newest first), `switchboard sessions show <launch_id>` (the record, its chain up through `caller_launch_id`/`parent` and down through `continued_as` and children), MCP `switchboard_sessions` with `history` and `launch_id`. Fields additive; old records read as before.
+Risk class R2 (new files and fields, no money, no credentials); tests: chain of three launches through the environment, hook writes with a synthetic transcript path, retention prune, old record compatibility.
