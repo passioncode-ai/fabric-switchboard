@@ -43,7 +43,7 @@ A second pass changed nothing.
 | 1 | S-1 (scenarios SCN-074 … SCN-084, SCR-03, amendments to SCN-039, 040, 051, 056, 065, 066), A-0 (measurement) | `/ux-lint` green; A-0 recorded |
 | 2 | A-1, A-5, A-10, A-11, B-2, B-5, C-2, C-4, C-8 | each node's tests, risk-class rounds |
 | 3 | A-2, A-3, A-4, B-3, B-4, C-5, C-6 | same |
-| 4 | A-7, A-8, B-6, B-7, B-8, C-3, C-7 (UI, in sequence), Copylot on every string (en-US, ru-RU) | WebKit pass of the window, both themes, en and ru |
+| 4 | A-7, A-8, B-6, B-7, B-8, C-3, C-7 (UI, in sequence), Copylot on every string (en-US, ru-RU); D-1 (SB-212 session provenance and transcript: record fields, `launch --by/--parent`, `SessionStart`/`Stop` hook writes, `switchboard sessions` and MCP; no UI, runs beside the UI nodes, R2) | WebKit pass of the window, both themes, en and ru |
 | 5 | A-9, B-9, C-9, release | doc gate, `./scripts/check.sh`, release |
 | after | B-10 (SB-125 live setup), the operator's acceptance | human gates |
 
@@ -75,3 +75,7 @@ read split.
 | A-4, A-2 (R3), A-3 (R3) | `w3/shell` `11019dd` | r1 seam fail (backup lost `off`, notice in memory only, ZDOTDIR, created file left, other data folder); fixed `4d8feb0`; r2 adversarial: 12 of 15 plants caught, bash `set -a` leak; fixed, every plant now caught | **merged** |
 | B-3, B-4 | `w3/person` `97a48df` | r1 seam fail (`shell on` offered after the person turned it off, `shell on/off` dependency, `in_cli` missing on login finish) | fix cycle on top of the merged `w3/shell` next |
 | C-5 (R3), C-6 (R3) | not started | | after B-3/B-4 |
+
+## D-1 (added 2026-10-26)
+
+Operator request 2026-10-26: keep what a launched session did and show who launched it, from which project, where it stopped and where the work went. Backlog SB-212 (`3171e45`). Dashboards part asked on the board (thread `62d78b7f-629f-4867-8c83-265e1a8a5763`, copy to fabric-workspace). Schema to post on that thread when the node starts.
