@@ -139,6 +139,10 @@ export interface Adapter {
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
+  /** The terminal hook's first-time notice (SB-183), kept until acknowledged; null when none waits. */
+  shellHookNotice(): Promise<ShellHookNotice | null>;
+  /** The window showed the notice: it is not given again. */
+  acknowledgeShellHookNotice(): Promise<void>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<AnalyticsStatus>;
   /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128).
@@ -174,6 +178,8 @@ export interface ChainPreset { id: string; agents: { agent: string; name: string
 /** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
 export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
 export interface LoginItem { available: boolean; enabled: boolean }
+/** The organization and its group whose presence put the terminal hook in place (SB-183). */
+export interface ShellHookNotice { organization: string; group: string }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */

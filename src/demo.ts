@@ -438,6 +438,8 @@ export function createDemoAdapter(): Adapter {
     async kimiRemove(id) { await pause(); kimi.accounts = kimi.accounts.filter((a) => a.account.id !== id); log('kimi_account', '', 'removed'); },
     async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
+    async shellHookNotice() { return null; },
+    async acknowledgeShellHookNotice() { await pause(); },
     async updateStatus() { return { ...update }; },
     async setAutoUpdate(enabled) { await pause(); update.enabled = enabled; return { ...update }; },
     async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },

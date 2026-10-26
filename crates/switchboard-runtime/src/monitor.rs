@@ -2201,7 +2201,52 @@ mod tests {
             .usage_health(&a, "ok", start - 10, start + 3 * 3600)
             .unwrap();
         runtime.store.set_policy(policy("claude_cli")).unwrap();
+        // SB-183: a group bound to an organization, so the bindings pass also hashes the shell
+        // homes' fingerprint (`shell::homes::key`) and writes the homes and the folder map once.
+        let work = tempfile::tempdir().unwrap();
+        let acme = work.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let member = save(&runtime.store, "synthetic-org", "default");
+        runtime
+            .store
+            .usage_health(&member.id, "ok", start - 10, start + 3 * 3600)
+            .unwrap();
+        runtime
+            .store
+            .assign_organization(&member.id, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(crate::Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![member.id.clone()],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
         runtime.store.flush().unwrap();
+        // Every file under the data folder and the group's folder, with its size and time.
+        fn files(
+            dirs: &[&std::path::Path],
+        ) -> Vec<(std::path::PathBuf, u64, std::time::SystemTime)> {
+            let mut out = Vec::new();
+            let mut stack: Vec<std::path::PathBuf> = dirs.iter().map(|d| d.to_path_buf()).collect();
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        out.push((entry.path(), meta.len(), meta.modified().unwrap()));
+                    }
+                }
+            }
+            out.sort();
+            out
+        }
         let mut pass = Pass::default();
         // The first pass learns what is there: the sign-in, the renewal schedule, a backup.
         CLOCK.store(start, Ordering::SeqCst);
@@ -2211,6 +2256,13 @@ mod tests {
         let writes = runtime.store.metadata_writes();
         let backup_files = || std::fs::read_dir(backups.path()).unwrap().count();
         let first_backups = backup_files();
+        assert!(
+            crate::shell::map::answer(root.path(), &acme).is_some(),
+            "the first pass wrote the organization's row"
+        );
+        let key = *runtime.bindings_key.lock().unwrap();
+        assert!(key.is_some());
+        let written = files(&[root.path(), &acme]);
         // Then an hour of passes with nothing changing.
         let passes = 3600 / PASS_SECONDS as i64;
         for k in 1..=passes {
@@ -2233,6 +2285,16 @@ mod tests {
         );
         assert_eq!(runtime.store.metadata_writes(), writes, "no metadata write");
         assert_eq!(backup_files(), first_backups, "no backup without a change");
+        assert_eq!(
+            *runtime.bindings_key.lock().unwrap(),
+            key,
+            "the bindings and shell homes' fingerprint did not move"
+        );
+        assert_eq!(
+            files(&[root.path(), &acme]),
+            written,
+            "no file was written in the data folder or the group's folder"
+        );
         // One per pass for native rotation's current account, one per three-minute source
         // sync for the signed-in account (before: every account's credential, every 10 s).
         let syncs = (3600 / INTERVAL_SECONDS) as u64;

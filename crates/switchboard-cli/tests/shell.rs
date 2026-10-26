@@ -104,9 +104,12 @@ fn shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&control, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-    let dir = acme.join("app");
+    let dir = acme.clone();
     // The first call pays for loading the binary from disk; a terminal's hook runs a warm one.
     assert_eq!(line(&env(root, &dir)), expected(root));
+    // Below the bound folder Claude Code would not read the route (measured): a group with
+    // only Claude has nothing to export there.
+    assert_eq!(line(&env(root, &acme.join("app"))), "none\n");
     let mut times: Vec<Duration> = (0..7)
         .map(|_| {
             let started = Instant::now();
@@ -134,7 +137,7 @@ fn shell_env_says_none_when_off_missing_unknown_version_or_outside() {
     let data = private_dir();
     let root = data.path();
     let (work, acme) = work();
-    let dir = acme.join("app");
+    let dir = acme.clone();
     // No map yet: the owner has not written one.
     assert_eq!(line(&env(root, &dir)), "none\n");
     write_map(root, &acme);
@@ -179,7 +182,7 @@ fn shell_env_never_writes_to_stderr_and_exits_zero() {
     let root = data.path();
     let (_work, acme) = work();
     write_map(root, &acme);
-    let dir = acme.join("app");
+    let dir = acme.clone();
     let dir = dir.to_str().unwrap();
     let missing = data.path().join("not-created");
     let missing = missing.to_str().unwrap();
@@ -357,7 +360,7 @@ fn shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails()
     .unwrap();
     let lock = std::fs::File::create(root.join("instance.lock")).unwrap();
     lock.lock().unwrap();
-    let value = status(&acme.join("app"), true);
+    let value = status(&acme, true);
     assert_eq!(value["hook"], "default_on");
     assert_eq!(value["map"], "ok");
     assert_eq!(value["terminal"]["hook_loaded"], true);
@@ -379,7 +382,7 @@ fn shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails()
         ])
     );
     std::fs::write(root.join("shell-hook"), "off").unwrap();
-    let value = status(&acme.join("app"), true);
+    let value = status(&acme, true);
     assert_eq!(value["hook"], "off");
     assert!(value["here"].is_null());
     // The human form names the group, the homes and each start file.
@@ -388,7 +391,7 @@ fn shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails()
         .arg("--data-dir")
         .arg(root)
         .args(["shell", "status", "--dir"])
-        .arg(acme.join("app"))
+        .arg(&acme)
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -413,4 +416,233 @@ fn shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails()
     assert!(output.status.success());
     assert!(!missing.exists());
     drop(lock);
+}
+
+/// SB-183 node A-2: the script `shell init` prints, loaded by a real zsh and bash, asks this
+/// very executable on every change of folder and moves the variables into the group's homes
+/// and back.
+#[cfg(unix)]
+#[test]
+fn shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli() {
+    let data = private_dir();
+    let root = data.path().canonicalize().unwrap();
+    let (_work, acme) = work();
+    write_map(&root, &acme);
+    let elsewhere = acme.parent().unwrap().join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    for (shell, prompt) in [("zsh", ":"), ("bash", "eval \"$PROMPT_COMMAND\"")] {
+        let path = format!("/bin/{shell}");
+        if !Path::new(&path).exists() {
+            eprintln!("skipped: {shell} is not installed on this machine");
+            continue;
+        }
+        let printed = binary()
+            .arg("--data-dir")
+            .arg(&root)
+            .args(["shell", "init", shell])
+            .output()
+            .unwrap();
+        assert!(printed.status.success());
+        let script = String::from_utf8(printed.stdout).unwrap();
+        assert!(
+            script.contains(env!("CARGO_BIN_EXE_switchboard")) || script.contains("switchboard")
+        );
+        let hook = root.join(format!("hook-test.{shell}"));
+        std::fs::write(&hook, &script).unwrap();
+        let body = format!(
+            ". '{}'\ncd '{}'\n{prompt}\necho \"in=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"\ncd '{}'\n{prompt}\necho \"out=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"",
+            hook.display(),
+            acme.display(),
+            elsewhere.display()
+        );
+        let mut command = Command::new(&path);
+        if shell == "zsh" {
+            command.args(["-f", "-c", &body]);
+        } else {
+            command.args(["--noprofile", "--norc", "-c", &body]);
+        }
+        let out = command
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("CLAUDE_CONFIG_DIR", "/own home")
+            .current_dir(&elsewhere)
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(&format!(
+                "in={} ctx=org:o-acme",
+                root.join("shell").join("claude-acme").display()
+            )),
+            "{shell}: {text}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(text.contains("out=/own home ctx=unset"), "{shell}: {text}");
+        assert!(
+            out.stderr.is_empty(),
+            "{shell}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    // --json answers the script as data.
+    let json = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args(["--json", "shell", "init", "fish"])
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(value["data"]["shell"], "fish");
+    assert!(value["data"]["script"]
+        .as_str()
+        .unwrap()
+        .contains("--on-variable PWD"));
+}
+
+/// The app's own data folder under `home` (`dirs::data_dir()` follows `HOME`).
+#[cfg(unix)]
+fn default_root_in(home: &Path) -> std::path::PathBuf {
+    let base = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".local/share")
+    };
+    let root = base.join(switchboard_runtime::APP_ID);
+    std::fs::create_dir_all(&root).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+    root
+}
+/// A temporary home with an installed CLI in `~/.local/bin` (a stand-in: never run here).
+#[cfg(unix)]
+fn temporary_home() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().canonicalize().unwrap();
+    let installed = home.join(".local/bin/switchboard");
+    std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    std::fs::write(&installed, "#!/bin/sh\necho none\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&installed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (tmp, home, installed)
+}
+/// The CLI in `home`, as a person's terminal there would run it.
+#[cfg(unix)]
+fn in_home(home: &Path) -> Command {
+    let mut command = binary();
+    command
+        .env("HOME", home)
+        .env("SHELL", "/bin/zsh")
+        .env("PATH", "/usr/bin:/bin")
+        .env_remove("ZDOTDIR")
+        .env_remove("XDG_DATA_HOME");
+    command
+}
+
+/// SB-183 node A-3: `shell on` and `shell off` edit the start files of the home they are given
+/// (here a temporary HOME, with the app's own data folder in it), and `shell off` gives each one
+/// back byte for byte. A development build names the installed CLI, never itself.
+#[cfg(unix)]
+#[test]
+fn shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only() {
+    let (_tmp, home, installed) = temporary_home();
+    let root = default_root_in(&home);
+    let original = "export MINE=1\nalias ll='ls -l'";
+    std::fs::write(home.join(".zshrc"), original).unwrap();
+    std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+    let run = |args: &[&str]| in_home(&home).args(args).output().unwrap();
+    let on = run(&["--json", "shell", "on"]);
+    assert!(
+        on.status.success(),
+        "{}",
+        String::from_utf8_lossy(&on.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&on.stdout).unwrap();
+    assert_eq!(value["data"]["hook"], "on");
+    let files = value["data"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{value}");
+    assert!(files.iter().all(|f| f["state"] == "written"));
+    let zshrc = std::fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(zshrc.starts_with(original));
+    assert!(zshrc.contains("# >>> Fabric Switchboard: shell hook (SB-183) >>>"));
+    let hook = std::fs::read_to_string(root.join("shell").join("hook.zsh")).unwrap();
+    assert!(
+        hook.contains(&format!("_switchboard_cli='{}'", installed.display())),
+        "the installed CLI, not this development build: {hook}"
+    );
+    assert!(!hook.contains(env!("CARGO_BIN_EXE_switchboard")));
+    let fish = home.join(".config/fish/conf.d/fabric-switchboard.fish");
+    assert!(fish.is_file());
+    // The human answer names each file.
+    let text = run(&["shell", "status"]);
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("Terminal hook: on."), "{text}");
+    assert!(text.contains(".zshrc, added"), "{text}");
+    let off = run(&["shell", "off"]);
+    assert!(off.status.success());
+    assert_eq!(
+        std::fs::read(home.join(".zshrc")).unwrap(),
+        original.as_bytes()
+    );
+    assert!(!fish.exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("shell-hook")).unwrap(),
+        "off\n"
+    );
+    assert!(String::from_utf8(off.stdout)
+        .unwrap()
+        .contains("Terminal hook: off."));
+}
+
+/// SB-183 fix cycle 1: every data folder would write into the same home under one marker, so
+/// only the app's own data folder changes start files. Another `--data-dir` is refused with a
+/// sentence and never takes out the block the app's folder wrote.
+#[cfg(unix)]
+#[test]
+fn another_data_folder_never_touches_the_start_files() {
+    let (_tmp, home, _installed) = temporary_home();
+    let root = default_root_in(&home);
+    std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+    let on = in_home(&home).args(["shell", "on"]).output().unwrap();
+    assert!(
+        on.status.success(),
+        "{}",
+        String::from_utf8_lossy(&on.stderr)
+    );
+    let zshrc = std::fs::read(home.join(".zshrc")).unwrap();
+    let record = std::fs::read(root.join("shell-hook.json")).unwrap();
+    assert!(String::from_utf8_lossy(&zshrc).contains("Fabric Switchboard: shell hook"));
+    let other = private_dir();
+    for args in [["shell", "off"], ["shell", "on"]] {
+        let out = in_home(&home)
+            .arg("--data-dir")
+            .arg(other.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{args:?} was refused");
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            said.contains("Only Switchboard's own data folder"),
+            "{said}"
+        );
+        assert!(!other.path().join("shell-hook").exists(), "no choice saved");
+    }
+    // `uninstall` of another data folder (Linux: on macOS it would also remove the real
+    // Keychain's orphan item, so the runtime's `uninstall::tests` cover it there).
+    #[cfg(target_os = "linux")]
+    {
+        let out = in_home(&home)
+            .arg("--data-dir")
+            .arg(other.path())
+            .args(["uninstall", "--yes"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    assert_eq!(std::fs::read(home.join(".zshrc")).unwrap(), zshrc);
+    assert_eq!(std::fs::read(root.join("shell-hook.json")).unwrap(), record);
 }
