@@ -841,6 +841,13 @@ impl Store {
             .ok()
             .filter(|(account, _)| fits.admits(account)))
     }
+    /// B-5 fix cycle 1: the ordinary CLI was signed in to `id` at the monitor's last look
+    /// (`set_in_use`). Unknown before the first look: false.
+    pub fn is_in_use(&self, id: &str) -> bool {
+        self.in_use
+            .lock()
+            .is_ok_and(|set| set.as_ref().is_some_and(|ids| ids.contains(id)))
+    }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {
             let mut set = self

@@ -1102,6 +1102,61 @@ under it, read again only if a credential was written meanwhile. Evidence:
 `a_quota_checks_generation_read_does_not_hold_the_metadata`,
 `a_credential_written_after_the_generation_read_is_still_seen`.
 
+**A seat the provider ended (SB-160 leaving, iteration 0.7.0 node B-5).** `sign_in_required` and
+`RefreshState::is_dead` also name an account whose stored credential a quota check found rejected:
+a Claude usage 401 that survives a fresh renewal (`monitor::check` renews once after a 401 and
+probes again; a 401 on the renewed token is the verdict), or, for Codex (never renewed while
+inactive), a 401 on two checks in a row on the same credential, the second at least
+`refresh::REJECTION_SPACING` (60 s) after the first. Only the provider's own 401 counts: a token
+that expired on this machine is refused before the network and says nothing; a Codex 401 within
+`monitor::CODEX_EXPIRY_SKEW` (300 s) of the token's local expiry may be a clock running ahead here
+and is no verdict; a 403, a 429, a 5xx, an unreachable provider or any answer between two Codex
+401s is no verdict and breaks the row; the account Claude Code is signed in to is never renewed
+here, so its 401 never is one, and the account the ordinary Codex CLI is signed in to (the monitor's
+in-use set, `Store::is_in_use`) is exempt the same way. The verdict is
+the fingerprint of the whole stored credential (access and refresh token) in memory
+(`RefreshState::rejected`), never in the renewal journal: any new credential (a sign-in, a
+renewal by Claude Code or Claude Swap) clears it, and a restart forgets it, so a provider's mistake
+costs one run at most and the next check finds a real removal again. Until then the account is
+handled as a dead lineage: no quota check reaches the provider (the account leaves the due queue
+for 30 minutes and its check answers the sign-in message), no renewal is granted, native
+activation refuses it, and native rotation, fallback chains and recovery skip it, as they skip
+every account in `sign_in_required`. An ended Claude seat leaves the renewal schedule until its
+credential or a verdict changes (`RefreshState::verdict_generation` is part of the schedule's key),
+so its due token is not read every minute. A quota check a person asks for (the owner's `Usage`
+operation and the offline CLI's, `monitor::check_by_person`; never the background pass) asks the
+provider once past a usage verdict, without a renewal: a 401 keeps the verdict, any other answer
+takes it back (`RefreshState::lift_verdict`); a lineage the token endpoint refused is not asked
+past. Nothing moves a session or replays a request (B-Q3). Known limit: the proxy's own failover
+(SB-98's 429 move and SB-101's unusable-route failover) does not read this set, so a request on a
+group's route can still be moved to an ended seat (board row SB-211). An ended seat that is a
+group's selected route stops renewing, so its token runs out and the route falls to the recorded
+SB-101 failover for an expired token: the pool moves to its next usable account, and a group with
+no other usable seat answers the session 409 ("Select a usable account in this pool first.").
+The Codex row's 60 s spacing is measured in wall-clock time (`monitor::now`), not a monotonic
+clock: a forward jump of the machine's clock between two Codex 401s can shorten it, so two checks
+less than a minute apart may give a verdict; a person's check (`monitor::check_by_person`) takes a
+wrong verdict back on the provider's next answer that is not a 401.
+Both an `invalid_grant` (also from `refresh::renew_idle_live`, once per lineage) and this verdict
+log `seat_ended {provider, by: renewal|usage, organization: true|false}` once. Evidence:
+`monitor::tests::seat::*`
+(`a_claude_seat_rejected_after_a_fresh_renewal_reads_sign_in_required`,
+`a_codex_seat_rejected_twice_reads_sign_in_required`, `a_single_codex_401_is_not_a_verdict`,
+`two_quick_codex_401s_are_not_two_scheduled_checks`, `a_403_is_never_a_verdict`,
+`a_new_credential_clears_the_rejection`, `a_transient_401_or_a_5xx_never_ends_a_claude_seat`,
+`an_expired_codex_token_is_not_a_removed_seat`,
+`the_account_claude_code_uses_is_never_marked_ended`,
+`a_person_check_lifts_a_verdict_the_provider_takes_back`,
+`a_person_check_answered_401_keeps_the_verdict`,
+`a_codex_401_near_its_local_expiry_is_no_verdict`,
+`the_account_codex_uses_is_never_marked_ended`),
+`monitor::tests::an_ended_seat_leaves_the_renewal_schedule_until_its_credential_changes`,
+`monitor::tests::a_verdict_after_the_schedule_was_built_takes_the_seat_out`,
+`usage_gate_tests::a_persons_usage_operation_lifts_a_verdict_through_the_owner_and_the_offline_arm`,
+`refresh::tests::invalid_grant_logs_the_seat_as_ended_by_renewal`,
+`refresh::tests::an_idle_live_lineage_rejected_by_the_provider_is_dead`,
+`oplog::tests::a_flag_is_written_as_a_json_boolean`.
+
 The hand-over queue is `<data>/handovers/`, records 0600, at most 16 pending before
 the monitor starts overflow in Terminal; recording refuses at 256 directory entries
 (including permanent `.taken` receipts). Individual records are at most 16 KiB.

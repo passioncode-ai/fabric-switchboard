@@ -911,7 +911,7 @@ impl Runtime {
         // provider never holds every other operation (SB-39).
         if let Operation::Usage { id } = &operation {
             return Ok(json!(
-                monitor::check(
+                monitor::check_by_person(
                     &self.store,
                     self.native,
                     &self.refresh,
@@ -2890,7 +2890,7 @@ async fn execute(
                 }
             };
             Ok(json!(
-                monitor::check(&store, native, refresh_state, &id, None, gate).await?
+                monitor::check_by_person(&store, native, refresh_state, &id, None, gate).await?
             ))
         }
         Operation::AgentCatalog => Ok(agent_catalog::catalog()),
@@ -7807,6 +7807,48 @@ mod usage_gate_tests {
     }
     async fn usage(runtime: &Runtime, id: &str) -> Result<Value, String> {
         runtime.execute(Operation::Usage { id: id.into() }).await
+    }
+
+    /// B-5 fix cycle 2: a person's *Check* reaches past a usage verdict through both doors that
+    /// carry it: the owner's `Runtime::execute` and the `execute` arm the offline CLI runs. The
+    /// provider answering 200 takes the verdict back; the background check would not have asked.
+    #[tokio::test]
+    async fn a_persons_usage_operation_lifts_a_verdict_through_the_owner_and_the_offline_arm() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let up = upstream(&runtime).await;
+        let verdict = || {
+            let credential = runtime.store.stored_credential(&b.id).unwrap();
+            runtime.refresh.reject(&b.id, &credential);
+            assert_eq!(
+                runtime.refresh.sign_in_required(&runtime.store),
+                vec![b.id.clone()]
+            );
+        };
+
+        verdict();
+        assert!(usage(&runtime, &b.id).await.is_ok());
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        assert!(
+            runtime.refresh.sign_in_required(&runtime.store).is_empty(),
+            "the owner's Usage operation is a person's check"
+        );
+
+        verdict();
+        let answer = execute(
+            runtime.store.clone(),
+            &runtime.root,
+            Some(runtime.as_ref()),
+            Operation::Usage { id: b.id.clone() },
+        )
+        .await;
+        assert!(answer.is_ok(), "{answer:?}");
+        assert_eq!(up.calls.load(Ordering::SeqCst), 2);
+        assert!(
+            runtime.refresh.sign_in_required(&runtime.store).is_empty(),
+            "the offline Usage arm is a person's check"
+        );
     }
 
     #[tokio::test]
