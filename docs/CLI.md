@@ -159,11 +159,11 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the 23 read tools; usage refresh shows the stored observation
+switchboard mcp --read-only   # only the 24 read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
-`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 45 tools; `--read-only` lists the 23 that only read and none of the 22 that write (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 48 tools; `--read-only` lists the 24 that only read and none of the 24 that write (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
 
 A project reserves its accounts to its folders and their subfolders. A project has no folder limit; all projects together hold at most 1024 folders, and no folder may sit inside another project's (`a_project_has_no_folder_limit_and_all_projects_hold_1024`).
 
@@ -386,8 +386,36 @@ the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code a
 Kimi Code on saved Kimi accounts since SB-99: its first turn runs as `kimi -p`, without approvals,
 then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
 SB-107; OpenCode on the same key and its default model since SB-119; an agent disabled on the Agents
-page is skipped as `agent_disabled` (SB-120); other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
+page is skipped as `agent_disabled` (SB-120); other agents and keyed pins are skipped until the
+project grant they need can be checked, SB-96); `switchboard continue` still hands a workflow over by hand.
 `--mode managed` applies to Claude Code and Codex only; with Hermes, OpenCode or Kimi Code it is refused.
+
+### Spending ceilings
+
+Before every paid step of an automatic hand-over (Hermes or OpenCode on an OpenRouter key, Claude
+Code or Codex on an API-key account) Switchboard reads the key's spend from OpenRouter and skips
+the step when the key has less than $0.50 left of its own limit, when a spending ceiling is
+reached (a question opens: double it or keep it), or when a ceiling covers it and its spend cannot
+be read (0.7.0, SB-72; [contract](CONTRACTS.md)). A ceiling is a daily dollar amount for this
+computer (every saved OpenRouter key added up per UTC day) or for a group on its own key, or one
+for a task counted on its key since the task's first paid hand-over.
+
+```sh
+switchboard ceiling list                                     # ceilings, open questions, the last hand-over
+switchboard ceiling set 5                                    # this computer: $5 a UTC day
+switchboard ceiling set --scope project:alpha-web 2          # a group on its own key
+switchboard ceiling set --scope workflow:wf_0123456789abcdef 1
+switchboard ceiling keep q_0123456789abcdef                  # keep a reached ceiling as it is
+switchboard continue wf_0123456789abcdef --account hermes --dir /absolute/checkout --ceiling 1
+```
+
+From the CLI (and MCP) a first ceiling for a scope or a lower one is accepted; raising, doubling
+or clearing one is done in the Switchboard window (*Raising or clearing a ceiling is done in the
+Switchboard window. From here, set a first ceiling or a lower one.*; *Doubling a ceiling is
+answered in the Switchboard window.*), so an agent never loosens a ceiling. `continue --ceiling`
+sets the task's ceiling before anything is offered (an amount out of range, or higher than the
+one set, refuses the continue); the ceiling is checked at the task's automatic hand-overs, not at
+this manual one. Test `ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`.
 
 ### Other coding agents
 

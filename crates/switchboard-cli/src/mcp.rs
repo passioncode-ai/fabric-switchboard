@@ -83,6 +83,9 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_apply","title":"Apply folder rule","description":"Apply the folder's rule to this session when you start work in a folder. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, group or workflow), the presets, and the chain that applies: the workflow's own, else its group's, else the machine's. With folder (the workflow's checkout) the group is found as the automatic fallback finds it. None applies until the operator sets one.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A group id; with folder, the executor account's group."},"folder":{"type":"string","description":"An absolute folder: the workflow's checkout."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_ceilings","title":"Spending ceilings","description":"Spending ceilings for paid fallback agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account): each ceiling with its scope and dollars (this computer's and a group's per UTC day, a task's since its first paid hand-over), the open questions a reached ceiling asked, the last hand-over and the limits. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising or clearing a ceiling is done in the Switchboard window, never here. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":"number","minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task."}},"required":["usd"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_answer","title":"Keep a reached ceiling","description":"Answer the question a reached spending ceiling asked with keep: the ceiling stays as it is. Only when the operator asks. Doubling a ceiling is answered in the Switchboard window, never here.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep"],"default":"keep"}},"required":["id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter); with pool, that group's own key. Also lists every saved key with the group it is for (keys) and the groups with or without one (projects): an agent starting in a group's folder runs on that group's key, else on the machine's. Never a key itself.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"A group id from switchboard_projects; omit for the machine's key."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_hermes_status","title":"Hermes model and provider","description":"The model and provider the operator's ordinary Hermes Agent runs on (hermes config get model): model, provider, endpoint, API mode. Never a key.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
@@ -108,6 +111,24 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (write, tool)
     })
     .collect()
+}
+
+/// `scope`: machine (the default), project:<group id> or workflow:<wf_id>.
+fn scope_arg(args: &Map<String, Value>) -> Result<switchboard_core::ChainScope, String> {
+    let text = args
+        .get("scope")
+        .and_then(Value::as_str)
+        .unwrap_or("machine");
+    match text.split_once(':') {
+        None if text == "machine" => Ok(switchboard_core::ChainScope::Machine),
+        Some(("project", pool)) if !pool.is_empty() => {
+            Ok(switchboard_core::ChainScope::Project { pool: pool.into() })
+        }
+        Some(("workflow", id)) if !id.is_empty() => {
+            Ok(switchboard_core::ChainScope::Workflow { id: id.into() })
+        }
+        _ => Err("scope is machine, project:<group id> or workflow:<wf_id>.".into()),
+    }
 }
 
 impl Server {
@@ -860,6 +881,9 @@ impl Server {
             "switchboard_project_apply" => self.project_apply(args).await,
             "switchboard_chain_get" => self.chain_get(args).await,
             "switchboard_chain_set" => self.chain_set(args).await,
+            "switchboard_ceilings" => self.call(Operation::Ceilings).await,
+            "switchboard_ceiling_set" => self.ceiling_set(args).await,
+            "switchboard_ceiling_answer" => self.ceiling_answer(args).await,
             "switchboard_openrouter_status" => {
                 let pool = args.get("pool").and_then(Value::as_str).map(str::to_owned);
                 let mut status = match self
@@ -924,21 +948,36 @@ impl Server {
         })
     }
 
-    async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let scope_text = args
-            .get("scope")
-            .and_then(Value::as_str)
-            .unwrap_or("machine");
-        let scope = match scope_text.split_once(':') {
-            None if scope_text == "machine" => switchboard_core::ChainScope::Machine,
-            Some(("project", pool)) if !pool.is_empty() => {
-                switchboard_core::ChainScope::Project { pool: pool.into() }
-            }
-            Some(("workflow", id)) if !id.is_empty() => {
-                switchboard_core::ChainScope::Workflow { id: id.into() }
-            }
-            _ => return Err("scope is machine, project:<group id> or workflow:<wf_id>.".into()),
+    async fn ceiling_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let usd = args
+            .get("usd")
+            .and_then(Value::as_f64)
+            .ok_or("usd is a number of dollars from 0.01 to 1000.")?;
+        self.call(Operation::SetCeiling {
+            scope: scope_arg(args)?,
+            usd: Some(usd),
+            by: switchboard_runtime::spend::Surface::Mcp,
+        })
+        .await
+    }
+    /// `keep` only. `double` goes to the runtime, which refuses it with the window named, the one
+    /// sentence every surface gives.
+    async fn ceiling_answer(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        use switchboard_runtime::spend::{Answer, Surface};
+        let answer = match args.get("answer").and_then(Value::as_str) {
+            None | Some("keep") => Answer::Keep,
+            Some("double") => Answer::Double,
+            Some(_) => return Err("answer is keep.".into()),
         };
+        self.call(Operation::AnswerCeiling {
+            id: required(args, "id")?.into(),
+            answer,
+            by: Surface::Mcp,
+        })
+        .await
+    }
+    async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let scope = scope_arg(args)?;
         let executors: Vec<switchboard_core::Executor> = match args.get("executors") {
             Some(list) => serde_json::from_value(list.clone()).map_err(|_| {
                 "executors: each needs agent, and at most one of account_id or key."

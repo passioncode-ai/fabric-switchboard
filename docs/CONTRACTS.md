@@ -522,7 +522,16 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   the file under its write lock, nothing written), and `by: window` through the control listener
   or an offline command is refused like a ceiling answer (`WINDOW_ONLY`;
   `a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener`);
-  `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. One read-modify-write of
+  `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. CLI (0.7.0, C-6)
+  `switchboard ceiling list|set [--scope] <usd>|keep <id>` and `switchboard continue --ceiling
+  <usd>` (the task's ceiling is set before anything is offered, a refusal stopping the continue)
+  send `by: cli`; there is no CLI command to raise, double or clear one. MCP
+  `switchboard_ceilings` (read), `switchboard_ceiling_set {scope?, usd}` (`usd` required, never a
+  clear) and `switchboard_ceiling_answer {id, answer?: keep}` (a `double` reaches the runtime and
+  is refused with the window named) send `by: mcp`; the read-only server lists only the first
+  (`ceiling_answer_double_over_mcp_is_refused_with_the_window_named`,
+  `ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`,
+  `handshake_lists_tools_and_rejects_malformed_messages`). One read-modify-write of
   spend.json at a time in a process (`two_surfaces_setting_one_ceiling_at_once_never_loosen_it`,
   `four_scopes_set_at_once_are_all_kept`). `spend::key_slot(snapshot, folder)` names the key a
   paid step in `folder` spends, for the gate's `PaidStep::key` (C-5) and the chains view's
