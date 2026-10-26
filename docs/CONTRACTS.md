@@ -576,7 +576,20 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
 - Every Claude Code or Codex launch (Terminal or in place, managed or isolated, continuation
   included) writes `<home>/.session.json` (0600) before the session starts: `account_id`,
   `provider`, `pool`, `mode`, `working_directory` (canonical), `in_place`, `launched_at`,
-  `continues`. A failed write fails the launch before Terminal opens.
+  `continues`. A failed write fails the launch before Terminal opens. Since 0.7.0 (SB-201) a
+  Kimi Code launch or continuation, a Hermes or OpenCode continuation, an agent launched on the
+  OpenRouter key (`runtimes/agent-<recipe>-openrouter`, `provider`, `agent` and `account_id` the
+  recipe id, `pool` `openrouter`, `label` its model or null) and an agent launched through the
+  proxy (`runtimes/agent-<agent>-<pool>`, `provider` `claude`: the provider the proxy route
+  `/claude/<pool>` serves, so a reader comparing it with the route sees no false move; `agent` the
+  catalog id, `account_id` its API-key account, `mode` `managed`) write one too, `context`
+  included. `agent` is optional in the record: `Operation::Sessions` fills it for a record that
+  names none from its provider (`claude` gives `claude-code`, `kimi` gives `kimi-code`; `codex`,
+  `hermes` and `opencode` are their own ids; any other leaves it null), so the list has one field
+  for the agent. Tests: `a_proxy_agent_launch_records_its_context` (goose and codex: `provider`
+  `claude`), `an_openrouter_launch_records_its_session_and_context`,
+  `the_session_list_names_an_organizations_context`,
+  `the_session_list_names_a_proxy_agent_and_not_its_route` (the CLI line names the agent).
 - **Context (SB-110, 0.6.80).** The record also carries `context`, and the session's environment
   `SWITCHBOARD_CONTEXT` (scrubbed from the inherited environment like `SWITCHBOARD_SESSION`):
   `Snapshot::session_context` in the contract's form (`personal`, `org:<id>`): the group of the
@@ -587,13 +600,26 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   Tests: core `a_sessions_context_follows_its_group_else_its_account_and_the_more_private_wins`,
   `a_launch_records_its_session_and_the_list_follows_its_process`,
   `the_session_list_names_an_organizations_context`.
+  SB-201 (0.7.0): the rule is `Snapshot::context_for(own, pool, folder)`, which
+  `session_context` calls with the account's organization and pool. A session on no account
+  takes `Snapshot::key_context`: the group's own OpenRouter key gives that group's context, the
+  machine's key and a Kimi account (no organization, no pool) give `personal`, also in an
+  organization's folder (the more private wins; a Kimi session there is launched, not refused).
+  A proxy agent takes its account's `session_context`. Tests: core
+  `a_session_without_an_account_takes_its_keys_group_else_personal`; runtime
+  `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`,
+  `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`,
+  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`,
+  `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`,
+  `an_openrouter_launch_records_its_session_and_context`,
+  `a_proxy_agent_launch_records_its_context`.
 - The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
   homes with a record. State comes from the same markers that keep one session per home:
   `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
 - The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
-- Not covered yet (packet SS-01, SB-65): agents launched through `switchboard agents launch` and
-  Kimi Code sessions, active requests per session, and acting on a session (open, drain, close).
+- Not covered yet (packet SS-01, SB-65): active requests per session, and acting on a session
+  (open, drain, close).
 - Test: `a_launch_records_its_session_and_the_list_follows_its_process`; MCP
   `handshake_lists_tools_and_rejects_malformed_messages` (`switchboard_sessions`).
 

@@ -742,10 +742,21 @@ export function statTroubleText(c: StatCounts): string {
   if (share === null) return '–';
   return share === 0 && c.limited + c.failed > 0 ? '<1%' : `${share}%`;
 }
+/** Coding agents' display names by the id the proxy or a session record gives them. */
+const AGENT_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', 'kimi-code': 'Kimi Code', pi: 'Pi' };
 /** A coding agent's name as the proxy recorded it (from its user-agent). */
 export function statAgentName(agent: string): string {
-  const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', pi: 'Pi', 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
+  const names: Record<string, string> = { ...AGENT_NAMES, 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
   return names[agent] ?? t('Other client');
+}
+/**
+ * SB-201: the agent a launched session runs, by its display name: the record's catalog `agent`
+ * (an agent through the proxy records the route's provider, `claude`), else its provider's own
+ * CLI for an older record; an agent without a known name shows its id.
+ */
+export function sessionAgentName(session: { agent?: string | null; provider: string }): string {
+  const id = session.agent ?? (session.provider === 'claude' ? 'claude-code' : session.provider);
+  return AGENT_NAMES[id] ?? id;
 }
 
 /** SB-147: the share of input tokens read from the cache, as a whole percent; null with no input. */

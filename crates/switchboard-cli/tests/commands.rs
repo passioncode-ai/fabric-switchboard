@@ -613,6 +613,45 @@ fn offline_list_and_status_are_json_and_launch_requires_owner() {
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("switchboard serve"));
 }
+/// SB-201: a catalog agent launched through the proxy records the route's provider (`claude`)
+/// and its own id as `agent`; the session list names the agent, whole, not the route.
+#[test]
+fn the_session_list_names_a_proxy_agent_and_not_its_route() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["sessions", "--all"]).status.success());
+    let home = tmp.path().join("runtimes/agent-deepseek-harness-default");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join(".session.json"),
+        serde_json::json!({"account_id": "acct", "provider": "claude",
+            "agent": "deepseek-harness", "pool": "default", "context": "personal",
+            "mode": "managed", "working_directory": "/w", "in_place": false,
+            "launched_at": 1, "continues": null})
+        .to_string(),
+    )
+    .unwrap();
+    let output = run(&["sessions", "--all"]);
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().find(|l| l.contains("/w")).unwrap_or_default();
+    assert!(
+        line.contains(" deepseek-harness ") && !line.contains(" claude "),
+        "{text}"
+    );
+    let output = run(&["--json", "sessions", "--all"]);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session = &json["data"]["sessions"][0];
+    assert_eq!(session["provider"], "claude");
+    assert_eq!(session["agent"], "deepseek-harness");
+}
 #[test]
 fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     let tmp = tempfile::tempdir().unwrap();

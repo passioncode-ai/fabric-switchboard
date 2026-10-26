@@ -1562,6 +1562,30 @@ pub fn launch_agent(
     pool: &str,
     working_directory: &Path,
 ) -> Result<Value, String> {
+    launch_agent_with(
+        root,
+        store,
+        proxy,
+        agent,
+        pool,
+        working_directory,
+        find_program,
+        start_terminal,
+    )
+}
+/// `launch_agent` with the agent's program found by `find` and Terminal started by `start`, so
+/// tests need neither an installed agent nor Terminal.
+#[allow(clippy::too_many_arguments)]
+fn launch_agent_with(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    agent: &str,
+    pool: &str,
+    working_directory: &Path,
+    find: fn(&str) -> Option<PathBuf>,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
     let profile = crate::agent_catalog::launchable(agent)?;
     let working_directory = agent_folder(root, working_directory)?;
     let (account, _) = store
@@ -1571,7 +1595,7 @@ pub fn launch_agent(
         return Err(switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED.into());
     }
     project_allows(&store.snapshot()?, &account, &working_directory)?;
-    let program = find_program(&profile.binary).ok_or_else(|| {
+    let program = find(&profile.binary).ok_or_else(|| {
         format!(
             "{} is not installed. Install it first, then launch it again.",
             profile.name
@@ -1582,10 +1606,17 @@ pub fn launch_agent(
     let home = homes.join(format!("agent-{}-{pool}", profile.id));
     private_dir(&home)?;
     let base = format!("http://{}/claude/{pool}{}", proxy.address(), profile.suffix);
-    let mut env = BTreeMap::from([(
-        "SWITCHBOARD_SESSION".to_string(),
-        format!("managed:claude:{pool}"),
-    )]);
+    // SB-201: the account's context, as a Claude Code launch on it would have.
+    let context = store
+        .snapshot()?
+        .session_context(&account, Some(&working_directory));
+    let mut env = BTreeMap::from([
+        (
+            "SWITCHBOARD_SESSION".to_string(),
+            format!("managed:claude:{pool}"),
+        ),
+        ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
+    ]);
     if let (Some(base_env), Some(key_env)) = (&profile.base_env, &profile.key_env) {
         env.insert(base_env.clone(), base);
         env.insert(key_env.clone(), proxy.agent_token().to_owned());
@@ -1593,7 +1624,23 @@ pub fn launch_agent(
     env.extend(profile.extra_env.clone());
     let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
     let content = script(&home, &program, &args, &env, false, &working_directory);
-    open_terminal(&home, &content)?;
+    let path = write_launch_script(&home, &content)?;
+    // Listed under Sessions like any launch (`sessions`): ids, folder and times only.
+    // `provider` is the provider the proxy route serves (the agent speaks Claude's protocol on
+    // `/claude/<pool>`), so a reader comparing it with the route sees no false move; the catalog
+    // agent is its own field.
+    let record = json!({
+        "account_id": account.id, "provider": Provider::Claude.as_str(), "agent": profile.id,
+        "pool": pool, "context": context,
+        "mode": "managed", "working_directory": working_directory, "in_place": false,
+        "launched_at": switchboard_proxy::now(), "continues": null,
+    });
+    private_write(
+        &home.join(SESSION_RECORD),
+        record.to_string().as_bytes(),
+        false,
+    )?;
+    start(&path)?;
     Ok(
         json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
     )
@@ -1742,6 +1789,7 @@ fn hermes_continuation_session(
         let saved = store
             .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+        let context = key_context(store, &saved, &working_directory)?;
         let (model, model_from) = match own_model {
             Some(m) if switchboard_core::agent_keys::model_valid(m) => (m.to_owned(), "hermes"),
             _ => (saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?, "key"),
@@ -1768,7 +1816,7 @@ fn hermes_continuation_session(
             crate::continuation::prompt(continuation)
         );
         private_write(&prompt, first.as_bytes(), false)?;
-        let mut env = BTreeMap::new();
+        let mut env = BTreeMap::from([("SWITCHBOARD_CONTEXT".to_string(), context.clone())]);
         if let Some(isolate) = &recipe.isolate_env {
             env.insert(isolate.clone(), own.to_string_lossy().into_owned());
         }
@@ -1806,7 +1854,8 @@ fn hermes_continuation_session(
         // Listed under Sessions like any launch (`sessions`); its label is the model.
         let record = json!({
             "account_id": crate::hermes::HERMES_TARGET, "provider": "hermes", "pool": "openrouter",
-            "mode": "isolated", "working_directory": working_directory, "in_place": false,
+            "context": context, "mode": "isolated", "working_directory": working_directory,
+            "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
             "label": model,
         });
@@ -1910,6 +1959,7 @@ pub(crate) fn opencode_continuation_session(
         let saved = store
             .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+        let context = key_context(store, &saved, &working_directory)?;
         let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
         if !switchboard_core::agent_keys::model_valid(&model) {
             return Err(switchboard_core::agent_keys::MODEL_INVALID.into());
@@ -1926,7 +1976,7 @@ pub(crate) fn opencode_continuation_session(
             crate::continuation::prompt(continuation)
         );
         private_write(&session.join("handoff-prompt.txt"), first.as_bytes(), false)?;
-        let mut env = BTreeMap::new();
+        let mut env = BTreeMap::from([("SWITCHBOARD_CONTEXT".to_string(), context.clone())]);
         env.insert(
             "OPENCODE_CONFIG_CONTENT".to_string(),
             opencode_config(&model, &continuation.observatory),
@@ -1956,7 +2006,8 @@ pub(crate) fn opencode_continuation_session(
         let path = write_launch_script(&session, &content)?;
         let record = json!({
             "account_id": OPENCODE_TARGET, "provider": "opencode", "pool": "openrouter",
-            "mode": "isolated", "working_directory": working_directory, "in_place": false,
+            "context": context, "mode": "isolated", "working_directory": working_directory,
+            "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
             "label": model,
         });
@@ -2052,6 +2103,17 @@ fn carry_pi(own: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// SB-201: the context of an agent on a saved key: the group's own key gives that group's
+/// context, the machine's key is personal (also in an organization's folder).
+fn key_context(
+    store: &Store,
+    key: &switchboard_core::agent_keys::AgentKey,
+    folder: &Path,
+) -> Result<String, String> {
+    Ok(store
+        .snapshot()?
+        .key_context(key.pool.as_deref(), Some(folder)))
+}
 fn openrouter_session(
     root: &Path,
     store: &Store,
@@ -2076,11 +2138,12 @@ fn openrouter_session(
     if takes_model && model.is_none() {
         return Err(OPENROUTER_MODEL_NEEDED.into());
     }
+    let context = key_context(store, &saved, &working_directory)?;
     let homes = root.join("runtimes");
     private_dir(&homes)?;
     let home = homes.join(format!("agent-{}-openrouter", recipe.id));
     private_dir(&home)?;
-    let mut env = BTreeMap::new();
+    let mut env = BTreeMap::from([("SWITCHBOARD_CONTEXT".to_string(), context.clone())]);
     if let (Some(base_env), Some(base_url)) = (&recipe.base_env, &recipe.base_url) {
         env.insert(base_env.clone(), base_url.clone());
     }
@@ -2135,6 +2198,19 @@ fn openrouter_session(
         &working_directory,
     );
     let path = write_launch_script(&home, &content)?;
+    // SB-201: listed under Sessions like any launch, labelled with its model (none when the
+    // agent picks it itself); ids, folder and times only, never the key.
+    let record = json!({
+        "account_id": recipe.id, "provider": recipe.id, "agent": recipe.id, "pool": "openrouter",
+        "context": context, "mode": "isolated", "working_directory": working_directory,
+        "in_place": false, "launched_at": switchboard_proxy::now(), "continues": null,
+        "label": if takes_model { model.clone() } else { None },
+    });
+    private_write(
+        &home.join(SESSION_RECORD),
+        record.to_string().as_bytes(),
+        false,
+    )?;
     Ok((
         path,
         json!({
@@ -3799,6 +3875,30 @@ mod tests {
             &f.project,
         )
     }
+    /// SB-201: an organization whose group holds the fixture's folder (pool `acme`), with
+    /// `accounts` assigned to it and moved into the group; its id.
+    fn acme_group(f: &Fixture, accounts: &[String]) -> String {
+        let acme = f.store.add_organization("Acme", &[]).unwrap();
+        for id in accounts {
+            f.store.assign_organization(id, Some(&acme.id)).unwrap();
+        }
+        let group = f
+            .store
+            .save_project_in(
+                None,
+                "Acme",
+                &[f.project.canonicalize().unwrap()],
+                accounts,
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        assert_eq!(group.pool, "acme");
+        acme.id
+    }
+    /// The launch record a session folder holds.
+    fn recorded(session: &Path) -> Value {
+        serde_json::from_slice(&fs::read(session.join(SESSION_RECORD)).unwrap()).unwrap()
+    }
     #[cfg(not(windows))]
     #[test]
     fn finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does() {
@@ -3961,6 +4061,27 @@ mod tests {
             .root
             .join("runtimes/opencode-continue/agent-home")
             .exists());
+        // SB-201: the hand-over records and exports its context. The machine's key is
+        // personal, also in an organization's folder; the group's own key is the group's.
+        let folder = base.join("wf_00112233445566aa");
+        assert_eq!(recorded(&folder)["context"], "personal");
+        assert!(text.contains("export SWITCHBOARD_CONTEXT='personal'"));
+        let acme = acme_group(&f, &[]);
+        session(&f).unwrap();
+        assert_eq!(recorded(&folder)["context"], "personal");
+        f.store
+            .set_agent_key_for(
+                "openrouter",
+                Some("acme"),
+                "sk-or-v1-synthetic-group-key",
+                Some("xiaomi/mimo-v2.6-pro".into()),
+            )
+            .unwrap();
+        let (path, _) = session(&f).unwrap();
+        assert_eq!(recorded(&folder)["context"], format!("org:{acme}"));
+        assert!(fs::read_to_string(path)
+            .unwrap()
+            .contains(&format!("export SWITCHBOARD_CONTEXT='org:{acme}'")));
     }
     #[cfg(not(windows))]
     #[test]
@@ -4097,6 +4218,29 @@ mod tests {
             None
         )
         .is_err());
+        // SB-201: the hand-over records and exports its context. The machine's key is
+        // personal, also in an organization's folder; the group's own key is the group's.
+        let folder = base.join("wf_0123456789abcdef");
+        assert_eq!(recorded(&folder)["context"], "personal");
+        assert!(fs::read_to_string(&path)
+            .unwrap()
+            .contains("export SWITCHBOARD_CONTEXT='personal'"));
+        let acme = acme_group(&f, &[]);
+        session(&f).unwrap();
+        assert_eq!(recorded(&folder)["context"], "personal");
+        f.store
+            .set_agent_key_for(
+                "openrouter",
+                Some("acme"),
+                "sk-or-v1-synthetic-group-key",
+                Some("moonshotai/kimi-k2".into()),
+            )
+            .unwrap();
+        let (path, _) = session(&f).unwrap();
+        assert_eq!(recorded(&folder)["context"], format!("org:{acme}"));
+        assert!(fs::read_to_string(path)
+            .unwrap()
+            .contains(&format!("export SWITCHBOARD_CONTEXT='org:{acme}'")));
     }
     #[test]
     fn an_openrouter_launch_needs_a_saved_key_and_a_valid_model() {
@@ -4181,6 +4325,152 @@ mod tests {
             ));
             assert!(text.contains("unset ANTHROPIC_API_KEY"));
         }
+    }
+    /// SB-201: an agent launched on the OpenRouter key writes a session record, so Sessions
+    /// lists it with its model and context; the context follows the key it runs on.
+    #[test]
+    fn an_openrouter_launch_records_its_session_and_context() {
+        let f = fixture();
+        openrouter_key(&f, Some("moonshotai/kimi-k2"));
+        let (path, _) = openrouter_launch(&f, "goose", None).unwrap();
+        let home = f.root.join("runtimes/agent-goose-openrouter");
+        let record = recorded(&home);
+        assert_eq!(record["provider"], "goose");
+        // Readers name the agent from one field, whatever route it runs on.
+        assert_eq!(record["agent"], "goose");
+        assert_eq!(record["account_id"], "goose");
+        assert_eq!(record["pool"], "openrouter");
+        assert_eq!(record["label"], "moonshotai/kimi-k2");
+        assert_eq!(record["mode"], "isolated");
+        assert_eq!(record["context"], "personal");
+        assert_eq!(
+            record["working_directory"],
+            f.project.canonicalize().unwrap().to_string_lossy().as_ref()
+        );
+        assert!(!fs::read_to_string(home.join(SESSION_RECORD))
+            .unwrap()
+            .contains("sk-or-"));
+        let script = fs::read_to_string(&path).unwrap();
+        assert!(script.contains("SWITCHBOARD_CONTEXT"));
+        #[cfg(not(windows))]
+        assert!(script.contains("export SWITCHBOARD_CONTEXT='personal'"));
+        let listed = sessions(&f.root, true);
+        let goose = listed
+            .iter()
+            .find(|r| r["provider"] == "goose")
+            .expect("the launch is listed");
+        assert_eq!(goose["home"], "runtimes");
+        // An agent that picks its model itself has no model to show.
+        openrouter_launch(&f, "crush", None).unwrap();
+        assert!(recorded(&f.root.join("runtimes/agent-crush-openrouter"))["label"].is_null());
+        // In an organization's folder: the machine's key is personal, the group's key the group's.
+        let acme = acme_group(&f, &[]);
+        openrouter_launch(&f, "goose", None).unwrap();
+        assert_eq!(recorded(&home)["context"], "personal");
+        f.store
+            .set_agent_key_for(
+                "openrouter",
+                Some("acme"),
+                "sk-or-v1-synthetic-group-key",
+                Some("qwen/qwen3-coder".into()),
+            )
+            .unwrap();
+        let (path, _) = openrouter_launch(&f, "goose", None).unwrap();
+        let record = recorded(&home);
+        assert_eq!(record["context"], format!("org:{acme}"));
+        assert_eq!(record["label"], "qwen/qwen3-coder");
+        #[cfg(not(windows))]
+        assert!(fs::read_to_string(path)
+            .unwrap()
+            .contains(&format!("export SWITCHBOARD_CONTEXT='org:{acme}'")));
+    }
+    fn goose_installed(_: &str) -> Option<PathBuf> {
+        Some(PathBuf::from("/opt/Agent Tools/goose"))
+    }
+    /// SB-201: an agent launched through the proxy on an API-key account records its session
+    /// and the account's context, as a Claude Code launch does.
+    #[tokio::test]
+    async fn a_proxy_agent_launch_records_its_context() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let api = f.add(
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default",
+            "synthetic-api-key",
+        );
+        f.store.select(Provider::Claude, "default", &api).unwrap();
+        let answer = launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "goose",
+            "default",
+            &f.project,
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        assert_eq!(answer["agent"], "goose");
+        let home = f.root.join("runtimes/agent-goose-default");
+        let record = recorded(&home);
+        // `provider` is the provider the proxy route serves, so a reader comparing it with the
+        // route never sees a move; the agent is its own field.
+        assert_eq!(record["provider"], "claude");
+        assert_eq!(record["agent"], "goose");
+        assert_eq!(record["account_id"], api.as_str());
+        assert_eq!(record["pool"], "default");
+        assert_eq!(record["mode"], "managed");
+        assert_eq!(record["context"], "personal");
+        assert!(!fs::read_to_string(home.join(SESSION_RECORD))
+            .unwrap()
+            .contains("synthetic"));
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("SWITCHBOARD_CONTEXT"));
+        #[cfg(not(windows))]
+        assert!(script.contains("export SWITCHBOARD_CONTEXT='personal'"));
+        assert!(sessions(&f.root, true)
+            .iter()
+            .any(|r| r["provider"] == "claude"
+                && r["agent"] == "goose"
+                && r["account_id"] == api.as_str()));
+        // Codex through the proxy: its id must not pass for the Codex provider.
+        launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "codex",
+            "default",
+            &f.project,
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        let record = recorded(&f.root.join("runtimes/agent-codex-default"));
+        assert_eq!(record["provider"], "claude");
+        assert_eq!(record["agent"], "codex");
+        // The account is an organization's seat in its group: the group's context.
+        let acme = acme_group(&f, std::slice::from_ref(&api));
+        f.store.select(Provider::Claude, "acme", &api).unwrap();
+        launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "goose",
+            "acme",
+            &f.project,
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        let record = recorded(&f.root.join("runtimes/agent-goose-acme"));
+        assert_eq!(record["context"], format!("org:{acme}"));
+        assert_eq!(record["pool"], "acme");
     }
     #[test]
     fn a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot() {

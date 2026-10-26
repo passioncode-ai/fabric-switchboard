@@ -82,9 +82,11 @@ Annotations: `readOnlyHint: true`.
 
 ### `switchboard_sessions`: `all?` (boolean)
 
-`{sessions[]}`: the Claude Code, Codex and Kimi Code sessions Switchboard launched: `account_id`,
-`label`, `provider`, `pool` (the group id), `context` (`personal` or `org:<id>`, fixed at the session's start;
-absent before 0.6.80 and on Kimi Code, Hermes and OpenCode sessions), `context_name` (the organization's name), `mode`, `working_directory`,
+`{sessions[]}`: the sessions Switchboard launched (Claude Code, Codex, Kimi Code, Hermes,
+OpenCode and catalog agents): `account_id`, `label`, `agent` (the catalog id, such as
+`claude-code`, `codex` or `goose`; null when unknown), `provider` (the provider the route serves:
+`claude` for an agent through an API-key account's proxy), `pool` (the group id), `context` (`personal` or `org:<id>`, fixed at the session's start;
+absent before 0.6.80, and on Kimi Code, Hermes and OpenCode sessions before 0.7.0), `context_name` (the organization's name), `mode`, `working_directory`,
 `in_place`, `launched_at`, `started_at`, `continues`, `home` and `state` (`starting`,
 `running`, `ended`, `unknown`).
 Without `all`, only starting and running ones. A session started outside Switchboard is not
