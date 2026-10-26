@@ -234,6 +234,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 ## Uninstall (SB-29, 2026-10-05)
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
+- With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice), and the plan names `shell_hook_files` (start files holding the block). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
 ## Near-limit quota checks (SB-106, 2026-10-12)
@@ -1361,8 +1362,8 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   and a control port that never answers; the fastest of seven warm calls within 25 ms),
   `shell_env_says_none_when_off_missing_unknown_version_or_outside`,
   `shell_env_never_writes_to_stderr_and_exits_zero`.
-- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. The
-  writer is node A-3.
+- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. Written by
+  `switchboard shell on|off` (`shell::install::set_choice`; section below).
 - **`shell status [--dir <folder>]`** (`--json`: `{"ok": true, "data": ...}`) answers `hook`
   (`on`, `off`, `default_on` when no choice is made and the map holds a valid row, else
   `default_off`), `choice`, `map` (`ok`, `missing`, `unreadable`, `unknown_version`), `folder`,
@@ -1417,6 +1418,75 @@ transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. De
   not the person had exported it.
 - **Not covered.** fish was not installed on the machine that ran the tests (2026-10-26): its
   script is written to the same rules and its tests skip with the reason. PowerShell is node A-8.
+
+## The terminal hook's start files (SB-183, node A-3, 2026-10-26)
+
+Code: `switchboard_runtime::shell::install` (`Host`, `apply`, `remove_all`, `set_choice`,
+`read_record`), `Runtime::enable_shell_hook` and the bindings pass (`shell_hook_follow`), CLI
+`switchboard shell on|off`, `uninstall`. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "On by default, safely"; operator decision D-3 (on by default on a computer holding an
+organization's group, off by one command); A-Q3 assumed (a linked start file is skipped).
+
+- **Who writes.** The installed app only: `src-tauri` calls `Runtime::enable_shell_hook` when the
+  executable is an installed build (`residency::packaged`) and not the smoke check, and the
+  runtime goes on only for the app's own data folder, with the person's home
+  (`install::Host::process`: `HOME`, `ZDOTDIR`, the login shell from `SHELL`, the user id) and the
+  bundled CLI (`launch::agent_cli`). `serve`, a development build, `--data-dir` and every test owner
+  never get a home. The person may also run `switchboard shell on|off` themselves (it names its
+  own executable). Tests: `owner_tests::no_test_or_dev_build_touches_the_real_home`,
+  `owner_tests::the_installed_owner_follows_the_presence_of_an_organization_group`.
+- **When.** At the owner's start (`enable_shell_hook`), and in a bindings pass whose
+  fingerprint moved when the presence of a group bound to an existing organization flipped
+  (`shell::homes::organizations_present`); never on a timer, never on an idle pass. Log event
+  `shell_hook` (`wanted`, `written`, `removed`, `skipped`, `changed`, `no_hook`), numbers and
+  flags only.
+- **The rule.** Wanted when `<data>/shell-hook` is `on`, or absent while an organization's group
+  exists; `off` takes every block out and never writes again. Tests:
+  `shell::install::tests::default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins`,
+  `the_last_organization_group_leaving_removes_the_default_block`.
+- **Where** (macOS and Linux; Windows has none yet, PowerShell is node A-8): zsh
+  `${ZDOTDIR:-$HOME}/.zshrc`, created only when zsh is the login shell; bash, on macOS the first
+  existing of `.bash_profile`, `.bash_login`, `.profile` (else `.bash_profile`), on Linux
+  `.bashrc`, only when it exists or bash is the login shell; fish its own file
+  `~/.config/fish/conf.d/fabric-switchboard.fish`, only when `~/.config/fish` exists. Test:
+  `the_start_files_follow_the_shells_present`.
+- **What.** The hook script `<data>/shell/hook.<shell>` (node A-2) and one block appended at the
+  end of the start file: `# >>> Fabric Switchboard: shell hook (SB-183) >>>`, one line that
+  reads the script only when it is readable (`if [ -r '<hook>' ]; then . '<hook>'; fi`, fish
+  `if test -r '<hook>'; source '<hook>'; end`), `# <<< Fabric Switchboard <<<`. A file without a
+  final line break gets one before the block, recorded, and taken out with it. Taking the block
+  out gives the file back byte for byte; its mode is kept; the write is a file in the same
+  folder renamed over it. Lines inside the markers are Switchboard's and are rewritten. No CLI to
+  name, or a data folder whose path is not text: no script and no block (`no_hook`). Tests:
+  `the_block_goes_in_and_comes_out_leaving_the_file_byte_identical` (no final break, CRLF,
+  an empty file, non-ASCII text; mode 0640 kept), `a_data_folder_that_is_not_text_writes_no_block`.
+- **Never written.** A start file that is a link (`skipped_symlink`), another user's
+  (`skipped_owner`), not a regular file, over 1 MiB or not valid text (`unreadable`), one whose
+  opening or closing marker was changed (`unreadable`: neither rewritten nor taken out), and one
+  that changed between the read and the rename (size or time differ: left as it is, the
+  temporary file removed, tried again next time). Tests:
+  `a_symlinked_foreign_owned_or_changed_rc_is_never_written`,
+  `a_block_with_a_changed_marker_is_the_persons_and_never_touched`.
+- **Never fought.** A block (or the fish file, or a start file) the person took out after
+  Switchboard wrote it is recorded `removed_by_person` and not written back until the person's
+  own `switchboard shell on`. Test: `a_block_the_person_removed_is_not_written_back`.
+- **Record** `<data>/shell-hook.json` (0600): `{"files": [{"shell", "path", "state",
+  "newline_added", "at"}]}`, `state` one of `written`, `removed_by_person`, `skipped_symlink`,
+  `skipped_owner`, `unreadable` (`policy_blocked` comes with node A-8); what `shell status`
+  shows. Nothing ever written and nothing wanted: no record.
+- **The first-time notice.** The first run that writes a block while no choice is made leaves
+  `{organization, group}` for the window, taken once by `Runtime::take_shell_hook_notice`; the
+  window's text is node A-7's.
+- **CLI.** `switchboard shell on` saves `on` and writes now (a block the person took out
+  included); `switchboard shell off` saves `off` and takes every block out now; both answer
+  `shell status`. The choice that cannot be saved answers “The terminal hook's choice could not be
+  saved in Switchboard's data folder.” Test: CLI
+  `shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only` (a temporary `HOME`).
+  The MCP tool `switchboard_shell_hook` and the window's switch are node A-7.
+- **Uninstall** takes every block out first (section "Uninstall"). `remove_all` keeps a block it
+  could not take out (a changed marker) in the record and names the file as a failure. Test:
+  `remove_all_takes_every_block_out_whatever_the_choice` (a fish file the person added lines to
+  keeps them).
 
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 

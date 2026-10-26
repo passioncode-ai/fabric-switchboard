@@ -198,6 +198,8 @@ switchboard shell status            # the hook's state, this terminal, the folde
 switchboard shell status --dir /w/acme --json
 switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every change of folder
 switchboard shell init zsh          # the hook script itself (also bash, fish)
+switchboard shell off               # take the hook out of every start file and keep it out
+switchboard shell on                # put it back, with or without an organization's group
 ```
 
 - `shell env` prints one line: `none`, or the group's pool, its context, the Claude shell home and
@@ -213,6 +215,15 @@ switchboard shell init zsh          # the hook script itself (also bash, fish)
   `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
   them back exactly when you leave; a variable you change while inside stays yours. It prints
   nothing, never fails the prompt, and does nothing in a terminal Switchboard launched.
+- On a computer with a group bound to an organization, the installed app puts one marked block
+  (`# >>> Fabric Switchboard: shell hook (SB-183) >>>` … `# <<< Fabric Switchboard <<<`) at the end
+  of the start file of each shell present: `.zshrc` (in `ZDOTDIR` when set), bash's login file on
+  macOS (`.bash_profile`, `.bash_login` or `.profile`) and `.bashrc` on Linux, and fish's own file
+  `~/.config/fish/conf.d/fabric-switchboard.fish`. It reads the hook script only when it is there.
+  A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
+  `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
+  written back. `shell off` gives every file back byte for byte, and `switchboard uninstall` does
+  the same.
 - `shell status` reads the same files and the installer's record and never fails: `hook` is `on`,
   `off`, `default_on` (no choice made and a group belongs to an organization) or `default_off`;
   `terminal.hook_loaded` says whether this terminal exported `SWITCHBOARD_SHELL_HOOK=1`; `here` is

@@ -68,6 +68,11 @@ impl Slot {
                 // Release builds only (the App Key), the real data folder only (docs/ANALYTICS.md).
                 if !self.smoke {
                     owner.runtime.enable_analytics(self.launch);
+                    // SB-183: only an installed build writes the terminal hook's start files
+                    // (never a development build); the runtime checks the data folder too.
+                    if std::env::current_exe().is_ok_and(|exe| residency::packaged(&exe)) {
+                        owner.runtime.enable_shell_hook();
+                    }
                 }
             });
             *owner = Some(started.map_err(|error| {

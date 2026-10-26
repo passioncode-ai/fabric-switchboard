@@ -50,11 +50,11 @@ pub fn hook_path(root: &Path, kind: Kind) -> PathBuf {
 }
 
 /// `value` as one single-quoted word of a POSIX shell.
-fn sh_quote(value: &str) -> String {
+pub(crate) fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 /// `value` as one single-quoted word of fish (`\\` and `\'` are its only escapes there).
-fn fish_quote(value: &str) -> String {
+pub(crate) fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
@@ -85,6 +85,18 @@ pub fn script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
             .replace("@CLI@", &quote(&cli))
             .replace("@DATA@", &quote(&data)),
     )
+}
+
+/// Writes `<data>/shell/hook.<shell>` (0600) when its bytes change. Ok(true): written now.
+pub(crate) fn write(root: &Path, kind: Kind, cli: &Path) -> Result<bool, ()> {
+    let text = script(kind, cli, root).ok_or(())?;
+    let path = hook_path(root, kind);
+    if std::fs::read(&path).is_ok_and(|current| current == text.as_bytes()) {
+        return Ok(false);
+    }
+    crate::launch::private_dir(&root.join(super::map::DIR)).map_err(|_| ())?;
+    crate::launch::private_write(&path, text.as_bytes(), false).map_err(|_| ())?;
+    Ok(true)
 }
 
 #[cfg(all(test, unix))]

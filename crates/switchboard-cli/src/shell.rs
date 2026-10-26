@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-use switchboard_runtime::shell::{map, scripts};
+use switchboard_runtime::shell::{install, map, scripts};
 
 #[derive(Subcommand)]
 pub enum ShellCmd {
@@ -35,6 +35,13 @@ pub enum ShellCmd {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+    /// Puts the hook in this computer's terminals now, with or without an organization's group:
+    /// one marked block in the start file of each shell present (zsh, bash, fish), the file
+    /// given back byte for byte by `shell off`. Writes a block you had taken out again.
+    On,
+    /// Takes the hook out of every start file Switchboard changed, byte for byte, and keeps it
+    /// out. Terminals already open give your own settings back at their next change of folder.
+    Off,
     /// The hook script for a shell, for people who keep their own start files: put
     /// `eval "$(switchboard shell init zsh)"` in `.zshrc` (bash likewise; fish:
     /// `switchboard shell init fish | source`). It names this CLI and the data folder.
@@ -59,6 +66,30 @@ impl InitShell {
             InitShell::Fish => scripts::Kind::Fish,
         }
     }
+}
+
+/// `switchboard shell on|off`: saves the choice, brings the start files in line with it now and
+/// answers `shell status`.
+pub fn set(data_dir: Option<&Path>, on: bool) -> Result<Value, String> {
+    let root = match data_dir {
+        Some(root) => root.to_owned(),
+        None => switchboard_runtime::default_root()?,
+    };
+    if !root.is_absolute() {
+        return Err("--data-dir must be an absolute private directory.".into());
+    }
+    let cli = std::env::current_exe().and_then(|p| p.canonicalize()).ok();
+    let host = install::Host::process(cli)
+        .ok_or("Your home folder could not be found, so no start file was changed.")?;
+    install::set_choice(&root, on)?;
+    let report = install::apply(&root, &host, false, on);
+    if on && report.no_hook {
+        return Err(
+            "The hook cannot name this executable or the data folder: a path is not absolute or not valid text."
+                .into(),
+        );
+    }
+    Ok(status(Some(&root), None))
 }
 
 /// `switchboard shell init <shell>`: the hook script, naming this executable and the data

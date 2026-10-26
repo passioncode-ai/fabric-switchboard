@@ -1045,6 +1045,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
                 Ok(Value::Null)
             }
+            shell::ShellCmd::On => shell::set(cli.data_dir.as_deref(), true),
+            shell::ShellCmd::Off => shell::set(cli.data_dir.as_deref(), false),
             shell::ShellCmd::Init { shell: kind } => {
                 let script = shell::init(cli.data_dir.as_deref(), *kind)?;
                 if cli.json {
@@ -2981,6 +2983,14 @@ mod mcp_parity {
         (
             "shell env",
             Not("SB-183: the terminal hook's own question on every change of folder, one line for a shell script; not an agent action"),
+        ),
+        (
+            "shell on",
+            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
+        ),
+        (
+            "shell off",
+            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
         ),
         (
             "shell init",

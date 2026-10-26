@@ -58,6 +58,9 @@ const ALLOWLIST = {
   // runtime shell/map.rs write(): the terminal hook's folder map is written only by the owner's
   // background bindings pass (SB-183, node A-4), which logs a refusal; no renderer request writes it.
   'Two rows of the terminal folder map name the same folder.': 'SB-183 shell map write: background bindings pass only, logged',
+  // runtime shell/install.rs set_choice(): `switchboard shell on|off` only until the window's
+  // switch (SB-183 node A-7) maps it in src/adapter.ts and removes this line.
+  "The terminal hook's choice could not be saved in Switchboard's data folder.": 'SB-183 shell on/off: CLI only until node A-7 adds the window switch',
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
   "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',

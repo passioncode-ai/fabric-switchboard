@@ -495,3 +495,64 @@ fn shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli() {
         .unwrap()
         .contains("--on-variable PWD"));
 }
+
+/// SB-183 node A-3: `shell on` and `shell off` edit the start files of the home they are given
+/// (here a temporary HOME), and `shell off` gives each one back byte for byte.
+#[cfg(unix)]
+#[test]
+fn shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only() {
+    let data = private_dir();
+    let root = data.path().canonicalize().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path().canonicalize().unwrap();
+    let original = "export MINE=1\nalias ll='ls -l'";
+    std::fs::write(home.join(".zshrc"), original).unwrap();
+    std::fs::create_dir_all(home.join(".config/fish")).unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .env("HOME", &home)
+            .env("SHELL", "/bin/zsh")
+            .env_remove("ZDOTDIR")
+            .arg("--data-dir")
+            .arg(&root)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let on = run(&["--json", "shell", "on"]);
+    assert!(
+        on.status.success(),
+        "{}",
+        String::from_utf8_lossy(&on.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&on.stdout).unwrap();
+    assert_eq!(value["data"]["hook"], "on");
+    let files = value["data"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{value}");
+    assert!(files.iter().all(|f| f["state"] == "written"));
+    let zshrc = std::fs::read_to_string(home.join(".zshrc")).unwrap();
+    assert!(zshrc.starts_with(original));
+    assert!(zshrc.contains("# >>> Fabric Switchboard: shell hook (SB-183) >>>"));
+    assert!(root.join("shell").join("hook.zsh").is_file());
+    let fish = home.join(".config/fish/conf.d/fabric-switchboard.fish");
+    assert!(fish.is_file());
+    // The human answer names each file.
+    let text = run(&["shell", "status"]);
+    let text = String::from_utf8(text.stdout).unwrap();
+    assert!(text.contains("Terminal hook: on."), "{text}");
+    assert!(text.contains(".zshrc, added"), "{text}");
+    let off = run(&["shell", "off"]);
+    assert!(off.status.success());
+    assert_eq!(
+        std::fs::read(home.join(".zshrc")).unwrap(),
+        original.as_bytes()
+    );
+    assert!(!fish.exists());
+    assert_eq!(
+        std::fs::read_to_string(root.join("shell-hook")).unwrap(),
+        "off\n"
+    );
+    assert!(String::from_utf8(off.stdout)
+        .unwrap()
+        .contains("Terminal hook: off."));
+}
