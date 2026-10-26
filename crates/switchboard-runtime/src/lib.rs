@@ -20,6 +20,7 @@ pub mod handovers;
 pub mod hermes;
 pub mod kimi;
 pub mod launch;
+pub mod launches;
 mod limits;
 mod monitor;
 pub mod onboarding;
@@ -192,6 +193,27 @@ pub enum Operation {
     Sessions {
         #[serde(default)]
         all: bool,
+    },
+    /// SB-212: a launch operation (`Launch`, `Continue`, `ContinueToConsole`, `LaunchAgent`,
+    /// `KimiLaunch`) with who asked for it. The owner checks `by` and `parent`, turns the
+    /// caller's folder into its group and records the rest on the launch.
+    Launched {
+        by: launches::LaunchedBy,
+        inner: Box<Operation>,
+    },
+    /// SB-212: what a launched session's own hook reports (`SessionStart`, `Stop`, a limit).
+    LaunchEvent {
+        launch_id: String,
+        event: launches::Event,
+        #[serde(default)]
+        provider_session_id: Option<String>,
+        #[serde(default)]
+        transcript: Option<PathBuf>,
+    },
+    /// SB-212: every launch record, newest first; with `launch_id`, that launch and its chain.
+    Launches {
+        #[serde(default)]
+        launch_id: Option<String>,
     },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
@@ -878,6 +900,17 @@ impl Runtime {
         );
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        // SB-212: a launch runs with who asked for it, and its answer names its launch id.
+        if let Operation::Launched { by, inner } = operation {
+            if !is_launch(&inner) {
+                return Err(launches::NOT_A_LAUNCH.into());
+            }
+            let by = launches::resolve(&self.store.snapshot()?, by)?;
+            return launches::scoped(Some(by), Box::pin(self.execute(*inner))).await;
+        }
+        if is_launch(&operation) && !launches::capturing() {
+            return launches::scoped(None, Box::pin(self.execute(operation))).await;
+        }
         if let Operation::ContinueToConsole {
             workflow_id,
             id,
@@ -945,6 +978,10 @@ impl Runtime {
                 | Operation::RecoveryHook { .. }
                 // SB-204: the same file and lock, after a turn of a stopped session.
                 | Operation::RecoveryContinued { .. }
+                // SB-212: a launch record is one small file written under its own lock; a
+                // session's hook gives up after 1.5 s and must not wait out the transaction.
+                | Operation::LaunchEvent { .. }
+                | Operation::Launches { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -3014,6 +3051,86 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 /// C-Q1: the window answers in the app's own process (`Runtime::execute`). An operation that
 /// names the window but arrives through the control listener or an offline command (anything
 /// holding the control token, an agent running the CLI included) is refused before it runs.
+/// A session's record as the list shows it (SB-95, SB-110, SB-201): the account's label, the
+/// organization's name and the agent it runs.
+fn label_session(snapshot: &switchboard_core::Snapshot, mut session: Value) -> Value {
+    let id = session["account_id"].as_str().map(str::to_owned);
+    let label = snapshot
+        .accounts
+        .iter()
+        .find(|a| Some(&a.id) == id.as_ref())
+        .map(|a| a.label.clone())
+        .or_else(|| {
+            snapshot
+                .kimi_accounts
+                .iter()
+                .find(|k| Some(&k.id) == id.as_ref())
+                .map(|k| k.label.clone())
+        })
+        // A Hermes hand-over names its model itself (SB-107).
+        .or_else(|| session["label"].as_str().map(str::to_owned));
+    session["label"] = label.into();
+    // SB-110: an organization's context also by its name, for the CLI and agents.
+    let context_name = session["context"]
+        .as_str()
+        .and_then(|c| c.strip_prefix("org:"))
+        .and_then(|id| snapshot.organization(id))
+        .map(|o| o.name.clone());
+    session["context_name"] = context_name.into();
+    // SB-201: one field names the agent. A catalog agent's record carries it; a
+    // launch of a provider's own CLI is named from its provider.
+    if !session["agent"].is_string() {
+        let agent = match session["provider"].as_str() {
+            Some("claude") => Some("claude-code"),
+            Some("kimi") => Some("kimi-code"),
+            Some(other @ ("codex" | "hermes" | "opencode")) => Some(other),
+            _ => None,
+        };
+        session["agent"] = agent.into();
+    }
+    session
+}
+/// SB-212: the operations that launch a session and get a launch record.
+fn is_launch(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Launch { .. }
+            | Operation::Continue { .. }
+            | Operation::ContinueToConsole { .. }
+            | Operation::LaunchAgent { .. }
+            | Operation::KimiLaunch { .. }
+    )
+}
+/// SB-212: `operation` with who asked for it, when it launches a session; any other operation
+/// as it is.
+pub fn launched(operation: Operation, by: launches::LaunchedBy) -> Operation {
+    if is_launch(&operation) {
+        Operation::Launched {
+            by,
+            inner: Box::new(operation),
+        }
+    } else {
+        operation
+    }
+}
+/// SB-212: a launch that reached the owner from outside its process (the control listener, an
+/// offline command) never says the window asked for it: a bare one is the command line's, and
+/// `window` becomes `cli`.
+pub(crate) fn from_outside(operation: Operation) -> Operation {
+    match operation {
+        Operation::Launched { mut by, inner } => {
+            if by.surface == launches::Surface::Window {
+                by.surface = launches::Surface::Cli;
+            }
+            Operation::Launched { by, inner }
+        }
+        operation if is_launch(&operation) => Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Cli),
+            inner: Box::new(operation),
+        },
+        operation => operation,
+    }
+}
 pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
     matches!(
         operation,
@@ -3041,7 +3158,7 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
         return Err(refusal.into());
     }
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
-    execute(store, &root, None, operation).await
+    execute(store, &root, None, from_outside(operation)).await
 }
 /// How long a command waits for the store when another process holds it (SB-181): an update
 /// restart keeps the lock through the old owner's drain and frees it once the new owner runs,
@@ -4848,49 +4965,58 @@ async fn execute(
             }
             Ok(json!(restored))
         }
+        // Reached offline (`Runtime::execute` unwraps it before): the same scope around the
+        // launch, which then asks for an owner.
+        Operation::Launched { by, inner } => {
+            if !is_launch(&inner) {
+                return Err(launches::NOT_A_LAUNCH.into());
+            }
+            let by = launches::resolve(&store.snapshot()?, by)?;
+            launches::scoped(
+                Some(by),
+                Box::pin(execute(store.clone(), root, runtime, *inner)),
+            )
+            .await
+        }
+        Operation::LaunchEvent {
+            launch_id,
+            event,
+            provider_session_id,
+            transcript,
+        } => Ok(launches::event(
+            root,
+            &launch_id,
+            event,
+            provider_session_id.as_deref(),
+            transcript.as_deref(),
+            monitor::now(),
+        )),
+        Operation::Launches { launch_id } => {
+            let snapshot = store.snapshot()?;
+            // The states may ask `kill -0`/`ps`: never on an async worker (SB-103).
+            match launch_id {
+                Some(id) => {
+                    let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
+                    shown["launch"] = label_session(&snapshot, shown["launch"].take());
+                    Ok(shown)
+                }
+                None => {
+                    let (listed, total) = crate::blocking::run(|| launches::history(root));
+                    let listed: Vec<Value> = listed
+                        .into_iter()
+                        .map(|r| label_session(&snapshot, r))
+                        .collect();
+                    Ok(json!({"launches": listed, "total": total}))
+                }
+            }
+        }
         Operation::Sessions { all } => {
             let snapshot = store.snapshot()?;
             // SB-103: the liveness checks may start `kill -0`/`ps`: never on an async worker.
             let listed = crate::blocking::run(|| launch::sessions(root, all));
             let sessions: Vec<Value> = listed
                 .into_iter()
-                .map(|mut session| {
-                    let id = session["account_id"].as_str().map(str::to_owned);
-                    let label = snapshot
-                        .accounts
-                        .iter()
-                        .find(|a| Some(&a.id) == id.as_ref())
-                        .map(|a| a.label.clone())
-                        .or_else(|| {
-                            snapshot
-                                .kimi_accounts
-                                .iter()
-                                .find(|k| Some(&k.id) == id.as_ref())
-                                .map(|k| k.label.clone())
-                        })
-                        // A Hermes hand-over names its model itself (SB-107).
-                        .or_else(|| session["label"].as_str().map(str::to_owned));
-                    session["label"] = label.into();
-                    // SB-110: an organization's context also by its name, for the CLI and agents.
-                    let context_name = session["context"]
-                        .as_str()
-                        .and_then(|c| c.strip_prefix("org:"))
-                        .and_then(|id| snapshot.organization(id))
-                        .map(|o| o.name.clone());
-                    session["context_name"] = context_name.into();
-                    // SB-201: one field names the agent. A catalog agent's record carries it; a
-                    // launch of a provider's own CLI is named from its provider.
-                    if !session["agent"].is_string() {
-                        let agent = match session["provider"].as_str() {
-                            Some("claude") => Some("claude-code"),
-                            Some("kimi") => Some("kimi-code"),
-                            Some(other @ ("codex" | "hermes" | "opencode")) => Some(other),
-                            _ => None,
-                        };
-                        session["agent"] = agent.into();
-                    }
-                    session
-                })
+                .map(|session| label_session(&snapshot, session))
                 .collect();
             Ok(json!({ "sessions": sessions }))
         }
@@ -9383,5 +9509,131 @@ mod usage_gate_tests {
         )
         .await;
         assert_eq!(answer.unwrap_err(), switchboard_proxy::USAGE_RATE_LIMITED);
+    }
+}
+
+#[cfg(test)]
+mod launch_record_tests {
+    use super::*;
+    use fixtures::*;
+
+    #[test]
+    fn a_launch_from_outside_the_app_never_reads_as_the_window() {
+        let launch = || Operation::KimiLaunch {
+            id: "k".into(),
+            working_directory: PathBuf::from("/x"),
+        };
+        let bare = from_outside(launch());
+        let Operation::Launched { by, inner } = bare else {
+            panic!("a bare launch is wrapped");
+        };
+        assert_eq!(by.surface, launches::Surface::Cli);
+        assert!(matches!(*inner, Operation::KimiLaunch { .. }));
+        let claimed = from_outside(Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Window),
+            inner: Box::new(launch()),
+        });
+        let Operation::Launched { by, .. } = claimed else {
+            panic!();
+        };
+        assert_eq!(by.surface, launches::Surface::Cli);
+        let dashboards = from_outside(Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Dashboards),
+            inner: Box::new(launch()),
+        });
+        let Operation::Launched { by, .. } = dashboards else {
+            panic!();
+        };
+        assert_eq!(by.surface, launches::Surface::Dashboards);
+        assert!(matches!(
+            from_outside(Operation::Snapshot),
+            Operation::Snapshot
+        ));
+        // The wire form a CLI sends, read back by the owner.
+        let wire = serde_json::to_string(&Operation::Launched {
+            by: launches::LaunchedBy {
+                by: Some("voc-learn".into()),
+                ..launches::LaunchedBy::surface(launches::Surface::Cli)
+            },
+            inner: Box::new(launch()),
+        })
+        .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Operation>(&wire).unwrap(),
+            Operation::Launched { .. }
+        ));
+    }
+    #[tokio::test]
+    async fn a_malformed_launcher_name_or_a_wrapped_non_launch_is_refused_before_anything_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let refused = runtime
+            .execute(Operation::Launched {
+                by: launches::LaunchedBy {
+                    by: Some("two words".into()),
+                    ..launches::LaunchedBy::surface(launches::Surface::Cli)
+                },
+                inner: Box::new(Operation::KimiLaunch {
+                    id: "k".into(),
+                    working_directory: root.path().to_owned(),
+                }),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, launches::BY_INVALID);
+        let refused = runtime
+            .execute(Operation::Launched {
+                by: launches::LaunchedBy::surface(launches::Surface::Cli),
+                inner: Box::new(Operation::Snapshot),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, launches::NOT_A_LAUNCH);
+        assert!(!root.path().join(launches::DIR).exists());
+    }
+    #[tokio::test]
+    async fn the_history_and_one_launch_read_through_the_owner_and_a_hook_writes_its_turns() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let home = root.path().join("runtimes").join("claude-default");
+        private_fs_dir(&home);
+        let id = launches::new_id();
+        launches::record(
+            root.path(),
+            &home,
+            json!({"account_id": "a", "provider": "claude", "launched_at": 5}),
+            &id,
+        )
+        .unwrap();
+        let listed = runtime
+            .execute(Operation::Launches { launch_id: None })
+            .await
+            .unwrap();
+        assert_eq!(listed["total"], 1);
+        assert_eq!(listed["launches"][0]["launch_id"], id.as_str());
+        assert_eq!(listed["launches"][0]["agent"], "claude-code");
+        assert_eq!(listed["launches"][0]["state"], "ended");
+        let answer = runtime
+            .execute(Operation::LaunchEvent {
+                launch_id: id.clone(),
+                event: launches::Event::Turn,
+                provider_session_id: None,
+                transcript: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer, json!({"recorded": true}));
+        let shown = runtime
+            .execute(Operation::Launches {
+                launch_id: Some(id.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(shown["launch"]["turns"], 1);
+        assert_eq!(shown["up"], json!([]));
+        assert_eq!(shown["down"], json!([]));
+    }
+    fn private_fs_dir(path: &Path) {
+        switchboard_core::private_fs::private_dir(path).unwrap();
     }
 }

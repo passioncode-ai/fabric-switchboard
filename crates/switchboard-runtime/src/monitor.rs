@@ -285,6 +285,8 @@ impl Pass {
             },
         )
         .await;
+        // SB-212: launch records not written for 90 days go, looked for at most once an hour.
+        crate::launches::prune_due(&runtime.root, time);
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

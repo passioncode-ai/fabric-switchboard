@@ -48,6 +48,8 @@ const CONFLICTS: &[&str] = &[
     "SWITCHBOARD_LOCAL_TOKEN",
     "SWITCHBOARD_SESSION",
     "SWITCHBOARD_CONTEXT",
+    // SB-212: every launched session gets its own; one inherited from a caller never leaks.
+    "SWITCHBOARD_LAUNCH_ID",
 ];
 #[cfg(windows)]
 const CLI_NAME: &str = "switchboard.exe";
@@ -1643,6 +1645,9 @@ fn launch_agent_with(
         env.insert(key_env.clone(), proxy.agent_token().to_owned());
     }
     env.extend(profile.extra_env.clone());
+    // SB-212: the session's own launch id, for the record and for what it launches.
+    let launch_id = crate::launches::new_id();
+    env.insert(crate::launches::ENV.into(), launch_id.clone());
     let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
     let content = script(&home, &program, &args, &env, false, &working_directory);
     let path = write_launch_script(&home, &content)?;
@@ -1656,11 +1661,7 @@ fn launch_agent_with(
         "mode": "managed", "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
     });
-    private_write(
-        &home.join(SESSION_RECORD),
-        record.to_string().as_bytes(),
-        false,
-    )?;
+    crate::launches::record(root, &home, record, &launch_id)?;
     start(&path)?;
     Ok(
         json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
@@ -1842,6 +1843,9 @@ fn hermes_continuation_session(
             env.insert(isolate.clone(), own.to_string_lossy().into_owned());
         }
         env.extend(recipe.extra_env.clone());
+        // SB-212: the session's own launch id, for the record and for what it launches.
+        let launch_id = crate::launches::new_id();
+        env.insert(crate::launches::ENV.into(), launch_id.clone());
         let prompt = prompt.to_string_lossy().into_owned();
         let mut args = vec!["chat".to_string(), "--query-file".into(), prompt];
         args.extend(
@@ -1880,11 +1884,7 @@ fn hermes_continuation_session(
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
             "label": model,
         });
-        private_write(
-            &session.join(SESSION_RECORD),
-            record.to_string().as_bytes(),
-            false,
-        )?;
+        crate::launches::record(root, &session, record, &launch_id)?;
         Ok((
             path.clone(),
             json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from, "script": path}),
@@ -2002,6 +2002,9 @@ pub(crate) fn opencode_continuation_session(
             "OPENCODE_CONFIG_CONTENT".to_string(),
             opencode_config(&model, &continuation.observatory),
         );
+        // SB-212: the session's own launch id, for the record and for what it launches.
+        let launch_id = crate::launches::new_id();
+        env.insert(crate::launches::ENV.into(), launch_id.clone());
         let model_arg = format!("openrouter/{model}");
         let args = ["--prompt", first.as_str(), "-m", model_arg.as_str()];
         let key_command = [
@@ -2032,11 +2035,7 @@ pub(crate) fn opencode_continuation_session(
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
             "label": model,
         });
-        private_write(
-            &session.join(SESSION_RECORD),
-            record.to_string().as_bytes(),
-            false,
-        )?;
+        crate::launches::record(root, &session, record, &launch_id)?;
         Ok((
             path.clone(),
             json!({"launched": true, "agent": "opencode", "via": "openrouter", "model": model, "model_from": "key", "script": path}),
@@ -2188,6 +2187,9 @@ fn openrouter_session(
         }
         env.insert(isolate.clone(), own.to_string_lossy().into_owned());
     }
+    // SB-212: the session's own launch id, for the record and for what it launches.
+    let launch_id = crate::launches::new_id();
+    env.insert(crate::launches::ENV.into(), launch_id.clone());
     let mut args = recipe.args.clone();
     if let Some(model) = &model {
         args.extend(
@@ -2227,11 +2229,7 @@ fn openrouter_session(
         "in_place": false, "launched_at": switchboard_proxy::now(), "continues": null,
         "label": if takes_model { model.clone() } else { None },
     });
-    private_write(
-        &home.join(SESSION_RECORD),
-        record.to_string().as_bytes(),
-        false,
-    )?;
+    crate::launches::record(root, &home, record, &launch_id)?;
     Ok((
         path,
         json!({
@@ -2655,6 +2653,9 @@ fn launch_full(
         args.push(first.as_str());
     }
     args.extend(extra.iter().map(String::as_str));
+    // SB-212: the session's own launch id, for the record and for what it launches.
+    let launch_id = crate::launches::new_id();
+    env.insert(crate::launches::ENV.into(), launch_id.clone());
     let path = write_launch_script(
         &home,
         &script(&home, &program, &args, &env, false, &working_directory),
@@ -2671,11 +2672,7 @@ fn launch_full(
         "launched_at": switchboard_proxy::now(),
         "continues": continuation.map(|c| c.workflow_id.clone()),
     });
-    private_write(
-        &home.join(SESSION_RECORD),
-        record.to_string().as_bytes(),
-        false,
-    )?;
+    crate::launches::record(root, &home, record, &launch_id)?;
     // In place the caller runs the script now; the reservation lapses if it never does.
     if !in_place {
         (host.start_terminal)(&path)?;
@@ -2714,33 +2711,10 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             else {
                 continue;
             };
-            let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-                meta.file_type().is_file()
-                    && !meta
-                        .modified()
-                        .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-            });
-            let state = if pending {
-                "starting"
-            } else {
-                match session_running(&home) {
-                    Ok(true) => "running",
-                    Ok(false) => "ended",
-                    Err(_) => "unknown",
-                }
-            };
+            let (state, started) = home_state(&home);
             if !all && !matches!(state, "starting" | "running") {
                 continue;
             }
-            #[cfg(unix)]
-            let marker = home.join(".session-pid");
-            #[cfg(windows)]
-            let marker = home.join(".session-process");
-            let started = fs::symlink_metadata(&marker)
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64);
             record["state"] = state.into();
             record["started_at"] = started.into();
             record["home"] = folder.into();
@@ -2749,6 +2723,35 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
     }
     found.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
     found
+}
+/// A home's session state now (`starting`, `running`, `ended` or `unknown`, see `sessions`)
+/// and when its process started, from its marker.
+pub(crate) fn home_state(home: &Path) -> (&'static str, Option<i64>) {
+    let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
+        meta.file_type().is_file()
+            && !meta
+                .modified()
+                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
+    });
+    let state = if pending {
+        "starting"
+    } else {
+        match session_running(home) {
+            Ok(true) => "running",
+            Ok(false) => "ended",
+            Err(_) => "unknown",
+        }
+    };
+    #[cfg(unix)]
+    let marker = home.join(".session-pid");
+    #[cfg(windows)]
+    let marker = home.join(".session-process");
+    let started = fs::symlink_metadata(&marker)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64);
+    (state, started)
 }
 /// Terminal is already open: a journal failure must not report the launch as failed.
 fn journal_launch(store: &Store, id: &str, mode: &str) {
@@ -5576,5 +5579,192 @@ mod tests {
             assert!(private_write(&link, b"changed", false).is_err());
             assert_eq!(fs::read(&file).unwrap(), b"synthetic");
         }
+    }
+
+    /// SB-212: the launch id a session's script exports, read back from the script as the
+    /// session's shell would see it.
+    #[cfg(unix)]
+    fn exported_launch_id(home: &Path) -> String {
+        let script = fs::read_to_string(home.join("launch.command")).unwrap();
+        let line = script
+            .lines()
+            .find_map(|l| l.strip_prefix("export SWITCHBOARD_LAUNCH_ID="))
+            .unwrap_or_else(|| panic!("no launch id exported: {script}"));
+        line.trim_matches('\'').to_owned()
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn two_launches_of_one_home_keep_two_records_and_each_script_names_its_own() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let home = f.root.join("homes").join(&id);
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            launch_with(
+                &f.root, &f.store, &proxy, &id, "isolated", &f.project, &TEST_HOST, None,
+            )
+            .unwrap();
+            ids.push(exported_launch_id(&home));
+            // The script ran and its session ended: the home is free for the next launch.
+            fs::remove_file(home.join(".launch-pending")).unwrap();
+        }
+        assert_ne!(ids[0], ids[1]);
+        let current: Value =
+            serde_json::from_slice(&fs::read(home.join(SESSION_RECORD)).unwrap()).unwrap();
+        assert_eq!(current["launch_id"], ids[1].as_str());
+        for launch in &ids {
+            let file = f.root.join("launches").join(format!("{launch}.json"));
+            let record: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+            assert_eq!(record["launch_id"], launch.as_str());
+            assert_eq!(record["account_id"], id.as_str());
+            assert_eq!(record["home_path"], format!("homes/{id}"));
+            assert_eq!(record["launched_by"]["surface"], "window");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+            assert!(!record.to_string().contains("synthetic"), "{record}");
+        }
+        let (history, total) = crate::launches::history(&f.root);
+        assert_eq!(total, 2);
+        assert_eq!(history.len(), 2);
+        let state = |launch: &str| {
+            history.iter().find(|r| r["launch_id"] == launch).unwrap()["state"].clone()
+        };
+        assert_eq!(state(&ids[0]), "ended", "the home holds a later launch");
+        assert_eq!(state(&ids[1]), "ended", "no process runs it");
+        // An earlier record without a launch id still lists as it did.
+        fs::write(
+            home.join(SESSION_RECORD),
+            r#"{"account_id":"old","provider":"claude","launched_at":1}"#,
+        )
+        .unwrap();
+        let listed = sessions(&f.root, true);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["account_id"], "old");
+        assert!(listed[0]["launch_id"].is_null());
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_chain_of_three_launches_follows_the_variable_each_session_exports() {
+        // A launches B from inside its session, B launches C: each caller is read from the
+        // variable its own script exported, as `switchboard launch` reads its environment.
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let mut homes = Vec::new();
+        let mut ids: Vec<String> = Vec::new();
+        for (n, pool) in ["one", "two", "three"].iter().enumerate() {
+            let account = f.add(Provider::Claude, AuthKind::OAuth, pool, CLAUDE_OAUTH);
+            let mut by = crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli);
+            by.caller_launch_id = ids.last().cloned();
+            if n == 2 {
+                by.by = Some("voc-learn".into());
+            }
+            let root = f.root.clone();
+            let store = f.store.clone();
+            let project = f.project.clone();
+            let proxy = &proxy;
+            let answer = crate::launches::scoped(Some(by), async move {
+                launch_with(
+                    &root, &store, proxy, &account, "isolated", &project, &TEST_HOST, None,
+                )
+                .map(|_| json!({}))
+            })
+            .await
+            .unwrap();
+            let home = f.root.join("homes").join(
+                f.store
+                    .snapshot()
+                    .unwrap()
+                    .accounts
+                    .iter()
+                    .find(|a| a.pool == *pool)
+                    .unwrap()
+                    .id
+                    .clone(),
+            );
+            let exported = exported_launch_id(&home);
+            assert_eq!(answer["launch_id"], exported.as_str());
+            ids.push(exported);
+            homes.push(home);
+        }
+        let record = |n: usize| -> Value {
+            serde_json::from_slice(
+                &fs::read(f.root.join("launches").join(format!("{}.json", ids[n]))).unwrap(),
+            )
+            .unwrap()
+        };
+        assert!(record(0)["launched_by"]["caller_launch_id"].is_null());
+        assert_eq!(
+            record(1)["launched_by"]["caller_launch_id"],
+            ids[0].as_str()
+        );
+        assert_eq!(
+            record(2)["launched_by"]["caller_launch_id"],
+            ids[1].as_str()
+        );
+        assert_eq!(record(2)["launched_by"]["by"], "voc-learn");
+        assert_eq!(record(1)["launched_by"]["surface"], "cli");
+        let shown = crate::launches::show(&f.root, &ids[1]).unwrap();
+        assert_eq!(shown["launch"]["launch_id"], ids[1].as_str());
+        let up: Vec<&str> = shown["up"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["launch_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(up, [ids[0].as_str()]);
+        let down: Vec<&str> = shown["down"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["launch_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(down, [ids[2].as_str()]);
+        let top = crate::launches::show(&f.root, &ids[2]).unwrap();
+        assert_eq!(top["up"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            crate::launches::show(&f.root, "no-such-launch").unwrap_err(),
+            crate::launches::LAUNCH_NOT_FOUND
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_launch_naming_its_parent_continues_it_and_the_parent_says_so() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let first = f.add(Provider::Claude, AuthKind::OAuth, "one", CLAUDE_OAUTH);
+        let second = f.add(Provider::Claude, AuthKind::OAuth, "two", CLAUDE_OAUTH);
+        launch_with(
+            &f.root, &f.store, &proxy, &first, "isolated", &f.project, &TEST_HOST, None,
+        )
+        .unwrap();
+        let parent = exported_launch_id(&f.root.join("homes").join(&first));
+        let mut by = crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli);
+        by.parent = Some(parent.clone());
+        let (root, store, project) = (f.root.clone(), f.store.clone(), f.project.clone());
+        let proxy = &proxy;
+        let answer = crate::launches::scoped(Some(by), async move {
+            launch_with(
+                &root, &store, proxy, &second, "isolated", &project, &TEST_HOST, None,
+            )
+            .map(|_| json!({}))
+        })
+        .await
+        .unwrap();
+        let child = answer["launch_id"].as_str().unwrap();
+        let parent_record: Value = serde_json::from_slice(
+            &fs::read(f.root.join("launches").join(format!("{parent}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            parent_record["continued_as"],
+            json!({"kind": "launch", "id": child})
+        );
     }
 }

@@ -45,6 +45,13 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime launches.rs (SB-212): who launched a session is named only by `switchboard launch
+  // --by/--parent` and read only by `switchboard sessions --history/show` and MCP
+  // switchboard_sessions; the window sends neither `Launched` nor `Launches`.
+  'Name the launcher with up to 64 letters, digits, dots, hyphens or underscores.': 'SB-212 launch --by: CLI only',
+  'Give a launch id from switchboard sessions --history as the parent.': 'SB-212 launch --parent: CLI only',
+  'No launch has that id. List them with switchboard sessions --history.': 'SB-212 sessions show: CLI and MCP only',
+  'Only a launch can name who launched it.': 'SB-212 Launched wraps only launches; the window never sends it',
   // runtime settings_bundle.rs parse(): SB-176 settings import runs from the CLI only; the window
   // has no import, so this prints to the terminal.
   'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',

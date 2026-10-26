@@ -773,13 +773,16 @@ fn launch_with(
         return Err(KIMI_SIGNED_OUT.into());
     }
     let context = context(store, &folder)?;
-    let env = BTreeMap::from([
+    let mut env = BTreeMap::from([
         (
             "KIMI_CODE_HOME".to_string(),
             home.to_string_lossy().into_owned(),
         ),
         ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
     ]);
+    // SB-212: the session's own launch id, for the record and for what it launches.
+    let launch_id = crate::launches::new_id();
+    env.insert(crate::launches::ENV.into(), launch_id.clone());
     // The session script lives beside the home, not in it: Kimi owns everything inside.
     let sessions = homes(root).join("sessions");
     private_dir(&sessions)?;
@@ -796,11 +799,7 @@ fn launch_with(
         "mode": "isolated", "working_directory": folder, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
     });
-    private_write(
-        &session.join(SESSION_RECORD),
-        record.to_string().as_bytes(),
-        false,
-    )?;
+    crate::launches::record(root, &session, record, &launch_id)?;
     start(&path)?;
     reservation.committed = true;
     Ok(json!({"launched": true, "account": account.label}))
@@ -930,13 +929,16 @@ fn launch_continuation_with(
         let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
         add_observatory(&home, &continuation.observatory)?;
         let context = context(store, &folder)?;
-        let env = BTreeMap::from([
+        let mut env = BTreeMap::from([
             (
                 "KIMI_CODE_HOME".to_string(),
                 home.to_string_lossy().into_owned(),
             ),
             ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
         ]);
+        // SB-212: the session's own launch id, for the record and for what it launches.
+        let launch_id = crate::launches::new_id();
+        env.insert(crate::launches::ENV.into(), launch_id.clone());
         let first = crate::continuation::prompt(continuation);
         let path = write_launch_script(
             &session,
@@ -954,11 +956,7 @@ fn launch_continuation_with(
             "mode": "isolated", "working_directory": folder, "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
         });
-        private_write(
-            &session.join(SESSION_RECORD),
-            record.to_string().as_bytes(),
-            false,
-        )?;
+        crate::launches::record(root, &session, record, &launch_id)?;
         start(&path)?;
         reservation.committed = true;
         Ok(json!({"launched": true, "account": account.label, "script": path}))

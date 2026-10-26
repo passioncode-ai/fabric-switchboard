@@ -258,6 +258,8 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    // SB-212: a launch asked for through this door is never the window's.
+    let operation = crate::from_outside(operation);
     if let Some(refusal) = crate::window_only_refusal(&operation) {
         return Json(Reply::Error {
             message: refusal.into(),

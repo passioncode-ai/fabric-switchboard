@@ -10,7 +10,7 @@ use std::{
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
-    arm_hard_exit, control, default_root, onboarding, oplog,
+    arm_hard_exit, control, default_root, launches, onboarding, oplog,
     projects::{detect_session, Session},
     rfc3339, AgentVia, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
@@ -76,8 +76,14 @@ enum Command {
     /// and times. Reads only.
     Sessions {
         /// Also list sessions that ended (their homes keep the last launch's record).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "history")]
         all: bool,
+        /// Every launch of the last 90 days, newest first, each with who launched it and what
+        /// it did: one record per launch, also when a later launch reused its home.
+        #[arg(long)]
+        history: bool,
+        #[command(subcommand)]
+        command: Option<SessionsCommand>,
     },
     /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
     Current,
@@ -113,6 +119,18 @@ enum Command {
         /// stdin and stdout). The same session, home and tools as a Terminal launch.
         #[arg(long)]
         in_place: bool,
+        /// Who is launching, for the launch record: a runner's own name (up to 64 letters,
+        /// digits, dots, hyphens or underscores), such as `voc-learn`.
+        #[arg(long, value_name = "NAME")]
+        by: Option<String>,
+        /// The launch this one continues (a launch id from `switchboard sessions --history`):
+        /// that launch's record then names this one as where its work went.
+        #[arg(long, value_name = "LAUNCH_ID")]
+        parent: Option<String>,
+        /// Where the launch is asked from: `dashboards` for Fabric Dashboards' console,
+        /// `recovery` for a host resuming a stopped session; default `cli`.
+        #[arg(long, value_enum, default_value = "cli")]
+        surface: LaunchSurface,
         /// Arguments for the agent, after `--` (for example `-- --resume <id>`); with --in-place.
         #[arg(last = true)]
         args: Vec<String>,
@@ -1017,6 +1035,22 @@ enum Login {
         login_id: String,
     },
 }
+#[derive(Subcommand)]
+enum SessionsCommand {
+    /// One launch with its chain: who launched it, up to the first launch, and the launches it
+    /// started or that took its work over.
+    Show {
+        /// The launch id (`switchboard sessions --history`).
+        launch_id: String,
+    },
+}
+/// Where `switchboard launch` is run from, for the launch record.
+#[derive(Clone, Copy, ValueEnum)]
+enum LaunchSurface {
+    Cli,
+    Dashboards,
+    Recovery,
+}
 #[derive(Clone, Copy, ValueEnum)]
 enum ProviderArg {
     Claude,
@@ -1271,7 +1305,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 choice: (organization != "auto").then(|| organization.clone()),
             },
         },
-        Command::Sessions { all } => Operation::Sessions { all: *all },
+        Command::Sessions {
+            command: Some(SessionsCommand::Show { launch_id }),
+            ..
+        } => Operation::Launches {
+            launch_id: Some(launch_id.clone()),
+        },
+        Command::Sessions { history: true, .. } => Operation::Launches { launch_id: None },
+        Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
             Backup::List => Operation::Backups,
@@ -1356,8 +1397,25 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             mode,
             working_directory,
             in_place,
+            by,
+            parent,
+            surface,
             args,
         } => {
+            // SB-212: checked before anything is asked (the owner checks them again); a clap
+            // parser's refusal would print only "Invalid arguments".
+            if by.as_deref().is_some_and(|b| !launches::valid_name(b)) {
+                return Err(launches::BY_INVALID.into());
+            }
+            if parent.as_deref().is_some_and(|p| !launches::valid_id(p)) {
+                return Err(launches::PARENT_INVALID.into());
+            }
+            let surface = match surface {
+                LaunchSurface::Cli => launches::Surface::Cli,
+                LaunchSurface::Dashboards => launches::Surface::Dashboards,
+                LaunchSurface::Recovery => launches::Surface::Recovery,
+            };
+            let by = launches::LaunchedBy::from_caller(surface, by.clone(), parent.clone());
             return launch(
                 &root,
                 id,
@@ -1366,8 +1424,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 working_directory,
                 *in_place,
                 args,
+                by,
             )
-            .await
+            .await;
         }
         Command::Continue {
             workflow_id,
@@ -1700,6 +1759,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Uninstall { .. }
         | Command::Onboard { .. } => unreachable!(),
     };
+    // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
+    // --to-console`).
+    let operation = switchboard_runtime::launched(
+        operation,
+        launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
+    );
     let value = call(&root, operation).await?;
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
@@ -1719,6 +1784,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
 /// `switchboard launch` (SB-75 adds the account for a folder and the in-place run): resolves the
 /// account when only a provider is given, asks the owner to prepare the session, and either
 /// leaves it to the Terminal the owner opened or runs the prepared script in this terminal.
+#[allow(clippy::too_many_arguments)]
 async fn launch(
     root: &std::path::Path,
     id: &Option<String>,
@@ -1727,6 +1793,7 @@ async fn launch(
     working_directory: &std::path::Path,
     in_place: bool,
     args: &[String],
+    by: launches::LaunchedBy,
 ) -> Result<Value, String> {
     use std::io::IsTerminal;
     if !in_place && !args.is_empty() {
@@ -1752,17 +1819,20 @@ async fn launch(
     };
     let value = call(
         root,
-        Operation::Launch {
-            id,
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: working_directory.to_owned(),
-            in_place,
-            args: args.to_vec(),
-        },
+        switchboard_runtime::launched(
+            Operation::Launch {
+                id,
+                mode: match mode {
+                    Mode::Isolated => "isolated",
+                    Mode::Managed => "managed",
+                }
+                .into(),
+                working_directory: working_directory.to_owned(),
+                in_place,
+                args: args.to_vec(),
+            },
+            by,
+        ),
     )
     .await?;
     if !in_place {
@@ -1803,17 +1873,20 @@ async fn continue_workflow(
     }
     let value = call(
         root,
-        Operation::Continue {
-            workflow_id: workflow_id.to_owned(),
-            id: account.to_owned(),
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: dir.to_owned(),
-            in_place,
-        },
+        switchboard_runtime::launched(
+            Operation::Continue {
+                workflow_id: workflow_id.to_owned(),
+                id: account.to_owned(),
+                mode: match mode {
+                    Mode::Isolated => "isolated",
+                    Mode::Managed => "managed",
+                }
+                .into(),
+                working_directory: dir.to_owned(),
+                in_place,
+            },
+            launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
+        ),
     )
     .await?;
     if !in_place {
@@ -1992,8 +2065,37 @@ async fn project_suggest_hook(root: &std::path::Path) -> Value {
         .ok()
         .and_then(Result::ok)
         .and_then(|input| serde_json::from_slice(&input).ok());
+    // SB-212: a session Switchboard launched records its provider session and transcript, beside
+    // the folder's suggestion and within the same deadline.
+    let (_, value) = tokio::join!(
+        launch_event(root, parsed.as_ref(), launches::Event::Start),
+        suggest_from_hook(root, parsed.as_ref()),
+    );
+    value
+}
+/// SB-212: what a session's hook reports about its own launch, when Switchboard launched it
+/// (`SWITCHBOARD_LAUNCH_ID` in its environment). Without that variable, or with an input that
+/// is not a hook's, nothing is asked. Never an error: the answer is not read.
+async fn launch_event(root: &std::path::Path, hook: Option<&Value>, event: launches::Event) {
+    let Some(launch_id) = std::env::var(launches::ENV)
+        .ok()
+        .filter(|id| launches::valid_id(id))
+    else {
+        return;
+    };
+    let Some(hook) = hook.filter(|h| h.is_object()) else {
+        return;
+    };
+    let operation = Operation::LaunchEvent {
+        launch_id,
+        event,
+        provider_session_id: hook["session_id"].as_str().map(str::to_owned),
+        transcript: hook["transcript_path"].as_str().map(PathBuf::from),
+    };
+    let _ = tokio::time::timeout(SESSION_HOOK_DEADLINE, call(root, operation)).await;
+}
+async fn suggest_from_hook(root: &std::path::Path, parsed: Option<&Value>) -> Value {
     let Some(cwd) = parsed
-        .as_ref()
         .and_then(|h| h["cwd"].as_str())
         .map(std::path::PathBuf::from)
     else {
@@ -2060,6 +2162,8 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     // session's stop, asks the owner only when the session has one, and prints `{}`: a Stop
     // hook's stdout is read by Claude Code as its decision.
     if hook["hook_event_name"].as_str() == Some("Stop") {
+        // SB-212: the launch record counts the turn.
+        launch_event(root, Some(&hook), launches::Event::Turn).await;
         if let Some(session) = hook["session_id"].as_str() {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2085,6 +2189,8 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
         Some("billing_error") => true,
         _ => return json!({"registered": false, "reason": "not_a_limit"}),
     };
+    // SB-212: the launch record says where the session stopped.
+    launch_event(root, Some(&hook), launches::Event::Limit).await;
     let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
         return json!({"registered": false, "reason": "malformed_input"});
     };
@@ -2096,6 +2202,87 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     match call(root, operation).await {
         Ok(value) => value,
         Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+    }
+}
+/// One launch on one line (SB-212): its id, state and agent, who launched it, where and when.
+fn launch_line(l: &Value) -> String {
+    let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
+    let by = &l["launched_by"];
+    let mut who = text(&by["surface"]);
+    if let Some(name) = by["by"].as_str() {
+        who.push(':');
+        who.push_str(name);
+    }
+    let mut line = format!(
+        "{} {:<9} {:<16} {:<14} {} · {}",
+        text(&l["launch_id"]),
+        text(&l["state"]),
+        text(&l["agent"]),
+        who,
+        text(&l["working_directory"]),
+        utc(&l["launched_at"]),
+    );
+    if let Some(ended) = l["ended"].as_str() {
+        line.push_str(&format!(" · stopped: {ended}"));
+    }
+    if let Some(kind) = l["continued_as"]["kind"].as_str() {
+        line.push_str(&format!(
+            " · went to {kind} {}",
+            text(&l["continued_as"]["id"])
+        ));
+    }
+    line
+}
+/// `switchboard sessions show`: the launch, then its chain up and down.
+fn print_launch(value: &Value) {
+    let launch = &value["launch"];
+    println!("{}", launch_line(launch));
+    let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
+    for (key, name) in [
+        ("label", "account"),
+        ("pool", "group"),
+        ("provider_session_id", "provider session"),
+        ("transcript", "transcript"),
+        ("turns", "turns"),
+        ("handover", "hand-over"),
+    ] {
+        let field = &launch[key];
+        if !field.is_null() {
+            let shown = field
+                .as_str()
+                .map_or_else(|| field.to_string(), str::to_owned);
+            println!("  {name}: {shown}");
+        }
+    }
+    let by = &launch["launched_by"];
+    for (key, name) in [
+        ("caller_project", "caller's group"),
+        ("caller_program", "caller's program"),
+    ] {
+        if let Some(v) = by[key].as_str() {
+            println!("  {name}: {v}");
+        }
+    }
+    if launch["last_turn_at"].is_i64() {
+        println!("  last turn: {}", utc(&launch["last_turn_at"]));
+    }
+    for (key, heading) in [("up", "Launched by"), ("down", "Then")] {
+        let rows = value[key].as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            continue;
+        }
+        println!("{heading}:");
+        for r in &rows {
+            if r["missing"] == true {
+                println!(
+                    "  {} (record no longer kept) via {}",
+                    text(&r["launch_id"]),
+                    text(&r["via"])
+                );
+            } else {
+                println!("  {} via {}", launch_line(r), text(&r["via"]));
+            }
+        }
     }
 }
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
@@ -2157,6 +2344,23 @@ fn print_result(value: &Value, cli: &Cli) {
                         format!("{} ({by})", text(&a["label"]))
                     }
                 );
+            }
+        }
+        Command::Sessions {
+            command: Some(SessionsCommand::Show { .. }),
+            ..
+        } => print_launch(value),
+        Command::Sessions { history: true, .. } => {
+            let launches = value["launches"].as_array().cloned().unwrap_or_default();
+            if launches.is_empty() {
+                println!("No launch is recorded yet.");
+            }
+            for l in &launches {
+                println!("{}", launch_line(l));
+            }
+            let total = value["total"].as_u64().unwrap_or(0);
+            if total as usize > launches.len() {
+                println!("{} of {total} launches, newest first.", launches.len());
             }
         }
         Command::Sessions { .. } => {
@@ -3092,7 +3296,8 @@ mod mcp_parity {
             Not("SB-176: reads a file the person brought from another machine and adds groups and policies; the person runs it once per move"),
         ),
         ("status", Tool("switchboard_status")),
-        ("sessions", Tool("switchboard_sessions")),
+        // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
+        ("sessions show", Tool("switchboard_sessions")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
         ("rotation set", Tool("switchboard_rotation_set")),
