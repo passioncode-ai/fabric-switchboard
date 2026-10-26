@@ -70,8 +70,9 @@ enum Command {
     },
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
-    /// Sessions Switchboard launched (Claude Code, Codex) that are starting or running: account,
-    /// provider, group, mode, folder and times. Reads only.
+    /// Sessions Switchboard launched that are starting or running: Claude Code, Codex, Kimi Code,
+    /// Hermes, OpenCode and catalog agents. Account, agent, provider, group, mode, context, folder
+    /// and times. Reads only.
     Sessions {
         /// Also list sessions that ended (their homes keep the last launch's record).
         #[arg(long)]
@@ -2017,10 +2018,18 @@ fn print_result(value: &Value, cli: &Cli) {
                     Some(name) => format!("{label} ({name})"),
                     None => label.to_owned(),
                 };
+                // SB-201: the agent the session runs (an agent through the proxy records the
+                // route's provider, `claude`); the provider when an older record names none. 16
+                // fits the longest catalog id.
+                let agent = if s["agent"].is_string() {
+                    &s["agent"]
+                } else {
+                    &s["provider"]
+                };
                 println!(
-                    "{:<9} {:<7} {:<9} {} · {} · {}",
+                    "{:<9} {:<16} {:<9} {} · {} · {}",
                     text(&s["state"]),
-                    text(&s["provider"]),
+                    text(agent),
                     text(&s["mode"]),
                     label,
                     text(&s["working_directory"]),

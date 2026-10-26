@@ -4289,6 +4289,17 @@ async fn execute(
                         .and_then(|id| snapshot.organization(id))
                         .map(|o| o.name.clone());
                     session["context_name"] = context_name.into();
+                    // SB-201: one field names the agent. A catalog agent's record carries it; a
+                    // launch of a provider's own CLI is named from its provider.
+                    if !session["agent"].is_string() {
+                        let agent = match session["provider"].as_str() {
+                            Some("claude") => Some("claude-code"),
+                            Some("kimi") => Some("kimi-code"),
+                            Some(other @ ("codex" | "hermes" | "opencode")) => Some(other),
+                            _ => None,
+                        };
+                        session["agent"] = agent.into();
+                    }
                     session
                 })
                 .collect();
@@ -4870,8 +4881,8 @@ mod owner_tests {
         std::fs::create_dir_all(&agent).unwrap();
         std::fs::write(
             agent.join(launch::SESSION_RECORD),
-            json!({"account_id": "goose", "provider": "goose", "pool": "openrouter",
-                "context": format!("org:{}", acme.id), "mode": "isolated",
+            json!({"account_id": "goose", "provider": "goose", "agent": "goose",
+                "pool": "openrouter", "context": format!("org:{}", acme.id), "mode": "isolated",
                 "working_directory": "/w", "in_place": false, "launched_at": 2,
                 "continues": null, "label": "moonshotai/kimi-k2"})
             .to_string(),
@@ -4894,8 +4905,11 @@ mod owner_tests {
         assert_eq!(by("two")["context"], "personal");
         assert!(by("two")["context_name"].is_null());
         assert_eq!(by("goose")["provider"], "goose");
+        assert_eq!(by("goose")["agent"], "goose");
         assert_eq!(by("goose")["label"], "moonshotai/kimi-k2");
         assert_eq!(by("goose")["context_name"], "Acme");
+        // A Claude Code launch's record names no agent: the list names it from the provider.
+        assert_eq!(by("one")["agent"], "claude-code");
     }
     /// SB-180: `suggest_found` held the owner transaction while every found folder was saved on
     /// its own, each save publishing `accounts.json` and syncing the bindings. One pass's folders

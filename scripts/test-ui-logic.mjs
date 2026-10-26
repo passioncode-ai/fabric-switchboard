@@ -652,6 +652,14 @@ check(() => {
   assert.equal(logic.statTroubleText(c), '25%');
   assert.equal(logic.statAgentName('codex'), 'Codex CLI');
   assert.equal(logic.statAgentName('something-new'), 'Other client');
+  // SB-201: a session names its agent; an agent through the proxy records provider claude.
+  assert.equal(logic.sessionAgentName({ agent: 'goose', provider: 'claude' }), 'Goose');
+  assert.equal(logic.sessionAgentName({ agent: 'codex', provider: 'claude' }), 'Codex CLI');
+  assert.equal(logic.sessionAgentName({ agent: 'kimi-code', provider: 'kimi' }), 'Kimi Code');
+  assert.equal(logic.sessionAgentName({ agent: 'deepseek-harness', provider: 'claude' }), 'deepseek-harness', 'an unnamed agent by its id');
+  assert.equal(logic.sessionAgentName({ provider: 'claude' }), 'Claude Code', 'an older record without agent');
+  assert.equal(logic.sessionAgentName({ agent: null, provider: 'hermes' }), 'Hermes Agent');
+  assert.equal(logic.sessionAgentName({ provider: 'crush' }), 'Crush');
 });
 // SB-146: a group's projects are its repositories by name: no worktree, clone or subfolder, one per origin.
 check(() => {

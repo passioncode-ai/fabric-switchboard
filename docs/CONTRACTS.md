@@ -578,10 +578,18 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   `provider`, `pool`, `mode`, `working_directory` (canonical), `in_place`, `launched_at`,
   `continues`. A failed write fails the launch before Terminal opens. Since 0.7.0 (SB-201) a
   Kimi Code launch or continuation, a Hermes or OpenCode continuation, an agent launched on the
-  OpenRouter key (`runtimes/agent-<recipe>-openrouter`, `provider` and `account_id` the recipe
-  id, `pool` `openrouter`, `label` its model or null) and an agent launched through the proxy
-  (`runtimes/agent-<agent>-<pool>`, `provider` the agent id, `account_id` its API-key account,
-  `mode` `managed`) write one too, `context` included.
+  OpenRouter key (`runtimes/agent-<recipe>-openrouter`, `provider`, `agent` and `account_id` the
+  recipe id, `pool` `openrouter`, `label` its model or null) and an agent launched through the
+  proxy (`runtimes/agent-<agent>-<pool>`, `provider` `claude`: the provider the proxy route
+  `/claude/<pool>` serves, so a reader comparing it with the route sees no false move; `agent` the
+  catalog id, `account_id` its API-key account, `mode` `managed`) write one too, `context`
+  included. `agent` is optional in the record: `Operation::Sessions` fills it for a record that
+  names none from its provider (`claude` gives `claude-code`, `kimi` gives `kimi-code`; `codex`,
+  `hermes` and `opencode` are their own ids; any other leaves it null), so the list has one field
+  for the agent. Tests: `a_proxy_agent_launch_records_its_context` (goose and codex: `provider`
+  `claude`), `an_openrouter_launch_records_its_session_and_context`,
+  `the_session_list_names_an_organizations_context`,
+  `the_session_list_names_a_proxy_agent_and_not_its_route` (the CLI line names the agent).
 - **Context (SB-110, 0.6.80).** The record also carries `context`, and the session's environment
   `SWITCHBOARD_CONTEXT` (scrubbed from the inherited environment like `SWITCHBOARD_SESSION`):
   `Snapshot::session_context` in the contract's form (`personal`, `org:<id>`): the group of the

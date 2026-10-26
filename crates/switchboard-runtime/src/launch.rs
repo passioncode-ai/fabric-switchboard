@@ -1629,8 +1629,12 @@ fn launch_agent_with(
     let content = script(&home, &program, &args, &env, false, &working_directory);
     let path = write_launch_script(&home, &content)?;
     // Listed under Sessions like any launch (`sessions`): ids, folder and times only.
+    // `provider` is the provider the proxy route serves (the agent speaks Claude's protocol on
+    // `/claude/<pool>`), so a reader comparing it with the route sees no false move; the catalog
+    // agent is its own field.
     let record = json!({
-        "account_id": account.id, "provider": profile.id, "pool": pool, "context": context,
+        "account_id": account.id, "provider": Provider::Claude.as_str(), "agent": profile.id,
+        "pool": pool, "context": context,
         "mode": "managed", "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
     });
@@ -2200,7 +2204,7 @@ fn openrouter_session(
     // SB-201: listed under Sessions like any launch, labelled with its model (none when the
     // agent picks it itself); ids, folder and times only, never the key.
     let record = json!({
-        "account_id": recipe.id, "provider": recipe.id, "pool": "openrouter",
+        "account_id": recipe.id, "provider": recipe.id, "agent": recipe.id, "pool": "openrouter",
         "context": context, "mode": "isolated", "working_directory": working_directory,
         "in_place": false, "launched_at": switchboard_proxy::now(), "continues": null,
         "label": if takes_model { model.clone() } else { None },
@@ -4335,6 +4339,8 @@ mod tests {
         let home = f.root.join("runtimes/agent-goose-openrouter");
         let record = recorded(&home);
         assert_eq!(record["provider"], "goose");
+        // Readers name the agent from one field, whatever route it runs on.
+        assert_eq!(record["agent"], "goose");
         assert_eq!(record["account_id"], "goose");
         assert_eq!(record["pool"], "openrouter");
         assert_eq!(record["label"], "moonshotai/kimi-k2");
@@ -4411,7 +4417,10 @@ mod tests {
         assert_eq!(answer["agent"], "goose");
         let home = f.root.join("runtimes/agent-goose-default");
         let record = recorded(&home);
-        assert_eq!(record["provider"], "goose");
+        // `provider` is the provider the proxy route serves, so a reader comparing it with the
+        // route never sees a move; the agent is its own field.
+        assert_eq!(record["provider"], "claude");
+        assert_eq!(record["agent"], "goose");
         assert_eq!(record["account_id"], api.as_str());
         assert_eq!(record["pool"], "default");
         assert_eq!(record["mode"], "managed");
@@ -4430,7 +4439,24 @@ mod tests {
         assert!(script.contains("export SWITCHBOARD_CONTEXT='personal'"));
         assert!(sessions(&f.root, true)
             .iter()
-            .any(|r| r["provider"] == "goose" && r["account_id"] == api.as_str()));
+            .any(|r| r["provider"] == "claude"
+                && r["agent"] == "goose"
+                && r["account_id"] == api.as_str()));
+        // Codex through the proxy: its id must not pass for the Codex provider.
+        launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "codex",
+            "default",
+            &f.project,
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        let record = recorded(&f.root.join("runtimes/agent-codex-default"));
+        assert_eq!(record["provider"], "claude");
+        assert_eq!(record["agent"], "codex");
         // The account is an organization's seat in its group: the group's context.
         let acme = acme_group(&f, std::slice::from_ref(&api));
         f.store.select(Provider::Claude, "acme", &api).unwrap();
