@@ -1809,6 +1809,29 @@ pub(crate) async fn onboard_status(
         )
         .await?;
         probe.project = Some(resolved["project"].clone()).filter(|p| !p.is_null());
+        // SB-202: the organization checklist's reads, only where an organization exists. The
+        // `hook` step reads `shell status` (SB-183's record), never the start files.
+        probe.passioncode =
+            switchboard_runtime::vesta::status(root).is_ok_and(|v| v["connected"] == true);
+        let saved: Option<switchboard_core::Snapshot> = serde_json::from_value(snapshot).ok();
+        if saved.as_ref().is_some_and(|s| !s.organizations.is_empty()) {
+            let monitor = call(root, Operation::MonitorStatus).await?;
+            probe.sign_in_required = monitor["sign_in_required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.as_str().map(str::to_owned))
+                .collect();
+            let sessions = call(root, Operation::Sessions { all: true }).await?;
+            probe.contexts = sessions["sessions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|s| s["context"].as_str().map(str::to_owned))
+                .collect();
+            probe.shell = Some(shell::status(Some(root), Some(&folder)));
+        }
+        probe.snapshot = saved;
     }
     // SB-103: Windows names the home USERPROFILE (as `agents::setup` reads it).
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })

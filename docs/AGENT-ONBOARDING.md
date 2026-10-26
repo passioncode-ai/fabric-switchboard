@@ -32,6 +32,19 @@ between them when one runs out, and gives coding agents its tools over MCP.
 | `mcp` | The `switchboard` MCP server is registered with you | you |
 | `proving_call` | A Switchboard tool answered a coding agent | you |
 
+On a computer with an organization (added by hand, or from PassionCode.ai) more steps follow,
+for each organization, newest first; each carries `organization: {id, name}`. A computer with
+no organization has only the five steps above. With PassionCode.ai connected and no
+organization listed for the person, one optional `organization` step says so.
+
+| Step | What it checks | Whose |
+|---|---|---|
+| `organization` | At least one organization exists on this computer | done, or optional |
+| `org_group` | The organization has exactly one group bound to it | you: import the administrator's settings file (`next.command`), or make the group (`next.alternatives`); with two groups, the person keeps one |
+| `seat` | That group holds an account of the organization that is switched on, not used on another machine and still signed in | the person signs in with the organization's address; you may start `next.command` (the sign-in opens in the group) |
+| `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`) | optional: on by default. `next.turn_off` is the command that turns it off: never run it unless the person asks |
+| `launch` | A session ran in the organization's context (`org:<id>`) | optional: `next.command` launches one in a folder of the group |
+
 ## Rules
 
 - Never ask the person to paste a token, password or key into the conversation, and never put

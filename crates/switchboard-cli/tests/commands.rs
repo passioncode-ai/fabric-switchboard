@@ -1271,6 +1271,109 @@ fn onboard_prints_the_guide_and_reads_the_setup_without_creating_storage() {
     assert!(!output.status.success());
 }
 #[test]
+fn onboard_lists_an_organizations_group_seat_and_hook() {
+    // SB-202 (B-3): with an organization, `onboard --status` reads its group, its seats, the
+    // terminal hook (`shell status`) and the recorded contexts after the five steps.
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let folder = work.path().canonicalize().unwrap().join("acme");
+    std::fs::create_dir_all(&folder).unwrap();
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env_remove("CODEX_HOME")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let folder_text = folder.to_str().unwrap();
+    let onboard = || {
+        run(&[
+            "onboard",
+            "--status",
+            "--host",
+            "claude",
+            "--folder",
+            folder_text,
+        ])
+    };
+    let ids = |answer: &serde_json::Value| -> Vec<String> {
+        answer["data"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let saved = run(&[
+        "project",
+        "save",
+        "--name",
+        "Acme work",
+        "--folder",
+        folder_text,
+    ]);
+    let pool = saved["data"]["pool"].as_str().unwrap().to_owned();
+    // A group and no organization: today's five steps.
+    assert_eq!(ids(&onboard()).len(), 5);
+    run(&["org", "add", "Acme", "--domain", "acme.com"]);
+    run(&["project", "edit", "--pool", &pool, "--organization", "Acme"]);
+    let answer = onboard();
+    assert_eq!(
+        ids(&answer),
+        [
+            "owner",
+            "accounts",
+            "project",
+            "mcp",
+            "proving_call",
+            "organization",
+            "org_group",
+            "seat",
+            "hook",
+            "launch"
+        ]
+    );
+    let step = |id: &str| {
+        answer["data"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(step("org_group")["state"], "done");
+    assert_eq!(step("org_group")["organization"]["name"], "Acme");
+    let seat = step("seat");
+    assert_eq!(seat["state"], "needs_person");
+    assert!(seat["next"]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with(&format!("login begin --provider claude --pool {pool}")));
+    // No owner has written the folder map: the hook reads as not on yet, from `shell status`.
+    let hook = step("hook");
+    assert_eq!(hook["state"], "optional");
+    assert!(hook["next"]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("shell status"));
+    assert_eq!(step("launch")["state"], "optional");
+    assert_eq!(answer["data"]["complete"], false);
+}
+#[test]
 fn project_bindings_are_listed_offline() {
     // SB-118 REQ-5: `switchboard project bindings` lists the bound folders; the record's
     // digest stays in the record.
