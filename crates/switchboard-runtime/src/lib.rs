@@ -4865,6 +4865,18 @@ mod owner_tests {
             )
             .unwrap();
         }
+        // SB-201: an agent launched on the OpenRouter key: no account, its model as its label.
+        let agent = root.path().join("runtimes").join("agent-goose-openrouter");
+        std::fs::create_dir_all(&agent).unwrap();
+        std::fs::write(
+            agent.join(launch::SESSION_RECORD),
+            json!({"account_id": "goose", "provider": "goose", "pool": "openrouter",
+                "context": format!("org:{}", acme.id), "mode": "isolated",
+                "working_directory": "/w", "in_place": false, "launched_at": 2,
+                "continues": null, "label": "moonshotai/kimi-k2"})
+            .to_string(),
+        )
+        .unwrap();
         let listed = runtime
             .execute(Operation::Sessions { all: true })
             .await
@@ -4881,6 +4893,9 @@ mod owner_tests {
         assert_eq!(by("one")["context_name"], "Acme");
         assert_eq!(by("two")["context"], "personal");
         assert!(by("two")["context_name"].is_null());
+        assert_eq!(by("goose")["provider"], "goose");
+        assert_eq!(by("goose")["label"], "moonshotai/kimi-k2");
+        assert_eq!(by("goose")["context_name"], "Acme");
     }
     /// SB-180: `suggest_found` held the owner transaction while every found folder was saved on
     /// its own, each save publishing `accounts.json` and syncing the bindings. One pass's folders
