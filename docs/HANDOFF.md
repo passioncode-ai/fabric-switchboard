@@ -20,10 +20,17 @@
 - **Verification.** Three blind tiers (round 1: unit, seam, product), one adversarial round (15 plants, 10 caught; the
   5 survivors and two real defects fixed in round 2), round 3 clean. `./scripts/check.sh` exit 0 on `4790697`.
 - **Rows.** SB-206 to SB-210 filed from the rounds; SB-184 now waits for OBS-236 (Observatory 0.31.0, 2026-11-14).
-- **Exact next task.** Merge the release PR, tag `v0.6.83`, watch the release run, confirm `latest.json` and the
-  installed app, update the plugin, then measure `control_slow` on the installed 0.6.83 for a day (SB-174), reply on
-  board threads `3f0ec524` (Dashboards: SB-204/205 shipped, `reason` to show) and `24483d65` (integration: 0.6.83
-  shipped), and prepare the operator's acceptance checklist (SB-159, SB-178) for their signal.
+- **Published.** PR #313 squash-merged as `1de6648`; tag `v0.6.83`; release run 40245506270 all green (guard,
+  macOS, Linux x64 and arm64, Windows x64 and arm64, updater, publish); 25 assets; `latest.json` 0.6.83 at 00:45 UTC
+  for seven platforms. Plugin `switchboard@switchboard` updated 0.6.82 to 0.6.83 locally; its `hooks.json` is
+  byte-identical to the repository's (StopFailure, Stop, SessionStart). Board: Dashboards answered on `3f0ec524`
+  (`eb9543a8`, asks to show `reason`), integration report 2 on `24483d65` (`4d601edd`: SB-02 within 3 working days
+  of a Windows host, the PowerShell hook in 0.7.0, SB-167 at "7 days after OBS-191"). Acceptance checklist:
+  [reports/2026-10-26-operator-acceptance](reports/2026-10-26-operator-acceptance/README.md) (#314).
+- **Exact next task.** Measure `control_slow`, `vault_slow` and `transaction_held` on the installed 0.6.83 after 24
+  hours (SB-174, checklist §3); meanwhile start the 0.7.0 «first organization» iteration through
+  `/task-pipeline iteration`, scenarios first through super-ux (SB-183 shell hook with PowerShell, SB-202 first run
+  and runbook, SB-71 chains screen and SB-72 ceilings, SB-201, SB-160, SB-125), target 2026-11-14.
 
 ## 2026-10-25: audit of all open work, the plan to a first organization, decisions D-1 to D-8
 
