@@ -313,18 +313,26 @@ pub fn steps(probe: &Probe) -> Value {
 /// through copywriting and Copylot in wave 4.
 fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
     let degraded = |code: &str| probe.degraded.iter().any(|d| d == code);
+    // A read that lost every organization (a newer owner's field on each, round 2 of B-3) is
+    // said as plainly as no read at all, and keeps the checklist from reading complete.
+    let unread = || {
+        vec![step(
+            "organization",
+            "todo",
+            "Switchboard's saved settings could not be read, so the organization steps are missing. Update this Switchboard to the version that runs, then ask again.".into(),
+            Value::Null,
+        )]
+    };
     let Some(snapshot) = &probe.snapshot else {
         return if degraded("snapshot") {
-            vec![step(
-                "organization",
-                "optional",
-                "Switchboard's saved settings could not be read, so the organization steps are missing.".into(),
-                Value::Null,
-            )]
+            unread()
         } else {
             Vec::new()
         };
     };
+    if snapshot.organizations.is_empty() && degraded("snapshot") {
+        return unread();
+    }
     if snapshot.organizations.is_empty() {
         return if probe.passioncode {
             vec![step(
@@ -345,7 +353,7 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
         .collect::<Vec<_>>()
         .join(", ");
     let partial = if degraded("snapshot") {
-        " Part of Switchboard's saved settings could not be read, so a step below may be missing."
+        " Part of Switchboard's saved settings could not be read, so a step below may be wrong or missing."
     } else {
         ""
     };
@@ -1086,7 +1094,7 @@ mod tests {
         let organization = by_id(&answer, "organization");
         assert_eq!(
             organization["summary"],
-            "Organizations on this computer: Acme. Part of Switchboard's saved settings could not be read, so a step below may be missing."
+            "Organizations on this computer: Acme. Part of Switchboard's saved settings could not be read, so a step below may be wrong or missing."
         );
         assert_eq!(by_id(&answer, "seat")["state"], "needs_person");
 
@@ -1097,12 +1105,27 @@ mod tests {
         probe.snapshot = None;
         probe.degraded = vec!["snapshot".into()];
         let answer = steps(&probe);
+        let unread = "Switchboard's saved settings could not be read, so the organization steps are missing. Update this Switchboard to the version that runs, then ask again.";
         let organization = by_id(&answer, "organization");
-        assert_eq!(organization["state"], "optional");
-        assert_eq!(
-            organization["summary"],
-            "Switchboard's saved settings could not be read, so the organization steps are missing."
-        );
+        assert_eq!(organization["state"], "todo");
+        assert_eq!(organization["summary"], unread);
+        assert_eq!(answer["complete"], false);
+
+        // Round 2: a newer field on the organization itself drops every organization; the
+        // checklist says so instead of reading as a computer with none.
+        let mut value = serde_json::to_value(acme().snapshot.as_ref().unwrap()).unwrap();
+        value["organizations"][0]["a_newer_organization_field"] = json!(true);
+        let (read, degraded) = read_snapshot(&value);
+        assert!(degraded);
+        assert!(read.as_ref().unwrap().organizations.is_empty());
+        let mut probe = acme();
+        probe.snapshot = read;
+        probe.degraded = vec!["snapshot".into()];
+        probe.passioncode = true;
+        let answer = steps(&probe);
+        assert_eq!(answer["degraded"], json!(["snapshot"]));
+        assert_eq!(by_id(&answer, "organization")["summary"], unread);
+        assert_eq!(answer["complete"], false);
     }
 
     #[test]

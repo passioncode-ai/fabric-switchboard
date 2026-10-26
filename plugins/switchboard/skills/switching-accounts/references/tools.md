@@ -100,7 +100,7 @@ Those five are all on a computer without organizations, plus one optional `organ
 when PassionCode.ai is connected and lists none. With organizations, `organization` follows,
 then `org_group`, `seat`, `hook` and `launch` for each, each carrying `organization: {id, name}`.
 `state` is `done`, `todo` (run `next.command`, or call `next.tool`), `needs_person` (tell
-the person `next.person`; run `next.command` or one of `next.alternatives` once they agree) or
+the person `next.person`; run `next.command`, or `next.alternatives` in order (save the group, then bind it; the bind alone when a group for those folders already exists), once they agree) or
 `optional`. `next.turn_on` and `next.turn_off` (the `hook` step) are the person's switches: run
 one only when the person asks. `degraded` names reads that failed (`snapshot`, `sign_ins`,
 `sessions`); the step each touches says so. Reads only; the same as
