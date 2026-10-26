@@ -2,6 +2,26 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-26 (later): iteration 0.7.0 «first organization» in progress, waves 1 and 2 merged
+
+- **Where.** Branch `iteration/0.7.0` (not on `main` yet); the run's record is
+  `docs/runs/2026-10-26-iteration-0.7.0/` on that branch: `canvas.md` (dossiers A, B, C, waves, node state, rounds),
+  `questions.md` (A-Q1 to A-Q8, B-Q1 to B-Q6, C-Q1 to C-Q7: assumed, closed, or queued with fabric-workspace as Q-I).
+- **Done.** Wave 1: scenarios SCN-074 to SCN-084, SCR-03, FLW-04/05 (`d4fef33`), the shell home measurement A-0
+  (`bfee6c4`). Wave 2, merged at `1cd483b` and green (fmt, clippy, 587 runtime tests, CLI, core, typecheck, docs):
+  A-1/A-5 shell map and the person's folders, A-10/A-11/B-2 contexts for every agent and organization queries,
+  B-5 an ended seat (R3, two rounds, adversarial), C-8/C-4/C-2 chains by checkout, spending ceilings, readiness
+  (C-4 R3, two rounds, adversarial).
+- **Release gate.** Fabric Dashboards reads the new `agent` field of sessions (adopted in its 0.8.6, board
+  `c8e089bb`; confirm it is published before 0.7.0 ships).
+- **Constraint.** The MacBook's disk fell to 0.2 to 6 GB free several times: one builder at a time,
+  `CARGO_INCREMENTAL=0`, debug info off, the target dir deleted between builders; a green run counts only when its
+  output names the node's tests.
+- **Exact next task.** Wave 3 on `iteration/0.7.0`, one builder at a time: A-4 (shell homes and the map writer),
+  A-2 (hook scripts, R3), A-3 (rc installer, default on, R3); then B-3 (onboard steps) and B-4 (sign-in receipt);
+  then C-5 (the spend gate at hand-over, R3) and C-6 (CLI and MCP ceilings, R3). Each node: TDD, blind rounds by risk
+  class, merge, then the merged gate.
+
 ## 2026-10-26: 0.6.83 hotfix (H-1 owner stalls, limit stops settled, one update restart in 6 hours)
 
 - **Objective.** The 0.6.83 hotfix of the 2026-10-25 plan ([report](reports/2026-10-25-audit-and-plan/README.md) §3A)
