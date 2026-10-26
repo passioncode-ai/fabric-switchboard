@@ -605,6 +605,9 @@ pub(crate) struct NativeSources {
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
     /// SB-143: Codex's own `config.toml`; None for a synthetic owner, which never writes it.
     pub(crate) codex_config: fn() -> Option<PathBuf>,
+    /// SB-183: what an organization's shell home carries of the person's (their folders and
+    /// board server); nothing for a synthetic owner.
+    pub(crate) shell: shell::homes::Sources,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -625,6 +628,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_signature: || None,
     transcripts: |_| Vec::new(),
     codex_config: || None,
+    shell: shell::homes::NO_SOURCES,
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -644,6 +648,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
     codex_config: codex_route::config_path,
+    shell: shell::homes::NATIVE,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
@@ -677,6 +682,12 @@ pub struct Runtime {
     kimi_watch: kimi::KimiWatch,
     /// Provider not-before per account, and one quota request per account at a time (SB-39).
     usage_gate: usage_gate::UsageGate,
+    /// SB-183: the person's home for the terminal hook's start files; set only by the installed
+    /// app (`enable_shell_hook`), so a test, `serve` or a development build never writes one.
+    shell_hook: Mutex<Option<shell::install::Host>>,
+    /// Whether a group bound to an organization existed at the last look, for the hook's
+    /// default (written when the first appears, taken out when the last leaves).
+    shell_present: Mutex<Option<bool>>,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
     backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
     backup_folder: Mutex<Option<PathBuf>>,
@@ -821,6 +832,8 @@ impl Runtime {
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
             usage_gate,
+            shell_hook: Mutex::new(None),
+            shell_present: Mutex::new(None),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
@@ -1001,6 +1014,9 @@ impl Runtime {
                     read_pool_salts(&self.root).into_iter().collect();
                 salts.sort();
                 salts.hash(&mut h);
+                // SB-183: the organizations' shell homes and the folder map follow the groups'
+                // organizations and Codex accounts too.
+                shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
                 key = h.finish();
             }
             key
@@ -1026,6 +1042,46 @@ impl Runtime {
                     Ok(mut last) => binding_changed(&report, &mut last),
                     Err(_) => true,
                 };
+                // SB-183: the organizations' shell homes and the terminal hook's folder map.
+                // A refusal is a code in the log, never an answer to anyone's request.
+                let shell = blocking::run(|| {
+                    shell::homes::sync(
+                        &self.root,
+                        &snapshot,
+                        &report.bound_folders,
+                        &address,
+                        &self.proxy.auto_capability(),
+                        &self.native.shell,
+                    )
+                });
+                if shell.homes_written > 0
+                    || shell.map_written
+                    || shell.failed > 0
+                    || shell.map_refused
+                {
+                    oplog::event(
+                        "shell_homes",
+                        &[
+                            ("rows", oplog::Field::Number(shell.rows as i64)),
+                            (
+                                "homes_written",
+                                oplog::Field::Number(shell.homes_written as i64),
+                            ),
+                            ("failed", oplog::Field::Number(shell.failed as i64)),
+                            (
+                                "map",
+                                oplog::Field::Code(if shell.map_refused {
+                                    "refused"
+                                } else if shell.map_written {
+                                    "written"
+                                } else {
+                                    "unchanged"
+                                }),
+                            ),
+                        ],
+                    );
+                }
+                self.shell_hook_follow(shell::homes::organizations_present(&snapshot));
                 if changed {
                     oplog::event(
                         "claude_binding",
@@ -1607,6 +1663,110 @@ impl Runtime {
     /// Starts analytics for the desktop app (docs/ANALYTICS.md): a release build (it carries
     /// the App Key) owning the real data folder. `launch` is `ordinary` or `background`. Until
     /// the person has answered the switch in this app, the start is held and nothing is sent.
+    /// SB-183 (node A-3): the installed app's owner writes the terminal hook's start-file
+    /// blocks. Only for the app's own data folder; the app calls it only from an installed
+    /// build (never a development build or the smoke check), and `serve` never does.
+    /// The app must also run from `/Applications` or `~/Applications` on macOS: a bundle opened
+    /// from a download or build folder (or translocated) is not installed.
+    pub fn enable_shell_hook(self: &Arc<Self>) {
+        self.enable_shell_hook_when(
+            || {
+                std::env::current_exe()
+                    .and_then(|exe| exe.canonicalize())
+                    .is_ok_and(|exe| {
+                        shell::install::installed_app(&exe, dirs::home_dir().as_deref())
+                    })
+            },
+            || shell::install::Host::process(shell::install::hook_cli()),
+        );
+    }
+    /// `enable_shell_hook` with the installed check and the person's home given: the data
+    /// folder is checked first, then `installed`, and only then is `host` asked for.
+    pub(crate) fn enable_shell_hook_when(
+        &self,
+        installed: impl FnOnce() -> bool,
+        host: impl FnOnce() -> Option<shell::install::Host>,
+    ) {
+        if !shell::install::is_default_root(&self.root) {
+            return;
+        }
+        if !installed() {
+            return;
+        }
+        if let Some(host) = host() {
+            self.enable_shell_hook_with(host);
+        }
+    }
+    pub(crate) fn enable_shell_hook_with(&self, host: shell::install::Host) {
+        if let Ok(mut slot) = self.shell_hook.lock() {
+            *slot = Some(host);
+        }
+        let present = self
+            .store
+            .snapshot()
+            .is_ok_and(|s| shell::homes::organizations_present(&s));
+        self.shell_hook_apply(present);
+    }
+    /// The first-time notice: `{organization, group}` of the organization's group whose
+    /// presence wrote the first block, kept in `shell-hook.json` until the window acknowledges
+    /// it (a restart in between keeps it). The window shows it (node A-7).
+    pub fn shell_hook_notice(&self) -> Option<Value> {
+        shell::install::pending_notice(&self.root)
+            .map(|n| json!({"organization": n.organization, "group": n.group}))
+    }
+    /// The window showed the first-time notice: it is never shown again.
+    pub fn acknowledge_shell_hook_notice(&self) {
+        let root = self.root.clone();
+        blocking::run(move || shell::install::acknowledge_notice(&root));
+    }
+    /// Runs the start-file installer when the presence of an organization's group is new or
+    /// flipped; never on an idle pass, never without the installed app's home.
+    fn shell_hook_follow(&self, present: bool) {
+        let changed = match self.shell_present.lock() {
+            Ok(last) => *last != Some(present),
+            Err(_) => false,
+        };
+        if changed {
+            self.shell_hook_apply(present);
+        }
+    }
+    fn shell_hook_apply(&self, present: bool) {
+        if let Ok(mut last) = self.shell_present.lock() {
+            *last = Some(present);
+        }
+        let Some(host) = self.shell_hook.lock().ok().and_then(|h| h.clone()) else {
+            return;
+        };
+        let report = blocking::run(|| shell::install::apply(&self.root, &host, present, false));
+        oplog::event(
+            "shell_hook",
+            &[
+                ("wanted", oplog::Field::Flag(report.wanted)),
+                ("written", oplog::Field::Number(report.written as i64)),
+                ("removed", oplog::Field::Number(report.removed as i64)),
+                ("skipped", oplog::Field::Number(report.skipped as i64)),
+                ("changed", oplog::Field::Number(report.changed as i64)),
+                ("no_hook", oplog::Field::Flag(report.no_hook)),
+            ],
+        );
+        if report.first_written && shell::map::choice(&self.root) == shell::map::Choice::Default {
+            let notice = self.store.snapshot().ok().and_then(|s| {
+                let group = s.projects.iter().find(|p| {
+                    p.organization
+                        .as_deref()
+                        .is_some_and(|o| s.organization(o).is_some())
+                })?;
+                let organization = s.organization(group.organization.as_deref()?)?;
+                Some(shell::install::Notice {
+                    organization: organization.name.clone(),
+                    group: group.name.clone(),
+                })
+            });
+            if let Some(notice) = notice {
+                blocking::run(|| shell::install::set_notice(&self.root, notice));
+            }
+        }
+    }
     pub fn enable_analytics(self: &Arc<Self>, launch: &str) {
         let (Some(key), Some(shared)) = (analytics::APP_KEY, analytics::shared_folder()) else {
             return;
@@ -5843,6 +6003,232 @@ mod owner_tests {
         drop(held);
     }
 
+    /// SB-183 (node A-3): only an owner the installed app enabled with a home writes start
+    /// files. A test or development owner (any owner over a data folder that is not the app's
+    /// own) never gets one, whatever groups it holds.
+    #[tokio::test]
+    async fn no_test_or_dev_build_touches_the_real_home() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let (work, acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        // The installed app's call, on a data folder that is not the app's own: refused.
+        runtime.enable_shell_hook();
+        runtime.bindings_pass().await;
+        assert!(!shell::install::record_path(root.path()).exists());
+        assert!(runtime.shell_hook_notice().is_none());
+        drop(work);
+    }
+
+    /// SB-183 (node A-3): the data-folder guard holds on its own. Even when the app counts as
+    /// installed and a home is at hand, an owner over a data folder that is not the app's own
+    /// writes no start file and no record.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_installed_app_over_another_data_folder_writes_no_start_file() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let (work, acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        runtime.enable_shell_hook_when(
+            || {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                true
+            },
+            || Some(host),
+        );
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        assert!(!shell::install::record_path(root.path()).exists());
+        assert!(runtime.shell_hook_notice().is_none());
+        // The installed check is not even consulted: the data folder decides first.
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
+        drop(work);
+    }
+
+    /// SB-183 (node A-3): the installed owner writes the block at start when an organization's
+    /// group exists, says so once, takes the default block out when the last one leaves, and
+    /// writes it again when one comes back, all in an injected home.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_installed_owner_follows_the_presence_of_an_organization_group() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        // No organization yet: enabled, nothing written.
+        runtime.enable_shell_hook_with(host);
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        assert!(runtime.shell_hook_notice().is_none());
+        // The first organization's group appears: the next pass writes the block, once.
+        let (work, _acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        let text = std::fs::read_to_string(&zshrc).unwrap();
+        assert!(text.contains(shell::install::OPEN), "{text}");
+        let notice = runtime.shell_hook_notice().expect("the first-time notice");
+        assert_eq!(notice["organization"], "Acme");
+        assert_eq!(notice["group"], "Acme");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none(), "only once");
+        // Idle passes do not touch the file.
+        std::fs::write(&zshrc, &text).unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), text);
+        // The group turns personal: the default block goes.
+        let pool = runtime.store.snapshot().unwrap().projects[0].pool.clone();
+        let account = runtime.store.snapshot().unwrap().accounts[0].id.clone();
+        runtime
+            .store
+            .assign_organization(&account, Some("personal"))
+            .unwrap();
+        runtime.store.set_project_organization(&pool, None).unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        // The person turns it off; an organization coming back writes nothing.
+        shell::install::set_choice(root.path(), false).unwrap();
+        let org = runtime.store.snapshot().unwrap().organizations[0]
+            .id
+            .clone();
+        runtime
+            .store
+            .assign_organization(&account, Some(&org))
+            .unwrap();
+        runtime
+            .store
+            .set_project_organization(&pool, Some(&org))
+            .unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        drop(work);
+    }
+
+    /// A group bound to the organization "Acme" with one Claude account and one folder.
+    pub(crate) async fn organization_group(runtime: &Runtime) -> (tempfile::TempDir, PathBuf) {
+        let work = tempfile::tempdir().unwrap();
+        let acme = work.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .store
+            .assign_organization(&one, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
+        (work, acme)
+    }
+
+    /// SB-183 (node A-4): the bindings pass writes an organization's shell homes and the folder
+    /// map, and a pass whose fingerprint did not move writes nothing: a file taken away is not
+    /// written back until something changes. A synthetic owner carries nothing of the real home.
+    #[tokio::test]
+    async fn an_idle_pass_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .store
+            .assign_organization(&one, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        let map_file = shell::map::path(root.path());
+        let found = shell::map::answer(root.path(), &acme).expect("a row for the folder");
+        assert_eq!(found.context, format!("org:{}", org.id));
+        let home = found.claude_home.clone().unwrap();
+        let settings = home.join("settings.json");
+        assert!(settings.is_file());
+        // Nothing of the real person's folder in a synthetic owner's home.
+        assert!(!home.join("CLAUDE.md").exists());
+        // Idle: the files taken away stay away.
+        let written = std::fs::read(&map_file).unwrap();
+        std::fs::remove_file(&map_file).unwrap();
+        std::fs::remove_file(&settings).unwrap();
+        for _ in 0..5 {
+            runtime.bindings_pass().await;
+        }
+        assert!(!map_file.exists(), "an idle pass wrote the map");
+        assert!(!settings.exists(), "an idle pass wrote a shell home");
+        // A change (the group turns personal) is written: the map loses its row, the home stays.
+        std::fs::write(&map_file, &written).unwrap();
+        let pool = found.pool.clone();
+        runtime
+            .store
+            .set_project_organization(&pool, None)
+            .unwrap_err();
+        runtime
+            .store
+            .assign_organization(
+                &runtime.store.snapshot().unwrap().accounts[0].id,
+                Some("personal"),
+            )
+            .unwrap();
+        runtime.store.set_project_organization(&pool, None).unwrap();
+        runtime.bindings_pass().await;
+        assert_ne!(
+            std::fs::read(&map_file).unwrap(),
+            written,
+            "the map was rewritten"
+        );
+        assert!(shell::map::answer(root.path(), &acme).is_none());
+        assert!(home.is_dir(), "the organization's history stays");
+    }
+
     #[tokio::test]
     async fn a_folder_moved_out_of_its_project_cannot_spend_the_projects_accounts() {
         // SB-133: a renamed project folder kept the project's route and capability in its
@@ -7861,6 +8247,52 @@ mod lifecycle_tests {
             .await
             .unwrap()
             .status()
+    }
+
+    /// SB-183 (node A-3): the first-time notice waits for the window, across a restart of the
+    /// owner, and is gone once the window acknowledged it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_first_time_notice_waits_for_the_window_across_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        let first = owner(root.path()).await;
+        first.runtime.enable_shell_hook_with(host.clone());
+        let (work, _acme) = super::owner_tests::organization_group(&first.runtime).await;
+        first.runtime.bindings_pass().await;
+        assert!(first.runtime.shell_hook_notice().is_some());
+        first.shutdown(Duration::from_secs(5)).await;
+        // The app restarted before the window showed it.
+        let second = owner(root.path()).await;
+        let runtime = &second.runtime;
+        let notice = runtime
+            .shell_hook_notice()
+            .expect("the notice is still waiting after a restart");
+        assert_eq!(notice["organization"], "Acme");
+        assert_eq!(notice["group"], "Acme");
+        assert!(runtime.shell_hook_notice().is_some(), "until acknowledged");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none());
+        second.shutdown(Duration::from_secs(5)).await;
+        let third = owner(root.path()).await;
+        third.runtime.enable_shell_hook_with(host);
+        third.runtime.bindings_pass().await;
+        assert!(third.runtime.shell_hook_notice().is_none(), "said once");
+        third.shutdown(Duration::from_secs(5)).await;
+        drop(work);
     }
 
     #[tokio::test]

@@ -218,7 +218,8 @@ impl Answer {
 }
 
 /// What applies in `dir`, or None: the hook turned off, the map missing, unreadable or of an
-/// unknown version, the folder in no organization's group, or a row with neither home.
+/// unknown version, the folder in no organization's group, or a row with neither home there
+/// (the Claude home is answered in a row's own folder only, the Codex home anywhere inside it).
 pub fn answer(root: &Path, dir: &Path) -> Option<Answer> {
     answer_in(root, dir, &read(root))
 }
@@ -230,10 +231,15 @@ fn answer_in(root: &Path, dir: &Path, loaded: &Loaded) -> Option<Answer> {
         return None;
     };
     let row = map.lookup(dir)?;
+    // Claude Code reads Switchboard's route only from `.claude/settings.local.json` in the folder
+    // it starts in (measured, docs/evidence/shell-home-measurement-2026-10.md): below the bound
+    // folder the home's placeholder would reach the provider, so no Claude home there.
+    let at_folder =
+        dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()) == Path::new(&row.folder);
     let answer = Answer {
         pool: row.pool.clone(),
         context: row.context.clone(),
-        claude_home: row.claude.then(|| claude_home(root, &row.pool)),
+        claude_home: (row.claude && at_folder).then(|| claude_home(root, &row.pool)),
         codex_home: row.codex.then(|| codex_home(root, &row.pool)),
     };
     (answer.claude_home.is_some() || answer.codex_home.is_some()).then_some(answer)
@@ -354,9 +360,11 @@ mod tests {
             },
         )
         .unwrap();
-        // A subfolder of the group's folder: the group's Claude home, no Codex home.
+        // The group's folder: the group's Claude home, no Codex home. (A subfolder of a group
+        // with only Claude answers nothing: `the_claude_home_is_answered_in_the_bound_folder_itself_only`.)
         let inside = acme.join("app").join("src");
-        let found = answer(root, &inside).unwrap();
+        assert_eq!(answer(root, &inside), None);
+        let found = answer(root, &acme).unwrap();
         assert_eq!(found.pool, "acme");
         assert_eq!(found.context, "org:o-acme");
         assert_eq!(
@@ -389,7 +397,7 @@ mod tests {
         {
             let link = work.join("link-to-acme");
             std::os::unix::fs::symlink(&acme, &link).unwrap();
-            assert_eq!(answer(root, &link.join("vendor")).unwrap().pool, "acme");
+            assert_eq!(answer(root, &link).unwrap().pool, "acme");
         }
         // A sibling whose name starts the same is not inside; neither is the parent.
         assert_eq!(answer(root, &work.join("acme-other")), None);
@@ -413,6 +421,60 @@ mod tests {
             },
         );
         assert_eq!(answer(root, &inside), None);
+    }
+
+    /// Claude Code 2.1.299 reads Switchboard's route only from `.claude/settings.local.json` in
+    /// the folder it starts in, git repository or not (`docs/evidence/shell-home-measurement-2026-10.md`):
+    /// below the bound folder the shell home's placeholder would reach the provider. So the Claude
+    /// home is answered in the bound folder itself only; the Codex home everywhere inside.
+    #[test]
+    fn the_claude_home_is_answered_in_the_bound_folder_itself_only() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().canonicalize().unwrap();
+        let (acme, globex) = (work.join("acme"), work.join("globex"));
+        for dir in [&acme.join("src"), &globex.join("src")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![
+                    row(&s(&acme), "acme", "org:o-acme", true, false),
+                    row(&s(&globex), "globex", "org:o-globex", true, true),
+                ],
+            },
+        )
+        .unwrap();
+        let claude = root.join("shell").join("claude-acme");
+        assert_eq!(answer(root, &acme).unwrap().claude_home, Some(claude));
+        // Below it, a Claude-only group has nothing to export: `none`.
+        assert_eq!(answer(root, &acme.join("src")), None);
+        assert_eq!(env_line(root, &acme.join("src")), NONE);
+        // A group with Codex: its context and Codex home, `-` for Claude.
+        let below = answer(root, &globex.join("src")).unwrap();
+        assert_eq!(below.claude_home, None);
+        assert_eq!(
+            below.codex_home,
+            Some(root.join("shell").join("codex-globex"))
+        );
+        assert_eq!(
+            below.line(),
+            format!(
+                "globex\torg:o-globex\t-\t{}",
+                s(&root.join("shell/codex-globex"))
+            )
+        );
+        // The folder itself through a link is the folder itself.
+        #[cfg(unix)]
+        {
+            let link = work.join("link-to-acme");
+            std::os::unix::fs::symlink(&acme, &link).unwrap();
+            assert!(answer(root, &link).unwrap().claude_home.is_some());
+        }
     }
 
     /// A map as it lands on disk, bypassing `write`'s checks (an older or hand-edited file).
@@ -460,7 +522,7 @@ mod tests {
                 rows: vec![one("acme"), one("globex"), one("initech")],
             },
         );
-        assert_eq!(answer(root, &acme.join("src")).unwrap().pool, "acme");
+        assert_eq!(answer(root, &acme).unwrap().pool, "acme");
     }
 
     #[test]
@@ -541,8 +603,9 @@ mod tests {
         let link = work.join("link");
         std::os::unix::fs::symlink(&acme, &link).unwrap();
         let s = |p: &Path| p.to_string_lossy().into_owned();
-        let linked = row(&s(&link), "linked", "org:o-linked", true, false);
-        let real = row(&s(&acme), "acme", "org:o-acme", true, false);
+        // Both homes, so a subfolder answers (its Codex home) and the match itself is seen.
+        let linked = row(&s(&link), "linked", "org:o-linked", true, true);
+        let real = row(&s(&acme), "acme", "org:o-acme", true, true);
         for rows in [
             vec![real.clone(), linked.clone()],
             vec![linked.clone(), real.clone()],

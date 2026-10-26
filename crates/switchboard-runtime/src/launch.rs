@@ -60,9 +60,28 @@ pub fn agent_cli() -> Option<PathBuf> {
     if current.file_name().is_some_and(|n| n == CLI_NAME) {
         return Some(current);
     }
+    cli_candidates(&current)
+        .into_iter()
+        .filter(|p| p.is_absolute() && p.is_file())
+        .find_map(|p| p.canonicalize().ok())
+}
+/// An installed CLI other than `current` (a development build): beside the desktop executable,
+/// on the user's PATH or in `~/.local/bin`, found as [`agent_cli`] finds one.
+pub(crate) fn installed_cli(current: &Path) -> Option<PathBuf> {
+    cli_candidates(current)
+        .into_iter()
+        .filter(|p| p.is_absolute() && p.is_file())
+        .filter_map(|p| p.canonicalize().ok())
+        .find(|p| p != current)
+}
+fn cli_candidates(current: &Path) -> Vec<PathBuf> {
     // Never a translocated copy beside a desktop app opened from its download folder: an MCP
     // entry pointing into it breaks once the app quits.
-    let mut candidates = vec![current.parent()?.join(CLI_NAME)];
+    let mut candidates: Vec<PathBuf> = current
+        .parent()
+        .map(|dir| dir.join(CLI_NAME))
+        .into_iter()
+        .collect();
     candidates.retain(|p| !crate::agents::translocated(p));
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(CLI_NAME)));
@@ -71,9 +90,6 @@ pub fn agent_cli() -> Option<PathBuf> {
         candidates.push(PathBuf::from(home).join(".local/bin").join(CLI_NAME));
     }
     candidates
-        .into_iter()
-        .filter(|p| p.is_absolute() && p.is_file())
-        .find_map(|p| p.canonicalize().ok())
 }
 /// What a launched session needs to reach Switchboard's tools: Claude reads an extra MCP
 /// file named on its command line; Codex reads `[mcp_servers]` from its private config.
@@ -229,7 +245,7 @@ fn user_board_server(
         .then_some(McpServer { command, args })
 }
 /// The board server of this machine's operator, read from their real user scope.
-fn board_server(provider: Provider) -> Option<McpServer> {
+pub(crate) fn board_server(provider: Provider) -> Option<McpServer> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
     let codex_home = crate::person::codex_home();
     user_board_server(provider, Path::new(&home), codex_home.as_deref())
@@ -582,17 +598,22 @@ pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
     start_terminal(&write_launch_script(home, content)?)
 }
 /// After the proxy had to move from `old` to `new` (its port was taken), points the files
-/// Switchboard generated in managed homes — launch scripts and Codex's provider config — at
-/// the new port. Only the exact loopback address is replaced; nothing else is touched.
-/// Returns how many files changed.
+/// Switchboard generated in managed homes (launch scripts and Codex's provider config) and in
+/// the organizations' Codex shell homes (SB-183) at the new port, before the first bindings pass
+/// rewrites the shell homes anyway. Only the exact loopback address is replaced; nothing else is
+/// touched. Returns how many files changed.
 pub(crate) fn repoint_managed(root: &Path, old: u16, new: u16) -> usize {
     let from = format!("http://127.0.0.1:{old}/");
     let to = format!("http://127.0.0.1:{new}/");
-    let Ok(homes) = fs::read_dir(root.join("runtimes")) else {
-        return 0;
-    };
+    let homes = ["runtimes", crate::shell::map::DIR]
+        .iter()
+        .filter_map(|dir| fs::read_dir(root.join(dir)).ok())
+        .flat_map(|entries| entries.flatten());
     let mut changed = 0;
-    for home in homes.flatten() {
+    for home in homes {
+        if !home.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
         for (name, executable) in [
             ("launch.command", true),
             ("launch.ps1", true),

@@ -39,16 +39,17 @@ for _ in $(seq 50); do [ -s "$port_file" ] && break; sleep 0.1; done
 port=$(cat "$port_file"); base="http://127.0.0.1:$port"
 base_env=(PATH="$PATH" TERM=dumb LANG=en_US.UTF-8)
 
-claude_case() { # name, put-placeholder-in-home (yes/no)
-  local name=$1 placeholder=$2 home="$work/$1-home" folder="$work/$1-folder"
-  mkdir -p "$home" "$folder/.claude"
+claude_case() { # name, put-placeholder-in-home (yes/no), [subfolder to run in], [git: yes/no]
+  local name=$1 placeholder=$2 sub=${3-} git=${4-no} home="$work/$1-home" folder="$work/$1-folder"
+  mkdir -p "$home" "$folder/.claude" "$folder/${sub:-.}"
+  if [ "$git" = yes ]; then git -C "$folder" init -q; fi
   if [ "$placeholder" = yes ]; then
     printf '{"env":{"ANTHROPIC_AUTH_TOKEN":"switchboard-shell"}}\n' > "$home/settings.json"
   fi
   printf '{"env":{"ANTHROPIC_BASE_URL":"%s","ANTHROPIC_CUSTOM_HEADERS":"X-Switchboard-Capability: test-capability"}}\n' \
     "$base" > "$folder/.claude/settings.local.json"
   : > "$log"
-  local out; out=$(cd "$folder" && env -i "${base_env[@]}" HOME="$work/$1-user" CLAUDE_CONFIG_DIR="$home" \
+  local out; out=$(cd "$folder/${sub:-.}" && env -i "${base_env[@]}" HOME="$work/$1-user" CLAUDE_CONFIG_DIR="$home" \
     perl -e "alarm 90; exec @ARGV" claude -p "hi" </dev/null 2>&1 | head -3 | tr '\n' ' ' | cut -c1-160) || true
   echo "claude/$name: requests=$(wc -l < "$log" | tr -d ' ') first=$(head -1 "$log" 2>/dev/null) output=\"$out\""
 }
@@ -73,5 +74,8 @@ TOML
 echo "claude $(claude --version 2>/dev/null | head -1); codex $(codex --version 2>/dev/null | head -1)"
 claude_case placeholder yes
 claude_case no-placeholder no
+# Below the bound folder (fix cycle 1 of A-2/A-3/A-4): the route sits in <folder>/.claude only.
+claude_case subfolder yes src no
+claude_case subfolder-git yes src yes
 codex_case auth-required true
 codex_case no-auth false

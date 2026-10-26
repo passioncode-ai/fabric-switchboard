@@ -153,7 +153,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.
 - `MonitorStatus` adds `sign_in_required: [account id]` and `limited: [{account_id, until, source: managed|claude_code}]`; the MCP `switchboard_status` result adds `limited`. Decision reasons add `limit_reached`, `limit_no_eligible_account`, `switched_on_limit`.
 - `Store::rotation_decision_with(policy, current, now, limited)`; `rotation_decision` passes an empty set. `Store::adopt_refreshed`, `Store::export`, `Store::changes`, `Store::backup_id`.
-- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` (`SETTING_FILES`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 128 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`; restore writes a JSON setting back byte for byte, a switch word with its line end, so a `spend.json` of exactly its limit stays readable: `a_spend_file_of_exactly_the_limit_comes_back_from_a_backup_readable`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`), and so does a spending ceiling set or answered (`Store::setting_changed`; the gate's own records in `spend.json` wait for the next change-driven or daily backup). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
+- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` and the terminal hook's choice `shell-hook` (`SETTING_FILES`; a restored `off` stays off, never read as the default and written over: `the_terminal_hooks_choice_survives_a_reinstall`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 128 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`; restore writes a JSON setting back byte for byte, a switch word with its line end, so a `spend.json` of exactly its limit stays readable: `a_spend_file_of_exactly_the_limit_comes_back_from_a_backup_readable`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`), and so does a spending ceiling set or answered (`Store::setting_changed`; the gate's own records in `spend.json` wait for the next change-driven or daily backup). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
 
 ## 0.5.1 additions
 
@@ -234,6 +234,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 ## Uninstall (SB-29, 2026-10-05)
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
+- With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
 - With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
 ## Near-limit quota checks (SB-106, 2026-10-12)
@@ -1323,7 +1324,7 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
 [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; scenario SCN-074.
 
 - **Map.** `<data>/shell/map.json`, 0600, at most 1 MiB, written in one rename by `map::write`
-  (the owner's bindings pass calls it from node A-4):
+  (the owner's bindings pass calls it, node A-4, section below):
   `{"version": 1, "rows": [{"folder", "pool", "context", "claude", "codex"}]}`. `folder` is an
   absolute group folder (its subfolders and worktrees belong to it); `context` is `org:<id>`;
   `claude` is true when the folder's Claude Code is bound to the group, `codex` when the pool has
@@ -1353,7 +1354,16 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
 - **`shell env --shell <zsh|bash|fish|pwsh> --dir <folder>`** prints `none` or
   `<pool>\t<context>\t<claude home or ->\t<codex home or ->`. `none` also when `<data>/shell-hook`
   reads `off`, the map is missing, unreadable, over 1 MiB or of another version, the folder is
-  not absolute, the row has neither home, or an argument is malformed. It is answered in `main`
+  not absolute, the row has neither home there, or an argument is malformed. The Claude home is
+  answered only in the row's own folder (the folder itself, or the same folder through a link):
+  Claude Code 2.1.299 reads Switchboard's route only from `.claude/settings.local.json` in the
+  folder it starts in, git repository or not, so below it the home's placeholder would reach the
+  provider (measured: [shell home measurement](evidence/shell-home-measurement-2026-10.md),
+  cases `subfolder` and `subfolder-git`). Below the bound folder the answer is `-` for Claude and
+  the Codex home as above; a group with only Claude answers `none` there, so `claude` runs in the
+  person's own settings, as it does there without the hook (SB-118 binds group folders and
+  worktrees, not their subfolders). Test:
+  `shell::map::tests::the_claude_home_is_answered_in_the_bound_folder_itself_only`. It is answered in `main`
   before the async runtime starts, takes no store lock, opens no control connection, silences
   panics, exits 0 and writes nothing to stderr; `--help` still reaches the ordinary parser. Tests:
   `shell::map::tests::the_longest_folder_of_an_organization_group_answers_its_homes_and_context`,
@@ -1361,8 +1371,8 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   and a control port that never answers; the fastest of seven warm calls within 25 ms),
   `shell_env_says_none_when_off_missing_unknown_version_or_outside`,
   `shell_env_never_writes_to_stderr_and_exits_zero`.
-- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. The
-  writer is node A-3.
+- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. Written by
+  `switchboard shell on|off` (`shell::install::set_choice`; section below).
 - **`shell status [--dir <folder>]`** (`--json`: `{"ok": true, "data": ...}`) answers `hook`
   (`on`, `off`, `default_on` when no choice is made and the map holds a valid row, else
   `default_off`), `choice`, `map` (`ok`, `missing`, `unreadable`, `unknown_version`), `folder`,
@@ -1373,6 +1383,237 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   `{"files": [{"shell", "path", "state"}]}`, ignores other fields and skips an entry without the
   three strings; an absent or broken record gives `[]`. Test:
   `shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails`.
+
+## The terminal hook's scripts (SB-183, node A-2, 2026-10-26)
+
+Code: `switchboard_runtime::shell::scripts` (`script`, `hook_path`), templates
+`crates/switchboard-runtime/src/shell/hook.zsh`, `hook.bash`, `hook.fish` and `core.sh` (the
+transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A "The hook scripts".
+
+- **Files.** `<data>/shell/hook.<zsh|bash|fish>`, 0600, each naming the CLI's absolute path and
+  the data folder, single-quoted for its shell (fish: `\\` and `\'`). A path that is not absolute,
+  not valid text or holds a control character gets no script (`script` answers None; `shell
+  init` refuses with “The hook cannot name this executable or the data folder: a path is not
+  absolute or not valid text.”). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
+- **Triggers.** zsh: `add-zsh-hook chpwd`, inside `emulate -L zsh`; bash: a `PROMPT_COMMAND` entry
+  (string form, macOS's bash 3.2) put first, acting only when `$PWD` changed and returning the
+  status the prompt shows; fish: `--on-variable PWD`. Each acts once at load. Loading twice
+  registers once (the `_switchboard_shell` guard). Tests: `bash_3_2_syntax_is_accepted` (`bash -n`
+  on `/bin/bash` 3.2.57 and `zsh -n`), `loading_twice_registers_once_and_bash_keeps_the_persons_prompt_command`,
+  `an_answer_of_another_form_changes_nothing_and_the_prompt_keeps_its_status` (five fields, a
+  relative home, and since fix cycle 2 an answer of two lines, which bash had taken: none of
+  the three variables moves).
+- **The question.** `<cli> --data-dir <data> shell env --shell <shell> --dir "$PWD"`, stderr and
+  stdin closed. The answer is used only when it is one line of four tab-separated fields with a
+  pool, a context and two homes that are `-` or absolute. Anything else reads as `none`: a CLI that is
+  not executable (the app removed or moved), one that exits non-zero (an older CLI without
+  `shell env`), an answer of another form, and in zsh a CLI silent for ten seconds (then two
+  more for its exit status, which must be 0). So what the hook holds is given back and nothing
+  it does not hold changes; nothing is printed. zsh runs the CLI disowned, holding none of the
+  terminal's files, so nothing waits for it after a timeout; bash and fish wait for the CLI
+  (bash has no output timeout that also works in its POSIX mode, fish has none). Tests:
+  `a_missing_old_or_failing_cli_gives_the_held_values_back` (the CLI deleted, exiting 2, or
+  answering two fields, after entering a group's folder: leaving gives the person's values
+  back), `a_hanging_cli_never_holds_a_zsh_prompt`.
+- **fish** reads `conf.d` in every fish, scripts included: the hook loads only when
+  `status is-interactive`. Test: `a_fish_script_never_runs_the_hook` (the CLI never asked).
+- **The transition**, per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `SWITCHBOARD_CONTEXT`):
+  entering a folder where the answer names a value, the person's own (its value, or that it was
+  not set) is kept in a shell variable that is never exported, then the value is exported;
+  moving on, the new value; where the answer names none, the person's own is set back or unset.
+  A variable whose value is no longer what the hook set is the person's: the hook lets it go and
+  never writes over it. `SWITCHBOARD_SESSION` set (a terminal Switchboard launched): the hook does
+  not load. A home inside `<data>/shell/` found at load (a shell started from a hooked terminal,
+  which never sees its parent's saved values) is held with "not set" as the person's own, with
+  an `org:` context beside it. On load it exports `SWITCHBOARD_SHELL_HOOK=1`. The hook's own
+  variables (`_switchboard_*`) are never exported, `set -a` included (bash and zsh turn it off
+  before the hook's first assignment and on again after loading and after each prompt, so the
+  person's `set -a` stays theirs). Tests (real `/bin/zsh` and `/bin/bash`; fish when installed,
+  else skipped with the reason): `entering_and_leaving_restores_unset_and_set_values`,
+  `a_value_the_person_set_inside_is_never_restored_over`, `a_launched_sessions_shell_is_never_touched`,
+  `the_saved_values_are_not_exported` (`set -a` on before the hook loads and again after),
+  `set_a_stays_on_after_loading_and_after_a_prompt` (bash and zsh), `a_missing_cli_prints_nothing`,
+  `paths_with_spaces_and_quotes_survive_every_shell`,
+  `a_shell_started_inside_an_organization_folder_gives_the_home_back_on_leaving`; CLI
+  `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli` (the printed script,
+  loaded by zsh and bash, with the real `shell env`). A variable set back is exported, whether or
+  not the person had exported it.
+- **Covered since fix cycle 1.** fish 4.9.3 (Homebrew) ran every test above on 2026-10-26 (run
+  interactive, `fish --no-config -i -c`); a machine without fish still skips them with the
+  reason. PowerShell is node A-8.
+
+## The terminal hook's start files (SB-183, node A-3, 2026-10-26)
+
+Code: `switchboard_runtime::shell::install` (`Host`, `apply`, `remove_all`, `set_choice`,
+`read_record`), `Runtime::enable_shell_hook` and the bindings pass (`shell_hook_follow`), CLI
+`switchboard shell on|off`, `uninstall`. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "On by default, safely"; operator decision D-3 (on by default on a computer holding an
+organization's group, off by one command); A-Q3 assumed (a linked start file is skipped).
+
+- **Who writes.** The installed app only: `src-tauri` calls `Runtime::enable_shell_hook` when the
+  executable is an installed build (`residency::packaged`) and not the smoke check, and the
+  runtime goes on only for the app's own data folder (`install::is_default_root`) and, on macOS,
+  only for an app inside `/Applications` or `~/Applications` (`install::installed_app`: never a
+  bundle opened from a download or build folder, nor a translocated copy), with the person's home
+  (`install::Host::process`: `HOME`, `ZDOTDIR`, the login shell from `SHELL`, the user id) and the
+  CLI `install::hook_cli` names (`launch::agent_cli` in a release build; a development build
+  never names itself, only an installed copy beside the app, on `PATH` or in `~/.local/bin`).
+  `serve`, a development build, `--data-dir` and every test owner never get a home. The person
+  may also run `switchboard shell on|off` themselves, for the app's own data folder only: another
+  `--data-dir` is refused with “Only Switchboard's own data folder can change your terminals'
+  start files. Run this command without --data-dir.”, since every data folder would write the
+  same marker into the same home; a development build with no installed CLI to name refuses
+  `shell on` with “No installed switchboard command was found for the hook to run. Install Fabric
+  Switchboard, then run this command again.” The two runtime checks are in
+  `Runtime::enable_shell_hook_when`, the data folder first, so the installed check and the home
+  can be given by a test. Tests: `owner_tests::no_test_or_dev_build_touches_the_real_home`,
+  `owner_tests::an_installed_app_over_another_data_folder_writes_no_start_file` (the installed
+  check given as true and a home given: nothing written, the installed check never asked),
+  `owner_tests::the_installed_owner_follows_the_presence_of_an_organization_group`,
+  `shell::install::tests::only_the_apps_own_data_folder_and_an_installed_app_touch_the_home`,
+  CLI `another_data_folder_never_touches_the_start_files`. Not covered: `residency::packaged`
+  itself is unchanged (the location rule lives in the runtime, so the login item and the updater
+  keep their own predicate).
+- **One run at a time.** Every run (`apply`, `remove_all`, the notice's writes) holds an advisory
+  `flock` on the data folder itself from its first read to its last write, so the owner's run
+  and `switchboard shell on|off` or `uninstall` from another process never interleave between a
+  start file's read and its rename. The folder rather than `shell-hook.json`: the record is
+  replaced by a rename, which a lock on it would not survive, and a lock file would be one more
+  entry in a data folder that never had an organization's group (the store's own lock is the
+  file `instance.lock`, so the two never meet). Test:
+  `a_second_run_waits_for_the_first` (`shell off` started between the owner's read and rename
+  waits; the file ends as it was and the record agrees).
+- **When.** At the owner's start (`enable_shell_hook`), and in a bindings pass whose
+  fingerprint moved when the presence of a group bound to an existing organization flipped
+  (`shell::homes::organizations_present`); never on a timer, never on an idle pass. Log event
+  `shell_hook` (`wanted`, `written`, `removed`, `skipped`, `changed`, `no_hook`), numbers and
+  flags only.
+- **The rule.** Wanted when `<data>/shell-hook` is `on`, or absent while an organization's group
+  exists; `off` takes every block out and never writes again. Tests:
+  `shell::install::tests::default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins`,
+  `the_last_organization_group_leaving_removes_the_default_block`.
+- **Where** (macOS and Linux; Windows has none yet, PowerShell is node A-8): zsh
+  `${ZDOTDIR:-$HOME}/.zshrc`, created only when zsh is the login shell and never when the app
+  cannot know where zsh reads it: an app started from the Dock or at login does not see the
+  `ZDOTDIR` a person exports in `~/.zshenv`, so with no `ZDOTDIR` in this process, no
+  `~/.zshrc`, and a `~/.zshenv` (any) or a `~/.zprofile` that names `ZDOTDIR` or cannot be read,
+  nothing is created and the record says `skipped_zdotdir_unknown`; `shell status` gives the line
+  to add (`eval "$(switchboard shell init zsh)"`). An existing `~/.zshrc` is written as before.
+  Test: `no_zshrc_is_created_when_zshenv_may_move_zdotdir`; bash, on macOS the first
+  existing of `.bash_profile`, `.bash_login`, `.profile` (else `.bash_profile`), on Linux
+  `.bashrc`, only when it exists or bash is the login shell; fish its own file
+  `~/.config/fish/conf.d/fabric-switchboard.fish`, only when `~/.config/fish` exists. Test:
+  `the_start_files_follow_the_shells_present`.
+- **What.** The hook script `<data>/shell/hook.<shell>` (node A-2) and one block appended at the
+  end of the start file: `# >>> Fabric Switchboard: shell hook (SB-183) >>>`, one line that
+  reads the script only when it is readable (`if [ -r '<hook>' ]; then . '<hook>'; fi`, fish
+  `if test -r '<hook>'; source '<hook>'; end`), `# <<< Fabric Switchboard <<<`. A file without a
+  final line break gets one before the block, recorded, and taken out with it. Taking the block
+  out gives the file back byte for byte; its mode is kept; the write is a file in the same
+  folder renamed over it. Lines inside the markers are Switchboard's and are rewritten. No CLI to
+  name, or a data folder whose path is not text: no script and no block (`no_hook`). A start file
+  the installer created is recorded `created` and deleted when the block comes out and nothing
+  else is left in it (one the person wrote into keeps their lines; one the person had is never
+  deleted). Tests: `a_start_file_the_installer_created_is_deleted_when_the_block_goes`,
+  `the_block_goes_in_and_comes_out_leaving_the_file_byte_identical` (no final break, CRLF,
+  an empty file, non-ASCII text; mode 0640 kept), `a_data_folder_that_is_not_text_writes_no_block`.
+- **Never written.** A start file that is a link (`skipped_symlink`), another user's
+  (`skipped_owner`), not a regular file, over 1 MiB or not valid text (`unreadable`), one whose
+  opening or closing marker was changed (`unreadable`: neither rewritten nor taken out), and one
+  that changed between the read and the rename (size or time differ: left as it is, the
+  temporary file removed, tried again next time). Tests:
+  `a_symlinked_foreign_owned_or_changed_rc_is_never_written`,
+  `a_block_with_a_changed_marker_is_the_persons_and_never_touched`.
+- **Never fought.** A block (or the fish file, or a start file) the person took out after
+  Switchboard wrote it is recorded `removed_by_person` and not written back until the person's
+  own `switchboard shell on`. Test: `a_block_the_person_removed_is_not_written_back`.
+- **Record** `<data>/shell-hook.json` (0600): `{"files": [{"shell", "path", "state",
+  "newline_added", "created", "at"}], "notice_pending"}`, `state` one of `written`,
+  `removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
+  `unreadable` (`policy_blocked` comes with node A-8); `created` only when true,
+  `notice_pending` only while one waits; what `shell status` shows. Nothing ever written and
+  nothing wanted: no record.
+- **The first-time notice.** The first run that writes a block while no choice is made saves
+  `notice_pending: {organization, group}` in the record (`install::set_notice`, under the run
+  lock, only while a block is written); it waits there across restarts until the window
+  acknowledges it and is dropped when the hook is no longer wanted. The window reads it with the
+  Tauri command `shell_hook_notice` (`Runtime::shell_hook_notice`: `{organization, group}` or
+  null) and clears it with `acknowledge_shell_hook_notice`; the adapter's `shellHookNotice` and
+  `acknowledgeShellHookNotice`. The text and where it shows are node A-7's. Test:
+  `lifecycle_tests::the_first_time_notice_waits_for_the_window_across_a_restart` (a second and a
+  third owner over the same folder: there until acknowledged, then never again).
+- **CLI.** `switchboard shell on` saves `on` and writes now (a block the person took out
+  included); `switchboard shell off` saves `off` and takes every block out now; both answer
+  `shell status`. The choice that cannot be saved answers “The terminal hook's choice could not be
+  saved in Switchboard's data folder.” Test: CLI
+  `shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only` (a temporary `HOME` with
+  the app's own data folder in it; the hook names the installed CLI in `~/.local/bin`, not the
+  development build running the test).
+  The MCP tool `switchboard_shell_hook` and the window's switch are node A-7.
+- **Uninstall** takes every block out first (section "Uninstall"). `remove_all` keeps a block it
+  could not take out (a changed marker) in the record and names the file as a failure. Test:
+  `remove_all_takes_every_block_out_whatever_the_choice` (a fish file the person added lines to
+  keeps them).
+
+## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
+
+Code: `switchboard_runtime::shell::homes` (`rows`, `key`, `sync`), called from the owner's
+bindings pass (`Runtime::bindings_pass`, `crates/switchboard-runtime/src/lib.rs`) after the Claude
+bindings are synced. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "Homes" and "The folder map"; A-Q1 assumed (a shell home per group, not the launched
+managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md).
+
+- **When.** In the same pass as the Claude bindings, only when the pass's fingerprint moved: the
+  bindings' own (groups, folders, worktrees, Claude accounts, the proxy address, the pools' salts)
+  plus `homes::key` (each group's organization, the pools' Codex accounts and, on a computer
+  with an organization's group, the stamp of the person's `settings.json` and which carried
+  names exist). Every file is written only when its bytes change. A computer that never had an
+  organization's group gets nothing, not even `<data>/shell/`. Test:
+  `owner_tests::an_idle_pass_writes_nothing` (a map and a home taken away are not written back by
+  five passes with nothing changed; the group turning personal rewrites the map), and
+  `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` with an organization's
+  group (120 passes: the bindings fingerprint, `homes::key` included, does not move, and no file
+  under the data folder or the group's folder changes size or time).
+- **Rows.** One per folder: each folder of a group bound to an existing organization, and each
+  worktree the Claude bindings write inside one (`bindings::desired`), when
+  `Snapshot::project_for` names that group there (a folder also in a personal group has no row:
+  the more private wins). `folder` is `canonicalize()`'s form (on Windows `\\?\C:\...`, which the
+  reader matches because it resolves the folder it is asked about the same way; test
+  `windows_rows_are_verbatim_and_a_plain_spelling_finds_them`, Windows only, not yet run: SB-02);
+  a folder that does not exist has no row. `context` is `org:<id>`; `claude` is true when the
+  Claude bindings hold the folder's route now (`bindings::Report::bound_folders`: written or
+  unchanged, never a folder whose values are the person's); `codex` when the pool has an enabled
+  Codex account. Tests: `shell::homes::tests::a_personal_group_gets_no_shell_home_and_no_map_row`,
+  `worktrees_and_folders_the_person_keeps_get_their_own_rows`,
+  `rows_are_written_in_canonical_form_for_folders_that_exist`.
+- **Claude shell home** `<data>/shell/claude-<pool>` (0700), for a pool with a row whose `claude`
+  is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`;
+  macOS and Linux, A-Q7), `.claude.json` with `hasCompletedOnboarding` and, when the person
+  registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
+  file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
+  without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
+  placeholder is a fixed word, not a credential: the folder's `settings.local.json` carries the
+  route and the folder's capability header and the proxy authenticates by the header. Test:
+  `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
+  capability, no credential file and none of the person's secrets anywhere in the home).
+- **Codex shell home** `<data>/shell/codex-<pool>` (0700), for a pool with an enabled Codex
+  account: an `AGENTS.md` link and `config.toml` (0600) with SB-143's marked provider blocks
+  (`codex_route::with_provider`): `base_url = "http://<proxy>/codex/_auto/v1"`, the machine's auto
+  capability as `X-Switchboard-Capability`, `requires_openai_auth = false`, no `env_key` and no
+  `auth.json`; the person's own lines in that file stay. Test:
+  `a_codex_shell_home_routes_to_auto_with_no_sign_in` (a rotated capability is written in).
+- **Repointed.** A proxy that had to move at start rewrites the Codex shell homes' address with
+  the managed homes' (`launch::repoint_managed` reads `<data>/shell/` too), and the first pass
+  with the new address writes the same bytes. Test: `a_port_change_repoints_shell_homes`.
+- **Kept.** A group that leaves its organization (or is deleted) loses its rows; its homes stay
+  on disk as the organization's history. Test:
+  `a_pool_that_leaves_its_organization_keeps_its_home_and_loses_its_rows`.
+- **Failures.** A home that cannot be written or a map `map::write` refuses is logged as the
+  event `shell_homes` (`rows`, `homes_written`, `failed`, `map`: `written`, `unchanged`,
+  `refused`), numbers and codes only, and tried again when the fingerprint next moves; nothing
+  reaches a request's answer. A synthetic owner (tests, the smoke check) carries nothing of the
+  real home (`NativeSources::shell` = `homes::NO_SOURCES`).
 
 ## The person's own Claude Code and Codex folders (SB-183, node A-5, 2026-10-26)
 

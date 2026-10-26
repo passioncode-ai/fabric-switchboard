@@ -95,6 +95,17 @@ fn toml_quote(value: &str) -> String {
 /// The config with Switchboard's provider: the selection at the top (a top-level key must come
 /// before any table), the provider table at the end, the person's text between, untouched.
 pub(crate) fn with_route(text: &str, address: &str, capability: &str) -> Result<String, String> {
+    with_provider(text, address, capability, true)
+}
+/// [`with_route`] with `requires_openai_auth` chosen: an organization's Codex shell home (SB-183)
+/// holds no sign-in, so it sends none (measured: Codex 0.163.0 sends the capability header and no
+/// `Authorization` either way, `docs/evidence/shell-home-measurement-2026-10.md`).
+pub(crate) fn with_provider(
+    text: &str,
+    address: &str,
+    capability: &str,
+    requires_auth: bool,
+) -> Result<String, String> {
     let own = stripped(text);
     let parsed: toml::Table = own.parse().map_err(|_| CODEX_ROUTE_UNREADABLE)?;
     if let Some(chosen) = parsed.get("model_provider") {
@@ -107,7 +118,7 @@ pub(crate) fn with_route(text: &str, address: &str, capability: &str) -> Result<
         toml_quote(PROVIDER)
     );
     let tail = format!(
-        "{TAIL_OPEN}\n[model_providers.{PROVIDER}]\nname = \"Fabric Switchboard\"\nbase_url = {}\nwire_api = \"responses\"\nrequires_openai_auth = true\nsupports_websockets = false\nhttp_headers = {{ \"X-Switchboard-Capability\" = {} }}\n{CLOSE}\n",
+        "{TAIL_OPEN}\n[model_providers.{PROVIDER}]\nname = \"Fabric Switchboard\"\nbase_url = {}\nwire_api = \"responses\"\nrequires_openai_auth = {requires_auth}\nsupports_websockets = false\nhttp_headers = {{ \"X-Switchboard-Capability\" = {} }}\n{CLOSE}\n",
         toml_quote(&format!("http://{address}/codex/{}/v1", switchboard_proxy::AUTO_POOL)),
         toml_quote(capability),
     );
