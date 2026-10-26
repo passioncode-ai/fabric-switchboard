@@ -605,6 +605,9 @@ pub(crate) struct NativeSources {
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
     /// SB-143: Codex's own `config.toml`; None for a synthetic owner, which never writes it.
     pub(crate) codex_config: fn() -> Option<PathBuf>,
+    /// SB-183: what an organization's shell home carries of the person's (their folders and
+    /// board server); nothing for a synthetic owner.
+    pub(crate) shell: shell::homes::Sources,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -625,6 +628,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_signature: || None,
     transcripts: |_| Vec::new(),
     codex_config: || None,
+    shell: shell::homes::NO_SOURCES,
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -644,6 +648,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
     codex_config: codex_route::config_path,
+    shell: shell::homes::NATIVE,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
@@ -1001,6 +1006,9 @@ impl Runtime {
                     read_pool_salts(&self.root).into_iter().collect();
                 salts.sort();
                 salts.hash(&mut h);
+                // SB-183: the organizations' shell homes and the folder map follow the groups'
+                // organizations and Codex accounts too.
+                shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
                 key = h.finish();
             }
             key
@@ -1026,6 +1034,45 @@ impl Runtime {
                     Ok(mut last) => binding_changed(&report, &mut last),
                     Err(_) => true,
                 };
+                // SB-183: the organizations' shell homes and the terminal hook's folder map.
+                // A refusal is a code in the log, never an answer to anyone's request.
+                let shell = blocking::run(|| {
+                    shell::homes::sync(
+                        &self.root,
+                        &snapshot,
+                        &report.bound_folders,
+                        &address,
+                        &self.proxy.auto_capability(),
+                        &self.native.shell,
+                    )
+                });
+                if shell.homes_written > 0
+                    || shell.map_written
+                    || shell.failed > 0
+                    || shell.map_refused
+                {
+                    oplog::event(
+                        "shell_homes",
+                        &[
+                            ("rows", oplog::Field::Number(shell.rows as i64)),
+                            (
+                                "homes_written",
+                                oplog::Field::Number(shell.homes_written as i64),
+                            ),
+                            ("failed", oplog::Field::Number(shell.failed as i64)),
+                            (
+                                "map",
+                                oplog::Field::Code(if shell.map_refused {
+                                    "refused"
+                                } else if shell.map_written {
+                                    "written"
+                                } else {
+                                    "unchanged"
+                                }),
+                            ),
+                        ],
+                    );
+                }
                 if changed {
                     oplog::event(
                         "claude_binding",
@@ -5841,6 +5888,77 @@ mod owner_tests {
         // No saved account matches in this fixture: the answer is a refusal, given at once.
         assert!(answer.is_err());
         drop(held);
+    }
+
+    /// SB-183 (node A-4): the bindings pass writes an organization's shell homes and the folder
+    /// map, and a pass whose fingerprint did not move writes nothing: a file taken away is not
+    /// written back until something changes. A synthetic owner carries nothing of the real home.
+    #[tokio::test]
+    async fn an_idle_pass_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .store
+            .assign_organization(&one, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        let map_file = shell::map::path(root.path());
+        let found = shell::map::answer(root.path(), &acme).expect("a row for the folder");
+        assert_eq!(found.context, format!("org:{}", org.id));
+        let home = found.claude_home.clone().unwrap();
+        let settings = home.join("settings.json");
+        assert!(settings.is_file());
+        // Nothing of the real person's folder in a synthetic owner's home.
+        assert!(!home.join("CLAUDE.md").exists());
+        // Idle: the files taken away stay away.
+        let written = std::fs::read(&map_file).unwrap();
+        std::fs::remove_file(&map_file).unwrap();
+        std::fs::remove_file(&settings).unwrap();
+        for _ in 0..5 {
+            runtime.bindings_pass().await;
+        }
+        assert!(!map_file.exists(), "an idle pass wrote the map");
+        assert!(!settings.exists(), "an idle pass wrote a shell home");
+        // A change (the group turns personal) is written: the map loses its row, the home stays.
+        std::fs::write(&map_file, &written).unwrap();
+        let pool = found.pool.clone();
+        runtime
+            .store
+            .set_project_organization(&pool, None)
+            .unwrap_err();
+        runtime
+            .store
+            .assign_organization(
+                &runtime.store.snapshot().unwrap().accounts[0].id,
+                Some("personal"),
+            )
+            .unwrap();
+        runtime.store.set_project_organization(&pool, None).unwrap();
+        runtime.bindings_pass().await;
+        assert_ne!(
+            std::fs::read(&map_file).unwrap(),
+            written,
+            "the map was rewritten"
+        );
+        assert!(shell::map::answer(root.path(), &acme).is_none());
+        assert!(home.is_dir(), "the organization's history stays");
     }
 
     #[tokio::test]

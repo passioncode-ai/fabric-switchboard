@@ -1582,7 +1582,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Status:** draft
 **Meaning:** SB-183, operator decision D-3 of 2026-10-25 (default on, off by one command; PowerShell added 2026-10-26, X-16); design [dossier A](../runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; answers A-Q1, A-Q2, A-Q3, A-Q5, A-Q7 as assumed in [questions](../runs/2026-10-26-iteration-0.7.0/questions.md) (A-Q4 asked of Appvillis IT).
 **Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
-**Coverage:** NOT_RUN, none yet: scenario written before code (nodes A-0 measurement, A-1 map and `shell env`, A-2 scripts, A-3 install, A-4 homes, A-5 the person's folders, A-8 PowerShell).
+**Coverage:** partial (code tests; no walk yet). Step 1's homes and folder map (node A-4): `crates/switchboard-runtime/src/shell/homes.rs` tests `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential`, `a_codex_shell_home_routes_to_auto_with_no_sign_in`, `a_port_change_repoints_shell_homes`, `a_personal_group_gets_no_shell_home_and_no_map_row`, `a_pool_that_leaves_its_organization_keeps_its_home_and_loses_its_rows`, `worktrees_and_folders_the_person_keeps_get_their_own_rows`, `rows_are_written_in_canonical_form_for_folders_that_exist`; `lib.rs` `owner_tests::an_idle_pass_writes_nothing`. Step 7 and the map reader (node A-1): `shell::map::tests`, CLI `shell_env_*` and `shell_status_*`. Not yet: A-2 scripts, A-3 install, A-8 PowerShell, the window (A-7).
 **Product:** unobserved
 **Traces:** SB-183, SB-110, D-3, SCN-056, SCN-066, SCN-070, SCN-075
 

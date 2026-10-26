@@ -187,10 +187,11 @@ Leaving a project removes only what Switchboard wrote, and `switchboard uninstal
 In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`
 and `codex` in that group's shell homes, with `SWITCHBOARD_CONTEXT=org:<id>`, and gives the
 person's own values back when it leaves the folder ([SCN-074](ux/scenarios.md), design
-[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A). This build has
-the two commands that read the folder map; the hook scripts, the start-file block and the shell
-homes come with the next nodes of 0.7.0, so until the installed app writes the map every folder
-answers `none`.
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A). The owner
+(the app or `serve`) writes each organization group's shell homes, `<data>/shell/claude-<pool>`
+and, for a group with a Codex account, `<data>/shell/codex-<pool>`, and the folder map
+`<data>/shell/map.json`; a computer with no group bound to an organization gets none of them, and
+every folder there answers `none`.
 
 ```sh
 switchboard shell status            # the hook's state, this terminal, the folder's group and homes

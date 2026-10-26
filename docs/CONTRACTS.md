@@ -1323,7 +1323,7 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
 [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; scenario SCN-074.
 
 - **Map.** `<data>/shell/map.json`, 0600, at most 1 MiB, written in one rename by `map::write`
-  (the owner's bindings pass calls it from node A-4):
+  (the owner's bindings pass calls it, node A-4, section below):
   `{"version": 1, "rows": [{"folder", "pool", "context", "claude", "codex"}]}`. `folder` is an
   absolute group folder (its subfolders and worktrees belong to it); `context` is `org:<id>`;
   `claude` is true when the folder's Claude Code is bound to the group, `codex` when the pool has
@@ -1373,6 +1373,62 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   `{"files": [{"shell", "path", "state"}]}`, ignores other fields and skips an entry without the
   three strings; an absent or broken record gives `[]`. Test:
   `shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails`.
+
+## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
+
+Code: `switchboard_runtime::shell::homes` (`rows`, `key`, `sync`), called from the owner's
+bindings pass (`Runtime::bindings_pass`, `crates/switchboard-runtime/src/lib.rs`) after the Claude
+bindings are synced. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "Homes" and "The folder map"; A-Q1 assumed (a shell home per group, not the launched
+managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md).
+
+- **When.** In the same pass as the Claude bindings, only when the pass's fingerprint moved: the
+  bindings' own (groups, folders, worktrees, Claude accounts, the proxy address, the pools' salts)
+  plus `homes::key` (each group's organization, the pools' Codex accounts and, on a computer
+  with an organization's group, the stamp of the person's `settings.json` and which carried
+  names exist). Every file is written only when its bytes change. A computer that never had an
+  organization's group gets nothing, not even `<data>/shell/`. Test:
+  `owner_tests::an_idle_pass_writes_nothing` (a map and a home taken away are not written back by
+  five passes with nothing changed; the group turning personal rewrites the map).
+- **Rows.** One per folder: each folder of a group bound to an existing organization, and each
+  worktree the Claude bindings write inside one (`bindings::desired`), when
+  `Snapshot::project_for` names that group there (a folder also in a personal group has no row:
+  the more private wins). `folder` is `canonicalize()`'s form (on Windows `\\?\C:\...`, which the
+  reader matches because it resolves the folder it is asked about the same way; test
+  `windows_rows_are_verbatim_and_a_plain_spelling_finds_them`, Windows only, not yet run: SB-02);
+  a folder that does not exist has no row. `context` is `org:<id>`; `claude` is true when the
+  Claude bindings hold the folder's route now (`bindings::Report::bound_folders`: written or
+  unchanged, never a folder whose values are the person's); `codex` when the pool has an enabled
+  Codex account. Tests: `shell::homes::tests::a_personal_group_gets_no_shell_home_and_no_map_row`,
+  `worktrees_and_folders_the_person_keeps_get_their_own_rows`,
+  `rows_are_written_in_canonical_form_for_folders_that_exist`.
+- **Claude shell home** `<data>/shell/claude-<pool>` (0700), for a pool with a row whose `claude`
+  is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`;
+  macOS and Linux, A-Q7), `.claude.json` with `hasCompletedOnboarding` and, when the person
+  registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
+  file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
+  without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
+  placeholder is a fixed word, not a credential: the folder's `settings.local.json` carries the
+  route and the folder's capability header and the proxy authenticates by the header. Test:
+  `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
+  capability, no credential file and none of the person's secrets anywhere in the home).
+- **Codex shell home** `<data>/shell/codex-<pool>` (0700), for a pool with an enabled Codex
+  account: an `AGENTS.md` link and `config.toml` (0600) with SB-143's marked provider blocks
+  (`codex_route::with_provider`): `base_url = "http://<proxy>/codex/_auto/v1"`, the machine's auto
+  capability as `X-Switchboard-Capability`, `requires_openai_auth = false`, no `env_key` and no
+  `auth.json`; the person's own lines in that file stay. Test:
+  `a_codex_shell_home_routes_to_auto_with_no_sign_in` (a rotated capability is written in).
+- **Repointed.** A proxy that had to move at start rewrites the Codex shell homes' address with
+  the managed homes' (`launch::repoint_managed` reads `<data>/shell/` too), and the first pass
+  with the new address writes the same bytes. Test: `a_port_change_repoints_shell_homes`.
+- **Kept.** A group that leaves its organization (or is deleted) loses its rows; its homes stay
+  on disk as the organization's history. Test:
+  `a_pool_that_leaves_its_organization_keeps_its_home_and_loses_its_rows`.
+- **Failures.** A home that cannot be written or a map `map::write` refuses is logged as the
+  event `shell_homes` (`rows`, `homes_written`, `failed`, `map`: `written`, `unchanged`,
+  `refused`), numbers and codes only, and tried again when the fingerprint next moves; nothing
+  reaches a request's answer. A synthetic owner (tests, the smoke check) carries nothing of the
+  real home (`NativeSources::shell` = `homes::NO_SOURCES`).
 
 ## The person's own Claude Code and Codex folders (SB-183, node A-5, 2026-10-26)
 
