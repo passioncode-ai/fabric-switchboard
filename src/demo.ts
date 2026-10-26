@@ -3,7 +3,7 @@ import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Account, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover } from './types';
+import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -58,6 +58,18 @@ export function createDemoAdapter(): Adapter {
   const enabled = (id: string) => { const found = account(id); if (!found.enabled) throw new Error('This account is disabled. Enable it before continuing.'); return found; };
   const logins = new Map<string, LoginInput & { started: number }>();
   let signIns = 0;
+  // SB-160 (B-4, SCN-077), like the owner's `organization_offer`: the one group of the account's
+  // organization when it landed outside it; none for a personal account, an organization with no
+  // group or several, an account already there, or an identity the group already holds.
+  const organizationOffer = (item: Account): OrganizationGroupOffer | undefined => {
+    const organization = attribution(state, item).organization;
+    if (!organization) return undefined;
+    const bound = (state.projects ?? []).filter((p) => p.organization === organization);
+    if (bound.length !== 1 || bound[0].pool === item.pool) return undefined;
+    const id = item.external_identity;
+    const held = !!id?.account_id && state.accounts.some((a) => a.pool === bound[0].pool && a.provider === item.provider && a.external_identity?.account_id === id.account_id && a.external_identity?.organization_id === id.organization_id);
+    return held ? undefined : { pool: bound[0].pool, name: bound[0].name };
+  };
   let passioncode: PassioncodeStatus = { connected: false, base: 'https://org.passioncode.ai' };
   const rateLimited = new Set<string>();
   // Explicit browser-only acceptance fixtures for ordering, multi-window waits and failure.
@@ -157,7 +169,9 @@ export function createDemoAdapter(): Adapter {
       } else if (input.label) item.label = input.label;
       source.account_id = item.id;
       log('account_added', item.id, 'success');
-      return structuredClone(item);
+      // The ordinary CLI's own account: it joins a group only after the CLI switches.
+      const offer = organizationOffer(item);
+      return offer ? { ...structuredClone(item), organization_group: { ...offer, in_cli: true } } : structuredClone(item);
     },
     async importClaudeSwap(pool) {
       await pause();
@@ -218,12 +232,14 @@ export function createDemoAdapter(): Adapter {
       await pause(); logins.delete(id); signIns += 1;
       const identity: ExternalIdentity = { account_id: `synthetic-signin-${signIns}`, organization_id: 'synthetic-work', email: `signin-${signIns}@example.test` };
       const existing = state.accounts.find((entry) => entry.provider === input.provider && entry.pool === input.pool && entry.label === input.label && input.label);
-      if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account_updated', existing.id, 'success'); return structuredClone(existing); }
+      if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account_updated', existing.id, 'success'); const offer = organizationOffer(existing); return offer ? { ...structuredClone(existing), organization_group: offer } : structuredClone(existing); }
       const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
       state.accounts.push(item); log('account_added', item.id, 'success');
+      const offer = organizationOffer(item);
+      const receipt = offer ? { ...structuredClone(item), organization_group: offer } : structuredClone(item);
       // Like the owner since SB-42: a saved account with its temporary folder still to remove.
-      if (input.provider === 'codex') return { ...structuredClone(item), login_cleanup: 'pending' as const };
-      return structuredClone(item);
+      if (input.provider === 'codex') return { ...receipt, login_cleanup: 'pending' as const };
+      return receipt;
     },
     // Like the owner, an unknown or already finished sign-in cannot be cancelled.
     async cancelLogin(id) { await pause(); if (!logins.delete(id)) throw new Error('Sign-in not found. Start again.'); },

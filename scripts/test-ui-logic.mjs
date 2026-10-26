@@ -417,6 +417,22 @@ check(() => {
   assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code in group work \(no folders\)\. Switchboard could not remove its temporary sign-in folder yet/);
 });
 
+// SB-160 (B-4, SCN-077): signInNotice offers the organization's group a new seat landed outside of;
+// the ordinary CLI's own account is told to switch first; a personal seat is offered nothing.
+check(() => {
+  const offer = { pool: 'acme-work', name: 'Acme work' };
+  assert.equal(logic.signInNotice({ label: 'me@acme.com', pool: 'default', organization_group: offer }, 'Claude Code'), 'me@acme.com added to Claude Code in the default group.');
+  assert.deepEqual(logic.signInMove({ id: 'a-1', label: 'me@acme.com', organization_group: offer }), { id: 'a-1', pool: 'acme-work', label: 'Move it to “Acme work”', done: 'me@acme.com moved to group “Acme work”.' });
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com' }), null, 'a personal seat: no offer');
+  const inCli = { ...offer, in_cli: true };
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', organization_group: inCli }), null, 'the CLI account cannot move yet');
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', pool: 'default', login_cleanup: 'done', signed_in_again: false, organization_group: inCli }), null, 'a login finish receipt with in_cli (B-4): no move');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', inCli), 'Switch Claude Code to another account first to move me@acme.com to group “Acme work”.');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', offer), '');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', undefined), '');
+  assert.equal(logic.signInNotice({ label: 'me@acme.com', pool: 'default', organization_group: inCli }, 'Claude Code'), 'me@acme.com added to Claude Code in the default group. Switch Claude Code to another account first to move me@acme.com to group “Acme work”.');
+});
+
 // L10N-01…04 (fabric-workspace knowledge/localization.md): language, Russian plurals, placeholders.
 const i18n = await load('../src/i18n.ts');
 check(() => {
@@ -448,6 +464,8 @@ check(() => {
   assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
   assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
   assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code\) в группе work \(без папок\)\.$/);
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'Work', organization_group: { pool: 'acme-work', name: 'Acme work' } }).label, 'Перенести в «Acme work»');
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'default', organization_group: { pool: 'acme-work', name: 'Acme work', in_cli: true } }, 'Claude Code'), /Сначала переключите Claude Code на другой аккаунт, чтобы перенести Work в группу «Acme work»\.$/);
   i18n.setLocale('en');
 });
 // A backend sentence with a name in it is shown, and translated by its template (L10N-04).

@@ -230,6 +230,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 ## Structured sign-in result (SB-42, 2026-10-05)
 
 - `Operation::FinishLogin` returns the saved `Account` plus `login_cleanup: "done" | "pending"` and (0.6.6, SB-62) `signed_in_again: bool` — true when the identity was already saved and the sign-in updated it in place (`file_sign_in`: a sign-in without a label updates every saved copy where it is and creates an account only for a new identity; every other copy of the identity gets the new sign-in); a cleanup failure after the account was saved is no longer an error (the CLI exits 0, the desktop shows the account as added with a note). `Runtime::finish_login` keeps the last `COMPLETED_LOGINS` (16) saved sign-ins in memory: a repeated Finish returns the same account without capturing again and retries that sign-in's pending cleanup; `LoginStatus` reads a saved sign-in as `complete`; an unknown id is still *Sign-in not found. Start again.* Saved sign-ins hold no sign-in slot (`failed_login_cleanup_releases_the_slot_after_the_account_is_saved`, `completed_sign_ins_are_bounded`).
+- SB-160 (0.7.0 node B-4, SCN-077): the `FinishLogin` receipt, and the `CaptureCurrent` receipt, carry `organization_group: {pool, name}` when the account belongs to an organization (`Snapshot::attribution`) that has exactly one group (`Snapshot::organization_group`) and the account is not in it; the capture receipt adds `in_cli: true` (the ordinary CLI's account cannot join a group until the CLI switches, `PROJECT_ACCOUNT_IN_CLI`). Absent for a personal account, an organization with no group or several, or an account already in its group. Nothing moves: the window's notice offers *Move it to “{group}”* (`signInMove`, `Operation::MoveAccount` on press) or, for the CLI's account, says to switch first (`organizationMoveNote`). Test `a_new_seat_of_an_organization_outside_its_only_group_is_offered_it`.
 
 ## Uninstall (SB-29, 2026-10-05)
 
@@ -842,7 +843,22 @@ CLI `onboard` (`onboard_status`), MCP `switchboard_onboarding`. Scenario SCN-050
   client name from `initialize`, ASCII letters, digits, space, `._-`, at most 64) after its first
   answered tool call, once per server process, and only into a data folder that exists.
 - Commands in `next` use the CLI's absolute path when `agent_cli()` finds it, shell-quoted.
-- Tests: `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage`,
+- The organization checklist (SB-202, 0.7.0 node B-3, SCN-076): after the five steps, only on a
+  computer with an organization, `organization` (done), then per organization, newest first,
+  `org_group` (done when `Snapshot::organization_group` finds its one group; `todo` otherwise,
+  with `next.command` the settings import and `next.alternatives` `project save` then
+  `project edit --organization`, or no `next` when two groups are bound), `seat` (done when
+  `organization_seats` holds an account that is enabled, not in `elsewhere` and not in the
+  monitor's `sign_in_required`; else `needs_person` with `login begin --pool <group>`), `hook`
+  (always `optional`; read from `switchboard shell status`'s `hook`, never the start files;
+  `next.turn_off` names `shell off` when it is on, `next.command` `shell on` when it is off) and
+  `launch` (done when a recorded session's context is `org:<id>`, else `optional` with a managed
+  launch in the group's first folder). Each carries `organization: {id, name}`. With no
+  organization and PassionCode.ai connected (`vesta.json`), one optional `organization` step;
+  with neither, exactly the five steps. The CLI reads `MonitorStatus`, `Sessions {all}` and
+  `shell status` only when an organization exists.
+- Tests: `onboarding::tests` (9), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage`,
+  `onboard_lists_an_organizations_group_seat_and_hook`,
   `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection`.
 
 ## Interface language (SB-76, 2026-10-07)

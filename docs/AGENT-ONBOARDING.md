@@ -17,10 +17,14 @@ between them when one runs out, and gives coding agents its tools over MCP.
    - `needs_person`: tell the person `next.person` in your own words. When `next.command` is
      present, you may run it to start the step for them (for example, it opens the sign-in in a
      Terminal window), then wait for them.
-   - `optional`: not required to finish; follow its `next` only when you have not already
+   - `optional`: not required to finish; run its `next.command` only when you have not already
      completed it.
+   - `next.turn_on` and `next.turn_off` are the person's switches, never a step for you: run
+     one only when the person asks for it.
 3. Run `switchboard onboard --status --json` again after every step. It reads the computer each
-   time and writes nothing, so it is always safe to repeat.
+   time and writes nothing, so it is always safe to repeat. When `degraded` is not empty, part of
+   what the steps read could not be read (`snapshot`, `sign_ins`, `sessions`); the step it touches
+   says so in its summary.
 
 ## The steps
 
@@ -32,6 +36,19 @@ between them when one runs out, and gives coding agents its tools over MCP.
 | `mcp` | The `switchboard` MCP server is registered with you | you |
 | `proving_call` | A Switchboard tool answered a coding agent | you |
 
+On a computer with an organization (added by hand, or from PassionCode.ai) more steps follow,
+for each organization, newest first; each carries `organization: {id, name}`. A computer with
+no organization has only the five steps above. With PassionCode.ai connected and no
+organization listed for the person, one optional `organization` step says so.
+
+| Step | What it checks | Whose |
+|---|---|---|
+| `organization` | At least one organization exists on this computer | done, or optional |
+| `org_group` | The organization has exactly one group bound to it | the person: ask whether the administrator gave a settings file (then you run `next.command`) or which folders the group takes (then you run `next.alternatives`); with two groups, the person says which one stays, then you run `next.command` on the others |
+| `seat` | That group holds an account of the organization that is switched on, not used on another machine and still signed in | the person signs in with the organization's address; you may start `next.command` (the sign-in opens in the group) |
+| `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`): on by default, and working once a start file holds the hook | optional. `next.turn_off` turns it off and `next.turn_on` turns it back on: never run either unless the person asks. `next.command` (`shell status`) only reads |
+| `launch` | A session ran in the organization's context (`org:<id>`) | optional: `next.command` launches one in a folder of the group |
+
 ## Rules
 
 - Never ask the person to paste a token, password or key into the conversation, and never put
@@ -42,6 +59,10 @@ between them when one runs out, and gives coding agents its tools over MCP.
   IDs move. For a provider with no enabled account in that project, ordinary account launches keep
   their existing fallback; automatic `--provider` selection still requires the project's selected
   account. Never move accounts during setup.
+- A sign-in that lands outside its organization's group comes back with `organization_group`
+  in the `login finish` (or `accounts capture`) receipt. Tell the person; move the account
+  (`switchboard accounts move <id> --pool <group>`) only when they say so. With `in_cli: true`
+  it is the ordinary CLI's account, which joins a group only after the CLI switches.
 - Changing the ordinary Claude Code login affects every `claude` session on the computer. Never
   do it during setup.
 - A server you register during a session is loaded by the next session. If `switchboard_accounts`
