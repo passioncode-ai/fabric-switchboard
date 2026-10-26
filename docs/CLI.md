@@ -182,6 +182,41 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
+### Terminals in an organization's folders (SB-183, 0.7.0, in progress)
+
+In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`
+and `codex` in that group's shell homes, with `SWITCHBOARD_CONTEXT=org:<id>`, and gives the
+person's own values back when it leaves the folder ([SCN-074](ux/scenarios.md), design
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A). This build has
+the two commands that read the folder map; the hook scripts, the start-file block and the shell
+homes come with the next nodes of 0.7.0, so until the installed app writes the map every folder
+answers `none`.
+
+```sh
+switchboard shell status            # the hook's state, this terminal, the folder's group and homes
+switchboard shell status --dir /w/acme --json
+switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every change of folder
+```
+
+- `shell env` prints one line: `none`, or the group's pool, its context, the Claude shell home and
+  the Codex shell home (`-` for none), separated by tabs. It reads only `<data>/shell/map.json` and
+  `<data>/shell-hook`: no store lock, no owner, so a busy or stopped owner never holds a terminal.
+  It always exits 0 and never writes to the error stream; anything it cannot read (no map, a map
+  of another version or over 1 MiB, the hook turned off, a relative or unknown folder, a bad
+  argument) answers `none`. Budget 25 ms (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
+- `shell status` reads the same files and the installer's record and never fails: `hook` is `on`,
+  `off`, `default_on` (no choice made and a group belongs to an organization) or `default_off`;
+  `terminal.hook_loaded` says whether this terminal exported `SWITCHBOARD_SHELL_HOOK=1`; `here` is
+  what `shell env` answers in the folder; `files` lists each start file with its state. A group
+  with no Codex account reads “codex: your own sign-in (this group has no Codex account)”.
+
+Programs started in such a terminal see a shell home as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
+Switchboard never takes a folder inside its own data folder for the person's: what a launch links
+from, the limit scan's transcripts, where *Codex in group folders* writes its provider and the user
+scope a launch copies its MCP servers from all fall back to `~/.claude` and `~/.codex` then. An
+offline switch of the ordinary Claude Code from such a terminal is refused: “This session runs in a
+Switchboard home or a terminal in an organization's folder. Run this from another terminal.”
+
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
 Switchboard keeps a project's folder list by itself and never asks (SB-121, SB-131; operator

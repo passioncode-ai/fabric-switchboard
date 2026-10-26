@@ -1107,3 +1107,92 @@ read. New record fields `kind`, `attempt` and `mode` default for SB-114 files.
 holds: a waiting stop moves to now with `attempt + 1`; a claimed one becomes `resumed` and
 a new stop follows; a stop within 1800 s of the session's last resumed stop is one attempt
 later. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
+
+## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
+
+Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer`, `env_line`,
+`status`), CLI `shell status` and `shell env` (`crates/switchboard-cli/src/shell.rs`). Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; scenario SCN-074.
+
+- **Map.** `<data>/shell/map.json`, 0600, at most 1 MiB, written in one rename by `map::write`
+  (the owner's bindings pass calls it from node A-4):
+  `{"version": 1, "rows": [{"folder", "pool", "context", "claude", "codex"}]}`. `folder` is an
+  absolute group folder (its subfolders and worktrees belong to it); `context` is `org:<id>`;
+  `claude` is true when the folder's Claude Code is bound to the group, `codex` when the pool has
+  an enabled Codex account. Folders, pools and organization ids only: never a capability or a
+  token. Shell homes are `<data>/shell/claude-<pool>` and `<data>/shell/codex-<pool>`.
+- **One row per folder.** Which group a folder belongs to is decided once, by the writer (node
+  A-4), never by the lookup: a folder gets a row only when the group `Snapshot::project_for`
+  chooses for it (`crates/switchboard-core/src/projects.rs:297`) is bound to an organization, and
+  no row when that group is personal; `folder` is written in `canonicalize()` form.
+  `map::write` refuses two rows that name the same folder, compared component by component, with
+  “Two rows of the terminal folder map name the same folder.” and writes nothing. Test:
+  `shell::map::tests::the_map_holds_one_row_per_folder`.
+- **Lookup.** The longest row folder that holds the folder wins, compared whole component by
+  whole component, the folder matched with its links resolved: a link inside a group's folder
+  that leads out of it (`/w/acme/out -> /w/mine`) is the folder it leads to and answers nothing
+  of the group's, and a link from outside that leads into a group's folder answers that group.
+  Only a folder that cannot be resolved (it does not exist or cannot be read) is matched as
+  given. A row is skipped when its folder is not absolute, its pool is not `[A-Za-z0-9._-]` (or
+  starts with `.`), or its pool or context is empty, longer than 256 characters or holds a space
+  or a control character. A folder with a `..` step is never matched (`/w/acme/../mine` is not
+  inside `/w/acme`). Of two rows of the same length the earlier one wins, every time (a map with
+  two rows for one folder, written by hand or by an older writer, answers its first); a row that
+  names its folder through a link holds no folder that resolves. Tests:
+  `shell::map::tests::a_link_out_of_a_group_folder_never_answers_its_homes`,
+  `shell::map::tests::a_folder_with_a_parent_step_is_never_matched`,
+  `shell::map::tests::a_row_stored_through_a_link_loses_to_the_resolved_folder`.
+- **`shell env --shell <zsh|bash|fish|pwsh> --dir <folder>`** prints `none` or
+  `<pool>\t<context>\t<claude home or ->\t<codex home or ->`. `none` also when `<data>/shell-hook`
+  reads `off`, the map is missing, unreadable, over 1 MiB or of another version, the folder is
+  not absolute, the row has neither home, or an argument is malformed. It is answered in `main`
+  before the async runtime starts, takes no store lock, opens no control connection, silences
+  panics, exits 0 and writes nothing to stderr; `--help` still reaches the ordinary parser. Tests:
+  `shell::map::tests::the_longest_folder_of_an_organization_group_answers_its_homes_and_context`,
+  CLI `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` (the store's lock held
+  and a control port that never answers; the fastest of seven warm calls within 25 ms),
+  `shell_env_says_none_when_off_missing_unknown_version_or_outside`,
+  `shell_env_never_writes_to_stderr_and_exits_zero`.
+- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. The
+  writer is node A-3.
+- **`shell status [--dir <folder>]`** (`--json`: `{"ok": true, "data": ...}`) answers `hook`
+  (`on`, `off`, `default_on` when no choice is made and the map holds a valid row, else
+  `default_off`), `choice`, `map` (`ok`, `missing`, `unreadable`, `unknown_version`), `folder`,
+  `terminal` (`hook_loaded`: `SWITCHBOARD_SHELL_HOOK` is `1`; `launched_session`:
+  `SWITCHBOARD_SESSION` is set), `here` (`group`, `context`, `claude_home`, `codex_home`, or null:
+  what `shell env` answers there) and `files`. It reads files only and never fails. `files` comes
+  from the installer's record `<data>/shell-hook.json` (node A-3 writes it): the reader takes
+  `{"files": [{"shell", "path", "state"}]}`, ignores other fields and skips an entry without the
+  three strings; an absent or broken record gives `[]`. Test:
+  `shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails`.
+
+## The person's own Claude Code and Codex folders (SB-183, node A-5, 2026-10-26)
+
+Code: `switchboard_runtime::person` (`claude_dir`, `codex_dir`, `codex_home`). A process started
+in a hooked terminal or inside a launched session sees one of Switchboard's homes as
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`; a value inside Switchboard's data folder (the default data
+folder, compared as written and with links resolved through the nearest existing parent) is never
+the person's, and `~/.claude` or `~/.codex` is used instead (`~/.pi/agent` for Pi's
+`PI_CODING_AGENT_DIR`). These readers of the person's folders go through it:
+`carry::claude_user_dir` and `carry::pi_user_dir` (what a launched home links from),
+`limits::transcript_files` (the limit scan), `codex_route::config_path` (SB-143's provider),
+`launch::user_scope` and `launch::board_server` (the MCP servers a launch copies), `agents::setup`
+and the CLI's `onboard --status`.
+
+Two readers still follow the process's variables as they are. `projects::detect_session` (which
+session is asking) reads `CODEX_HOME` only to recognise a home Switchboard launched. The native
+sign-in context, `external::context`, reads `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and refuses a
+Switchboard home rather than reading past it: `capture_current` and `capture_current_cached`
+(`accounts capture` and the owner's “in use now” probe; the background probe may answer the source's locked or needs-access state first, and never captures), `activate_claude` and `lock_live` answer
+“This session runs in a Switchboard home or a terminal in an organization's folder. Run this from
+another terminal.” when it lies inside the data folder (Copylot reports 21ec4932 en-US and
+a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts` carry it). The refusal applies where the
+operation runs: an offline CLI command, or `serve` started in such a terminal; a CLI command
+answered by a running owner uses the owner's own environment. Whether the context's reads should
+go through `person` instead, keeping the refusal for writes, is question A-Q8 (assumed, not done
+in 0.7.0 node A-5). Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
+`carry::tests::a_launch_from_a_hooked_terminal_links_from_the_persons_folder`,
+`carry::tests::a_pi_launch_from_a_switchboard_home_links_from_the_persons_pi_folder`,
+`codex_route::tests::the_route_is_never_written_into_a_shell_home`,
+`external::tests::a_capture_from_a_switchboard_home_is_refused`,
+`external::tests::a_home_inside_switchboards_data_folder_is_refused`.

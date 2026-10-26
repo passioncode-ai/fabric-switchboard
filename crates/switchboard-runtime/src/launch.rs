@@ -231,7 +231,7 @@ fn user_board_server(
 /// The board server of this machine's operator, read from their real user scope.
 fn board_server(provider: Provider) -> Option<McpServer> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
-    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let codex_home = crate::person::codex_home();
     user_board_server(provider, Path::new(&home), codex_home.as_deref())
 }
 pub(crate) fn private_dir(path: &Path) -> Result<(), String> {
@@ -575,10 +575,7 @@ const NATIVE: Host = Host {
 fn user_scope(provider: Provider) -> Option<PathBuf> {
     match provider {
         Provider::Claude => crate::carry::claude_user_dir(),
-        Provider::Codex => std::env::var_os("CODEX_HOME")
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".codex"))),
+        Provider::Codex => crate::person::codex_dir(),
     }
 }
 pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
