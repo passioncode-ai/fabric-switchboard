@@ -49,6 +49,9 @@ const ALLOWLIST = {
   // has no import, so this prints to the terminal.
   'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',
   'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
+  // runtime shell/map.rs write(): the terminal hook's folder map is written only by the owner's
+  // background bindings pass (SB-183, node A-4), which logs a refusal; no renderer request writes it.
+  'Two rows of the terminal folder map name the same folder.': 'SB-183 shell map write: background bindings pass only, logged',
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
   "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',

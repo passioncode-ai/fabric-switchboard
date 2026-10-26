@@ -38,12 +38,13 @@ pub(crate) fn claude_user_dir() -> Option<PathBuf> {
 pub(crate) fn claude_user_dir_from(sources: &crate::person::Sources) -> Option<PathBuf> {
     crate::person::claude_dir_from(sources)
 }
-/// The operator's Pi folder (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
+/// The operator's Pi folder (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`), never one of
+/// Switchboard's homes (SB-183).
 pub(crate) fn pi_user_dir() -> Option<PathBuf> {
-    std::env::var_os("PI_CODING_AGENT_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".pi").join("agent")))
+    pi_user_dir_from(&crate::person::Sources::process())
+}
+pub(crate) fn pi_user_dir_from(sources: &crate::person::Sources) -> Option<PathBuf> {
+    crate::person::pi_dir_from(sources)
 }
 
 /// Links each of `names` that exists in `source` into `home`. A link Switchboard made before is
@@ -321,6 +322,40 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(launched.path().join("CLAUDE.md")).unwrap(),
             "the person's rules"
+        );
+    }
+
+    #[test]
+    fn a_pi_launch_from_a_switchboard_home_links_from_the_persons_pi_folder() {
+        // SB-183: a Pi session Switchboard launched exports its own home as
+        // PI_CODING_AGENT_DIR; a launch started inside it carries the person's `~/.pi/agent`,
+        // never that home. The person's own value elsewhere is kept.
+        let person = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let launched = data.path().join("agent-home").join("pi");
+        std::fs::create_dir_all(&launched).unwrap();
+        let env =
+            |name: &str| (name == "PI_CODING_AGENT_DIR").then(|| launched.clone().into_os_string());
+        let sources = crate::person::Sources {
+            env: &env,
+            home: Some(person.path().to_owned()),
+            data: Some(data.path().to_owned()),
+        };
+        assert_eq!(
+            pi_user_dir_from(&sources),
+            Some(person.path().join(".pi").join("agent"))
+        );
+        let own = |name: &str| {
+            (name == "PI_CODING_AGENT_DIR").then(|| std::ffi::OsString::from("/elsewhere/pi"))
+        };
+        let sources = crate::person::Sources {
+            env: &own,
+            home: Some(person.path().to_owned()),
+            data: Some(data.path().to_owned()),
+        };
+        assert_eq!(
+            pi_user_dir_from(&sources),
+            Some(PathBuf::from("/elsewhere/pi"))
         );
     }
 

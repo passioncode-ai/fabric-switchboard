@@ -49,6 +49,11 @@ pub(crate) fn claude_dir_from(sources: &Sources) -> Option<PathBuf> {
 pub(crate) fn codex_dir_from(sources: &Sources) -> Option<PathBuf> {
     own("CODEX_HOME", sources).or_else(|| sources.home.as_ref().map(|h| h.join(".codex")))
 }
+/// The person's Pi folder: their `PI_CODING_AGENT_DIR`, else `~/.pi/agent`.
+pub(crate) fn pi_dir_from(sources: &Sources) -> Option<PathBuf> {
+    own("PI_CODING_AGENT_DIR", sources)
+        .or_else(|| sources.home.as_ref().map(|h| h.join(".pi").join("agent")))
+}
 
 /// The variable's value when it is set and the person's own: never a folder inside
 /// Switchboard's data folder (a shell home, a launched home).

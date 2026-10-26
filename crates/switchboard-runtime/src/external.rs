@@ -505,12 +505,26 @@ fn capture(
     }
     Ok(result)
 }
+/// A capture of the sign-in in `c`, refused when `c` is one of Switchboard's own homes under
+/// `root` (SB-183): a terminal with the shell hook, or a session Switchboard launched, sees a
+/// shell home or a launched home as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and its sign-in is
+/// never the person's current account.
+fn capture_from(
+    reader: &dyn Reader,
+    provider: Provider,
+    c: &Context,
+    root: Option<PathBuf>,
+) -> Result<CapturedProfile, String> {
+    refuse_home_inside(&c.home, root)?;
+    capture(reader, provider, c)
+}
 /// An explicit read a person asked for (capture): straight from the source, so a locked
 /// keychain may ask to be unlocked. Its result also becomes what the background reuses.
 pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
     let before = probe_source(provider);
     let started = unix_now();
-    let result = context(provider, None).and_then(|c| capture(&Native, provider, &c));
+    let result = context(provider, None)
+        .and_then(|c| capture_from(&Native, provider, &c, crate::default_root().ok()));
     WATCH.remember(provider, before, probe_source(provider), started, &result);
     result
 }
@@ -524,7 +538,10 @@ pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, Str
         provider,
         unix_now,
         || probe_source(provider),
-        || context(provider, None).and_then(|c| capture(&Native, provider, &c)),
+        || {
+            context(provider, None)
+                .and_then(|c| capture_from(&Native, provider, &c, crate::default_root().ok()))
+        },
     )
 }
 /// A person acted, or Switchboard wrote the sign-in: the next request probes and reads afresh.
@@ -3234,6 +3251,45 @@ mod tests {
             },
         );
         assert!(matches!(codex, Probe::Ready { consent: false, .. }));
+    }
+    #[test]
+    fn a_capture_from_a_switchboard_home_is_refused() {
+        // SB-183, SCN-074: `accounts capture` and the owner's "in use now" probe, run from a
+        // terminal with the shell hook (or a session Switchboard launched), see a shell home
+        // as CLAUDE_CONFIG_DIR or CODEX_HOME. A signed-in shell home is still not the person's
+        // current account: the capture is refused like a native switch, for both providers.
+        let data = tempfile::tempdir().unwrap();
+        let root = readable_temp(data.path()).join("ai.passioncode.fabric-switchboard");
+        let claude_home = root.join("shell").join("claude-acme");
+        let codex_home = root.join("shell").join("codex-acme");
+        for dir in [&claude_home, &codex_home] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let f = Fixture::new();
+        let claude = Context {
+            home: claude_home.clone(),
+            config: claude_home.join(".claude.json"),
+            ..ctx()
+        };
+        f.put(&claude.config, &config("org@example.test"));
+        f.put(&claude_home.join(".credentials.json"), &auth("org-token"));
+        let codex = Context {
+            home: codex_home.clone(),
+            config: codex_home.join("config.toml"),
+            ..ctx()
+        };
+        f.put(
+            &codex_home.join("auth.json"),
+            br#"{"OPENAI_API_KEY":"synthetic-key"}"#,
+        );
+        for (provider, c) in [(Provider::Claude, &claude), (Provider::Codex, &codex)] {
+            let refused = capture_from(&f, provider, c, Some(root.clone()))
+                .err()
+                .unwrap_or_else(|| panic!("{provider:?} captured from a Switchboard home"));
+            assert!(refused.contains("Switchboard home"), "{refused}");
+            // The same files with no data folder known are captured: the home is the cause.
+            assert!(capture_from(&f, provider, c, None).is_ok(), "{provider:?}");
+        }
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {

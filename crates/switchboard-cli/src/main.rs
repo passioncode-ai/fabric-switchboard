@@ -1027,18 +1027,19 @@ fn read_secret() -> Result<String, String> {
     Ok(input.trim().to_owned())
 }
 async fn run(cli: &Cli) -> Result<Value, String> {
-    // Before the data folder is resolved: these read files only and never fail (SB-183).
-    match &cli.command {
-        Command::Shell {
-            command: shell::ShellCmd::Status { dir },
-        } => return Ok(shell::status(cli.data_dir.as_deref(), dir.as_deref())),
-        Command::Shell {
-            command: shell::ShellCmd::Env { dir, .. },
-        } => {
-            shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
-            return Ok(Value::Null);
-        }
-        _ => {}
+    // Before the data folder is resolved: these read files only and never fail (SB-183). Every
+    // `shell` command is answered here, so this match names each one: a new one fails to compile
+    // until it is answered (the later `Command::Shell` arm is unreachable).
+    if let Command::Shell { command } = &cli.command {
+        return match command {
+            shell::ShellCmd::Status { dir } => {
+                Ok(shell::status(cli.data_dir.as_deref(), dir.as_deref()))
+            }
+            shell::ShellCmd::Env { dir, .. } => {
+                shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
+                Ok(Value::Null)
+            }
+        };
     }
     let root = cli.data_dir.clone().map(Ok).unwrap_or_else(default_root)?;
     if !root.is_absolute() {
@@ -2933,7 +2934,7 @@ mod mcp_parity {
         ),
         (
             "shell env",
-            Not("SB-183: what the terminal hook asks on every change of folder; a person or agent reads the same through shell status"),
+            Not("SB-183: the terminal hook's own question on every change of folder, one line for a shell script; not an agent action"),
         ),
         ("uninstall", Not(PERSON)),
     ];

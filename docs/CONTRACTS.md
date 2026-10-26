@@ -1121,10 +1121,23 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   `claude` is true when the folder's Claude Code is bound to the group, `codex` when the pool has
   an enabled Codex account. Folders, pools and organization ids only: never a capability or a
   token. Shell homes are `<data>/shell/claude-<pool>` and `<data>/shell/codex-<pool>`.
+- **One row per folder.** Which group a folder belongs to is decided once, by the writer (node
+  A-4), never by the lookup: a folder gets a row only when the group `Snapshot::project_for`
+  chooses for it (`crates/switchboard-core/src/projects.rs:297`) is bound to an organization, and
+  no row when that group is personal; `folder` is written in `canonicalize()` form.
+  `map::write` refuses two rows that name the same folder, compared component by component, with
+  “Two rows of the terminal folder map name the same folder.” and writes nothing. Test:
+  `shell::map::tests::the_map_holds_one_row_per_folder`.
 - **Lookup.** The longest row folder that holds the folder wins, compared whole component by
   whole component, the folder taken as given and with links resolved. A row is skipped when its
   folder is not absolute, its pool is not `[A-Za-z0-9._-]` (or starts with `.`), or its pool or
-  context is empty, longer than 256 characters or holds a space or a control character.
+  context is empty, longer than 256 characters or holds a space or a control character. A folder
+  with a `..` step is never matched (`/w/acme/../mine` is not inside `/w/acme`). Ties are broken
+  the same way every time: a row that holds the resolved folder beats one that holds only the
+  folder as given, then the earlier row wins (a map with two rows for one folder, written by hand
+  or by an older writer, answers its first). Tests:
+  `shell::map::tests::a_folder_with_a_parent_step_is_never_matched`,
+  `shell::map::tests::a_row_stored_through_a_link_loses_to_the_resolved_folder`.
 - **`shell env --shell <zsh|bash|fish|pwsh> --dir <folder>`** prints `none` or
   `<pool>\t<context>\t<claude home or ->\t<codex home or ->`. `none` also when `<data>/shell-hook`
   reads `off`, the map is missing, unreadable, over 1 MiB or of another version, the folder is
@@ -1155,13 +1168,27 @@ Code: `switchboard_runtime::person` (`claude_dir`, `codex_dir`, `codex_home`). A
 in a hooked terminal or inside a launched session sees one of Switchboard's homes as
 `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; a value inside Switchboard's data folder (the default data
 folder, compared as written and with links resolved through the nearest existing parent) is never
-the person's, and `~/.claude` or `~/.codex` is used instead. Every reader of the person's folders
-goes through it: `carry::claude_user_dir` (what a launched home links from), `limits::transcript_files`
-(the limit scan), `codex_route::config_path` (SB-143's provider), `launch::user_scope` and
-`launch::board_server` (the MCP servers a launch copies), `agents::setup` and the CLI's
-`onboard --status`. The native sign-in context keeps its refusal, now worded “This session runs in
-a Switchboard home or a terminal in an organization's folder. Run this from another terminal.”
-(Copylot reports 21ec4932 en-US and a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts`
-carry it). Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
+the person's, and `~/.claude` or `~/.codex` is used instead (`~/.pi/agent` for Pi's
+`PI_CODING_AGENT_DIR`). These readers of the person's folders go through it:
+`carry::claude_user_dir` and `carry::pi_user_dir` (what a launched home links from),
+`limits::transcript_files` (the limit scan), `codex_route::config_path` (SB-143's provider),
+`launch::user_scope` and `launch::board_server` (the MCP servers a launch copies), `agents::setup`
+and the CLI's `onboard --status`.
+
+Two readers still follow the process's variables as they are. `projects::detect_session` (which
+session is asking) reads `CODEX_HOME` only to recognise a home Switchboard launched. The native
+sign-in context, `external::context`, reads `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and refuses a
+Switchboard home rather than reading past it: `capture_current` and `capture_current_cached`
+(`accounts capture` and the owner's “in use now” probe), `activate_claude` and `lock_live` answer
+“This session runs in a Switchboard home or a terminal in an organization's folder. Run this from
+another terminal.” when it lies inside the data folder (Copylot reports 21ec4932 en-US and
+a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts` carry it). The refusal applies where the
+operation runs: an offline CLI command, or `serve` started in such a terminal; a CLI command
+answered by a running owner uses the owner's own environment. Whether the context's reads should
+go through `person` instead, keeping the refusal for writes, is question A-Q8 (assumed, not done
+in 0.7.0 node A-5). Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
 `carry::tests::a_launch_from_a_hooked_terminal_links_from_the_persons_folder`,
-`codex_route::tests::the_route_is_never_written_into_a_shell_home`.
+`carry::tests::a_pi_launch_from_a_switchboard_home_links_from_the_persons_pi_folder`,
+`codex_route::tests::the_route_is_never_written_into_a_shell_home`,
+`external::tests::a_capture_from_a_switchboard_home_is_refused`,
+`external::tests::a_home_inside_switchboards_data_folder_is_refused`.

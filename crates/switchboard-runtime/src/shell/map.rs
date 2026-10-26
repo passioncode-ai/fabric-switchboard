@@ -62,8 +62,17 @@ pub fn codex_home(root: &Path, pool: &str) -> PathBuf {
     root.join(DIR).join(format!("codex-{pool}"))
 }
 
-/// Writes the map (0600, replaced in one rename). For the owner's bindings pass.
+/// Writes the map (0600, replaced in one rename). For the owner's bindings pass, which writes
+/// one row per folder, in canonical form, for the group `Snapshot::project_for` chooses there
+/// when that group is bound to an organization. Two rows naming the same folder are refused.
 pub fn write(root: &Path, map: &Map) -> Result<(), String> {
+    let mut folders = std::collections::BTreeSet::new();
+    for row in &map.rows {
+        let folder: PathBuf = Path::new(&row.folder).components().collect();
+        if !folders.insert(folder) {
+            return Err("Two rows of the terminal folder map name the same folder.".into());
+        }
+    }
     // Encoding plain strings and booleans cannot fail; storage's own sentence if it ever did.
     let bytes = serde_json::to_vec(map).map_err(|_| "Private account storage unavailable")?;
     switchboard_core::private_fs::private_write(&path(root), &bytes)
@@ -114,21 +123,34 @@ impl Map {
     /// The row whose folder holds `dir` (the folder itself, a subfolder, a worktree inside it),
     /// the longest folder winning; `dir` is tried as given and with links resolved. Whole path
     /// components are compared, so `/w/acme-other` is not inside `/w/acme`. Rows that are not
-    /// valid are skipped.
+    /// valid are skipped, and a `dir` with a `..` step is never matched (`/w/acme/../mine` is
+    /// not inside `/w/acme`). Ties are broken the same way every time: a row that holds the
+    /// resolved folder beats one that holds only the folder as given (rows are written in
+    /// canonical form), then the earlier row wins.
     pub fn lookup(&self, dir: &Path) -> Option<&Row> {
-        if !dir.is_absolute() {
+        if !dir.is_absolute()
+            || dir
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
             return None;
         }
         let resolved = dir.canonicalize().ok().filter(|r| r != dir);
-        self.rows
-            .iter()
-            .filter(|row| row.valid())
-            .filter(|row| {
-                let folder = Path::new(&row.folder);
-                dir.starts_with(folder)
-                    || resolved.as_deref().is_some_and(|r| r.starts_with(folder))
-            })
-            .max_by_key(|row| Path::new(&row.folder).components().count())
+        let mut best: Option<(usize, bool, &Row)> = None;
+        for row in self.rows.iter().filter(|row| row.valid()) {
+            let folder = Path::new(&row.folder);
+            let real = resolved
+                .as_deref()
+                .map_or(dir.starts_with(folder), |r| r.starts_with(folder));
+            if !real && !dir.starts_with(folder) {
+                continue;
+            }
+            let key = (folder.components().count(), real);
+            if best.is_none_or(|(length, was_real, _)| key > (length, was_real)) {
+                best = Some((key.0, key.1, row));
+            }
+        }
+        best.map(|(_, _, row)| row)
     }
 }
 impl Row {
@@ -379,8 +401,9 @@ mod tests {
         assert_eq!(env_line(root, &skipped), NONE);
         // A relative folder is never matched.
         assert_eq!(answer(root, Path::new("acme")), None);
-        // Rows that would break the answer line or name a path outside `shell/` are skipped.
-        write(
+        // Rows that would break the answer line or name a path outside `shell/` are skipped
+        // (written by hand: `write` takes one row per folder).
+        write_raw(
             root,
             &Map {
                 version: VERSION,
@@ -390,8 +413,121 @@ mod tests {
                     row("relative/acme", "acme", "org:o-acme", true, true),
                 ],
             },
+        );
+        assert_eq!(answer(root, &inside), None);
+    }
+
+    /// A map as it lands on disk, bypassing `write`'s checks (an older or hand-edited file).
+    fn write_raw(root: &Path, map: &Map) {
+        switchboard_core::private_fs::private_write(&path(root), &serde_json::to_vec(map).unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn the_map_holds_one_row_per_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let one = |pool: &str| row("/w/acme", pool, "org:o-acme", true, false);
+        let refused = write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![one("acme"), one("globex")],
+            },
+        )
+        .unwrap_err();
+        assert!(refused.contains("same folder"), "{refused}");
+        assert_eq!(read(root), Loaded::Missing, "nothing written");
+        // The same folder spelled with a trailing separator is the same folder.
+        let mut trailing = one("globex");
+        trailing.folder = "/w/acme/".into();
+        assert!(write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![one("acme"), trailing],
+            },
+        )
+        .is_err());
+        // A map that holds two rows for one folder anyway: the first row answers, every time.
+        write_raw(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![one("acme"), one("globex"), one("initech")],
+            },
+        );
+        assert_eq!(answer(root, Path::new("/w/acme/src")).unwrap().pool, "acme");
+    }
+
+    #[test]
+    fn a_folder_with_a_parent_step_is_never_matched() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        let mine = work.join("mine");
+        for dir in [&acme, &mine] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![row(&s(&acme), "acme", "org:o-acme", true, true)],
+            },
         )
         .unwrap();
-        assert_eq!(answer(root, &inside), None);
+        // `<acme>/../mine` is the person's folder, though it starts with the group's folder.
+        assert_eq!(answer(root, &acme.join("..").join("mine")), None);
+        assert_eq!(answer(root, &acme.join("src").join("..")), None);
+        assert_eq!(answer(root, &acme).unwrap().pool, "acme");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_row_stored_through_a_link_loses_to_the_resolved_folder() {
+        // Rows are written in canonical form; a row that names a folder through a link is
+        // matched only through that link, and where the folder's resolved path has its own
+        // row of the same length, the resolved one answers whatever the rows' order.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        std::fs::create_dir_all(acme.join("src")).unwrap();
+        let link = work.join("link");
+        std::os::unix::fs::symlink(&acme, &link).unwrap();
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let linked = row(&s(&link), "linked", "org:o-linked", true, false);
+        let real = row(&s(&acme), "acme", "org:o-acme", true, false);
+        for rows in [
+            vec![real.clone(), linked.clone()],
+            vec![linked.clone(), real.clone()],
+        ] {
+            write(
+                root,
+                &Map {
+                    version: VERSION,
+                    rows,
+                },
+            )
+            .unwrap();
+            assert_eq!(answer(root, &link.join("src")).unwrap().pool, "acme");
+            assert_eq!(answer(root, &acme.join("src")).unwrap().pool, "acme");
+        }
+        // Alone, the linked row answers only a folder reached through the link.
+        write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![linked],
+            },
+        )
+        .unwrap();
+        assert_eq!(answer(root, &link.join("src")).unwrap().pool, "linked");
+        assert_eq!(answer(root, &acme.join("src")), None);
     }
 }
