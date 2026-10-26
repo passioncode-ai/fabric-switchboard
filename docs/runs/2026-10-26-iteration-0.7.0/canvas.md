@@ -48,3 +48,15 @@ A second pass changed nothing.
 | after | B-10 (SB-125 live setup), the operator's acceptance | human gates |
 
 Questions: [questions.md](questions.md).
+
+## Wave 2 state (2026-10-26)
+
+| Node | Branch, commit | Rounds | Open |
+|---|---|---|---|
+| A-1, A-5 | `w2/shell` `e86d0c6` | round 1: seam fail (capture not refused, wildcard match, map rule) | fix cycle 1 running |
+| A-10, A-11, B-2 | `w2/context` `268df9a`, fix `f4139e3` | round 1: unit pass, seam fail (provider collision); round 2: blocker closed | Dashboards must read `agent` (board `67535b26`, thread `3f0ec524`): **release gate for 0.7.0**; wave 4: catalog names in `sessionAgentName`, a fill test for kimi, codex, hermes |
+| B-5 (R3) | `w2/seat` `0e0b0fb`, fix `42e095c` | round 1: unit pass, seam fail (renew_idle_live log); fix cycle 1 done | adversarial round owed |
+| C-8 | `w2/chains` `4919d70` | none yet | C-4, C-2 half built in the worktree (builder stopped for disk) |
+
+Builders run one at a time since 2026-10-26 02:00 UTC (the MacBook's disk: 2 to 6 GB free; fabric-workspace's request). A shared
+`CARGO_TARGET_DIR` served stale binaries twice: a green run counts only when its output names the node's tests.
