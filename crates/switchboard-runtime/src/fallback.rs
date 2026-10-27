@@ -2380,6 +2380,8 @@ mod tests {
 
     // ---- C-5: the spend gate (SB-72, dossier C part D) ----
 
+    #[cfg(unix)]
+    use crate::continuation::TEST_OBSERVATORY;
     use crate::spend::{self, KeyRead, Surface};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
@@ -3243,9 +3245,13 @@ mod tests {
             .unwrap_err();
         assert_eq!(refused, spend::STOP_CEILING_REACHED);
         assert!(crate::handovers::pending(root.path()).is_empty());
-        // On the default agent: Hermes, refused the same way.
-        crate::agent_settings::set_default(root.path(), Some(crate::hermes::HERMES_TARGET))
-            .unwrap();
+        // On the default agent: Hermes, refused the same way. Written as the file holds it:
+        // `set_default` refuses an agent this computer lacks, and a CI runner has no Hermes.
+        switchboard_core::private_fs::private_write(
+            &root.path().join(crate::agent_settings::FILE),
+            br#"{"default":"hermes"}"#,
+        )
+        .unwrap();
         let refused = TEST_READ
             .scope(
                 spent.clone(),
@@ -3256,6 +3262,7 @@ mod tests {
         assert_eq!(refused, spend::STOP_CEILING_REACHED);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_paid_continue_by_hand_writes_the_tasks_baseline() {
         let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -3263,10 +3270,13 @@ mod tests {
         let runtime = paid_runtime(root.path(), None).await;
         let count = Arc::new(AtomicUsize::new(0));
         // The gate passes; "managed" is then refused for Hermes, before anything is offered.
-        let answer = TEST_READ
+        let answer = TEST_OBSERVATORY
             .scope(
-                test_read(spend(40.0, 10.0, 1.0), &count),
-                runtime.execute(continue_on(crate::hermes::HERMES_TARGET, &dir, "managed")),
+                engine(root.path(), "", &dir),
+                TEST_READ.scope(
+                    test_read(spend(40.0, 10.0, 1.0), &count),
+                    runtime.execute(continue_on(crate::hermes::HERMES_TARGET, &dir, "managed")),
+                ),
             )
             .await
             .unwrap_err();
@@ -3336,6 +3346,7 @@ mod tests {
         assert_eq!(refused, spend::STOP_SPEND_UNKNOWN);
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_automatic_fallback_gates_its_step_once_and_never_waits_on_itself() {
         // Break 1: with the gate in `Continue` too, the fallback's own step must neither take the
@@ -3375,7 +3386,10 @@ mod tests {
         // (SB-221), so the turn may come late. A self-deadlock never ends, so 60 s still tells.
         let done = tokio::time::timeout(
             std::time::Duration::from_secs(60),
-            hand_over(&act, &gate, WF, &dir, &[hermes()]),
+            TEST_OBSERVATORY.scope(
+                engine(root.path(), "", &dir),
+                hand_over(&act, &gate, WF, &dir, &[hermes()]),
+            ),
         )
         .await
         .expect("the hand-over never waits on its own turn");
@@ -3511,6 +3525,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_slow_paid_gate_by_hand_holds_up_neither_a_read_nor_a_subscription_launch() {
         // Fix cycle 2, risk 3: a paid start by hand takes the hand-over turn and passes its gate
@@ -3528,7 +3543,10 @@ mod tests {
                 spend(40.0, 1.0, 1.0)
             })
         };
-        let paid = runtime.execute(continue_on(crate::hermes::HERMES_TARGET, &dir, "managed"));
+        let paid = TEST_OBSERVATORY.scope(
+            engine(root.path(), "", &dir),
+            runtime.execute(continue_on(crate::hermes::HERMES_TARGET, &dir, "managed")),
+        );
         let probes = async {
             let waited = tokio::time::Instant::now();
             while !reading.load(Ordering::SeqCst) {

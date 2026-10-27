@@ -1411,7 +1411,8 @@ fn project_bindings_are_listed_offline() {
     );
     assert!(json["data"]["bindings"][0].get("token_sha256").is_none());
 }
-/// SB-212: a synthetic launch record, as a launch writes it (0600).
+/// SB-212: a synthetic launch record, 0600 on Unix as a launch writes it. On Windows it keeps
+/// the access list it inherits, which history still reads (and narrows), as after a copied folder.
 fn plant_launch(root: &std::path::Path, id: &str, extra: serde_json::Value) {
     let dir = root.join("launches");
     std::fs::create_dir_all(&dir).unwrap();
