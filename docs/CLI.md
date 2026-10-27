@@ -215,13 +215,18 @@ switchboard shell on                # put it back, with or without an organizati
 - `shell init <zsh|bash|fish|pwsh>` prints the hook script, naming this executable and the data
   folder, for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in
   `.zshrc` (bash likewise), `switchboard shell init fish | source` in fish's,
-  `switchboard shell init pwsh | Out-String | Invoke-Expression` in a PowerShell profile. On every change of folder it
+  `switchboard shell init pwsh | Out-String | Invoke-Expression` in a PowerShell profile (the
+  PowerShell script carries the two paths as base64, so Windows PowerShell 5.1's console code
+  page cannot garble a user name that is not ASCII). On every change of folder it
   asks `shell env` and exports the group's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
   `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
   them back exactly when you leave; a variable you change while inside stays yours. It prints
   nothing, never fails the prompt, and does nothing in a terminal Switchboard launched. A CLI that
   is gone, too old for `shell env` or failing reads as `none`, so the values it set are given back;
-  zsh waits at most ten seconds for an answer. fish runs the hook in interactive shells only.
+  zsh waits at most ten seconds for an answer. fish runs the hook in interactive shells only;
+  PowerShell asks as it loads only in a shell you type in (not under `-Command`, `-File`,
+  `-EncodedCommand` or `-NonInteractive` without `-NoExit`), and does nothing in Constrained
+  Language Mode.
 - On a computer with a group bound to an organization, the installed app (in `/Applications` or
   `~/Applications` on macOS) puts one marked block
   (`# >>> Fabric Switchboard: shell hook (SB-183) >>>` … `# <<< Fabric Switchboard <<<`) at the end
@@ -234,7 +239,11 @@ switchboard shell on                # put it back, with or without an organizati
   of each PowerShell edition installed (`WindowsPowerShell\` and `PowerShell\` under Documents,
   wherever Documents was redirected), except where the execution policy is `Restricted` or
   `AllSigned`: that profile is not changed and `shell status` says so (`policy_blocked`);
-  Switchboard never changes the policy. It reads the hook script only when it is there.
+  Switchboard never changes the policy. Where PowerShell is held to Constrained Language Mode
+  (Application Control holds both editions; `__PSLockdownPolicy` holds Windows PowerShell 5.1
+  only), that edition's profile is not changed and `shell status` says so
+  (`constrained_language`). A profile saved in UTF-16 (with its byte order mark) is written in
+  UTF-16 and given back byte for byte. It reads the hook script only when it is there.
   A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
   `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
   written back. `shell off` gives every file back byte for byte (a start file Switchboard created

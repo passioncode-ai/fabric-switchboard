@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 use switchboard_runtime::shell::map::{self, Map, Row};
+use switchboard_runtime::shell::scripts;
 
 fn binary() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_switchboard"));
@@ -666,12 +667,17 @@ fn shell_init_pwsh_prints_the_powershell_hook_naming_this_cli() {
     let exe = Path::new(env!("CARGO_BIN_EXE_switchboard"))
         .canonicalize()
         .unwrap();
-    let quoted = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', "''"));
+    // The paths as base64 of their UTF-8, decoded as the script runs (SB-225): Windows
+    // PowerShell 5.1 reads a command's output in the console's code page, so what it reads must
+    // be ASCII.
+    // Decoding it through PowerShell is `windows::tests::the_ps1_transition_matches_the_posix_one`.
+    let encoded = |p: &Path| scripts::ps_base64(&p.to_string_lossy());
     assert!(
-        script.contains(&format!("$global:_switchboard_cli = {}", quoted(&exe))),
+        script.contains(&format!("$global:_switchboard_cli = {}", encoded(&exe))),
         "{script}"
     );
-    assert!(script.contains(&format!("$global:_switchboard_data = {}", quoted(&root))));
+    assert!(script.contains(&format!("$global:_switchboard_data = {}", encoded(&root))));
+    assert!(script.is_ascii(), "{script}");
     assert!(script.contains("function global:prompt"));
     // Printed for `| Out-String | Invoke-Expression`: no byte order mark in front.
     assert!(script.starts_with("# Fabric Switchboard: shell hook for PowerShell"));

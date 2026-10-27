@@ -68,7 +68,9 @@ pub fn codex_home(root: &Path, pool: &str) -> PathBuf {
 pub fn write(root: &Path, map: &Map) -> Result<(), String> {
     let mut folders = std::collections::BTreeSet::new();
     for row in &map.rows {
-        let folder: PathBuf = Path::new(&row.folder).components().collect();
+        // Compared as the reader compares folders: on Windows `C:\A` and `c:\a\` are one.
+        let folder = key(Path::new(&row.folder))
+            .unwrap_or_else(|| vec![std::ffi::OsString::from(&row.folder)]);
         if !folders.insert(folder) {
             return Err("Two rows of the terminal folder map name the same folder.".into());
         }
@@ -127,7 +129,9 @@ impl Map {
     /// resolved (it does not exist, or cannot be read) is matched as given. Whole path
     /// components are compared, so `/w/acme-other` is not inside `/w/acme`. Rows that are not
     /// valid are skipped, and a `dir` with a `..` step is never matched (`/w/acme/../mine` is
-    /// not inside `/w/acme`). Of two rows of the same length, the earlier one wins.
+    /// not inside `/w/acme`). Of two rows of the same length, the earlier one wins. On Windows
+    /// folders compare as Windows names them ([`windows_key`]): `\\?\C:\w\acme` (what
+    /// `canonicalize` answers, and so how rows are written) holds `c:/W/Acme/src`.
     pub fn lookup(&self, dir: &Path) -> Option<&Row> {
         if !dir.is_absolute()
             || dir
@@ -137,19 +141,86 @@ impl Map {
             return None;
         }
         let target = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+        let target = key(&target)?;
         let mut best: Option<(usize, &Row)> = None;
         for row in self.valid_rows() {
-            let folder = Path::new(&row.folder);
-            if !target.starts_with(folder) {
+            let Some(folder) = key(Path::new(&row.folder)) else {
+                continue;
+            };
+            if !target.starts_with(&folder) {
                 continue;
             }
-            let length = folder.components().count();
+            let length = folder.len();
             if best.is_none_or(|(longest, _)| length > longest) {
                 best = Some((length, row));
             }
         }
         best.map(|(_, row)| row)
     }
+}
+/// A folder as the map compares it, one entry per path component. Elsewhere the components as
+/// they are, so a folder holds another exactly when [`Path::starts_with`] says so.
+#[cfg(not(windows))]
+fn key(path: &Path) -> Option<Vec<std::ffi::OsString>> {
+    Some(
+        path.components()
+            .map(|c| c.as_os_str().to_owned())
+            .collect(),
+    )
+}
+/// On Windows, [`windows_key`] of the path's text.
+#[cfg(windows)]
+fn key(path: &Path) -> Option<Vec<std::ffi::OsString>> {
+    windows_key(&path.to_string_lossy()).map(|parts| parts.into_iter().map(Into::into).collect())
+}
+/// An absolute Windows folder as Windows compares it: the verbatim prefix `canonicalize` adds
+/// dropped (`\\?\C:\w` is `C:\w`, `\\?\UNC\host\share` is `\\host\share`), `/` read as `\`,
+/// empty and `.` steps skipped, and every part in one case (NTFS and SMB names are
+/// case-insensitive). None for a path that is not absolute (no drive and root, no share) or
+/// that has a `..` step. Pure text, so it is tested on every platform.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn windows_key(text: &str) -> Option<Vec<String>> {
+    let text = text.replace('/', "\\");
+    let rest = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(local) = text
+        .strip_prefix(r"\\?\")
+        .or_else(|| text.strip_prefix(r"\\.\"))
+    {
+        local.to_owned()
+    } else {
+        text
+    };
+    let mut parts = Vec::new();
+    let steps = if let Some(unc) = rest.strip_prefix(r"\\") {
+        let mut steps = unc.split('\\');
+        let (host, share) = (steps.next()?, steps.next()?);
+        if host.is_empty() || share.is_empty() || host == "?" || host == "." {
+            return None;
+        }
+        parts.push(format!(r"\\{}", host.to_lowercase()));
+        parts.push(share.to_lowercase());
+        steps
+    } else {
+        let bytes = rest.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || bytes[2] != b'\\'
+        {
+            return None;
+        }
+        parts.push(rest[..2].to_ascii_lowercase());
+        rest[3..].split('\\')
+    };
+    for step in steps {
+        match step {
+            "" | "." => {}
+            ".." => return None,
+            name => parts.push(name.to_lowercase()),
+        }
+    }
+    Some(parts)
 }
 impl Map {
     /// The rows a reader acts on: the valid ones, in the map's order.
@@ -253,8 +324,8 @@ fn answer_in(root: &Path, dir: &Path, loaded: &Loaded) -> Option<Answer> {
     // Claude Code reads Switchboard's route only from `.claude/settings.local.json` in the folder
     // it starts in (measured, docs/evidence/shell-home-measurement-2026-10.md): below the bound
     // folder the home's placeholder would reach the provider, so no Claude home there.
-    let at_folder =
-        dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()) == Path::new(&row.folder);
+    let at_folder = key(&dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()))
+        == key(Path::new(&row.folder));
     let answer = Answer {
         pool: row.pool.clone(),
         context: row.context.clone(),
@@ -395,7 +466,7 @@ mod tests {
             found.line(),
             format!(
                 "acme\torg:o-acme\t{}\t-",
-                s(&root.join("shell/claude-acme"))
+                s(&root.join("shell").join("claude-acme"))
             )
         );
         // A group folder inside another: the longer folder wins, both homes.
@@ -484,7 +555,7 @@ mod tests {
             below.line(),
             format!(
                 "globex\torg:o-globex\t-\t{}",
-                s(&root.join("shell/codex-globex"))
+                s(&root.join("shell").join("codex-globex"))
             )
         );
         // The folder itself through a link is the folder itself.
@@ -565,9 +636,116 @@ mod tests {
         )
         .unwrap();
         // `<acme>/../mine` is the person's folder, though it starts with the group's folder.
-        assert_eq!(answer(root, &acme.join("..").join("mine")), None);
-        assert_eq!(answer(root, &acme.join("src").join("..")), None);
-        assert_eq!(answer(root, &acme).unwrap().pool, "acme");
+        // Spelled as text: on Windows `join("..")` on the verbatim `\\?\C:\...` that
+        // `canonicalize` answers drops the step itself, and a terminal's folder is plain text.
+        let sep = std::path::MAIN_SEPARATOR;
+        for acme in [s(&acme), plain(&acme)] {
+            let up = |rest: &str| PathBuf::from(format!("{acme}{sep}{rest}"));
+            assert_eq!(answer(root, &up(&format!("..{sep}mine"))), None, "{acme}");
+            assert_eq!(answer(root, &up(&format!("src{sep}.."))), None, "{acme}");
+            assert_eq!(answer(root, Path::new(&acme)).unwrap().pool, "acme");
+        }
+    }
+
+    /// The folder as a terminal names it: on Windows without the `\\?\` prefix
+    /// `canonicalize` adds (PowerShell's `$PWD` is `C:\...`).
+    fn plain(path: &Path) -> String {
+        let text = path.to_string_lossy();
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+    }
+
+    #[test]
+    fn a_windows_folder_compares_as_windows_names_it() {
+        let key = |text: &str| windows_key(text).map(|parts| parts.join("|"));
+        let acme = Some("c:|work|acme".to_owned());
+        // The verbatim prefix, the drive's case, the names' case, `/`, a trailing separator
+        // and `.` steps do not make another folder.
+        for spelling in [
+            r"C:\Work\Acme",
+            r"\\?\C:\work\acme",
+            r"c:\WORK\ACME\",
+            "C:/Work/Acme",
+            r"C:\Work\.\Acme",
+            r"\\.\C:\Work\Acme",
+        ] {
+            assert_eq!(key(spelling), acme, "{spelling}");
+        }
+        // Shares: `\\?\UNC\host\share` is `\\host\share`.
+        let share = Some(r"\\host|share|acme".to_owned());
+        assert_eq!(key(r"\\Host\Share\Acme"), share);
+        assert_eq!(key(r"\\?\UNC\host\share\acme"), share);
+        // Not absolute, or with a `..` step: no key, so never matched.
+        for refused in [
+            r"\Work\Acme",
+            r"C:Work\Acme",
+            "acme",
+            "/w/acme",
+            r"C:\Work\..\Acme",
+            r"\\host",
+            r"\\?\pipe",
+            "",
+        ] {
+            assert_eq!(key(refused), None, "{refused}");
+        }
+        // Whole names: `acme-other` is not inside `acme`.
+        let inside = |dir: &str, folder: &str| {
+            windows_key(dir)
+                .zip(windows_key(folder))
+                .is_some_and(|(d, f)| d.starts_with(&f))
+        };
+        assert!(inside(r"c:\work\ACME\src", r"\\?\C:\Work\acme"));
+        assert!(!inside(r"C:\Work\acme-other", r"C:\Work\acme"));
+        assert!(!inside(r"D:\Work\acme", r"C:\Work\acme"));
+        assert!(!inside(r"C:\Work", r"C:\Work\acme"));
+    }
+
+    /// Windows: rows are written as `canonicalize` answers (`\\?\C:\...`); the terminal asks
+    /// with `$PWD` (`C:\...`), in any case, with `/` too, and about folders that may not exist.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_terminal_folder_finds_its_verbatim_row() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let tmp = tempfile::tempdir().unwrap();
+        let acme = tmp.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(acme.join("src")).unwrap();
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        assert!(s(&acme).starts_with(r"\\?\"), "{}", s(&acme));
+        write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![row(&s(&acme), "acme", "org:o-acme", true, true)],
+            },
+        )
+        .unwrap();
+        let plain = plain(&acme);
+        for asked in [
+            plain.clone(),
+            plain.to_uppercase(),
+            plain.replace('\\', "/"),
+            format!(r"{plain}\"),
+        ] {
+            let found = answer(root, Path::new(&asked)).unwrap();
+            assert_eq!(found.pool, "acme", "{asked}");
+            assert!(found.claude_home.is_some(), "the folder itself: {asked}");
+        }
+        for below in [format!(r"{plain}\src"), format!(r"{plain}\gone\deeper")] {
+            let found = answer(root, Path::new(&below)).unwrap();
+            assert_eq!(found.claude_home, None, "{below}");
+            assert!(found.codex_home.is_some(), "{below}");
+        }
+        assert_eq!(answer(root, Path::new(&format!("{plain}-other"))), None);
+        // The same folder in another spelling is the same row.
+        let again = row(&plain.to_uppercase(), "globex", "org:o-globex", true, true);
+        assert!(write(
+            root,
+            &Map {
+                version: VERSION,
+                rows: vec![row(&s(&acme), "acme", "org:o-acme", true, true), again],
+            },
+        )
+        .is_err());
     }
 
     #[cfg(unix)]

@@ -1499,7 +1499,10 @@ fn a_launched_sessions_hooks_record_its_transcript_turns_and_stop_and_nothing_el
     let id = "5b7f2c1e-0000-4000-8000-000000000001";
     plant_launch(root, id, serde_json::json!({}));
     let dir = root.to_string_lossy().into_owned();
-    let transcript = "/synthetic/home/projects/x/0f3c.jsonl";
+    // Absolute on this platform, as Claude Code reports it: `C:\...` on Windows, where a path
+    // without a drive (`/synthetic/...`) is not absolute and is rightly not recorded.
+    let transcript = root.join("projects").join("x").join("0f3c.jsonl");
+    let transcript = transcript.to_string_lossy().into_owned();
     let start = serde_json::json!({"session_id": "0f3c", "transcript_path": transcript,
         "cwd": dir, "hook_event_name": "SessionStart"});
     let suggest = ["project", "suggest", "--from-hook"];

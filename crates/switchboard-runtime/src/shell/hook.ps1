@@ -4,8 +4,12 @@
 # Off: `switchboard shell off`. It prints nothing and never fails the prompt.
 # Windows PowerShell 5.1 and PowerShell 7: the prompt is wrapped and acts when the location
 # changed. Everything the hook keeps is a global variable (never in a child's environment), and
-# it works the same whatever scope this file is read in.
-if (-not [Environment]::GetEnvironmentVariable('SWITCHBOARD_SESSION') -and
+# it works the same whatever scope this file is read in. In Constrained Language Mode it does
+# nothing. Only a shell a person types in asks Switchboard as it loads: `-Command`, `-File` and
+# `-NonInteractive` runs that read profiles do not (set $global:_switchboard_interactive first
+# to decide it yourself).
+if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and
+    -not [Environment]::GetEnvironmentVariable('SWITCHBOARD_SESSION') -and
     $null -eq (Get-Variable -Name '_switchboard_shell' -Scope Global -ValueOnly -ErrorAction Ignore)) {
     try {
         $global:_switchboard_shell = 'pwsh'
@@ -167,9 +171,36 @@ if (-not [Environment]::GetEnvironmentVariable('SWITCHBOARD_SESSION') -and
             & $sb_prompt
         }
 
+        # Whether a person types in this shell, from the arguments it was started with: not with
+        # -NonInteractive, nor with -Command, -File, -CommandWithArgs or -EncodedCommand (any
+        # prefix PowerShell takes, after - or /) unless -NoExit keeps it open afterwards.
+        function global:_switchboard_interactive_args([string[]]$list) {
+            $noexit = $false
+            $script = $false
+            foreach ($arg in $list) {
+                if ($arg -notmatch '^(--|-|/)([A-Za-z]+)(:.*)?$') { continue }
+                $name = $Matches[2].ToLowerInvariant()
+                if ($name.Length -ge 4 -and 'noninteractive'.StartsWith($name)) { return $false }
+                if ($name.Length -ge 3 -and 'noexit'.StartsWith($name)) { $noexit = $true; continue }
+                if ('command'.StartsWith($name) -or 'file'.StartsWith($name) -or
+                    'encodedcommand'.StartsWith($name) -or $name -eq 'ec' -or $name -eq 'cwa' -or
+                    ($name.Length -ge 8 -and 'commandwithargs'.StartsWith($name))) {
+                    # What follows is the command or the script and its arguments.
+                    $script = $true
+                    break
+                }
+            }
+            return ($noexit -or -not $script)
+        }
+
         [Environment]::SetEnvironmentVariable('SWITCHBOARD_SHELL_HOOK', '1')
         _switchboard_inherit
-        $global:_switchboard_pwd = (Get-Location).Path
-        _switchboard_apply
+        if ($null -eq (Get-Variable -Name '_switchboard_interactive' -Scope Global -ValueOnly -ErrorAction Ignore)) {
+            $global:_switchboard_interactive = _switchboard_interactive_args @([Environment]::GetCommandLineArgs() | Select-Object -Skip 1)
+        }
+        if ($global:_switchboard_interactive) {
+            $global:_switchboard_pwd = (Get-Location).Path
+            _switchboard_apply
+        }
     } catch { }
 }

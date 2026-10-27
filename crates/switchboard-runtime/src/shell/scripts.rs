@@ -101,6 +101,25 @@ pub(crate) fn ps_quote(value: &str) -> String {
 /// either path is not absolute or not valid text (a shell script cannot name it reliably) or
 /// holds a control character.
 pub fn script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
+    render(kind, cli, data, false)
+}
+/// What `switchboard shell init <shell>` prints: [`script`], except that PowerShell gets its two
+/// paths as base64 of their UTF-8, decoded as it runs. Windows PowerShell 5.1 reads a command's
+/// output in the console's code page (`switchboard shell init pwsh | Out-String |
+/// Invoke-Expression`), which would garble a path that is not ASCII; the script itself is
+/// ASCII, so nothing else can be misread.
+pub fn init_script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
+    render(kind, cli, data, true)
+}
+/// `value` as a PowerShell expression that reads ASCII only: base64 of its UTF-8, decoded.
+pub fn ps_base64(value: &str) -> String {
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(value.as_bytes());
+    format!(
+        "([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{encoded}')))"
+    )
+}
+fn render(kind: Kind, cli: &Path, data: &Path, encoded: bool) -> Option<String> {
     let text = |p: &Path| {
         p.is_absolute()
             .then(|| p.to_str())
@@ -112,6 +131,7 @@ pub fn script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
     let quote = match kind {
         Kind::Fish => fish_quote,
         Kind::Zsh | Kind::Bash => sh_quote,
+        Kind::Pwsh if encoded => ps_base64,
         Kind::Pwsh => ps_quote,
     };
     let template = match kind {
