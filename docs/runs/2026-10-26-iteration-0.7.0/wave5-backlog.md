@@ -29,6 +29,16 @@ Board message for the lead (not a backlog row): Vesta's rollout note "plain `cla
 to a context" is Vesta's to update now that the hook ships on by default (dossier A section 5, dossier B
 section 7, B-9).
 
+## B-9: the organization's person
+
+### Existing rows
+
+| Row | Change | New state text |
+|---|---|---|
+| SB-202 | **State** | built on `iteration/0.7.0`: the organization checklist in `switchboard onboard` and MCP `switchboard_onboarding` (B-3, merged `a6701ad`), the window's organization card and the empty Accounts page leading with the seat (B-8, `e466ad7`), the runbook [ORGANIZATION.md](../../ORGANIZATION.md) and [ORGANIZATION.ru.md](../../ORGANIZATION.ru.md) with each step's proof command and a Windows column (B-9; Copylot en-US `82a68bc7-2279-489d-9289-3357ceb77231`, ru-RU `faec18a8-11a7-4cae-adbe-683cd6cc7dcc`), linked from README *Quick start* and INSTALL.md; to close at the 0.7.0 release. The Windows column stays "not yet tried on a person's Windows computer" until SB-02 |
+| SB-160 | **State** | Switchboard's part built on `iteration/0.7.0`: joining, a new seat's receipt offers its organization's group (B-4, `a6701ad`); leaving, an ended seat read from the provider's refusal (B-5, `f7d145f`), named with its organization on the card and the group (B-6), PassionCode.ai leaving recorded with its date (B-7, both `bdf4c04`); SCN-077 to SCN-079; to close at the 0.7.0 release. The playbook's run stays Vesta's and Fabric's |
+| SB-125 | **State** (add) | 2026-10-28: the runbook it walks exists (B-9). Node B-10 runs after 0.7.0 is installed on both machines; human gates: the browser consent and Serge Khurs's own sign-in |
+
 ## C-9: chains and ceilings
 
 ### Existing rows

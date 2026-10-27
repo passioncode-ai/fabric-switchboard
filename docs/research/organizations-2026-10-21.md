@@ -84,7 +84,7 @@ plus the organization list. No Fabric, Vesta or Observatory call is needed to at
 | 4. Invite the address to the provider team | org admin | Claude Team: Settings → Members → Invite (no API on Team); ChatGPT Business: Workspace settings → Members (no API on Business). Enterprise plans: SCIM (Claude), Admin API invitations or SCIM (ChatGPT, since 2026-08-20) can do it from an agent | on Team/Business the invite is a click in the provider's console |
 | 5. Accept and sign in | employee | invitation and sign-in codes reach their own mail through the forward; `switchboard login claude` (or *Add account*) on their machine | the employee signs in (sign-in code) |
 | 6. Attribution | Switchboard on the employee's machine | rule 3: the organization's domain | none |
-| Leaving | org admin | remove the seat at the provider; Inbox `pause_address` (forward stops, mail stays with the organization); Vesta removes the member | Switchboard shows the account as signed out or removed by the provider, keeps its history |
+| Leaving | org admin | remove the seat at the provider; Inbox `pause_address` (forward stops, mail stays with the organization); Vesta removes the member | Switchboard reads the removed seat as an ended sign-in (Claude: a renewal refused, or a 401 that survives a fresh renewal; Codex: a 401 on two checks in a row), names the organization on the account's card, stops choosing it, and keeps its history (built in 0.7.0, nodes B-5 and B-6; [SCN-078](../ux/scenarios.md)) |
 
 Why a forwarded company address rather than the employee's own: the sign-in identity belongs to
 the organization; on leaving, pausing the address ends every new sign-in code, and nobody has to
