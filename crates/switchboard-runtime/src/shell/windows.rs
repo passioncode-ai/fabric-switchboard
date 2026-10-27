@@ -551,14 +551,23 @@ mod tests {
     #[test]
     fn the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global() {
         use super::super::scripts::{self, Kind};
-        let cli = Path::new("/opt/it's $HOME `x`/switchboard");
-        let data = Path::new("/data/o'brien");
+        // Absolute on this platform: `script` refuses a relative path, and on Windows a path
+        // without a drive (`/opt/...`) is not absolute. `C:/...` is.
+        let drive = if cfg!(windows) { "C:" } else { "" };
+        let cli = format!("{drive}/opt/it's $HOME `x`/switchboard");
+        let cli = Path::new(&cli);
+        let data = format!("{drive}/data/o'brien");
+        let data = Path::new(&data);
         let text = scripts::script(Kind::Pwsh, cli, data).unwrap();
         assert!(
-            text.contains("$global:_switchboard_cli = '/opt/it''s $HOME `x`/switchboard'"),
+            text.contains(&format!(
+                "$global:_switchboard_cli = '{drive}/opt/it''s $HOME `x`/switchboard'"
+            )),
             "{text}"
         );
-        assert!(text.contains("$global:_switchboard_data = '/data/o''brien'"));
+        assert!(text.contains(&format!(
+            "$global:_switchboard_data = '{drive}/data/o''brien'"
+        )));
         assert!(!text.contains("@CLI@") && !text.contains("@DATA@"));
         // Every function is global, so the block may read the file in any scope.
         for line in text
@@ -586,12 +595,14 @@ mod tests {
 
         // PowerShell also ends a single-quoted string at U+2018, U+2019, U+201A and U+201B:
         // each one is doubled too.
-        let typographic = Path::new("/Users/o\u{2019}brien \u{2018}a\u{201a}b\u{201b}/switchboard");
+        let typographic =
+            format!("{drive}/Users/o\u{2019}brien \u{2018}a\u{201a}b\u{201b}/switchboard");
+        let typographic = Path::new(&typographic);
         let text = scripts::script(Kind::Pwsh, typographic, data).unwrap();
         assert!(
-            text.contains(
-                "$global:_switchboard_cli = '/Users/o\u{2019}\u{2019}brien \u{2018}\u{2018}a\u{201a}\u{201a}b\u{201b}\u{201b}/switchboard'"
-            ),
+            text.contains(&format!(
+                "$global:_switchboard_cli = '{drive}/Users/o\u{2019}\u{2019}brien \u{2018}\u{2018}a\u{201a}\u{201a}b\u{201b}\u{201b}/switchboard'"
+            )),
             "{text}"
         );
         // With PowerShell on this machine, the written file parses with no error.
