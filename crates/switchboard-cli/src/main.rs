@@ -2093,13 +2093,31 @@ async fn launch_event(root: &std::path::Path, hook: Option<&Value>, event: launc
     {
         return;
     }
-    let operation = Operation::LaunchEvent {
-        launch_id,
+    // SB-218: a start of the launch's own process under a new session (`/clear`, a compaction, a
+    // resume) says so; a nested session's start does not, and never replaces its parent's.
+    let source = (event == launches::Event::Start)
+        .then(|| hook["source"].as_str())
+        .flatten()
+        .filter(|s| matches!(*s, "clear" | "compact" | "resume"))
+        .map(str::to_owned);
+    let operation = |source: Option<String>| Operation::LaunchEvent {
+        launch_id: launch_id.clone(),
         event,
         provider_session_id: hook["session_id"].as_str().map(str::to_owned),
         transcript: hook["transcript_path"].as_str().map(PathBuf::from),
+        source,
     };
-    let _ = tokio::time::timeout(SESSION_HOOK_DEADLINE, call(root, operation)).await;
+    let _ = tokio::time::timeout(SESSION_HOOK_DEADLINE, async {
+        let sent = source.is_some();
+        match call(root, operation(source)).await {
+            // An owner from before `source` (the update window) records it as a start.
+            Err(e) if sent && e == switchboard_runtime::control::CONTROL_OWNER_OLDER => {
+                call(root, operation(None)).await
+            }
+            answer => answer,
+        }
+    })
+    .await;
 }
 async fn suggest_from_hook(root: &std::path::Path, parsed: Option<&Value>) -> Value {
     let Some(cwd) = parsed

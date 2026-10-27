@@ -436,13 +436,40 @@ pub enum Event {
     Limit,
 }
 /// Records a hook's report on launch `id`; `recorded: false` when there is no such record or
-/// the report is malformed. Never an error: a hook must not fail its session.
+/// the report is malformed. Never an error: a hook must not fail its session. The owner calls
+/// `event_from`, which also takes the start's `source`.
+#[cfg(test)]
 pub(crate) fn event(
     root: &Path,
     id: &str,
     kind: Event,
     session: Option<&str>,
     transcript: Option<&Path>,
+    now: i64,
+) -> Value {
+    event_from(root, id, kind, session, transcript, None, now)
+}
+/// At most this many nested sessions a record names (SB-218).
+const MAX_NESTED: usize = 16;
+/// `SessionStart`'s `source` values that start a new session in the same process (Claude Code's
+/// `/clear`, a compaction, a resume): the launch's own session, under a new id.
+fn same_process(source: Option<&str>) -> bool {
+    matches!(source, Some("clear" | "compact" | "resume"))
+}
+/// `event` with the `SessionStart` hook's `source` (SB-218). A launched session's children
+/// inherit `SWITCHBOARD_LAUNCH_ID`, so a nested `claude -p` in the same home runs the same hooks
+/// on the same record. A start under a session id other than the one stored, unless its `source`
+/// says the launch's own process moved to a new session, is a nested session: it is named in
+/// `nested_sessions` (at most `MAX_NESTED`) and never replaces the parent's session or
+/// transcript, and a turn or limit of a session other than the stored one changes nothing
+/// (`{"recorded": false, "nested": true}`).
+pub(crate) fn event_from(
+    root: &Path,
+    id: &str,
+    kind: Event,
+    session: Option<&str>,
+    transcript: Option<&Path>,
+    source: Option<&str>,
     now: i64,
 ) -> Value {
     let session = session.filter(|s| valid_session(s));
@@ -457,7 +484,27 @@ pub(crate) fn event(
         return json!({"recorded": false});
     }
     let _writing = writing();
+    let mut nested = false;
     let recorded = update(root, id, |r| {
+        let other = |r: &Value| match (r["provider_session_id"].as_str(), session) {
+            (Some(stored), Some(session)) => stored != session,
+            _ => false,
+        };
+        if other(r) && !(kind == Event::Start && same_process(source)) {
+            nested = true;
+            if kind != Event::Start {
+                return false;
+            }
+            let session = session.unwrap_or_default();
+            let list = r["nested_sessions"].as_array().cloned().unwrap_or_default();
+            if list.iter().any(|s| s == session) || list.len() >= MAX_NESTED {
+                return false;
+            }
+            let mut list = list;
+            list.push(session.into());
+            r["nested_sessions"] = list.into();
+            return true;
+        }
         match kind {
             Event::Start => {
                 if let Some(session) = session {
@@ -479,6 +526,9 @@ pub(crate) fn event(
         }
         true
     });
+    if nested {
+        return json!({"recorded": recorded && kind == Event::Start, "nested": true});
+    }
     json!({"recorded": recorded})
 }
 
@@ -1004,5 +1054,46 @@ mod tests {
             r["home_path"] = planted.into();
             assert!(home_of(&root, &r).is_none(), "{planted}");
         }
+    }
+
+    #[test]
+    fn a_nested_session_in_the_same_home_never_overwrites_its_parent() {
+        // SB-218: a `claude -p` the launched session runs inherits `SWITCHBOARD_LAUNCH_ID` and
+        // its hooks report on the parent's record.
+        let (_temp, root, id) = fixture();
+        let parent = Path::new("/synthetic/home/projects/x/parent.jsonl");
+        let child = Path::new("/synthetic/home/projects/x/child.jsonl");
+        event(&root, &id, Event::Start, Some("parent"), Some(parent), 200);
+        event(&root, &id, Event::Turn, Some("parent"), None, 210);
+        let answer = event(&root, &id, Event::Start, Some("child"), Some(child), 220);
+        assert_eq!(answer, json!({"recorded": true, "nested": true}));
+        let answer = event(&root, &id, Event::Turn, Some("child"), None, 230);
+        assert_eq!(answer, json!({"recorded": false, "nested": true}));
+        event(&root, &id, Event::Limit, Some("child"), None, 240);
+        let r = read_back(&root, &id);
+        assert_eq!(r["provider_session_id"], "parent");
+        assert_eq!(r["transcript"], parent.to_string_lossy().as_ref());
+        assert_eq!((r["turns"].clone(), r["last_turn_at"].clone()), (json!(1), json!(210)));
+        assert!(r["ended"].is_null(), "a child's limit is not the parent's");
+        assert_eq!(r["nested_sessions"], json!(["child"]));
+        // Named once.
+        event(&root, &id, Event::Start, Some("child"), Some(child), 250);
+        assert_eq!(read_back(&root, &id)["nested_sessions"], json!(["child"]));
+        // The parent's own `/clear` moves the record to its new session.
+        let cleared = Path::new("/synthetic/home/projects/x/cleared.jsonl");
+        let answer = event_from(
+            &root,
+            &id,
+            Event::Start,
+            Some("cleared"),
+            Some(cleared),
+            Some("clear"),
+            260,
+        );
+        assert_eq!(answer, json!({"recorded": true}));
+        event(&root, &id, Event::Turn, Some("cleared"), None, 270);
+        let r = read_back(&root, &id);
+        assert_eq!(r["provider_session_id"], "cleared");
+        assert_eq!(r["turns"], 2);
     }
 }

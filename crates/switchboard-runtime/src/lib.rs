@@ -209,6 +209,11 @@ pub enum Operation {
         provider_session_id: Option<String>,
         #[serde(default)]
         transcript: Option<PathBuf>,
+        /// SB-218: `SessionStart`'s `source` when the launch's own process moved to a new
+        /// session (`clear`, `compact`, `resume`); absent for a new session. Sent only then, so
+        /// an owner from before it decodes every other event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// SB-212: every launch record, newest first; with `launch_id`, that launch and its chain.
     Launches {
@@ -5097,12 +5102,14 @@ async fn execute(
             event,
             provider_session_id,
             transcript,
-        } => Ok(launches::event(
+            source,
+        } => Ok(launches::event_from(
             root,
             &launch_id,
             event,
             provider_session_id.as_deref(),
             transcript.as_deref(),
+            source.as_deref(),
             monitor::now(),
         )),
         Operation::Launches { launch_id } => {
@@ -9940,6 +9947,7 @@ mod launch_record_tests {
                 event: launches::Event::Turn,
                 provider_session_id: None,
                 transcript: None,
+                source: None,
             })
             .await
             .unwrap();

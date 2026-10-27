@@ -943,6 +943,16 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   writes `ended: "limit"` and `ended_at`. Without the variable, or with an input that is not a
   JSON object, nothing is asked. The `Stop` hook makes at most two calls of 1.5 s each (the turn,
   then a recovery stop the session has), so it takes up to 3 s, inside the plugin's 5 s timeout.
+  **A nested session (SB-218).** A launched session's children inherit `SWITCHBOARD_LAUNCH_ID`,
+  so a `claude -p` it runs in the same home reports on its parent's record. A `SessionStart` under
+  a session id other than the one stored is a nested session unless its `source` is `clear`,
+  `compact` or `resume` (the launch's own process under a new session, which moves the record to
+  it): its id is added to `nested_sessions` (at most 16, each once) and the parent's
+  `provider_session_id` and `transcript` stay; a `Stop` or `StopFailure` of a session other than
+  the stored one changes nothing and answers `{"recorded": false, "nested": true}`
+  (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
+  sends `source` only for those three values; an owner from before it refuses the field, and the
+  hook sends the start once more without it, which that owner records as before.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
