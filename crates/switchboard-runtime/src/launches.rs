@@ -473,6 +473,31 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     record
 }
 /// Every launch record, newest first, with its state now; at most `HISTORY_LIMIT`.
+/// What a session list row learns from its launch's record (fabric-dashboards, board
+/// `62d78b7f`, 2026-10-26): how the session ended, where its work went and its transcript, so a
+/// plain session list says it without `history`.
+pub(crate) const OUTCOME_FIELDS: [&str; 8] = [
+    "provider_session_id",
+    "transcript",
+    "session_started_at",
+    "last_turn_at",
+    "turns",
+    "ended",
+    "ended_at",
+    "continued_as",
+];
+/// Copies `OUTCOME_FIELDS` from the record of the launch a `.session.json` names onto that row;
+/// a missing or unreadable record leaves the row as it was.
+pub(crate) fn add_outcome(root: &Path, row: &mut Value) {
+    let Some(stored) = row["launch_id"].as_str().and_then(|id| read(root, id)) else {
+        return;
+    };
+    for field in OUTCOME_FIELDS {
+        if !stored[field].is_null() {
+            row[field] = stored[field].clone();
+        }
+    }
+}
 pub fn history(root: &Path) -> (Vec<Value>, usize) {
     let mut records: Vec<Value> = all(root).into_values().collect();
     records.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
@@ -693,6 +718,37 @@ mod tests {
             (r["ended"].clone(), r["ended_at"].clone()),
             (json!("limit"), json!(230))
         );
+    }
+    #[test]
+    fn a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went() {
+        let (_temp, root, id) = fixture();
+        let transcript = Path::new("/synthetic/home/projects/x/0f3c.jsonl");
+        event(
+            &root,
+            &id,
+            Event::Start,
+            Some("0f3c-session"),
+            Some(transcript),
+            200,
+        );
+        event(&root, &id, Event::Limit, None, None, 230);
+        update(&root, &id, |r| {
+            r["continued_as"] = json!({"kind": "launch", "id": "next"});
+            true
+        });
+        let listed = crate::launch::sessions(&root, true);
+        assert_eq!(listed.len(), 1);
+        let row = &listed[0];
+        assert_eq!(row["launch_id"], id.as_str());
+        assert_eq!(row["ended"], "limit");
+        assert_eq!(row["ended_at"], 230);
+        assert_eq!(row["continued_as"], json!({"kind": "launch", "id": "next"}));
+        assert_eq!(row["transcript"], transcript.to_string_lossy().as_ref());
+        assert_eq!(row["provider_session_id"], "0f3c-session");
+        // A record that is gone leaves the row as `.session.json` has it.
+        fs::remove_file(path(&root, &id)).unwrap();
+        let row = crate::launch::sessions(&root, true).remove(0);
+        assert!(row["ended"].is_null() && row["transcript"].is_null());
     }
     #[test]
     fn a_malformed_report_or_an_unknown_launch_records_nothing() {

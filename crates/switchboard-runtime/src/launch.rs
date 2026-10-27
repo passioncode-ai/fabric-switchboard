@@ -2718,6 +2718,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             record["state"] = state.into();
             record["started_at"] = started.into();
             record["home"] = folder.into();
+            crate::launches::add_outcome(root, &mut record);
             found.push(record);
         }
     }
