@@ -780,6 +780,42 @@ check(() => {
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', []), false, 'an empty group has its own note');
   assert.equal(logic.groupSeatsElsewhere(snap, null, [work]), false);
 });
+// SB-160 (B-6, SCN-078): an ended seat of an organization names it.
+check(() => {
+  const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
+  const work = account('w', 'dev@acme.example'); const home = account('h', 'me@home.example');
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  assert.equal(logic.seatEndedText(snap, work, ['w']), "dev@acme.example's sign-in has ended. If Acme removed your seat, ask its administrator; to keep using it, sign in again.", 'an ended seat of an organization names it');
+  assert.equal(logic.seatEndedText(snap, work, []), null, 'a signed-in seat says nothing');
+  assert.equal(logic.seatEndedText(snap, work, undefined), null, 'no monitor read yet: nothing');
+  assert.equal(logic.seatEndedText(snap, home, ['h']), null, 'a personal account keeps today\'s text');
+  assert.equal(logic.seatEndedText({}, work, ['w']), null, 'no organizations: today\'s text');
+  snap.memberships.w = 'personal';
+  assert.equal(logic.seatEndedText(snap, work, ['w']), null, 'placed as personal: today\'s text');
+});
+// SB-160 (B-6, SCN-078): a group whose seats all ended says so.
+check(() => {
+  const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
+  const a = account('a', 'dev@acme.example'); const b = account('b', 'ops@acme.example'); const home = account('h', 'me@home.example');
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  const group = { name: 'Acme web', organization: 'o1' };
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'a group whose seats all ended says so');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a']), null, 'one seat still signed in');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b, home], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'an account of another context is refused anyway');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [home], ['h']), null, 'every account elsewhere: SB-170\'s line instead');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [], []), null, 'an empty group has its own note');
+  assert.equal(logic.groupSeatsEndedText(snap, { name: 'Mine', organization: null }, [home], ['h']), null, 'a personal group: no seats');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], undefined), null);
+});
+// SB-160 (B-7, SCN-079): an organization left on PassionCode.ai is marked with its date until it is linked again.
+check(() => {
+  const status = { connected: true, released: [{ organization: 'o1', at: 1000 }] };
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: null }), 1000);
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: 'v-acme' }), null, 'linked again');
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o2', vesta_id: null }), null);
+  assert.equal(logic.organizationReleasedAt({ connected: false }, { id: 'o1' }), null, 'disconnected: no line');
+  assert.equal(logic.organizationReleasedAt(null, { id: 'o1' }), null);
+});
 // SB-159: the PassionCode.ai panel's sentence for each state.
 check(() => {
   assert.match(logic.passioncodeLine(null).key, /^Not connected/);

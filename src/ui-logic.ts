@@ -311,6 +311,32 @@ export function groupSeatsElsewhere(snapshot: OrgSnapshot, organization: string 
   if (!organization || !accounts.length) return false;
   return !accounts.some((a) => groupAdmits(snapshot, organization, a));
 }
+/** SB-160 (B-6, SCN-078): the card line of a seat the provider no longer accepts (the monitor's
+ * `sign_in_required`), naming its organization; null for a personal account or a signed-in one,
+ * which keep today's text. */
+export function seatEndedText(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, signInRequired: string[] | undefined): string | null {
+  if (!signInRequired?.includes(account.id)) return null;
+  const id = attribution(snapshot, account).organization;
+  const organization = id ? (snapshot.organizations ?? []).find((o) => o.id === id) : undefined;
+  if (!organization) return null;
+  return t("{label}'s sign-in has ended. If {organization} removed your seat, ask its administrator; to keep using it, sign in again.", { label: account.label, organization: organization.name });
+}
+/** SB-160 (B-6, SCN-078): a group bound to an organization whose seats (its accounts of that
+ * organization) have all ended says so; a group whose accounts all belong elsewhere keeps
+ * SB-170's line instead, and an empty group its own note. */
+export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string; organization?: string | null }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
+  const organization = group.organization ?? null;
+  if (!organization || !signInRequired) return null;
+  const seats = accounts.filter((a) => groupAdmits(snapshot, organization, a));
+  if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
+  return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
+}
+/** SB-160 (B-7, SCN-079): when the person stopped being in this organization on PassionCode.ai,
+ * while it is not linked again; null otherwise (a disconnect is not leaving). */
+export function organizationReleasedAt(status: { connected: boolean; released?: { organization: string; at: number }[] } | null, organization: Pick<Organization, 'id' | 'vesta_id'>): number | null {
+  if (!status?.connected || organization.vesta_id) return null;
+  return status.released?.find((r) => r.organization === organization.id)?.at ?? null;
+}
 /** SB-159: the PassionCode.ai panel's line as a translation key and its values. */
 export function passioncodeLine(status: { connected: boolean; state?: string; read_at?: number | null; organizations?: number } | null): { key: string; values?: Record<string, string | number> } {
   if (!status || !status.connected) return { key: 'Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.' };

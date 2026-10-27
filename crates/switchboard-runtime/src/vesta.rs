@@ -70,6 +70,48 @@ struct Link {
     state: State,
     #[serde(default)]
     organizations: usize,
+    /// SB-160 (B-7, SCN-079): organizations a read no longer listed, by local id with the time
+    /// it first did; never a name. One linked again, or removed by the person, leaves the list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    released: Vec<Released>,
+}
+
+/// An organization the person left on PassionCode.ai: kept here, marked.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Released {
+    /// The local organization's id.
+    organization: String,
+    at: i64,
+}
+
+/// Brings `released` up to date after a read: an organization the read unlinked joins it with
+/// `at`, one linked again or no longer here leaves it. Answers how many joined.
+fn mark_released(
+    released: &mut Vec<Released>,
+    linked_before: &[String],
+    organizations: &[switchboard_core::organizations::Organization],
+    at: i64,
+) -> usize {
+    released.retain(|r| {
+        organizations
+            .iter()
+            .any(|o| o.id == r.organization && o.vesta_id.is_none())
+    });
+    let mut joined = 0;
+    for o in organizations {
+        if o.vesta_id.is_none()
+            && linked_before.contains(&o.id)
+            && !released.iter().any(|r| r.organization == o.id)
+        {
+            released.push(Released {
+                organization: o.id.clone(),
+                at,
+            });
+            joined += 1;
+        }
+    }
+    joined
 }
 
 fn now() -> i64 {
@@ -348,6 +390,8 @@ pub async fn connect(
         checked_at: None,
         state: State::Ok,
         organizations: 0,
+        // Connecting again is not leaving or rejoining: what earlier reads found stays.
+        released: previous.map(|l| l.released).unwrap_or_default(),
     };
     write_link(root, &link)?;
     read_organizations(root, store, &mut link, &tokens.access).await
@@ -420,6 +464,16 @@ async fn read_organizations(
             domains: r.domains,
         })
         .collect();
+    let linked_before: Vec<String> = store
+        .snapshot()
+        .map(|snap| {
+            snap.organizations
+                .iter()
+                .filter(|o| o.vesta_id.is_some())
+                .map(|o| o.id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let applied = match store.apply_vesta(&read) {
         Ok(applied) => applied,
         Err(error) => {
@@ -429,6 +483,20 @@ async fn read_organizations(
             return Err(error);
         }
     };
+    if let Ok(snap) = store.snapshot() {
+        let joined = mark_released(
+            &mut link.released,
+            &linked_before,
+            &snap.organizations,
+            link.checked_at.unwrap_or_else(now),
+        );
+        if joined > 0 {
+            crate::oplog::event(
+                "organization_released",
+                &[("count", crate::oplog::Field::Number(joined as i64))],
+            );
+        }
+    }
     link.state = State::Ok;
     link.read_at = link.checked_at;
     link.organizations = read.len();
@@ -516,6 +584,7 @@ fn status_of(link: Option<&Link>, applied: Option<Value>) -> Value {
             "connected": true, "base": l.base, "state": l.state,
             "connected_at": l.connected_at, "read_at": l.read_at, "checked_at": l.checked_at,
             "organizations": l.organizations, "applied": applied,
+            "released": l.released,
         }),
     }
 }
@@ -569,6 +638,8 @@ mod tests {
         /// Refresh tokens already rotated; presenting one again revokes the grant, as Vesta does.
         rotated: Mutex<Vec<String>>,
         revoked: std::sync::atomic::AtomicBool,
+        /// The person left every organization on PassionCode.ai: the read lists none.
+        left: std::sync::atomic::AtomicBool,
     }
 
     async fn serve(server: Arc<Server>) -> String {
@@ -637,6 +708,12 @@ mod tests {
                 );
             }
             let name = s.name.lock().unwrap().clone();
+            if s.left.load(std::sync::atomic::Ordering::SeqCst) {
+                return (
+                    axum::http::StatusCode::OK,
+                    Json(json!({"organizations": []})),
+                );
+            }
             (
                 axum::http::StatusCode::OK,
                 Json(json!({"organizations": [
@@ -746,6 +823,94 @@ mod tests {
             sync(root.path(), &store).await.unwrap_err(),
             VESTA_NOT_CONNECTED
         );
+    }
+
+    // SB-160 (B-7, SCN-079): a read that no longer lists an organization records it as left, with
+    // its local id and the time only; the organization stays, and rejoining clears the mark.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_organization_left_on_passioncode_is_marked_with_its_date() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let server = Arc::new(Server::default());
+        *server.name.lock().unwrap() = "Acme".into();
+        let base = serve(server.clone()).await;
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        connect(
+            root.path(),
+            &store,
+            &base,
+            browser(server.clone(), base.clone(), "code=vapc_synthetic"),
+            cancel,
+        )
+        .await
+        .unwrap();
+        let acme = store.snapshot().unwrap().organizations[0].id.clone();
+        assert!(status(root.path()).unwrap()["released"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        // The person leaves Acme on PassionCode.ai.
+        server.left.store(true, std::sync::atomic::Ordering::SeqCst);
+        let before = now();
+        let (read, events) = crate::oplog::capture_async(sync(root.path(), &store)).await;
+        let read = read.unwrap();
+        assert_eq!(read["state"], "ok", "{read}");
+        let released = read["released"].as_array().unwrap().clone();
+        assert_eq!(released.len(), 1, "{read}");
+        assert_eq!(released[0]["organization"], acme.as_str());
+        let at = released[0]["at"].as_i64().unwrap();
+        assert!(at >= before && at <= now() + 1, "{at}");
+        assert_eq!(status(root.path()).unwrap()["released"], json!(released));
+        // Nothing is removed: the organization stays, only its link goes.
+        let snap = store.snapshot().unwrap();
+        assert_eq!(snap.organizations.len(), 1);
+        assert_eq!(snap.organizations[0].id, acme);
+        assert_eq!(snap.organizations[0].vesta_id, None);
+        // The file holds the id and the time, never the name.
+        let file = std::fs::read_to_string(root.path().join(FILE)).unwrap();
+        assert!(!file.contains("Acme"), "{file}");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|(e, _)| *e == "organization_released")
+                .map(|(_, f)| f.clone())
+                .collect::<Vec<_>>(),
+            vec![vec![("count", crate::oplog::Field::Number(1))]]
+        );
+        // A later read that still lists nothing keeps the first date and logs nothing more.
+        let (again, events) = crate::oplog::capture_async(sync(root.path(), &store)).await;
+        assert_eq!(again.unwrap()["released"], json!(released));
+        assert!(!events.iter().any(|(e, _)| *e == "organization_released"));
+        // Connecting again (offered after a refused sign-in) keeps the mark and its first date.
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        connect(
+            root.path(),
+            &store,
+            &base,
+            browser(server.clone(), base.clone(), "code=vapc_synthetic"),
+            cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(status(root.path()).unwrap()["released"], json!(released));
+        // Added back: linked again by its name, and the mark goes.
+        server
+            .left
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let back = sync(root.path(), &store).await.unwrap();
+        assert!(back["released"].as_array().unwrap().is_empty(), "{back}");
+        assert_eq!(
+            store.snapshot().unwrap().organizations[0]
+                .vesta_id
+                .as_deref(),
+            Some("v-acme")
+        );
+        // Left again and then removed by the person: the mark of a gone organization goes too.
+        server.left.store(true, std::sync::atomic::Ordering::SeqCst);
+        sync(root.path(), &store).await.unwrap();
+        store.remove_organization(&acme).unwrap();
+        let after = sync(root.path(), &store).await.unwrap();
+        assert!(after["released"].as_array().unwrap().is_empty(), "{after}");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

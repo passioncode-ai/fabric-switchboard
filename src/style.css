@@ -301,7 +301,7 @@ button.row-usage:hover:not(:disabled) .usage-pct { text-decoration: underline; t
   .proxy-status { margin-left: 0; }
 }
 .warn-badge { color: var(--warn); border-color: var(--warn); background: var(--warn-weak); }
-.seats-elsewhere { color: var(--warn); }
+.seats-elsewhere, .seats-ended { color: var(--warn); }
 .backup-list { margin: var(--space-3) 0; }
 
 /* Quota date and elapsed wait use the existing operational token layer. */
