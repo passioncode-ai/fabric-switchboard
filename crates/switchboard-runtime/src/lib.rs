@@ -1046,18 +1046,61 @@ impl Runtime {
         } else {
             self.paid_start(&mut operation)?
         };
-        let _turn = match &paid {
-            Some((workflow, dir, kind)) => {
-                let turn = fallback::HAND_OVER.lock().await;
-                fallback::gate_by_hand(&self.store, &self.root, workflow.as_deref(), dir, *kind)
-                    .await?;
-                Some(turn)
-            }
-            None => None,
-        };
+        //
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
-        let _mutation = self.mutations.lock().await;
+        //
+        // SB-213: the gate decided on the key its folder resolved to then; a folder that joined
+        // another group before the transaction (`SaveProject`, the monitor's `add_found`, both
+        // under it) would start on a key, and under a ceiling, no gate read. Inside the
+        // transaction no project changes, so the key is compared there, a read with no network.
+        // Moved, the transaction is let go and the start gated once more on the key it spends
+        // now, inside the same budget; moved again, it is refused. The order stays: the
+        // hand-over turn, then the gate (no transaction), then the transaction.
+        let (_turn, _mutation) = match &paid {
+            Some((workflow, dir, kind)) => {
+                let turn = fallback::HAND_OVER.lock().await;
+                let budget_end = tokio::time::Instant::now() + fallback::GATE_BUDGET;
+                let gate = || {
+                    fallback::gate_pinned(
+                        &self.store,
+                        &self.root,
+                        workflow.as_deref(),
+                        dir,
+                        *kind,
+                        budget_end,
+                    )
+                };
+                let mut pin = gate().await?;
+                let mut again = true;
+                loop {
+                    let mutation = self.mutations.lock().await;
+                    if pin.holds(&self.store.snapshot()?) {
+                        break (Some(turn), mutation);
+                    }
+                    drop(mutation);
+                    spend_gate_moved(again);
+                    if !again {
+                        return Err(spend::STOP_FOLDER_MOVED.into());
+                    }
+                    again = false;
+                    pin = gate().await?;
+                }
+            }
+            None => {
+                let mutation = self.mutations.lock().await;
+                // The automatic fallback's paid step: its gate ran on the pass's snapshot, and
+                // the hand-over turn it holds cannot be let go mid-step, so a moved key refuses
+                // the step before anything is offered; the pass goes on down the chain.
+                if let Some(pin) = fallback::pinned() {
+                    if !pin.holds(&self.store.snapshot()?) {
+                        spend_gate_moved(false);
+                        return Err(spend::STOP_FOLDER_MOVED.into());
+                    }
+                }
+                (None, mutation)
+            }
+        };
         let reported = Reported::of(&operation, &self.store);
         let run = execute(self.store.clone(), &self.root, Some(self), operation);
         // The gate passed above: the operation's own gate is not run again.
@@ -3318,6 +3361,17 @@ where
             result => return result,
         }
     }
+}
+/// Logs that a paid start's folder moved to another key after its gate (SB-213): gated again,
+/// or refused.
+fn spend_gate_moved(again: bool) {
+    oplog::event(
+        "spend_gate",
+        &[(
+            "folder_moved",
+            oplog::Field::Code(if again { "gated_again" } else { "refused" }),
+        )],
+    );
 }
 /// SB-120: the account a `Continue` that names none runs on, the machine's default agent:
 /// OpenCode and Hermes run on the OpenRouter key; Claude Code, Codex and Kimi Code on the account a

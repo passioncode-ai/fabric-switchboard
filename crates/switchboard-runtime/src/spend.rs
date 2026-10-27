@@ -77,6 +77,10 @@ pub const STOP_KEY_EXHAUSTED: &str =
     "This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.";
 pub const STOP_CEILING_REACHED: &str = "A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.";
 pub const STOP_SPEND_UNKNOWN: &str = "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.";
+/// SB-213: a paid start whose folder moved to another group (and so to another key) after its
+/// gate passed, and moved again after the gate was run once more: it never starts on a key no
+/// gate read.
+pub const STOP_FOLDER_MOVED: &str = "This folder moved to another group while its spend was checked, so no paid agent starts. Start it again.";
 /// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
 /// lower one, never loosen one.
 pub const RAISE_IN_WINDOW: &str = "Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.";

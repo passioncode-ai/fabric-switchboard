@@ -864,7 +864,14 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
                 .await
             }
         };
-        let done = hand_over(&act, &gate, id, &dir, &steps).await;
+        // SB-213: a paid step runs with the key its gate read on this pass's snapshot, checked
+        // again inside the owner transaction (`Runtime::execute`). This scope is inside the
+        // hand-over's own, so it is the one the step's `Continue` sees.
+        let pinned_act = |workflow: String, account: String, dir: PathBuf| {
+            let pin = paid_kind(&snapshot, &account).map(|_| Pin::of(&snapshot, &dir));
+            GATED.scope(pin, act(workflow, account, dir))
+        };
+        let done = hand_over(&pinned_act, &gate, id, &dir, &steps).await;
         log(done.outcome);
         record_last(&runtime.root, &snapshot, id, &done, now);
         // The gate's records (a question, a baseline, this hand-over) ride the next backup.
@@ -932,19 +939,49 @@ tokio::task_local! {
     /// Set while the automatic fallback's hand-over runs its step: that step holds
     /// [`HAND_OVER`] and passed its gate, so the `Continue` it runs takes neither again
     /// (a tokio mutex is not reentrant). Task-local, so no request from outside can claim it.
-    static GATED: ();
+    /// A paid step carries the key its gate read ([`Pin`], SB-213).
+    static GATED: Option<Pin>;
+}
+
+/// The key a paid start's gate read (SB-213): the OpenRouter key slot its folder resolved to on
+/// the snapshot the gate decided on. Checked again inside the owner transaction, where no
+/// project can change: a folder that joined another group meanwhile (`SaveProject`, the
+/// monitor's `add_found`) would start on a key, and under a ceiling, no gate read.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Pin {
+    dir: PathBuf,
+    key: Option<crate::spend::KeySlot>,
+}
+impl Pin {
+    /// The key a paid start in `dir` spends on `snapshot`.
+    pub(crate) fn of(snapshot: &Snapshot, dir: &std::path::Path) -> Pin {
+        Pin {
+            dir: dir.to_path_buf(),
+            key: crate::spend::key_slot(snapshot, Some(dir)),
+        }
+    }
+    /// Whether `dir` still resolves to the gated key on `snapshot`. A read only: no network,
+    /// no file, so it may run inside the owner transaction.
+    pub(crate) fn holds(&self, snapshot: &Snapshot) -> bool {
+        crate::spend::key_slot(snapshot, Some(&self.dir)) == self.key
+    }
 }
 
 /// Runs `work` as a step that holds [`HAND_OVER`] and passed its gate: a start by hand that
-/// `Runtime::execute` gated before the owner transaction, so the operation's own gate is not run
-/// again.
+/// `Runtime::execute` gated (and checked against its [`Pin`]) before the owner transaction, so
+/// the operation's own gate is not run again.
 pub(crate) async fn as_gated<F: std::future::Future>(work: F) -> F::Output {
-    GATED.scope((), work).await
+    GATED.scope(None, work).await
 }
 
 /// Whether this task is a hand-over step that already holds [`HAND_OVER`] and passed its gate.
 pub(crate) fn gated() -> bool {
     GATED.try_with(|_| ()).is_ok()
+}
+
+/// The key the automatic fallback's paid step was gated on, when this task is such a step.
+pub(crate) fn pinned() -> Option<Pin> {
+    GATED.try_with(Clone::clone).ok().flatten()
 }
 
 /// How long one pass's spend gates may take together, across all its workflows (at most
@@ -996,7 +1033,7 @@ where
     // dollar under a ceiling (each sees what the other's launch left behind).
     let _turn = HAND_OVER.lock().await;
     let act = |workflow: String, account: String, dir: PathBuf| {
-        GATED.scope((), act(workflow, account, dir))
+        GATED.scope(None, act(workflow, account, dir))
     };
     let mut tried = false;
     let mut gated: Option<&'static str> = None;
@@ -1289,7 +1326,23 @@ pub(crate) async fn gate_within(
     if gated() {
         return Ok(());
     }
+    gate_pinned(store, root, workflow, dir, kind, budget_end)
+        .await
+        .map(|_| ())
+}
+
+/// The spend gate for a paid start by hand, answering the key it read (SB-213): the caller
+/// checks it again inside the owner transaction ([`Pin::holds`]).
+pub(crate) async fn gate_pinned(
+    store: &std::sync::Arc<switchboard_core::Store>,
+    root: &std::path::Path,
+    workflow: Option<&str>,
+    dir: &std::path::Path,
+    kind: Paid,
+    budget_end: tokio::time::Instant,
+) -> Result<Pin, String> {
     let snapshot = store.snapshot()?;
+    let pin = Pin::of(&snapshot, dir);
     #[cfg(test)]
     let test_read = TEST_READ.try_with(|f| f.clone()).ok();
     #[cfg(not(test))]
@@ -1318,7 +1371,7 @@ pub(crate) async fn gate_within(
     )
     .await
     {
-        Gate::Run => Ok(()),
+        Gate::Run => Ok(pin),
         Gate::Skip(reason) => Err(crate::spend::refusal(reason).into()),
     }
 }
@@ -3583,6 +3636,235 @@ mod tests {
             took < budget + std::time::Duration::from_millis(1500),
             "two workflows' reads ran {took:?}, past the pass's {budget:?} budget"
         );
+    }
+
+    /// SB-213: the folder of a paid start joins a group with its own key and a reached ceiling
+    /// while the gate reads the machine's key.
+    fn move_to_capped_group(runtime: &Runtime, root: &std::path::Path, dir: &std::path::Path) {
+        let project = runtime
+            .store
+            .save_project(None, "Beta", &[dir.to_owned()], &[])
+            .unwrap();
+        runtime
+            .store
+            .set_agent_key_for(
+                "openrouter",
+                Some(&project.pool),
+                "sk-or-fixture-only",
+                None,
+            )
+            .unwrap();
+        spend::set_ceiling(
+            root,
+            &runtime.store.snapshot().unwrap(),
+            ChainScope::Project { pool: project.pool },
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_folder_moved_to_a_capped_group_during_a_paid_gate_by_hand_never_starts_ungated() {
+        // SB-213: the gate passed on the machine's key (no ceiling); before the owner transaction
+        // the folder joined `beta`, whose own key is past its ceiling. The start is gated again on
+        // the key it would spend, and refused: it never launches on a key no gate read.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), None).await;
+        let pools: Arc<Mutex<Vec<Option<String>>>> = Default::default();
+        let read: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
+            let (runtime, pools, dir) = (runtime.clone(), pools.clone(), dir.clone());
+            let root = root.path().to_owned();
+            Arc::new(move |pool| {
+                let first = pools.lock().unwrap().is_empty();
+                pools.lock().unwrap().push(pool);
+                if first {
+                    move_to_capped_group(&runtime, &root, &dir);
+                    return spend(40.0, 1.0, 1.0);
+                }
+                spend(40.0, 30.0, 6.0)
+            })
+        };
+        let refused = TEST_READ
+            .scope(
+                read,
+                runtime.execute(Operation::LaunchAgent {
+                    agent: "no-such-agent".into(),
+                    pool: String::new(),
+                    working_directory: dir.clone(),
+                    via: crate::AgentVia::Openrouter,
+                    model: None,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            refused,
+            spend::STOP_CEILING_REACHED,
+            "gated again on the group's key and refused, never launched"
+        );
+        assert_eq!(
+            *pools.lock().unwrap(),
+            vec![None, Some("beta".to_string())],
+            "the machine's key, then the group's"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_folder_that_moves_again_during_the_second_gate_is_refused() {
+        // SB-213: gated once more on the group's key, the folder left the group meanwhile. The
+        // start is gated at most twice, then refused with the sentence that says why.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), None).await;
+        let reads = Arc::new(AtomicUsize::new(0));
+        let read: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
+            let (runtime, reads, dir) = (runtime.clone(), reads.clone(), dir.clone());
+            let root = root.path().to_owned();
+            Arc::new(move |_| {
+                match reads.fetch_add(1, Ordering::SeqCst) {
+                    0 => move_to_capped_group(&runtime, &root, &dir),
+                    1 => {
+                        runtime.store.remove_project("beta").unwrap();
+                    }
+                    _ => {}
+                }
+                spend(40.0, 1.0, 1.0)
+            })
+        };
+        let refused = TEST_READ
+            .scope(
+                read,
+                runtime.execute(Operation::LaunchAgent {
+                    agent: "no-such-agent".into(),
+                    pool: String::new(),
+                    working_directory: dir,
+                    via: crate::AgentVia::Openrouter,
+                    model: None,
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::STOP_FOLDER_MOVED);
+        assert_eq!(reads.load(Ordering::SeqCst), 2, "two gates, no third");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_folder_moved_during_the_fallbacks_gate_refuses_its_paid_step() {
+        // SB-213, the automatic fallback: the pass's gate read the machine's key while the
+        // checkout joined a capped group. The step's `Continue` finds, inside the owner
+        // transaction, that the key it would spend is not the one gated, and is refused before
+        // anything is offered.
+        use crate::fixtures::*;
+        use crate::monitor::now;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        limit(&runtime, root.path(), &a.id);
+        runtime
+            .store
+            .set_agent_key_for("openrouter", None, "sk-or-fixture-only", None)
+            .unwrap();
+        hermes_chain(&runtime);
+        let repo = tempfile::tempdir().unwrap();
+        let dir = dir_of(&repo);
+        let bin = engine(root.path(), &a.id, &dir);
+        let errors: Arc<Mutex<Vec<String>>> = Default::default();
+        let act = |workflow: String, account: String, dir: PathBuf| {
+            let (runtime, errors) = (runtime.clone(), errors.clone());
+            async move {
+                let answer = runtime
+                    .execute(Operation::Continue {
+                        workflow_id: workflow,
+                        id: account,
+                        mode: "managed".into(),
+                        working_directory: dir,
+                        in_place: false,
+                    })
+                    .await;
+                if let Err(e) = &answer {
+                    errors.lock().unwrap().push(e.clone());
+                }
+                answer.map(|_| ())
+            }
+        };
+        let reads = Arc::new(AtomicUsize::new(0));
+        let read = |_: Option<String>| {
+            let (runtime, reads, dir) = (runtime.clone(), reads.clone(), dir.clone());
+            let root = root.path().to_owned();
+            async move {
+                if reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                    move_to_capped_group(&runtime, &root, &dir);
+                }
+                spend(40.0, 1.0, 1.0)
+            }
+        };
+        TEST_OBSERVATORY
+            .scope(
+                bin.clone(),
+                TEST_HERMES_READY.scope(
+                    (),
+                    pass_with_reads(
+                        &runtime,
+                        now(),
+                        &bin,
+                        act,
+                        read,
+                        std::time::Duration::from_secs(20),
+                    ),
+                ),
+            )
+            .await;
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            1,
+            "one gate, on the machine's key"
+        );
+        assert_eq!(
+            errors.lock().unwrap().as_slice(),
+            [spend::STOP_FOLDER_MOVED.to_string()],
+            "refused before the offer, never run on the group's ungated key"
+        );
+    }
+
+    /// The executor `account` of a workflow hit its limit a minute ago (Claude Code's marker).
+    fn limit(runtime: &Runtime, root: &std::path::Path, account: &str) {
+        use crate::fixtures::signed_in;
+        use crate::monitor::now;
+        let projects = root.join("claude").join("projects").join("-p");
+        std::fs::create_dir_all(&projects).unwrap();
+        let at = time::OffsetDateTime::from_unix_timestamp(now() - 60)
+            .unwrap()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        let line = json!({"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"timestamp":at,"quotaLimits":{"resetsAt":now()+3600}});
+        let file = projects.join("s.jsonl");
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        let profile = signed_in(Provider::Claude).unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        runtime.limits.refresh(
+            &snapshot,
+            Some((&profile.identity, vec![account.to_owned()])),
+            &[file],
+            now(),
+        );
+    }
+    /// The machine's chain: Hermes Agent alone.
+    fn hermes_chain(runtime: &Runtime) {
+        runtime
+            .store
+            .set_chain(
+                ChainScope::Machine,
+                vec![Executor {
+                    agent: "hermes".into(),
+                    account_id: None,
+                    key: None,
+                }],
+            )
+            .unwrap();
     }
 
     #[cfg(unix)]

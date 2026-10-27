@@ -654,7 +654,22 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   transaction, the order a hand-over takes them in; a slow spend read holds up no other operation
   and no start that is not paid
   (`a_slow_paid_gate_by_hand_holds_up_neither_a_read_nor_a_subscription_launch`,
-  `a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling`). A paid
+  `a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling`). SB-213: the
+  gate decides on the key the start's folder resolves to then (`fallback::Pin`, the
+  `spend::key_slot` of the gated snapshot); a folder that joins another group before the launch
+  (`SaveProject`, the monitor's `add_found`, both under the owner transaction) would start on a
+  key, and under a ceiling, no gate read. So the key is compared again inside the owner
+  transaction, where no project changes (`Pin::holds`, a snapshot read: no network, no file). A
+  start by hand whose key moved lets the transaction go, is gated once more on the key it spends
+  now inside the same `GATE_BUDGET`, and takes the transaction again; moved a second time, it is
+  refused with `STOP_FOLDER_MOVED` (log `spend_gate folder_moved=gated_again|refused`). The
+  automatic fallback's paid step carries its pin in the task-local mark (`fallback::pinned`); it
+  holds `HAND_OVER` across the step and cannot gate again mid-step, so a moved key refuses the
+  step before the offer and the chain moves on. The lock order stays `HAND_OVER`, then the gate
+  (no transaction), then the owner transaction, then `SPEND_WRITE` and the store's locks
+  (`a_folder_moved_to_a_capped_group_during_a_paid_gate_by_hand_never_starts_ungated`,
+  `a_folder_that_moves_again_during_the_second_gate_is_refused`,
+  `a_folder_moved_during_the_fallbacks_gate_refuses_its_paid_step`). A paid
   hand-over queued for a console records what it spends (`paid` in its record) and passes the
   gate again, with `HAND_OVER`, when a console takes it (`HandoverTake`: refused, it stays
   waiting) and when the background opens it in Terminal (`handovers::sweep`: refused, it is taken
@@ -679,7 +694,7 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   counting it, `AgentKeySet` and `AgentKeyRemove` from the CLI or MCP are refused rather than let
   through (`spend::saved_or_unknown`, `a_key_read_that_failed_counts_as_a_saved_key`). A start by hand the gate
   skips is refused with the reason's sentence (`spend::refusal`: `STOP_KEY_EXHAUSTED`,
-  `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`) before anything is offered or
+  `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`; a moved key `STOP_FOLDER_MOVED`) before anything is offered or
   started; a paid continue writes the task's baseline like a hand-over. The fallback's own step
   runs its `Continue` inside a task-local mark (`fallback::gated`), so it is gated once and never
   waits on its own turn
