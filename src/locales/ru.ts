@@ -1481,6 +1481,7 @@ export const RU: Record<string, string> = {
   "Daily ceiling: {usd}, doubled from {from}": "Дневной потолок: {usd}, удвоен с {from}",
   "Daily ceiling: {usd}": "Дневной потолок: {usd}",
   "Inactive: this group has no key of its own now.": "Не действует: у группы больше нет собственного ключа.",
+  "Its daily ceiling of {usd} stops counting until the group has a key of its own again.": "Её дневной потолок {usd} перестанет действовать, пока у группы снова не появится собственный ключ.",
   "Key's own limit: none": "Собственный лимит ключа: нет",
   "Key's own limit: {limit}, resets daily": "Собственный лимит ключа: {limit}, сбрасывается каждые сутки",
   "Key's own limit: {limit}, resets weekly": "Собственный лимит ключа: {limit}, сбрасывается раз в неделю",

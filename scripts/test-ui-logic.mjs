@@ -1301,7 +1301,24 @@ check(() => {
     assert.equal(logic.ceilingLine({ usd: 5, doubled_from: null, active: true }), 'Daily ceiling: $5.00');
     assert.equal(logic.ceilingLine({ usd: 10, doubled_from: 5, active: true }), 'Daily ceiling: $10.00, doubled from $5.00');
     assert.equal(logic.ceilingLine({ usd: 3, doubled_from: null, active: false }), 'Inactive: this group has no key of its own now. Daily ceiling: $3.00');
-    assert.equal(logic.dollars(1000), '$1000.00');
+    // SB-230: thousands are grouped, as the window writes $1,000 elsewhere; both languages alike (a window-wide decision).
+    assert.equal(logic.dollars(1000), '$1,000.00');
+    assert.equal(logic.dollars(1234567.5), '$1,234,567.50');
+    assert.equal(logic.dollars(999.999), '$1,000.00');
+    assert.equal(logic.dollars(0.5), '$0.50');
+    // SB-230: removing a capped group's key says its ceiling stops counting.
+    assert.equal(logic.ceilingRemovalNote({ usd: 3, active: true }), 'Its daily ceiling of $3.00 stops counting until the group has a key of its own again.');
+    assert.equal(logic.ceilingRemovalNote({ usd: 3, active: false }), null, 'already inactive');
+    assert.equal(logic.ceilingRemovalNote(null), null);
+    // SB-230: a re-read right after a saved answer that fails keeps what is shown and shows no error;
+    // any other failed read names it; a stale read changes nothing; an answer clears the error.
+    const shown = { view: { questions: [1] }, error: '' };
+    const text = (e) => `read: ${e.message}`;
+    assert.deepEqual(logic.afterRead(shown, { state: 'applied', value: { questions: [] } }, false, text), { view: { questions: [] }, error: '' });
+    assert.deepEqual(logic.afterRead({ ...shown, error: 'old' }, { state: 'applied', value: shown.view }, false, text).error, '');
+    assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, true, text), shown);
+    assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, false, text), { view: shown.view, error: 'read: x' });
+    assert.deepEqual(logic.afterRead(shown, { state: 'stale' }, false, text), shown);
     assert.equal(logic.keyLimitLine({ limit: 20, limit_reset: 'monthly' }), "Key's own limit: $20.00, resets monthly");
     assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: 'daily' }), "Key's own limit: $10.00, resets daily");
     assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: null }), "Key's own limit: $10.00, never resets");

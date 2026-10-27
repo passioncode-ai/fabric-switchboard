@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
@@ -1188,9 +1188,11 @@ function projectKeysPanel() {
  * that may raise, clear or double a ceiling (C-Q1); the question has two answers of equal weight. */
 let ceilingsView: Ceilings | null = null;
 let ceilingsError = '';
-async function loadCeilings() {
-  const stamp = clock.stamp();
-  try { const view = await adapter.ceilings(); if (clock.accepts(stamp)) { ceilingsView = view; ceilingsError = ''; } } catch (error) { ceilingsError = safeError(error, 'read'); }
+/** SB-230: `afterSave` is the re-read right after a saved change: its failure keeps what is shown
+ * and names nothing (the change stands; the next read reports). */
+async function loadCeilings(afterSave = false) {
+  const read = await clockedRead(clock, () => adapter.ceilings());
+  ({ view: ceilingsView, error: ceilingsError } = afterRead({ view: ceilingsView, error: ceilingsError }, read, afterSave, (error) => safeError(error, 'read')));
   backgroundRender();
 }
 /** Each group key's status (its own limit at OpenRouter), read once per visit to API keys. */
@@ -1238,7 +1240,8 @@ function answerCeiling(q: CeilingQuestionView, answer: 'keep' | 'double') {
   const success = answer === 'double'
     ? (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling is now {usd}.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} is now {usd}.', { group, usd }) : t('The ceiling of task {id} is now {usd}.', { id: task, usd }))
     : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
-  void mutate(async () => { await adapter.answerCeiling(q.id, answer); ceilingsView = await adapter.ceilings(); }, success, 'page-title');
+  // SB-230: the answer is the action; its banner goes with it, and the ceilings are read again after.
+  void mutate(async () => { await adapter.answerCeiling(q.id, answer); if (ceilingsView) ceilingsView = { ...ceilingsView, questions: ceilingsView.questions.filter((open) => open.id !== q.id) }; }, success, 'page-title').then(() => loadCeilings(true));
 }
 /** The ceiling of this computer (machine panel) or a group (its key row), beside the key's own limit. */
 function ceilingBlock(scope: ChainScope, credit: OpenrouterCredit | null) {
@@ -1292,7 +1295,7 @@ function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFoc
     const value = Number(amount.value);
     if (!Number.isFinite(value) || value < 0.01 || value > 1000) { context.error.textContent = t('Enter an amount from $0.01 to $1,000.'); amount.focus(); return; }
     const usd = dollars(Math.round(value * 100) / 100);
-    void dialogSave(context, async () => { await adapter.setCeiling(scope, Math.round(value * 100) / 100); ceilingsView = await adapter.ceilings(); }, scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd }));
+    void dialogSave(context, () => adapter.setCeiling(scope, Math.round(value * 100) / 100), scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd })).then(() => loadCeilings(true));
   });
   amount.focus();
 }
@@ -1301,7 +1304,7 @@ function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus
   const question = scope.kind === 'machine' ? t('Remove this computer\'s daily ceiling of {usd}?', { usd }) : scope.kind === 'project' ? t('Remove the daily ceiling of {group}, {usd}?', { group: name, usd }) : t('Remove the ceiling of task {id}, {usd}?', { id: shortWorkflow(scope.id), usd });
   const context = openDialog(question, t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
   const confirm = submit(t('Remove ceiling')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setCeiling(scope, null); ceilingsView = await adapter.ceilings(); }, t('Ceiling removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setCeiling(scope, null), t('Ceiling removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
@@ -1387,9 +1390,9 @@ function openrouterModelDialog(target?: { pool: string; name: string }) {
   picker.value.focus();
 }
 function openrouterRemoveDialog(target?: { pool: string; name: string }) {
-  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.') + (target ? ` ${ceilingRemovalNote(ceilingOf({ kind: 'project', pool: target.pool })) ?? ''}`.trimEnd() : ''));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
 }
 async function agentDialog(agent: AgentInfo) {

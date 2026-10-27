@@ -1271,9 +1271,23 @@ export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboardin
   }
   return { lead: firstRunHint(input.current) };
 }
-/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00). */
+/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00), thousands
+ * grouped ($1,000.00, SB-230), the same in every language (a window-wide decision, `docs/brand/strings.md`). */
 export function dollars(value: number): string {
-  return `$${value.toFixed(2)}`;
+  const [whole, cents] = value.toFixed(2).split('.');
+  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${cents}`;
+}
+/** SB-230: the line the remove-key confirmation adds for a group whose daily ceiling counts that key. */
+export function ceilingRemovalNote(ceiling: { usd: number; active: boolean } | null): string | null {
+  return ceiling?.active ? t('Its daily ceiling of {usd} stops counting until the group has a key of its own again.', { usd: dollars(ceiling.usd) }) : null;
+}
+/** SB-230: what a background read leaves on screen. An answer replaces the view and clears the
+ * error; a failure names itself, except right after a saved change (`afterSave`): the change stands,
+ * what is shown stays, and the next read reports; a stale read changes nothing. */
+export function afterRead<V>(current: { view: V | null; error: string }, read: { state: 'applied'; value: V } | { state: 'failed'; error: unknown } | { state: 'stale' }, afterSave: boolean, errorText: (error: unknown) => string): { view: V | null; error: string } {
+  if (read.state === 'applied') return { view: read.value, error: '' };
+  if (read.state === 'failed' && !afterSave) return { view: current.view, error: errorText(read.error) };
+  return current;
 }
 /** One answer to a reached ceiling. There is no `recommended` field and no primary class: the
  * rule is a question without a recommended option (C-Q1, SCN-084). */

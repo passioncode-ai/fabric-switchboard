@@ -814,13 +814,29 @@ fn window_answer_ceiling(id: String, answer: switchboard_runtime::spend::Answer)
         by: switchboard_runtime::spend::Surface::Window,
     }
 }
-/// Sets a scope's ceiling in dollars, or clears it with `usd: null`.
+/// SB-230: the refusal for an amount that is neither dollars nor `null`, in the window's own words.
+const CEILING_AMOUNT: &str = "Enter an amount from $0.01 to $1,000.";
+/// `set_ceiling`'s amount: a number of dollars sets, `null` clears, anything else is refused.
+fn ceiling_amount(usd: Value) -> Result<Option<f64>, String> {
+    match usd {
+        Value::Null => Ok(None),
+        Value::Number(n) => n
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| CEILING_AMOUNT.to_owned()),
+        _ => Err(CEILING_AMOUNT.to_owned()),
+    }
+}
+/// Sets a scope's ceiling in dollars, or clears it with `usd: null`. SB-230: `usd` is a JSON value,
+/// not `Option<f64>`, so a call that leaves it out is refused by Tauri's argument lookup rather than
+/// read as a clear nobody asked for (as `SetCeiling`'s `spend::present` refuses it on the wire).
 #[tauri::command]
 async fn set_ceiling(
     scope: switchboard_core::ChainScope,
-    usd: Option<f64>,
+    usd: Value,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
+    let usd = ceiling_amount(usd)?;
     state
         .runtime()
         .await?
@@ -1522,6 +1538,20 @@ mod tests {
             .chain(list.iter().copied())
             .map(String::from)
             .collect()
+    }
+
+    /// SB-230: `set_ceiling` takes its amount as a JSON value, so a call without `usd` is refused
+    /// by Tauri (a non-optional argument is looked up with `deserialize_any`, which fails on an
+    /// absent key, tauri 2.12 `ipc/command.rs` `CommandItem::deserialize_json`) instead of being
+    /// read as a clear, as `Option<f64>` was; `null` clears, a number sets, anything else refuses.
+    #[test]
+    fn set_ceiling_refuses_anything_but_dollars_or_null() {
+        assert_eq!(ceiling_amount(json!(null)), Ok(None));
+        assert_eq!(ceiling_amount(json!(5.5)), Ok(Some(5.5)));
+        assert_eq!(ceiling_amount(json!(5)), Ok(Some(5.0)));
+        for refused in [json!("5"), json!(true), json!([5]), json!({"usd": 5})] {
+            assert_eq!(ceiling_amount(refused), Err(CEILING_AMOUNT.to_owned()));
+        }
     }
 
     /// C-7 (C-Q1): the window's ceiling commands always speak as the window, and the answer
