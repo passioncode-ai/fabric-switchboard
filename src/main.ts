@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding } from './types';
+import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -258,7 +258,7 @@ function showNotice(text: string, error = false) { notice = t(text); noticeError
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
-  if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
+  if (target === 'activity') void loadSessions(); if (target === 'agents') { void loadAgents(); void loadChains(); } if (target === 'projects') void loadChains(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
   render();
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
   else document.querySelector<HTMLElement>('h1')?.focus();
@@ -292,6 +292,7 @@ async function reload() {
   void restorePendingLogin();
   void loadBackups(readStamp);
   if (page === 'agents') void loadAgents();
+  if (page === 'agents' || page === 'projects') void loadChains();
   if (page === 'orgs') void loadPassioncode();
   void adapter.analytics().then((value) => { if (clock.accepts(readStamp)) { analyticsState = value; analyticsError = false; } }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { if (clock.accepts(readStamp)) { loginItem = value; loginItemError = false; } }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -659,6 +660,9 @@ function projectsSection() {
     const folders = projectFolderList(project);
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
+    // C-3 (SCN-081): which chain the group's tasks fall back along; the editor is on Agents.
+    const fallback = groupChainLine(project.pool);
+    if (fallback) { const line = el('p', 'account-meta chain-line'); line.append(button(fallback, () => goTo('agents', `chain-edit-project-${project.pool}`), 'text-button chain-link', `chain-link-${project.pool}`)); details.append(line); }
     // SB-170: every account of the group belongs elsewhere now, so its folders are refused.
     if (groupOrg && groupSeatsElsewhere(snapshot!, groupOrg.id, accounts)) details.append(el('p', 'surface-note seats-elsewhere', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrg.name })));
     else { const ended = groupOrg ? groupSeatsEndedText(snapshot!, project, accounts, monitor?.sign_in_required) : null; if (ended) details.append(el('p', 'surface-note seats-ended', ended)); }
@@ -833,7 +837,8 @@ const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).a
 function renderAgents(main: HTMLElement) {
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
   else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
-  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), availableAgentsPanel(agentsView));
+  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), chainsPanel(), availableAgentsPanel(agentsView));
+  if (!agentsView) main.append(chainsPanel());
   main.append(tokensPointer(), connectPanel());
 }
 function defaultAgentPanel(view: AgentsOverview) {
@@ -914,6 +919,159 @@ function availableAgentsPanel(view: AgentsOverview) {
   }
   details.append(list); section.append(details, el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents status | enable | disable | default | launch.')));
   return section;
+}
+// C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
+let chainsView: Chains | null = null;
+let chainsError = '';
+async function loadChains() {
+  try { chainsView = await adapter.chains(); chainsError = ''; } catch (error) { chainsError = safeError(error, 'read'); }
+  backgroundRender();
+}
+const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;
+const chainAccountLabel = (id: string) => snapshot?.accounts.find((a) => a.id === id)?.label ?? kimi?.accounts.find((k) => k.account.id === id)?.account.label;
+const scopeKey = (scope: ChainScope) => scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
+const chainFor = (key: string) => chainsView?.chains.find((c) => scopeKey(c.scope) === key) ?? null;
+const scopeLabel = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer') : scope.kind === 'project' ? projectOf(scope.pool)?.name ?? scope.pool : t('Task {id}', { id: shortWorkflow(scope.id) });
+/** The Groups card's line (SCN-081): the group's own chain, this computer's, or none. */
+function groupChainLine(pool: string): string | null {
+  if (!chainsView) return null;
+  if (chainFor(`project:${pool}`)) return t('Fallback: own chain');
+  return chainFor('machine') ? t('Fallback: this computer\'s chain') : t('Fallback: not set');
+}
+function chainsPanel() {
+  const section = el('section', 'about-panel chains-panel'); section.id = 'chains-panel'; section.setAttribute('aria-labelledby', 'chains-heading');
+  const heading = el('h2', '', t('Fallback chains')); heading.id = 'chains-heading';
+  section.append(heading, el('p', '', t('When a task\'s accounts run out, Switchboard hands it to the next agent in its chain. Nothing is handed over until a chain is set.')));
+  if (chainsError) {
+    const failed = el('div', 'notice error stale-list'); failed.setAttribute('role', 'status');
+    failed.append(el('span', '', `${t('Chains are unavailable. Refresh to retry.')}${chainsView ? ` ${t('The list may be out of date: the last read failed.')}` : ''}`), button(t('Retry'), () => void loadChains(), 'text-button', 'chains-retry'));
+    section.append(failed);
+  }
+  if (!chainsView) { if (!chainsError) { const reading = el('p', 'form-note', t('Reading fallback chains…')); reading.setAttribute('role', 'status'); section.append(reading); } return section; }
+  const view = chainsView;
+  if (view.ceilings_unreadable) section.append(el('p', 'usage-error', t('Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.')));
+  if (!view.limits_known) section.append(el('p', 'form-note', t('Account limits are not known right now, so a step may read ready when its accounts have no room.')));
+  const nothingSet = !view.chains.length;
+  const list = el('div', 'chain-list');
+  list.append(chainRow({ kind: 'machine' }, nothingSet));
+  const projects = snapshot?.projects ?? [];
+  for (const project of projects) list.append(chainRow({ kind: 'project', pool: project.pool }, false));
+  for (const chain of view.chains) if (chain.scope.kind === 'workflow') list.append(chainRow(chain.scope, false));
+  section.append(list);
+  if (!projects.length) section.append(el('p', 'form-note', t('A group gets its own chain once you create one under Groups.')));
+  section.append(lastHandoverLine(view));
+  return section;
+}
+function chainRow(scope: ChainScope, primary: boolean) {
+  const key = scopeKey(scope); const chain = chainFor(key); const label = scopeLabel(scope);
+  const anchor = scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project-${scope.pool}` : `workflow-${scope.id}`;
+  const row = el('div', 'chain-row'); row.id = `chain-row-${anchor}`; row.setAttribute('role', 'group'); row.setAttribute('aria-label', label);
+  const head = el('div', 'chain-head'); const info = el('div', 'chain-info');
+  info.append(el('strong', 'chain-scope', label));
+  if (chain) {
+    const steps = el('ol', 'chain-steps'); steps.setAttribute('aria-label', t('{scope}: {chain}', { scope: label, chain: chainSummary(chain.executors, chainAgentName, chainAccountLabel) }));
+    for (const step of chain.executors) {
+      const pin = step.key ? null : step.account_id ? chainAccountLabel(step.account_id) ?? step.account_id : null;
+      const item = el('li', 'chain-step-chip'); const chip = el('span', 'chain-chip', chainAgentName(step.agent)); if (pin) chip.append(el('span', 'chain-pin', pin)); if (step.key) chip.append(el('span', 'chain-pin', t('key')));
+      item.append(chip); steps.append(item);
+    }
+    info.append(steps);
+  } else info.append(el('span', 'form-note', scope.kind === 'project' ? (chainFor('machine') ? t('Uses this computer\'s chain') : t('Uses this computer\'s chain, which is not set')) : t('Not set')));
+  const actions = el('div', 'management-actions');
+  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(async () => { await adapter.setChain(scope, [], 'subscriptions-first'); chainsView = await adapter.chains(); }, t('This computer\'s chain is set.'), 'chain-edit-machine'), primary ? 'button primary' : 'button', 'chain-preset'));
+  const editKey = `chain-edit-${anchor}`;
+  if (chain || scope.kind === 'machine') actions.append(button(t('Edit…'), () => chainDialog(scope, chain?.executors ?? [], editKey), 'button', editKey));
+  else actions.append(button(t('Set for this group…'), () => chainDialog(scope, [], editKey), 'button', editKey));
+  if (chain) actions.append(button(t('Clear'), () => clearChainDialog(scope, scope.kind === 'workflow' ? 'chain-edit-machine' : editKey), 'text-button danger-text', `chain-clear-${anchor}`));
+  head.append(info, actions); row.append(head);
+  const readiness = chain ? chainsView?.readiness[key] ?? [] : [];
+  if (readiness.length) {
+    const lines = el('ul', 'chain-readiness'); lines.setAttribute('aria-label', t('Whether each step could take a task now'));
+    for (const step of readiness) lines.append(readinessLine(step, scope.kind === 'project' ? label : undefined));
+    row.append(lines);
+  }
+  return row;
+}
+function readinessLine(step: ChainStepView, groupName?: string) {
+  const line = el('li', `chain-ready is-${step.state.replace('_', '-')}`);
+  line.append(el('span', 'chain-ready-agent', step.name ?? chainAgentName(step.agent)), el('span', '', stepReasonText(step, groupName)));
+  return line;
+}
+function lastHandoverLine(view: Chains) {
+  const wrap = el('div', 'chain-last');
+  const last = view.last_handover;
+  if (!last) { wrap.append(el('p', 'form-note', t('No hand-over yet.'))); return wrap; }
+  wrap.append(el('p', '', t('Last hand-over: {time}, task {task}: {outcome}.', { time: date(last.at), task: shortWorkflow(last.workflow), outcome: handoverOutcomeText(last.outcome) })));
+  const skipped = handoverSkipped(last.skipped, chainAgentName);
+  if (skipped.length) wrap.append(el('p', 'form-note', t('Passed over: {steps}', { steps: skipped.join('; ') })));
+  return wrap;
+}
+const chainSavedText = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer\'s chain is saved.') : scope.kind === 'project' ? t('The chain of {group} is saved.', { group: scopeLabel(scope) }) : t('The chain of task {id} is saved.', { id: shortWorkflow(scope.id) });
+/** The editor (SCN-080): the steps in order, each an agent and an account, moved with buttons. */
+function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: string) {
+  let steps: ChainExecutor[] = structuredClone(initial);
+  const context = openDialog(t('Fallback chain: {scope}', { scope: scopeLabel(scope) }), t('Steps are tried in order: the first agent that can take the task gets it.'), returnFocus);
+  const list = el('ol', 'chain-editor'); list.setAttribute('aria-label', t('Steps'));
+  const add = button(t('+ Add agent'), () => { const used = new Set(steps.map((s) => s.agent)); steps = [...steps, { agent: TAKEOVER_ORDER.find((a) => !used.has(a)) ?? TAKEOVER_ORDER[0] }]; paint(`chain-step-${steps.length - 1}-agent`); }, 'button row-button', 'chain-add');
+  const full = el('p', 'form-note', t('A chain holds at most 8 agents.'));
+  const kimiAccounts = (kimi?.accounts ?? []).map((k) => k.account);
+  const focusIn = (key?: string) => { if (key) context.form.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus(); };
+  const paint = (focusKey?: string) => {
+    list.replaceChildren();
+    steps.forEach((step, index) => {
+      const n = index + 1; const name = chainAgentName(step.agent);
+      const item = el('li', 'chain-step'); item.append(el('span', 'chain-step-number', `${n}.`));
+      const controls = el('div', 'chain-step-fields');
+      if (step.key) {
+        const fixed = el('div', 'chain-step-fixed'); fixed.append(el('strong', '', name), el('span', 'form-note', t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key })));
+        controls.append(fixed);
+      } else {
+        const agents: [string, string][] = TAKEOVER_ORDER.map((id) => [id, chainAgentName(id)]);
+        if (!TAKEOVER_ORDER.includes(step.agent)) agents.push([step.agent, t('{agent} (not automatic)', { agent: name })]);
+        const agent = select(agents); agent.value = step.agent; agent.dataset.key = `chain-step-${index}-agent`; agent.setAttribute('aria-label', t('Agent for step {n}', { n }));
+        agent.addEventListener('change', () => { steps[index] = { agent: agent.value }; paint(`chain-step-${index}-agent`); });
+        const choices = accountsForStep(step.agent, snapshot?.accounts ?? [], kimiAccounts);
+        const openrouterAgent = step.agent === 'hermes' || step.agent === 'opencode';
+        const options: [string, string][] = [['', openrouterAgent ? t('The OpenRouter key') : t('Any account with room')], ...choices.map((c): [string, string] => [c.id, c.label])];
+        if (step.account_id && !choices.some((c) => c.id === step.account_id)) options.push([step.account_id, chainAccountLabel(step.account_id) ?? step.account_id]);
+        const account = select(options); account.value = step.account_id ?? ''; account.dataset.key = `chain-step-${index}-account`; account.setAttribute('aria-label', t('Account for step {n}', { n }));
+        if (options.length === 1) { account.disabled = true; account.dataset.locked = 'true'; }
+        account.addEventListener('change', () => { steps[index] = { agent: step.agent, ...(account.value ? { account_id: account.value } : {}) }; });
+        controls.append(agent, account);
+      }
+      const moves = el('div', 'chain-step-moves');
+      const move = (delta: number) => { steps = moveStep(steps, index, delta); const to = index + delta; paint(`chain-step-${to}-${(delta < 0 ? to > 0 : to < steps.length - 1) ? (delta < 0 ? 'up' : 'down') : (delta < 0 ? 'down' : 'up')}`); };
+      const up = button(t('Move up'), () => move(-1), 'text-button', ''); up.dataset.key = `chain-step-${index}-up`; up.setAttribute('aria-label', t('Move up: step {n}, {agent}', { n, agent: name }));
+      const down = button(t('Move down'), () => move(1), 'text-button', ''); down.dataset.key = `chain-step-${index}-down`; down.setAttribute('aria-label', t('Move down: step {n}, {agent}', { n, agent: name }));
+      const remove = button(t('Remove'), () => { steps = steps.filter((_, i) => i !== index); paint(steps.length ? `chain-step-${Math.min(index, steps.length - 1)}-agent` : 'chain-add'); }, 'text-button danger-text', ''); remove.dataset.key = `chain-step-${index}-remove`; remove.setAttribute('aria-label', t('Remove: step {n}, {agent}', { n, agent: name }));
+      if (index === 0) { up.disabled = true; up.dataset.locked = 'true'; }
+      if (index === steps.length - 1) { down.disabled = true; down.dataset.locked = 'true'; }
+      moves.append(up, down, remove);
+      item.append(controls, moves); list.append(item);
+    });
+    if (!steps.length) list.append(el('li', 'chain-step is-empty form-note', t('No agents yet. Add the first one.')));
+    const atMost = steps.length >= 8; add.disabled = atMost; add.dataset.locked = String(atMost); full.hidden = !atMost;
+    add.dataset.key = 'chain-add';
+    focusIn(focusKey);
+  };
+  context.body.append(list, add, full); context.actions.append(submit(t('Save chain')));
+  paint(steps.length ? 'chain-step-0-agent' : 'chain-add');
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!steps.length) { context.error.textContent = t('Add an agent, or clear the chain instead.'); add.focus(); return; }
+    const executors = steps.map((s) => ({ agent: s.agent, ...(s.account_id ? { account_id: s.account_id } : {}), ...(s.key ? { key: s.key } : {}) }));
+    void dialogSave(context, async () => { await adapter.setChain(scope, executors, null); chainsView = await adapter.chains(); }, chainSavedText(scope));
+  });
+}
+/** Focus goes back to the row's Edit… (this computer's for a task row, which goes when cleared). */
+function clearChainDialog(scope: ChainScope, returnFocus: string) {
+  const question = scope.kind === 'machine' ? t('Clear this computer\'s chain?') : scope.kind === 'project' ? t('Clear the chain of {group}?', { group: scopeLabel(scope) }) : t('Clear the chain of task {id}?', { id: shortWorkflow(scope.id) });
+  const consequence = scope.kind === 'machine' ? t('Nothing is handed over while no chain applies.') : scope.kind === 'project' ? t('Its tasks use this computer\'s chain again.') : t('It uses its group\'s or this computer\'s chain again.');
+  const context = openDialog(question, consequence, returnFocus);
+  const confirm = submit(t('Clear chain')); confirm.className = 'button danger'; context.actions.append(confirm);
+  const cleared = scope.kind === 'machine' ? t('This computer\'s chain is cleared.') : scope.kind === 'project' ? t('The chain of {group} is cleared.', { group: scopeLabel(scope) }) : t('The chain of task {id} is cleared.', { id: shortWorkflow(scope.id) });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setChain(scope, [], null); chainsView = await adapter.chains(); }, cleared); });
+  context.actions.querySelector('button')?.focus();
 }
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
 function connectPanel() {

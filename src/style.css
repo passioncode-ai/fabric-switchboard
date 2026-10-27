@@ -393,6 +393,40 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
   .agent-row { flex-direction: column; align-items: stretch; }
   .agent-controls { flex-wrap: wrap; }
 }
+/* C-3 (SB-71): the fallback chains panel on Agents, its readiness lines and the editor dialog. */
+.chain-list { display: grid; margin: var(--space-2) 0; }
+.chain-row { padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
+.chain-row:focus-visible { outline-offset: 2px; }
+.chain-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.chain-info { display: grid; gap: var(--space-1); min-width: 0; }
+.chain-head > .management-actions { flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.chain-steps { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-2); list-style: none; padding: 0; margin: 0; }
+.chain-chip { display: inline-flex; align-items: baseline; gap: var(--space-1); font-size: var(--t-label); padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--panel-2); color: var(--ink); overflow-wrap: anywhere; }
+.chain-step-chip { display: inline-flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.chain-step-chip + .chain-step-chip::before { content: "→"; color: var(--muted); }
+.chain-pin { color: var(--muted); font-size: var(--t-chip); }
+.chain-readiness { list-style: none; padding: 0; margin: var(--space-2) 0 0; display: grid; gap: 2px; font-size: var(--t-label); color: var(--muted); }
+.chain-ready { display: flex; gap: var(--space-2); overflow-wrap: anywhere; }
+.chain-ready-agent { flex: 0 0 9em; color: var(--ink); font-weight: 550; }
+.chain-ready.is-ready .chain-ready-agent::before { content: "●"; color: var(--ok); margin-right: var(--space-1); }
+.chain-ready:not(.is-ready) .chain-ready-agent::before { content: "○"; color: var(--muted); margin-right: var(--space-1); }
+.chain-last { margin-top: var(--space-3); }
+.chain-last p { margin: 0 0 var(--space-1); overflow-wrap: anywhere; }
+.chain-line { margin: 0; }
+.chain-link { white-space: normal; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.chain-editor { list-style: none; padding: 0; margin: 0 0 var(--space-3); display: grid; gap: var(--space-2); }
+.chain-step { display: grid; grid-template-columns: 2em minmax(0, 1fr); align-items: center; gap: var(--space-1) var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.chain-step.is-empty { display: block; border-bottom: 0; }
+.chain-step-number { color: var(--muted); font-variant-numeric: tabular-nums; }
+.chain-step-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); min-width: 0; }
+.chain-step-fields select { min-width: 0; width: 100%; }
+.chain-step-fixed { grid-column: 1 / -1; display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.chain-step-moves { grid-column: 2; display: flex; flex-wrap: wrap; gap: var(--space-4); }
+@media (max-width: 760px) {
+  .chain-head { flex-direction: column; align-items: stretch; }
+  .chain-head > .management-actions { justify-content: flex-start; }
+  .chain-ready-agent { flex-basis: 8.5em; }
+}
 /* SB-135 part 2: the disk map's rows: a name, where it belongs, one action at the end. */
 .disk-map .segmented { margin: var(--space-2) 0; }
 .repository-map { list-style: none; padding: 0; margin: 0; }
