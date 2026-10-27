@@ -646,3 +646,44 @@ fn another_data_folder_never_touches_the_start_files() {
     assert_eq!(std::fs::read(home.join(".zshrc")).unwrap(), zshrc);
     assert_eq!(std::fs::read(root.join("shell-hook.json")).unwrap(), record);
 }
+
+/// SB-183 node A-8: `shell init pwsh` prints the PowerShell hook, naming this executable and the
+/// data folder, and `shell env --shell pwsh` answers it as it answers the other shells.
+#[test]
+fn shell_init_pwsh_prints_the_powershell_hook_naming_this_cli() {
+    let data = private_dir();
+    let root = data.path().canonicalize().unwrap();
+    let (_work, acme) = work();
+    write_map(&root, &acme);
+    let printed = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args(["shell", "init", "pwsh"])
+        .output()
+        .unwrap();
+    assert!(printed.status.success());
+    let script = String::from_utf8(printed.stdout).unwrap();
+    let exe = Path::new(env!("CARGO_BIN_EXE_switchboard"))
+        .canonicalize()
+        .unwrap();
+    let quoted = |p: &Path| format!("'{}'", p.to_string_lossy().replace('\'', "''"));
+    assert!(
+        script.contains(&format!("$global:_switchboard_cli = {}", quoted(&exe))),
+        "{script}"
+    );
+    assert!(script.contains(&format!("$global:_switchboard_data = {}", quoted(&root))));
+    assert!(script.contains("function global:prompt"));
+    // Printed for `| Out-String | Invoke-Expression`: no byte order mark in front.
+    assert!(script.starts_with("# Fabric Switchboard: shell hook for PowerShell"));
+    let answer = binary()
+        .arg("--data-dir")
+        .arg(&root)
+        .args(["shell", "env", "--shell", "pwsh", "--dir"])
+        .arg(&acme)
+        .output()
+        .unwrap();
+    assert!(answer.status.success());
+    assert!(answer.stderr.is_empty());
+    let line = String::from_utf8(answer.stdout).unwrap();
+    assert!(line.starts_with("acme\torg:"), "{line}");
+}

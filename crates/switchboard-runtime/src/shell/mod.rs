@@ -5,3 +5,4 @@ pub(crate) mod homes;
 pub mod install;
 pub mod map;
 pub mod scripts;
+pub mod windows;

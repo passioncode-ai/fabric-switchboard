@@ -333,8 +333,9 @@ Whether this computer's terminals follow organization folders, as `switchboard s
 reads it: `hook` (`on`, `off`, `default_on` because the folder map holds a folder of a group
 bound to an organization, `default_off`), `choice`, `map`, each start file in `files` with its
 `state` (`written`, `removed_by_person`, `skipped_symlink`, `skipped_owner`,
-`skipped_zdotdir_unknown`, `unreadable`; `policy_blocked` comes with PowerShell on Windows, node
-A-8), and in `here` the group, context and homes a terminal gets in
+`skipped_zdotdir_unknown`, `unreadable`, `policy_blocked`: a PowerShell profile on Windows whose
+execution policy, `Restricted` or `AllSigned`, keeps it from loading; Switchboard never changes
+the policy), and in `here` the group, context and homes a terminal gets in
 `path` (default the agent's folder). Reads files only.
 
 ### `switchboard_shell_hook_set`: `on`

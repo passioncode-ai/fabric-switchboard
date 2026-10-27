@@ -952,6 +952,7 @@ export interface ShellHookView {
 export function shellInitLine(shell: string): string | null {
   if (shell === 'zsh' || shell === 'bash') return `eval "$(switchboard shell init ${shell})"`;
   if (shell === 'fish') return 'switchboard shell init fish | source';
+  if (shell === 'pwsh') return 'switchboard shell init pwsh | Out-String | Invoke-Expression';
   return null;
 }
 /** A start file's path as the person knows it: `~/...` under their home. */

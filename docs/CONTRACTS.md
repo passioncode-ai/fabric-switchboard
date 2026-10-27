@@ -1661,11 +1661,13 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
 
 Code: `switchboard_runtime::shell::scripts` (`script`, `hook_path`), templates
 `crates/switchboard-runtime/src/shell/hook.zsh`, `hook.bash`, `hook.fish` and `core.sh` (the
-transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. Design:
+transition zsh and bash share), and `hook.ps1` (PowerShell, node A-8); CLI
+`switchboard shell init <zsh|bash|fish|pwsh>`. Design:
 [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A "The hook scripts".
 
-- **Files.** `<data>/shell/hook.<zsh|bash|fish>`, 0600, each naming the CLI's absolute path and
-  the data folder, single-quoted for its shell (fish: `\\` and `\'`). A path that is not absolute,
+- **Files.** `<data>/shell/hook.<zsh|bash|fish>` and `hook.ps1`, 0600, each naming the CLI's
+  absolute path and the data folder, single-quoted for its shell (fish: `\\` and `\'`;
+  PowerShell: a quote doubled). A path that is not absolute,
   not valid text or holds a control character gets no script (`script` answers None; `shell
   init` refuses with “The hook cannot name this executable or the data folder: a path is not
   absolute or not valid text.”). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
@@ -1714,7 +1716,7 @@ transition zsh and bash share); CLI `switchboard shell init <zsh|bash|fish>`. De
   not the person had exported it.
 - **Covered since fix cycle 1.** fish 4.9.3 (Homebrew) ran every test above on 2026-10-26 (run
   interactive, `fish --no-config -i -c`); a machine without fish still skips them with the
-  reason. PowerShell is node A-8.
+  reason. PowerShell: the next sections but one (node A-8).
 
 ## The terminal hook's start files (SB-183, node A-3, 2026-10-26)
 
@@ -1772,7 +1774,7 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   `owner_tests::the_hook_reported_is_the_hook_written`,
   `shell::install::tests::default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins`,
   `the_last_organization_group_leaving_removes_the_default_block`.
-- **Where** (macOS and Linux; Windows has none yet, PowerShell is node A-8): zsh
+- **Where** (macOS and Linux; on Windows the PowerShell profiles only, node A-8 below): zsh
   `${ZDOTDIR:-$HOME}/.zshrc`, created only when zsh is the login shell and never when the app
   cannot know where zsh reads it: an app started from the Dock or at login does not see the
   `ZDOTDIR` a person exports in `~/.zshenv`, so with no `ZDOTDIR` in this process, no
@@ -1810,7 +1812,8 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
 - **Record** `<data>/shell-hook.json` (0600): `{"files": [{"shell", "path", "state",
   "newline_added", "created", "at"}], "notice_pending"}`, `state` one of `written`,
   `removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
-  `unreadable` (`policy_blocked` comes with node A-8); `created` only when true,
+  `unreadable`, `policy_blocked` (a PowerShell profile whose execution policy keeps it from
+  running: not written, node A-8); `created` only when true,
   `notice_pending` only while one waits; what `shell status` shows. Nothing ever written and
   nothing wanted: no record.
 - **The first-time notice.** The first run that writes a block while no choice is made saves
@@ -1861,6 +1864,77 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   could not take out (a changed marker) in the record and names the file as a failure. Test:
   `remove_all_takes_every_block_out_whatever_the_choice` (a fish file the person added lines to
   keeps them).
+
+## The terminal hook for PowerShell (SB-183, node A-8, 2026-10-27)
+
+Code: `switchboard_runtime::shell::windows` (`profile_path`, `profile_paths`, `Policy`,
+`effective`, `group_policy`, `config_policy`, `Host`, `process_host`), the template
+`crates/switchboard-runtime/src/shell/hook.ps1`, `shell::install` (`Host::windows`, state
+`policy_blocked`), CLI `switchboard shell init pwsh`. Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) row A-8; A-Q4 (the
+execution policy is never changed) and A-Q7 (no carried links on Windows) assumed.
+
+- **Where.** `Microsoft.PowerShell_profile.ps1` (the console host's profile for the current user,
+  which Windows Terminal and the PowerShell window load) in `<Documents>\WindowsPowerShell\`
+  (Windows PowerShell 5.1) and `<Documents>\PowerShell\` (PowerShell 7). `<Documents>` is the
+  Documents known folder from `dirs::document_dir` (`SHGetKnownFolderPath`), so a Documents folder
+  OneDrive or a domain policy redirected is the one PowerShell reads. 5.1 counts when
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` exists, 7 when `pwsh.exe` is in
+  `%ProgramFiles%\PowerShell\7` or on `PATH` (an app alias in `WindowsApps` is not a `$PSHOME`),
+  or its profile folder exists. Each profile is created when absent, with its folder. On Windows
+  these are the only start files (`cmd.exe` and Git Bash are not covered); on macOS and Linux a
+  test gives a `windows::Host` to install into an injected Documents folder. Test:
+  `windows::tests::profile_paths_follow_the_documents_folder_for_each_edition`.
+- **The block** is A-3's, with one line: `if (Test-Path -LiteralPath '<hook>') { . '<hook>' }`.
+  Windows PowerShell 5.1 reads a profile without a byte order mark in the system code page, so the
+  line stays ASCII: a hook path that is not ASCII is carried as base64 of its UTF-8 and read inside
+  a script block (`& { $f = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'));
+  if (Test-Path -LiteralPath $f) { . $f } }`). Everything else (markers, the person's removal, a
+  link, another user's or unreadable file, the created-file rule, byte-for-byte removal) is A-3's
+  unchanged. Tests: `install::tests::a_powershell_profile_gets_the_block_and_gives_it_back_byte_identical`
+  (CRLF and no final break kept, the 7 profile created and deleted again),
+  `a_powershell_block_the_person_removed_is_not_written_back` (and a linked profile skipped),
+  `a_hook_path_that_is_not_ascii_keeps_the_powershell_block_ascii`.
+- **The script** `<data>/shell/hook.ps1`, written with a UTF-8 byte order mark (`shell init pwsh`
+  prints it without one, for `| Out-String | Invoke-Expression`). One script for 5.1 and 7: the
+  same transition as `core.sh` (the person's values kept in global variables, which no child
+  process sees; a value the person changed is theirs; `SWITCHBOARD_SESSION` set: not loaded; a
+  home inherited under `<data>\shell\` held, compared without regard to case), the same question
+  (`shell env --shell pwsh --dir <the location's file system path>`, through
+  `System.Diagnostics.Process` with no window, ten seconds for the CLI and two for its output,
+  exit status 0, stderr read and dropped), the same answer rules (one line, four fields, homes
+  `-` or rooted). Trigger: the `prompt` function is wrapped (5.1 has no location-changed event),
+  acting when `(Get-Location).Path` changed, once at load, and handing the person's prompt the
+  `$?` and `$LASTEXITCODE` it would have seen. A location that is not a file system folder
+  (`HKLM:`) reads as `none`. Every function is `global:` and every error is caught, so the file
+  works in any scope and never fails the profile. A prompt defined after the block replaces the
+  wrapper. Tests: `windows::tests::the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global`,
+  `the_ps1_transition_matches_the_posix_one` (in a real `pwsh` against the POSIX tests' stub CLI;
+  skipped with the reason where PowerShell is not installed, which was the case on 2026-10-27),
+  CLI `shell_init_pwsh_prints_the_powershell_hook_naming_this_cli`.
+- **The execution policy** is read, never changed, and no process is started for it: the scopes of
+  `Get-ExecutionPolicy -List` in its order (MachinePolicy, UserPolicy, Process, CurrentUser,
+  LocalMachine), the first set wins, none set (or `Default`) is `Restricted` on a Windows client
+  and `RemoteSigned` on Windows Server (`InstallationType`). 5.1: Group Policy
+  `HKLM`/`HKCU\SOFTWARE\Policies\Microsoft\Windows\PowerShell` (`EnableScripts` 0 is
+  `Restricted`, 1 applies `ExecutionPolicy`), Process `PSExecutionPolicyPreference`, CurrentUser and
+  LocalMachine `HKCU`/`HKLM\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`
+  `ExecutionPolicy`. 7: Group Policy `...\Policies\Microsoft\PowerShellCore` (or 5.1's when
+  `UseWindowsPowerShellPolicySetting` is 1), CurrentUser `<Documents>\PowerShell\powershell.config.json`
+  and LocalMachine `$PSHOME\powershell.config.json` (`Microsoft.PowerShell:ExecutionPolicy`; a
+  `$PSHOME` that cannot be found is read as the file PowerShell 7 ships, `RemoteSigned`).
+  `Restricted` loads no profile and `AllSigned` refuses the unsigned hook: that profile is not
+  written (a block an earlier run wrote stays until `shell off`) and is recorded `policy_blocked`,
+  which the window, MCP `switchboard_shell_hook` and `shell status` show (SCN-075). The next run
+  under a policy that allows local scripts writes it. Tests:
+  `windows::tests::a_restricted_or_allsigned_policy_reads_as_policy_blocked`,
+  `install::tests::a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked`.
+- **Not covered.** Windows has no carried links (A-Q7): an organization's shell home there lacks
+  the person's `CLAUDE.md`, skills and hooks. The run lock (`flock` on the data folder) does not
+  exist on Windows. The Windows build is checked by `cargo xwin check --target
+  x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli` (2026-10-27, exit 0); the
+  PowerShell hook has not run in PowerShell, and nothing of this has run on a Windows host
+  (SB-02).
 
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 

@@ -36,27 +36,32 @@ pub enum ShellCmd {
         dir: Option<PathBuf>,
     },
     /// Puts the hook in this computer's terminals now, with or without an organization's group:
-    /// one marked block in the start file of each shell present (zsh, bash, fish), the file
-    /// given back byte for byte by `shell off`. Writes a block you had taken out again.
+    /// one marked block in the start file of each shell present (zsh, bash, fish; on Windows the
+    /// PowerShell profile of each edition), the file given back byte for byte by `shell off`.
+    /// Writes a block you had taken out again.
     On,
     /// Takes the hook out of every start file Switchboard changed, byte for byte, and keeps it
     /// out. Terminals already open give your own settings back at their next change of folder.
     Off,
     /// The hook script for a shell, for people who keep their own start files: put
     /// `eval "$(switchboard shell init zsh)"` in `.zshrc` (bash likewise; fish:
-    /// `switchboard shell init fish | source`). It names this CLI and the data folder.
+    /// `switchboard shell init fish | source`; PowerShell:
+    /// `switchboard shell init pwsh | Out-String | Invoke-Expression`). It names this CLI and
+    /// the data folder.
     Init {
         /// The shell.
         #[arg(value_enum)]
         shell: InitShell,
     },
 }
-/// The shells `shell init` writes a hook for (PowerShell: node A-8 of 0.7.0).
+/// The shells `shell init` writes a hook for.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum InitShell {
     Zsh,
     Bash,
     Fish,
+    /// PowerShell: Windows PowerShell 5.1 and PowerShell 7.
+    Pwsh,
 }
 impl InitShell {
     pub fn kind(self) -> scripts::Kind {
@@ -64,6 +69,7 @@ impl InitShell {
             InitShell::Zsh => scripts::Kind::Zsh,
             InitShell::Bash => scripts::Kind::Bash,
             InitShell::Fish => scripts::Kind::Fish,
+            InitShell::Pwsh => scripts::Kind::Pwsh,
         }
     }
 }

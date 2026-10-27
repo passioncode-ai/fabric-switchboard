@@ -158,7 +158,7 @@ export function createDemoAdapter(): Adapter {
     inactive: [{ ...zshrc, state: 'skipped_symlink' }, { shell: 'bash', path: `${shellHome}/.bash_profile`, state: 'skipped_owner' }],
     zdotdir: [{ ...zshrc, state: 'skipped_zdotdir_unknown' }],
     removed: [zshrc, { shell: 'bash', path: `${shellHome}/.bash_profile`, state: 'removed_by_person' }],
-    policy: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\profile.ps1', state: 'policy_blocked' }],
+    policy: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' }],
   };
   let shellChoice: 'on' | 'off' | 'default' = shellParam === 'on' ? 'on' : shellParam === 'off' ? 'off' : 'default';
   let shellFiles: ShellHookFile[] = shellParam && shellStart[shellParam] ? shellStart[shellParam].map((f) => ({ ...f })) : shellParam === 'off' || shellParam === 'default_off' ? [] : [zshrc, fishFile].map((f) => ({ ...f }));

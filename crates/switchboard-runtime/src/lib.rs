@@ -6696,6 +6696,7 @@ mod owner_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         };
         let asked = std::sync::atomic::AtomicBool::new(false);
         runtime.enable_shell_hook_when(
@@ -6736,6 +6737,7 @@ mod owner_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         };
         // No organization yet: enabled, nothing written.
         runtime.enable_shell_hook_with(host);
@@ -6807,6 +6809,7 @@ mod owner_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         });
         let (work, acme) = organization_group(&runtime).await;
         // A personal group holds the organization group's only folder.
@@ -6897,6 +6900,7 @@ mod owner_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         });
         let (work, _acme) = organization_group(&runtime).await;
         runtime.bindings_pass().await;
@@ -9049,6 +9053,7 @@ mod lifecycle_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         };
         let first = owner(root.path()).await;
         first.runtime.enable_shell_hook_with(host.clone());
@@ -9100,6 +9105,7 @@ mod lifecycle_tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(cli),
+            windows: None,
         };
         let owner = owner(root.path()).await;
         let runtime = &owner.runtime;
