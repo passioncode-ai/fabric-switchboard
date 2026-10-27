@@ -219,6 +219,8 @@ const currentMatch = (account: Account) => {
   const identity = account.external_identity;
   return !!identity?.account_id && identity.account_id === current.identity?.account_id && identity.organization_id === current.identity?.organization_id;
 };
+// The account the ordinary CLI is signed in to cannot join a group (PROJECT_ACCOUNT_IN_CLI): never prefill it.
+const inCli = (account: Account) => currentMatch(account) || !!currentAccounts?.[account.provider]?.account_ids?.includes(account.id);
 interface Context { current: CurrentAccounts | null; currentFailed: boolean; monitor: MonitorStatus | null }
 /** UX-04: a read of the CLIs' sign-ins that failed (or ran out of time) is kept as failed, so In use now offers Retry instead of reading forever. */
 let currentReadFailed = false;
@@ -726,7 +728,7 @@ function projectDialog(existing?: Project, organization?: string) {
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
-    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? account.pool === existing.pool : !!organization && attribution(snapshot!, account).organization === organization;
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? account.pool === existing.pool : !!organization && attribution(snapshot!, account).organization === organization && !inCli(account);
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
@@ -2574,7 +2576,9 @@ function backgroundRefresh() {
     // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
     // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
     if (page === 'projects') shellHookKey = '';
-    snapshot = data; applyContext(context); backgroundRender(); loadOnboarding();
+    snapshot = data; applyContext(context); backgroundRender();
+    // B-8 seam read: the checklist lists sessions (SB-104); read it only where its card is drawn.
+    if (page === 'accounts' || page === 'orgs') loadOnboarding();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
