@@ -974,6 +974,14 @@ check(() => {
   const none = logic.shellHookView({ ...base, hook: 'default_off', organizations: [] });
   assert.equal(none.state, 'default_off'); assert.equal(none.line, 'Off: no group belongs to an organization on this computer.');
   assert.equal(none.action.label, 'Turn on');
+  // SB-222: off by default while an organization's group exists, but holds no row: the line names it.
+  const held = logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Acme', group: 'Acme web', reason: 'held', held_by: 'Mine' }, { organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] });
+  assert.equal(held.state, 'default_off');
+  assert.equal(held.line, 'Off: Acme\'s folders belong to the group “Mine”, so terminals there keep your own settings.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] }).line, 'Off: Globex\'s folders are not on this computer.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Globex', group: 'G', reason: 'no_folder', held_by: null }] }).line, 'Off: Globex\'s group “G” has no folder yet.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [] }).line, 'Off: no group belongs to an organization on this computer.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'off', choice: 'off', unmapped: [{ organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] }).line, 'Off: new terminals keep your own settings.', 'the person\'s own off is not explained away');
   // Wanted, but no start file holds it: installed but inactive, with each file's reason.
   const skipped = [
     { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_symlink' },

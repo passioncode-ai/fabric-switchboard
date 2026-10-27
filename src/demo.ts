@@ -224,7 +224,8 @@ export function createDemoAdapter(): Adapter {
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
   let codexOn = false;
   // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
-  // off, default_off, inactive, zdotdir, removed, policy, dev, failed, notice); without it, on by
+  // off, default_off, held (SB-222: the organization's folders belong to another group), inactive,
+  // zdotdir, removed, policy, dev, failed, notice); without it, on by
   // default while the demo holds an organization's group. Synthetic paths only.
   const shellParam = new URLSearchParams(location.search).get('shell');
   const shellHome = '/Users/demo';
@@ -237,14 +238,15 @@ export function createDemoAdapter(): Adapter {
     policy: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' }],
   };
   let shellChoice: 'on' | 'off' | 'default' = shellParam === 'on' ? 'on' : shellParam === 'off' ? 'off' : 'default';
-  let shellFiles: ShellHookFile[] = shellParam && shellStart[shellParam] ? shellStart[shellParam].map((f) => ({ ...f })) : shellParam === 'off' || shellParam === 'default_off' ? [] : [zshrc, fishFile].map((f) => ({ ...f }));
+  let shellFiles: ShellHookFile[] = shellParam && shellStart[shellParam] ? shellStart[shellParam].map((f) => ({ ...f })) : shellParam === 'off' || shellParam === 'default_off' || shellParam === 'held' ? [] : [zshrc, fishFile].map((f) => ({ ...f }));
   let shellNotice = shellParam === 'notice';
-  const shellOrganizations = () => shellParam === 'default_off' ? [] : shellParam ? ['Northwind'] : [...new Set((state.projects ?? []).map((p) => state.organizations?.find((o) => o.id === p.organization)?.name).filter((n): n is string => !!n))];
+  const shellOrganizations = () => shellParam === 'default_off' || shellParam === 'held' ? [] : shellParam ? ['Northwind'] : [...new Set((state.projects ?? []).map((p) => state.organizations?.find((o) => o.id === p.organization)?.name).filter((n): n is string => !!n))];
   const shellStatus = (): ShellHookStatus => {
     const organizations = shellOrganizations();
     const hook = shellChoice === 'on' ? 'on' : shellChoice === 'off' ? 'off' : organizations.length ? 'default_on' : 'default_off';
     const files = hook === 'default_off' && !shellParam ? [] : shellFiles;
-    return { hook, choice: shellChoice, map: 'ok', files: files.map((f) => ({ ...f })), organizations, codex_organizations: organizations, can_change: shellParam !== 'dev', home: shellHome };
+    const unmapped = shellParam === 'held' ? [{ organization: 'Northwind', group: 'Northwind web', reason: 'held' as const, held_by: 'Personal web' }] : [];
+    return { hook, choice: shellChoice, map: 'ok', files: files.map((f) => ({ ...f })), organizations, codex_organizations: organizations, unmapped, can_change: shellParam !== 'dev', home: shellHome };
   };
   let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];

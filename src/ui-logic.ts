@@ -1079,6 +1079,16 @@ function shellHookFile(file: { shell: string; path: string; state: string }, hom
     default: return { text: t('{shell}: {path}, {state}', { shell, path, state: file.state }), command: null, problem: true };
   }
 }
+/** SB-222: off by default. An organization's group with no row in the folder map is named with
+ * why (its folders belong to another group, are not on this computer, or it has none yet); the
+ * first one, in the runtime's order, when there are several. */
+function defaultOffLine(unmapped: NonNullable<ShellHookStatus['unmapped']>): string {
+  const first = unmapped[0];
+  if (!first) return t('Off: no group belongs to an organization on this computer.');
+  if (first.reason === 'held' && first.held_by) return t('Off: {organization}\'s folders belong to the group “{group}”, so terminals there keep your own settings.', { organization: first.organization, group: first.held_by });
+  if (first.reason === 'no_folder') return t('Off: {organization}\'s group “{group}” has no folder yet.', { organization: first.organization, group: first.group });
+  return t('Off: {organization}\'s folders are not on this computer.', { organization: first.organization });
+}
 /** What the Groups page's *Terminals in organization folders* section shows for a read (null while
  * reading) and the last read's or save's error (SCN-075). */
 export function shellHookView(status: ShellHookStatus | null, error: string | null = null): ShellHookView {
@@ -1097,7 +1107,7 @@ export function shellHookView(status: ShellHookStatus | null, error: string | nu
   else if (status.hook === 'default_on') line = orgs.length === 1 ? t('On: new terminals in {organization}\'s folders work in its context.', { organization: orgs[0] }) : t('On: new terminals in organization folders work in their context.');
   else if (status.hook === 'on') line = t('On: new terminals in organization folders work in their context.');
   else if (status.hook === 'off') line = t('Off: new terminals keep your own settings.');
-  else line = t('Off: no group belongs to an organization on this computer.');
+  else line = defaultOffLine(status.unmapped ?? []);
   const action = { label: wanted ? t('Turn off') : t('Turn on'), on: !wanted, disabled: !status.can_change };
   const readd = wanted && status.can_change && status.files.some((f) => f.state === 'removed_by_person');
   const note = status.can_change ? null : t('Only the installed app changes terminal settings.');
