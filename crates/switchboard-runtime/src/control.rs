@@ -268,25 +268,65 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
     }
     let kind = operation_kind(&operation);
     let started = std::time::Instant::now();
-    let reply = match state.runtime.execute(operation).await {
+    let (reply, lock_ms) = measure_lock_waits(state.runtime.execute(operation)).await;
+    let reply = match reply {
         Ok(value) => Reply::Ok { value },
         Err(message) => Reply::Error { message },
     };
-    slow_request(kind, started.elapsed());
+    slow_request(kind, started.elapsed(), lock_ms);
     Json(reply).into_response()
+}
+tokio::task_local! {
+    /// H-2: the store-lock waits of the control request this task answers.
+    static LOCK_WAITS: Arc<LockWaits>;
+}
+/// H-2: whether a request took the store's lock, and how long its takes waited in all.
+#[derive(Default)]
+struct LockWaits {
+    took: std::sync::atomic::AtomicBool,
+    micros: std::sync::atomic::AtomicU64,
+}
+/// The store's lock observer (`Store::observe_lock_waits`): adds each wait to the request this
+/// task answers. On any other task (the monitor, the proxy) it does nothing. Waits on tasks the
+/// request spawns are not counted; its blocking sections (`blocking::run`) are, as they run on
+/// its own task.
+pub(crate) fn lock_waited(waited: Duration) {
+    let _ = LOCK_WAITS.try_with(|waits| {
+        waits.took.store(true, std::sync::atomic::Ordering::Relaxed);
+        waits.micros.fetch_add(
+            waited.as_micros().min(u64::MAX as u128) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    });
+}
+/// Runs `work` and answers, with its result, the milliseconds it waited for the store's lock
+/// in all: None when it never took it.
+async fn measure_lock_waits<T>(work: impl std::future::Future<Output = T>) -> (T, Option<u64>) {
+    let waits = Arc::new(LockWaits::default());
+    let result = LOCK_WAITS.scope(waits.clone(), work).await;
+    let lock_ms = waits
+        .took
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .then(|| waits.micros.load(std::sync::atomic::Ordering::Relaxed) / 1000);
+    (result, lock_ms)
 }
 /// SB-174: a request the owner took longer than this to answer is logged, so a client's stall
 /// can be told apart from one on the way to the owner.
 const SLOW_REQUEST: Duration = Duration::from_secs(5);
-fn slow_request(kind: &'static str, took: Duration) {
+/// H-2: `lock_ms`, the time it waited for the store's lock, is named when it took that lock.
+fn slow_request(kind: &'static str, took: Duration, lock_ms: Option<u64>) {
     if took >= SLOW_REQUEST {
-        oplog::event(
-            "control_slow",
-            &[
-                ("operation", oplog::Field::Code(kind)),
-                ("ms", oplog::Field::Number(took.as_millis() as i64)),
-            ],
-        );
+        let mut fields = vec![
+            ("operation", oplog::Field::Code(kind)),
+            ("ms", oplog::Field::Number(took.as_millis() as i64)),
+        ];
+        if let Some(lock_ms) = lock_ms {
+            fields.push((
+                "lock_ms",
+                oplog::Field::Number(lock_ms.min(i64::MAX as u64) as i64),
+            ));
+        }
+        oplog::event("control_slow", &fields);
     }
 }
 /// The operation's tag (`handovers`, `usage`, ...), never its arguments. The tags come from a
@@ -526,6 +566,134 @@ mod tests {
     use super::*;
     use crate::Owner;
     use switchboard_core::{AuthKind, MemoryVault, Provider, Store};
+    #[test]
+    fn a_slow_request_names_how_long_it_waited_for_the_stores_lock() {
+        // H-2 (SB-174): `control_slow` carries `lock_ms` when the operation took the store's
+        // lock, and leaves it out when it never did; codes and numbers only.
+        let ((), events) = crate::oplog::capture_fields(|| {
+            slow_request("sessions", Duration::from_millis(6_400), Some(6_350));
+            slow_request("handovers", Duration::from_millis(5_100), None);
+            slow_request("usage", Duration::from_millis(40), Some(30));
+        });
+        assert_eq!(
+            events,
+            vec![
+                (
+                    "control_slow",
+                    vec![
+                        ("operation", oplog::Field::Code("sessions")),
+                        ("ms", oplog::Field::Number(6_400)),
+                        ("lock_ms", oplog::Field::Number(6_350)),
+                    ]
+                ),
+                (
+                    "control_slow",
+                    vec![
+                        ("operation", oplog::Field::Code("handovers")),
+                        ("ms", oplog::Field::Number(5_100)),
+                    ]
+                ),
+            ]
+        );
+    }
+    /// A vault whose removals take 400 ms: a removal holds the store's lock across its deletion.
+    #[derive(Default)]
+    struct SlowDelete(MemoryVault);
+    impl switchboard_core::Vault for SlowDelete {
+        fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
+            self.0.get(id)
+        }
+        fn put(&self, id: &str, value: &switchboard_core::Credential) -> Result<(), String> {
+            self.0.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            std::thread::sleep(Duration::from_millis(400));
+            self.0.delete(id)
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_operation_counts_the_time_it_waited_for_the_stores_lock() {
+        // H-2: the owner's store tells the request's task each wait for its lock; a request that
+        // never took it reads None.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let (_, untouched) = measure_lock_waits(async {}).await;
+        assert_eq!(untouched, None);
+        let (_, free) = measure_lock_waits(async { store.snapshot().unwrap() }).await;
+        assert!(free.is_some_and(|ms| ms < 100), "{free:?}");
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let removing = {
+            let store = store.clone();
+            std::thread::spawn(move || store.remove(&account.id))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let (_, waited) =
+            measure_lock_waits(async { crate::blocking::run(|| store.snapshot().unwrap()) }).await;
+        removing.join().unwrap().unwrap();
+        assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_requests_lock_ms_counts_only_its_own_waits() {
+        // H-2 fix cycle 1 (adversarial): two requests answered at once each count their own
+        // waits. One waits for the store's lock behind a slow removal; the other never takes
+        // the lock and reads None, not the first one's wait.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let removing = {
+            let store = store.clone();
+            std::thread::spawn(move || store.remove(&account.id))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let locking = {
+            let store = store.clone();
+            tokio::spawn(measure_lock_waits(async move {
+                crate::blocking::run(|| store.snapshot().unwrap());
+            }))
+        };
+        let lockless = tokio::spawn(measure_lock_waits(async {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }));
+        let (_, waited) = locking.await.unwrap();
+        let (_, untouched) = lockless.await.unwrap();
+        removing.join().unwrap().unwrap();
+        assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        assert_eq!(untouched, None, "a request that took no lock names no wait");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
     async fn fixture() -> (tempfile::TempDir, Owner, Descriptor) {
         let tmp = tempfile::tempdir().unwrap();
         let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))

@@ -204,6 +204,14 @@ pub(crate) fn capture<R>(f: impl FnOnce() -> R) -> (R, Vec<&'static str>) {
     let events = capture_end().into_iter().map(|(e, _)| e).collect();
     (result, events)
 }
+/// Tests: as `capture`, with each event's fields.
+#[cfg(test)]
+pub(crate) fn capture_fields<R>(f: impl FnOnce() -> R) -> (R, CapturedFields) {
+    capture_begin();
+    let result = f();
+    let events = CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default());
+    (result, events)
+}
 /// Tests: as `capture`, for a future polled on this thread (a current-thread test runtime), with
 /// each event's fields.
 #[cfg(test)]
