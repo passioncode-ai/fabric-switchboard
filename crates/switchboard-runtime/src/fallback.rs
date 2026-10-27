@@ -880,7 +880,6 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         let pinned_act = |workflow: String, account: String, dir: PathBuf| {
             let wrote = written.lock().unwrap_or_else(|p| p.into_inner()).take();
             let pin = paid_kind(&snapshot, &account).map(|_| Pin::of(&snapshot, &dir).wrote(wrote));
-            *LEAK.lock().unwrap() = pin.clone(); // PLANT G
             GATED.scope(pin, act(workflow, account, dir))
         };
         let done = hand_over(&pinned_act, &gate, id, &dir, &steps).await;
@@ -1038,9 +1037,8 @@ pub(crate) fn gated() -> bool {
 /// The key this task's paid start was gated on: the automatic fallback's paid step, or a start
 /// by hand inside `Runtime::execute`.
 pub(crate) fn pinned() -> Option<Pin> {
-    GATED.try_with(Clone::clone).ok().flatten().or_else(|| LEAK.lock().unwrap().clone()) // PLANT G
+    GATED.try_with(Clone::clone).ok().flatten()
 }
-static LEAK: Mutex<Option<Pin>> = Mutex::new(None);
 
 /// How long one pass's spend gates may take together, across all its workflows (at most
 /// `WORKFLOWS_PER_PASS`): counted inside the gates only ([`GateBudget`], SB-214), and each read
@@ -4072,7 +4070,11 @@ mod tests {
     // ---- SB-213, fix cycle 1 ----
 
     /// A queued paid hand-over on Hermes in `dir`, its script naming `key`.
-    fn queued_on(root: &std::path::Path, dir: &std::path::Path, key: Option<KeySlot>) -> crate::handovers::Handover {
+    fn queued_on(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        key: Option<KeySlot>,
+    ) -> crate::handovers::Handover {
         crate::handovers::set_enabled(root, true).unwrap();
         let handover = crate::handovers::Handover {
             id: crate::handovers::new_id(),
@@ -4195,8 +4197,16 @@ mod tests {
             )
             .await;
         assert_eq!(opened, 0);
-        assert_eq!(SWEEP_STARTS.load(Ordering::SeqCst), 0, "Terminal never opened it");
-        assert_eq!(count.load(Ordering::SeqCst), 1, "its gate read the folder's key");
+        assert_eq!(
+            SWEEP_STARTS.load(Ordering::SeqCst),
+            0,
+            "Terminal never opened it"
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "its gate read the folder's key"
+        );
         assert!(
             crate::handovers::pending(root.path()).is_empty(),
             "taken as refused, so it is not read again every pass"
@@ -4229,7 +4239,11 @@ mod tests {
             Some(KeySlot::Group("beta".into()))
         );
         assert_eq!(queued(json!("machine")).key, Some(KeySlot::Machine));
-        assert_eq!(queued(Value::Null).key, None, "a start on no OpenRouter key");
+        assert_eq!(
+            queued(Value::Null).key,
+            None,
+            "a start on no OpenRouter key"
+        );
     }
 
     #[cfg(unix)]
@@ -4297,15 +4311,16 @@ mod tests {
         let dir = dir_of(&repo);
         let runtime = paid_runtime(root.path(), None).await;
         let reads = Arc::new(AtomicUsize::new(0));
-        // Another operation holds the owner transaction from before the start until 1.5 s after
-        // its first read: the start's first gate runs without it, then waits for it.
+        // Another operation holds the owner transaction from before the start until 4 s after its
+        // first read, longer than the whole 3 s gate budget: the start's first gate runs without
+        // it, then waits for it.
         let transaction = runtime.mutations.lock().await;
         let holder = async {
             let _transaction = transaction;
             while reads.load(Ordering::SeqCst) == 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
         };
         let read: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
             let (runtime, reads, dir) = (runtime.clone(), reads.clone(), dir.clone());
@@ -4319,27 +4334,33 @@ mod tests {
             })
         };
         let start = TEST_GATE_BUDGET.scope(
-                std::time::Duration::from_secs(1),
-                TEST_READ_DELAY.scope(
-                    std::time::Duration::from_millis(300),
-                    TEST_READ.scope(
-                        read,
-                        runtime.execute(Operation::LaunchAgent {
-                            agent: "no-such-agent".into(),
-                            pool: String::new(),
-                            working_directory: dir,
-                            via: crate::AgentVia::Openrouter,
-                            model: None,
-                        }),
-                    ),
+            std::time::Duration::from_secs(3),
+            TEST_READ_DELAY.scope(
+                std::time::Duration::from_millis(300),
+                TEST_READ.scope(
+                    read,
+                    runtime.execute(Operation::LaunchAgent {
+                        agent: "no-such-agent".into(),
+                        pool: String::new(),
+                        working_directory: dir,
+                        via: crate::AgentVia::Openrouter,
+                        model: None,
+                    }),
                 ),
-            );
+            ),
+        );
         let ((), refused) = tokio::join!(holder, start);
         let refused = refused.unwrap_err();
-        assert_eq!(reads.load(Ordering::SeqCst), 2, "gated again on the group's key");
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "gated again on the group's key"
+        );
         assert_eq!(
             refused,
-            crate::agent_catalog::openrouter("no-such-agent").err().unwrap(),
+            crate::agent_catalog::openrouter("no-such-agent")
+                .err()
+                .unwrap(),
             "the second gate read the group's key and passed; the launch then refuses the agent"
         );
     }
@@ -4409,7 +4430,9 @@ mod tests {
         assert_eq!(reads.load(Ordering::SeqCst), 2);
         assert_eq!(
             paid.unwrap_err(),
-            crate::agent_catalog::openrouter("no-such-agent").err().unwrap()
+            crate::agent_catalog::openrouter("no-such-agent")
+                .err()
+                .unwrap()
         );
     }
 

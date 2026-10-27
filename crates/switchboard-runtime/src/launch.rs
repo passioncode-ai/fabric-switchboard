@@ -4064,7 +4064,10 @@ mod tests {
             text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
             "the key slot the gate read, the machine's here (SB-144, SB-213)"
         );
-        assert!(!text.contains("'--dir'"), "never the folder's key at run time");
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
+        );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
             .arg("-n")
@@ -4193,7 +4196,10 @@ mod tests {
             text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
             "the key slot the gate read, the machine's here (SB-144, SB-213)"
         );
-        assert!(!text.contains("'--dir'"), "never the folder's key at run time");
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
+        );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
             .arg("-n")
@@ -4369,7 +4375,10 @@ mod tests {
                 text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
                 "the key slot the gate read, the machine's here (SB-144, SB-213)"
             );
-            assert!(!text.contains("'--dir'"), "never the folder's key at run time");
+            assert!(
+                !text.contains("'--dir'"),
+                "never the folder's key at run time"
+            );
             assert!(text.contains("export OPENROUTER_API_KEY\n"));
             assert!(text.contains(
                 "exec '/opt/Agent Tools/agent' '--provider' 'openrouter' '-m' 'moonshotai/kimi-k2'"
@@ -4414,7 +4423,10 @@ mod tests {
             )),
             "the group's key by its slot"
         );
-        assert!(!text.contains("'--dir'"), "never the folder's key at run time");
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
+        );
         // After the launch the folder leaves Beta: by folder it would now get the machine's key.
         f.store
             .save_project(Some(&beta.pool), "Beta", &[other], &[])

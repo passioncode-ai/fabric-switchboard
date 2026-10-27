@@ -1090,7 +1090,8 @@ impl Runtime {
                     if pin.holds(&self.store.snapshot()?) {
                         break (Some(turn), mutation, Some(pin));
                     }
-                    let held = mutation; // PLANT F
+                    // The second gate runs without the transaction, as the first did.
+                    drop(mutation);
                     // Its start never runs on this key: the baseline its gate wrote goes (F2).
                     pin.release(&self.root);
                     fallback::log_moved(again);
@@ -1099,7 +1100,6 @@ impl Runtime {
                     }
                     again = false;
                     pin = gate().await?;
-                    drop(held);
                 }
             }
             None => {
@@ -4019,7 +4019,7 @@ async fn execute(
             folder,
             slot,
         } => {
-            let key = match slot.filter(|_| false) { // PLANT A2
+            let key = match slot {
                 Some(slot) => {
                     let pool = match &slot {
                         spend::KeySlot::Machine => None,

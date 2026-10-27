@@ -912,7 +912,12 @@ pub fn record_baseline(
 /// spend as unknown. Only that exact record goes; a baseline an earlier start wrote stays. Safe
 /// because the gate that wrote it still holds the hand-over turn, so no other start of the task
 /// counted from it. Answers whether it was dropped.
-pub fn forget_baseline(root: &Path, workflow: &str, key: &KeySlot, at: i64) -> Result<bool, String> {
+pub fn forget_baseline(
+    root: &Path,
+    workflow: &str,
+    key: &KeySlot,
+    at: i64,
+) -> Result<bool, String> {
     change(root, None, at, |file| {
         let before = file.baselines.len();
         file.baselines
