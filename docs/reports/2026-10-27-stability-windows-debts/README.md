@@ -40,3 +40,7 @@ Operator request 2026-10-27: «проверим все долги по стаб�
 | SB-92 | rehearsal of the shared signing action on an `-rc` tag, with the release environment |
 | SB-91 | the website repository |
 | SB-216, SB-217 | decisions C-N1, C-N2 for 0.7.0, revisit after it |
+
+## Outcome (2026-10-28)
+
+Every wave of the plan is merged on `iteration/0.7.0` (`a476db1`): W1 `8bd2512`, W1b `50236b8`, S3 `df9a7e1`, S2 `25d58d6`, S4 `27d5ca5`, W2 `c2d3e3e`, S5 `a476db1`; S1 closed on main (`84d7b4b`). Two dispatched nightlies found defects that would have shipped (four tests that passed only where Project Observatory is installed; an empty launch history on Windows; nine Windows test-data and one Windows path-matching defect); both were fixed, and the nightly on the Windows branch was green on all six jobs (runs 40581403395, 40585412854). The rows ship with 0.7.0 and close at its release. Still waiting on a person: SB-02's live run on a Windows host, SB-01, SB-15, SB-178, SB-06, SB-13, SB-16; on another project: SB-32, SB-92, SB-91. New follow-ups found on the way: SB-231, SB-232, SB-233.
