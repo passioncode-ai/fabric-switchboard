@@ -702,10 +702,13 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `a_paid_continue_by_hand_past_a_reached_machine_ceiling_is_refused_and_offers_nothing`,
   `a_paid_continue_by_hand_writes_the_tasks_baseline`,
   `an_agent_launched_on_the_openrouter_key_past_a_ceiling_is_refused`). One pass's gates together
-  take at most `GATE_BUDGET` (20 s), across all its workflows (at most 4): the budget starts once,
-  before the pass's first workflow, each read gets what is left of it, at most 12 s, and a read
-  cut short is unknown (`two_slow_paid_steps_end_inside_the_passes_gate_budget`,
-  `a_passes_gates_stay_inside_one_budget_across_its_workflows`). A task's first
+  take at most `GATE_BUDGET` (20 s), across all its workflows (at most 4): only the time spent
+  inside the gates is counted (`fallback::GateBudget`, SB-214), so the engine's reads
+  (`show_within`), the wait for `HAND_OVER` and an earlier workflow's launch never leave a later
+  paid step with nothing; each read gets what is left of it, at most 12 s, and a read cut short
+  is unknown (`two_slow_paid_steps_end_inside_the_passes_gate_budget`,
+  `a_passes_gates_stay_inside_one_budget_across_its_workflows`,
+  `a_passes_gate_budget_counts_only_time_inside_its_gates`). A task's first
   paid hand-over whose key total could not be read records a baseline with `usage: null`, so a
   task ceiling set later reads `spend_unknown`, never zero
   (`a_first_paid_hand_over_with_its_total_unread_leaves_a_later_task_ceiling_unknown`). The

@@ -753,10 +753,10 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             .collect();
         crate::launch::launched_session_running(&runtime.root, provider, &ids)
     };
-    // The pass's gates together stay inside the budget: it starts once, before the first
-    // workflow, so up to WORKFLOWS_PER_PASS hand-overs (and their waits for the hand-over turn)
-    // share it.
-    let budget_end = tokio::time::Instant::now() + budget;
+    // The pass's gates together stay inside the budget: up to WORKFLOWS_PER_PASS hand-overs
+    // share it. Only the time spent inside the gates is counted (SB-214): the engine's reads,
+    // the wait for the hand-over turn and an earlier workflow's launch spend none of it.
+    let gates = GateBudget::new(budget);
     let mut examined = 0;
     for workflow in &workflows {
         if examined >= WORKFLOWS_PER_PASS {
@@ -849,9 +849,10 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             &kimi,
         );
         let gate = |_agent: String, account: String| {
-            let (snapshot, dir, read) = (&snapshot, &dir, &read);
+            let (snapshot, dir, read, gates) = (&snapshot, &dir, &read, &gates);
             async move {
-                spend_gate(
+                let started = tokio::time::Instant::now();
+                let gate = spend_gate(
                     &runtime.root,
                     snapshot,
                     id,
@@ -859,9 +860,11 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
                     &account,
                     now,
                     read,
-                    read_limit(budget_end, SPEND_READ_TIMEOUT),
+                    gates.limit(SPEND_READ_TIMEOUT),
                 )
-                .await
+                .await;
+                gates.charge(started.elapsed());
+                gate
             }
         };
         // SB-213: a paid step runs with the key its gate read on this pass's snapshot, checked
@@ -985,10 +988,34 @@ pub(crate) fn pinned() -> Option<Pin> {
 }
 
 /// How long one pass's spend gates may take together, across all its workflows (at most
-/// `WORKFLOWS_PER_PASS`): the budget starts once, before the pass's first workflow, and each read
+/// `WORKFLOWS_PER_PASS`): counted inside the gates only ([`GateBudget`], SB-214), and each read
 /// gets what is left of it (at most [`SPEND_READ_TIMEOUT`]), so slow paid steps never hold a pass
 /// longer. A read cut short is unknown, never zero. A start by hand has a budget of its own.
 pub(crate) const GATE_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// What is left of one fallback pass's [`GATE_BUDGET`] (SB-214): only the time its gates take is
+/// charged, so the engine's reads, a wait for [`HAND_OVER`] and an earlier workflow's launch never
+/// leave a later paid step with nothing, its spend unknown and its workflow waiting a retry
+/// window. Each gate still gets at most what is left, so the gates together stay inside it.
+pub(crate) struct GateBudget {
+    left: Mutex<std::time::Duration>,
+}
+impl GateBudget {
+    pub(crate) fn new(total: std::time::Duration) -> GateBudget {
+        GateBudget {
+            left: Mutex::new(total),
+        }
+    }
+    /// The read limit for a gate that starts now: at most `cap`, inside what is left.
+    pub(crate) fn limit(&self, cap: std::time::Duration) -> std::time::Duration {
+        cap.min(*self.left.lock().unwrap_or_else(|p| p.into_inner()))
+    }
+    /// Takes the time one gate ran off what is left.
+    pub(crate) fn charge(&self, spent: std::time::Duration) {
+        let mut left = self.left.lock().unwrap_or_else(|p| p.into_inner());
+        *left = left.saturating_sub(spent);
+    }
+}
 
 /// The read limit for a gate that starts now: at most `cap`, inside a budget that ends at `end`.
 pub(crate) fn read_limit(
@@ -3224,6 +3251,8 @@ mod tests {
     async fn two_slow_paid_steps_end_inside_the_passes_gate_budget() {
         // Risk 7, scaled down: a 2 s budget, 1.5 s per read, reads that answer after 3 s. Each
         // step alone would take its full 1.5 s (3 s together); the budget ends both by 2 s.
+        // Measured inside the gates, as the pass charges it (SB-214): the hand-over turn is one
+        // per process and another test may hold it before the first gate.
         let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let dir = dir_of(&repo);
         let snapshot = paid_snapshot(&dir, false);
@@ -3237,28 +3266,24 @@ mod tests {
             std::time::Duration::from_secs(2),
             std::time::Duration::from_millis(1500),
         );
-        let started = tokio::time::Instant::now();
-        let budget_end = started + budget;
+        let gates = GateBudget::new(budget);
+        let inside: Mutex<std::time::Duration> = Default::default();
         let gate = |_: String, account: String| {
             let (root, snapshot, dir, slow) = (root.path(), &snapshot, &dir, &slow);
+            let (gates, inside) = (&gates, &inside);
             async move {
-                spend_gate(
-                    root,
-                    snapshot,
-                    WF,
-                    dir,
-                    &account,
-                    T,
-                    slow,
-                    read_limit(budget_end, cap),
-                )
-                .await
+                let started = tokio::time::Instant::now();
+                let gate =
+                    spend_gate(root, snapshot, WF, dir, &account, T, slow, gates.limit(cap)).await;
+                gates.charge(started.elapsed());
+                *inside.lock().unwrap() += started.elapsed();
+                gate
             }
         };
         let done = hand_over(&act, &gate, WF, &dir, &[hermes(), opencode()]).await;
         assert_eq!(done.outcome, "spend_unknown");
         assert_eq!(done.skipped.len(), 2);
-        let took = started.elapsed();
+        let took = *inside.lock().unwrap();
         assert!(
             took <= budget + std::time::Duration::from_millis(600),
             "two slow steps took {took:?}, past the {budget:?} budget"
@@ -3827,6 +3852,62 @@ mod tests {
             errors.lock().unwrap().as_slice(),
             [spend::STOP_FOLDER_MOVED.to_string()],
             "refused before the offer, never run on the group's ungated key"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_passes_gate_budget_counts_only_time_inside_its_gates() {
+        // SB-214: the first workflow's launch takes longer than the pass's whole gate budget.
+        // Counted in wall time, the second workflow's gate had nothing left: its read was given
+        // up, its spend unknown under the machine ceiling, and it waited 15 minutes. Counted
+        // inside the gates, it reads its key and runs.
+        use crate::fixtures::*;
+        use crate::monitor::now;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        limit(&runtime, root.path(), &a.id);
+        runtime
+            .store
+            .set_agent_key_for("openrouter", None, "sk-or-fixture-only", None)
+            .unwrap();
+        machine_ceiling(root.path(), &runtime.store.snapshot().unwrap(), 5.0);
+        hermes_chain(&runtime);
+        let repo = tempfile::tempdir().unwrap();
+        let bin = engine_two(root.path(), &a.id, &dir_of(&repo));
+        let budget = std::time::Duration::from_millis(400);
+        let acted = Arc::new(AtomicUsize::new(0));
+        let act = |_: String, _: String, _: PathBuf| {
+            let acted = acted.clone();
+            async move {
+                acted.fetch_add(1, Ordering::SeqCst);
+                // A launch, outside every gate, longer than the whole budget.
+                tokio::time::sleep(budget + std::time::Duration::from_millis(300)).await;
+                Ok::<(), String>(())
+            }
+        };
+        let reads = Arc::new(AtomicUsize::new(0));
+        let read = |_: Option<String>| {
+            let reads = reads.clone();
+            async move {
+                reads.fetch_add(1, Ordering::SeqCst);
+                // Answers after a moment, as a read over the network does.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                spend(40.0, 1.0, 1.0)
+            }
+        };
+        TEST_HERMES_READY
+            .scope(
+                (),
+                pass_with_reads(&runtime, now(), &bin, act, read, budget),
+            )
+            .await;
+        assert_eq!(reads.load(Ordering::SeqCst), 2, "both steps were gated");
+        assert_eq!(
+            acted.load(Ordering::SeqCst),
+            2,
+            "the second step's gate still had its budget: its spend was read and it ran"
         );
     }
 
