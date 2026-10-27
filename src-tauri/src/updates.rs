@@ -216,6 +216,34 @@ pub fn recorded_restart(recorded: Option<i64>, now: i64) -> (Option<i64>, bool) 
     }
 }
 
+/// The last restart on its own as the watch reads it from one look to the next (SB-210). A time
+/// ahead of the clock is read as the look that first saw it and written back once
+/// (`recorded_restart`); when that write fails, the file keeps the future time, and reading it
+/// as now at every look slid the pause forward so the app never restarted on its own. The first
+/// look's time is kept here instead, so the pause still ends one period after it.
+#[derive(Default)]
+pub struct RestartClock {
+    ahead_seen_at: Option<i64>,
+}
+
+impl RestartClock {
+    pub fn read(&mut self, recorded: Option<i64>, now: i64) -> (Option<i64>, bool) {
+        match recorded {
+            Some(at) if at > now => match self.ahead_seen_at {
+                Some(first) => (Some(first), false),
+                None => {
+                    self.ahead_seen_at = Some(now);
+                    (Some(now), true)
+                }
+            },
+            other => {
+                self.ahead_seen_at = None;
+                (other, false)
+            }
+        }
+    }
+}
+
 /// When the half hour before a drain starts counting (SB-191): the download, or the end of the
 /// pause when that is later. An urgent release has no pause, so it drains on the same terms as
 /// before 0.6.83.
@@ -768,6 +796,7 @@ fn watch_for_idle(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut idle_before = false;
         let mut report = IdleReport::default();
+        let mut clock = RestartClock::default();
         let waiting_since = now();
         loop {
             tokio::time::sleep(IDLE_LOOK_EVERY).await;
@@ -788,7 +817,7 @@ fn watch_for_idle(app: &AppHandle) {
             };
             // SB-191: at most one restart on its own in RESTART_EVERY_SECONDS.
             let time = now();
-            let (last, rewrite) = recorded_restart(state.restarted_at(), time);
+            let (last, rewrite) = clock.read(state.restarted_at(), time);
             if rewrite {
                 state.record_restart(time);
             }
@@ -1701,6 +1730,29 @@ mod tests {
         assert_eq!(cooldown_left(later, downloaded + six, false), 0);
         assert_eq!(recorded_restart(last, downloaded), (last, false));
         assert_eq!(recorded_restart(None, downloaded), (None, false));
+        // SB-210: a future time that cannot be written back is read as the first look that saw
+        // it, every look after, so the pause ends a period after that look, not never.
+        let mut clock = RestartClock::default();
+        let future = Some(downloaded + 365 * 86_400);
+        assert_eq!(clock.read(future, downloaded), (Some(downloaded), true));
+        assert_eq!(
+            clock.read(future, downloaded + 300),
+            (Some(downloaded), false)
+        );
+        assert_eq!(cooldown_left(Some(downloaded), downloaded + six, false), 0);
+        assert_eq!(
+            clock.read(future, downloaded + six),
+            (Some(downloaded), false)
+        );
+        // Once written, or once the clock passes it, the file's time is read again.
+        assert_eq!(
+            clock.read(Some(downloaded), downloaded + 600),
+            (Some(downloaded), false)
+        );
+        assert_eq!(
+            clock.read(future, downloaded + 900),
+            (Some(downloaded + 900), true)
+        );
         assert_eq!(
             drain_from(downloaded, Some(downloaded + 9_999), downloaded, false),
             downloaded + six,

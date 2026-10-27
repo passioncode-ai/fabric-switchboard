@@ -513,6 +513,34 @@ fn the_stop_hook_after_a_turn_is_silent_and_never_fails() {
     assert!(!tmp.path().join("recovery.json").exists());
 }
 #[test]
+fn a_stop_input_past_the_hook_limit_answers_no_decision() {
+    // SB-210: a `Stop` input over 8 MiB could not be parsed and the hook printed
+    // `malformed_input` where Claude Code reads a decision; it now prints `{}`.
+    let tmp = tempfile::tempdir().unwrap();
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["recovery", "hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = std::thread::spawn(move || {
+        let message = "x".repeat(8 * 1024 * 1024 + 16);
+        let input = serde_json::json!({"session_id": "s-1", "hook_event_name": "Stop",
+            "last_assistant_message": message});
+        // The hook stops reading at its limit; the rest of the write may fail.
+        let _ = stdin.write_all(input.to_string().as_bytes());
+    });
+    let output = child.wait_with_output().unwrap();
+    writer.join().unwrap();
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({}));
+}
+#[test]
 fn a_long_last_message_still_settles_the_stop_with_no_owner_running() {
     // Adversarial round 2: Claude Code puts the turn's whole last message in the Stop input; a
     // 64 KiB bound cut it and the stop stayed waiting. With no owner the CLI settles it itself.

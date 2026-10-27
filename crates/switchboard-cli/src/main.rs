@@ -2176,9 +2176,16 @@ const HOOK_INPUT_LIMIT: u64 = 8 * 1024 * 1024;
 async fn recovery_hook(root: &std::path::Path) -> Value {
     use std::io::Read;
     let mut input = Vec::new();
+    // One byte past the limit tells an input that was cut from one of exactly the limit.
     let read = std::io::stdin()
-        .take(HOOK_INPUT_LIMIT)
+        .take(HOOK_INPUT_LIMIT + 1)
         .read_to_end(&mut input);
+    // SB-210: an input past the limit cannot be parsed, and a `Stop` hook's stdout is read as
+    // its decision: such an input answers `{}`, no decision, as a `Stop` does. Claude Code's
+    // `StopFailure` payload is a few hundred bytes, so none is that long.
+    if input.len() as u64 > HOOK_INPUT_LIMIT {
+        return json!({});
+    }
     let parsed: Option<Value> = read.ok().and_then(|_| serde_json::from_slice(&input).ok());
     let Some(hook) = parsed else {
         return json!({"registered": false, "reason": "malformed_input"});

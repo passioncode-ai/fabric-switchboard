@@ -1424,7 +1424,10 @@ written by an earlier version still reads. Evidence:
   marks it `resumed` and logs `recovery_continued` with `settled`; with no owner running the
   CLI settles it under the store's lock. An unreadable file asks nothing. The input is read up
   to 8 MiB, since a Stop input carries the turn's whole last message. Its stdout is `{}`:
-  Claude Code reads a Stop hook's output as a decision. Evidence:
+  Claude Code reads a Stop hook's output as a decision. An input past 8 MiB cannot be parsed and
+  also answers `{}`, never `malformed_input` (SB-210; the turn is then not counted and a stop it
+  had stays waiting until a later turn settles it). Evidence:
+  `a_stop_input_past_the_hook_limit_answers_no_decision`,
   `a_session_that_goes_on_by_itself_settles_its_stop`,
   `the_stop_hook_after_a_turn_is_silent_and_never_fails`,
   `a_long_last_message_still_settles_the_stop_with_no_owner_running`,
