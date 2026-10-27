@@ -264,25 +264,28 @@ impl Pass {
         crate::fallback::pass(runtime, time).await;
         // SB-108: a hand-over no console took in two minutes opens in Terminal.
         // C-Q8: a paid one passes the spend gate again first.
+        // SB-215: one record without `paid` is classified on the snapshot as it is now, and the
+        // pass's gates share one budget.
+        let snapshot = runtime.store.snapshot().ok();
         crate::handovers::sweep(
             &runtime.root,
             time,
             crate::launch::start_terminal,
-            |h: crate::handovers::Handover| async move {
-                match h.paid {
-                    Some(kind) => {
-                        crate::fallback::gate_by_hand(
-                            &runtime.store,
-                            &runtime.root,
-                            Some(&h.workflow),
-                            &h.dir,
-                            kind,
-                        )
-                        .await
-                    }
-                    None => Ok(()),
-                }
+            |h: &crate::handovers::Handover| crate::fallback::handover_paid(snapshot.as_ref(), h),
+            |h: crate::handovers::Handover, kind, end| async move {
+                crate::fallback::gate_within(
+                    &runtime.store,
+                    &runtime.root,
+                    Some(&h.workflow),
+                    &h.dir,
+                    kind,
+                    end,
+                )
+                .await
             },
+            crate::fallback::GATE_BUDGET,
+            crate::fallback::SPEND_READ_TIMEOUT,
+            &crate::fallback::HAND_OVER,
         )
         .await;
         // SB-212: launch records not written for 90 days go, looked for at most once an hour.

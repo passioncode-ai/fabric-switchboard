@@ -466,6 +466,12 @@ pub fn refusal(reason: &str) -> &'static str {
 /// and the key a task ceiling counts from, its baseline (`KEY_COUNTED_BY_CEILING`). `replaces`
 /// says whether the slot has a key now (saving a first key loosens nothing). An unreadable file
 /// refuses every surface but the window, since whether a ceiling counts the key cannot be told.
+/// Whether a key is saved, as the counted-key refusal reads it (SB-215): a read that failed is
+/// a key that may be saved, so a ceiling counting it refuses the change (fails closed).
+pub(crate) fn saved_or_unknown<T>(read: Result<Option<T>, String>) -> bool {
+    !matches!(read, Ok(None))
+}
+
 pub fn guard_group_key<T>(
     root: &Path,
     pool: Option<&str>,
@@ -1079,6 +1085,17 @@ mod tests {
             .into_iter()
             .filter(|q| q.answer.is_none())
             .collect()
+    }
+
+    #[test]
+    fn a_key_read_that_failed_counts_as_a_saved_key() {
+        // SB-215: `AgentKeyRemove` read a failed read as "no key" and skipped the counted-key
+        // refusal (fails open).
+        assert!(saved_or_unknown::<()>(Err(
+            "Credential storage unavailable".into()
+        )));
+        assert!(saved_or_unknown(Ok(Some(()))));
+        assert!(!saved_or_unknown::<()>(Ok(None)));
     }
 
     #[test]

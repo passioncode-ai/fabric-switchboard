@@ -660,7 +660,24 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   waiting) and when the background opens it in Terminal (`handovers::sweep`: refused, it is taken
   without a start, log `handover outcome=spend_refused`)
   (`a_queued_paid_hand_over_is_gated_again_when_it_is_taken`,
-  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). A start by hand the gate
+  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). SB-215: what a
+  queued hand-over spends is its record's `paid`; a record without it (queued before 0.7.0, or
+  while the snapshot was unreadable) is classified when it is taken as the start it is now
+  (`fallback::handover_paid`: Hermes and OpenCode on the OpenRouter key, the record's `account`
+  on the current snapshot, an older record by its agent and label), and what cannot be placed (no
+  snapshot, an unknown agent, a removed account) is taken as paid on an API-key account, never
+  as free (`a_record_without_paid_is_classified_by_what_it_spends_now_and_fails_closed`,
+  `a_hand_over_queued_without_paid_is_gated_when_a_console_takes_it`). A console's take waits for
+  `HAND_OVER` at most `TAKE_TURN_WAIT` (10 s), then answers `handovers::BUSY` and the hand-over
+  keeps waiting (FD-71; `a_paid_take_behind_a_hand_over_in_progress_answers_busy_and_keeps_it_waiting`).
+  The background's sweep gives its gates one `GATE_BUDGET` (20 s) per pass and starts a gate only
+  while a whole 12 s read still fits, since a read cut short is unknown and would refuse the
+  hand-over for good; a due paid hand-over left over waits for the next pass (log `handover`
+  `outcome=gate_deferred` with `count`;
+  `handovers::tests::a_sweeps_gates_stay_inside_its_budget_and_the_rest_wait_for_the_next_pass`).
+  The counted-key refusal reads a saved key that could not be read as saved: with a ceiling
+  counting it, `AgentKeySet` and `AgentKeyRemove` from the CLI or MCP are refused rather than let
+  through (`spend::saved_or_unknown`, `a_key_read_that_failed_counts_as_a_saved_key`). A start by hand the gate
   skips is refused with the reason's sentence (`spend::refusal`: `STOP_KEY_EXHAUSTED`,
   `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`) before anything is offered or
   started; a paid continue writes the task's baseline like a hand-over. The fallback's own step
@@ -1572,7 +1589,13 @@ the monitor starts overflow in Terminal; recording refuses at 256 directory entr
 (including permanent `.taken` receipts). Individual records are at most 16 KiB.
 Exclusive private-file creation chooses one taker on every platform; the receipt remains
 after completion or a crash and prevents republication. A pending record with a receipt
-is not offered again. Expired/unparseable deadlines never launch.
+is not offered again. Expired/unparseable deadlines never launch. Since 0.7.0 a record
+carries `paid` and `account` (the account id it continues on), and a field this build does not
+know is ignored, not refused (SB-215,
+`handovers::tests::a_record_with_a_field_this_build_does_not_know_is_still_read`); builds before
+0.7.0 refuse unknown fields, so after a downgrade to 0.6.x a queued record that carries `paid`
+reads as unparseable and is removed by the sweep, its offer lost (an older build cannot be
+fixed from here).
 `fabric-handovers` absent means off. Pending/taken records and recovery state are
 operational state, excluded from account backups and removed by uninstall. A queue
 record never contains a prompt or credential. Evidence: `handovers::tests`,
