@@ -685,6 +685,20 @@ impl NativeSources {
         (self.fresh.unwrap_or(self.current))(provider)
     }
 }
+/// The `shell_hook` log event of one installer run: counts and flags only (LC-12).
+fn log_shell_hook(report: &shell::install::Report) {
+    oplog::event(
+        "shell_hook",
+        &[
+            ("wanted", oplog::Field::Flag(report.wanted)),
+            ("written", oplog::Field::Number(report.written as i64)),
+            ("removed", oplog::Field::Number(report.removed as i64)),
+            ("skipped", oplog::Field::Number(report.skipped as i64)),
+            ("changed", oplog::Field::Number(report.changed as i64)),
+            ("no_hook", oplog::Field::Flag(report.no_hook)),
+        ],
+    );
+}
 
 pub struct Runtime {
     pub store: Arc<Store>,
@@ -1891,6 +1905,63 @@ impl Runtime {
         shell::install::pending_notice(&self.root)
             .map(|n| json!({"organization": n.organization, "group": n.group}))
     }
+    /// SB-183 (node A-7): the window's *Terminals in organization folders* section, the same
+    /// state `switchboard shell status` reads (the hook, the choice, the folder map, each start
+    /// file) without the terminal's own fields, plus `can_change` (this owner is the installed
+    /// app, so the window's switch works), the organizations whose groups the hook follows by
+    /// name, and the person's home for showing start files as `~/...`.
+    pub fn shell_hook_status(&self) -> Value {
+        let root = self.root.clone();
+        let mut value = blocking::run(move || shell::map::status(Some(&root), None, &|_| None));
+        if let Some(object) = value.as_object_mut() {
+            for field in ["terminal", "here", "folder"] {
+                object.remove(field);
+            }
+        }
+        value["can_change"] = json!(self.shell_hook.lock().is_ok_and(|h| h.is_some()));
+        value["organizations"] = json!(self.shell_hook_organizations());
+        value["home"] = json!(dirs::home_dir().and_then(|h| h.to_str().map(str::to_owned)));
+        value
+    }
+    /// The names of the organizations a group on this computer is bound to, sorted, each once.
+    fn shell_hook_organizations(&self) -> Vec<String> {
+        let Ok(snapshot) = self.store.snapshot() else {
+            return Vec::new();
+        };
+        let names: std::collections::BTreeSet<String> = snapshot
+            .projects
+            .iter()
+            .filter_map(|p| snapshot.organization(p.organization.as_deref()?))
+            .map(|o| o.name.clone())
+            .collect();
+        names.into_iter().collect()
+    }
+    /// The window's *Turn off* / *Turn on*: saves the choice and brings every start file in line
+    /// with it now, as `switchboard shell off|on` does, then answers [`Self::shell_hook_status`].
+    /// Only the installed app's owner holds the person's home; any other owner (a development
+    /// build, `serve`, another data folder) refuses and changes nothing.
+    pub fn set_shell_hook(&self, on: bool) -> Result<Value, String> {
+        let Some(host) = self.shell_hook.lock().ok().and_then(|h| h.clone()) else {
+            return Err(shell::install::NOT_INSTALLED.into());
+        };
+        let root = self.root.clone();
+        let present = self
+            .store
+            .snapshot()
+            .is_ok_and(|s| shell::homes::organizations_present(&s));
+        let report = blocking::run(move || -> Result<shell::install::Report, String> {
+            shell::install::set_choice(&root, on)?;
+            Ok(shell::install::apply(&root, &host, present, on))
+        })?;
+        if let Ok(mut last) = self.shell_present.lock() {
+            *last = Some(present);
+        }
+        log_shell_hook(&report);
+        if on && report.no_hook {
+            return Err(shell::install::NO_PATH.into());
+        }
+        Ok(self.shell_hook_status())
+    }
     /// The window showed the first-time notice: it is never shown again.
     pub fn acknowledge_shell_hook_notice(&self) {
         let root = self.root.clone();
@@ -1915,17 +1986,7 @@ impl Runtime {
             return;
         };
         let report = blocking::run(|| shell::install::apply(&self.root, &host, present, false));
-        oplog::event(
-            "shell_hook",
-            &[
-                ("wanted", oplog::Field::Flag(report.wanted)),
-                ("written", oplog::Field::Number(report.written as i64)),
-                ("removed", oplog::Field::Number(report.removed as i64)),
-                ("skipped", oplog::Field::Number(report.skipped as i64)),
-                ("changed", oplog::Field::Number(report.changed as i64)),
-                ("no_hook", oplog::Field::Flag(report.no_hook)),
-            ],
-        );
+        log_shell_hook(&report);
         if report.first_written && shell::map::choice(&self.root) == shell::map::Choice::Default {
             let notice = self.store.snapshot().ok().and_then(|s| {
                 let group = s.projects.iter().find(|p| {
@@ -8853,6 +8914,72 @@ mod lifecycle_tests {
         third.runtime.bindings_pass().await;
         assert!(third.runtime.shell_hook_notice().is_none(), "said once");
         third.shutdown(Duration::from_secs(5)).await;
+        drop(work);
+    }
+
+    /// SB-183 (node A-7): the window's *Turn off* / *Turn on* go through the installed owner's
+    /// home: off gives the start file back byte for byte and keeps it out, on writes it again;
+    /// the section reads the organization by name. An owner that is not the installed app
+    /// refuses and changes nothing.
+    #[tokio::test]
+    async fn the_windows_switch_turns_the_hook_off_and_on_through_the_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let rc = home.join(".zshrc");
+        std::fs::write(&rc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+        };
+        let owner = owner(root.path()).await;
+        let runtime = &owner.runtime;
+        // Not the installed app yet: the switch is refused and nothing is written.
+        assert_eq!(runtime.shell_hook_status()["can_change"], false);
+        assert_eq!(
+            runtime.set_shell_hook(true).unwrap_err(),
+            shell::install::NOT_INSTALLED
+        );
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+        assert_eq!(shell::map::choice(root.path()), shell::map::Choice::Default);
+
+        runtime.enable_shell_hook_with(host);
+        let (work, _acme) = super::owner_tests::organization_group(runtime).await;
+        runtime.bindings_pass().await;
+        let status = runtime.shell_hook_status();
+        assert_eq!(status["can_change"], true);
+        assert_eq!(status["hook"], "default_on");
+        assert_eq!(status["organizations"], json!(["Acme"]));
+        assert_eq!(status["files"][0]["state"], "written");
+        assert!(
+            status.get("terminal").is_none(),
+            "the window has no terminal of its own"
+        );
+        assert!(std::fs::read_to_string(&rc)
+            .unwrap()
+            .contains(shell::install::OPEN));
+
+        let off = runtime.set_shell_hook(false).unwrap();
+        assert_eq!(off["hook"], "off");
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+        // A background pass after off writes nothing back.
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+
+        let on = runtime.set_shell_hook(true).unwrap();
+        assert_eq!(on["hook"], "on");
+        assert_eq!(on["files"][0]["state"], "written");
+        assert!(std::fs::read_to_string(&rc)
+            .unwrap()
+            .contains(shell::install::OPEN));
+        owner.shutdown(Duration::from_secs(5)).await;
         drop(work);
     }
 

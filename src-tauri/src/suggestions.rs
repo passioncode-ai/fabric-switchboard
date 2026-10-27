@@ -87,6 +87,23 @@ pub fn removed_text(gone: &[(String, String)], ru: bool) -> (String, String) {
     }
 }
 
+/// SB-183 (node A-7): the first time the installed app wrote the terminal hook into a start file
+/// because an organization's group appeared (SCN-074 step 1). The window shows the same words and
+/// acknowledges them; until it does, each start of the app posts this once.
+pub fn shell_hook_text(organization: &str, group: &str, ru: bool) -> (String, String) {
+    if ru {
+        (
+            format!("Терминалы в папках {organization} теперь работают в контексте этой организации"),
+            format!("Новые терминалы в папках группы «{group}» запускают claude и codex на аккаунтах {organization} и с историей этой организации. Выключить это можно на странице «Группы»."),
+        )
+    } else {
+        (
+            format!("Terminals now work in {organization}'s context in its folders"),
+            format!("New terminals opened in {group}'s folders run claude and codex on {organization}'s accounts and history. Turn this off under Groups."),
+        )
+    }
+}
+
 fn named(rows: &[serde_json::Value], told: &mut HashSet<String>) -> Vec<(String, String)> {
     let mut new = Vec::new();
     for r in rows {
@@ -116,6 +133,7 @@ pub fn watch(app: AppHandle) {
         let mut read_at = std::time::Instant::now();
         let mut told_removed: HashSet<String> = HashSet::new();
         let mut told_added: HashSet<String> = HashSet::new();
+        let mut told_shell: Option<String> = None;
         loop {
             if let Some(runtime) = app.state::<crate::Slot>().running().await {
                 let seq = runtime.suggestions_seq();
@@ -150,6 +168,21 @@ pub fn watch(app: AppHandle) {
                         }
                         let _ = app.emit("project-suggestions", 0);
                     }
+                    // The terminal hook's first-time notice: posted once per run while the window
+                    // has not shown it (the window acknowledges it).
+                    if let Some(notice) = runtime.shell_hook_notice() {
+                        let key = notice.to_string();
+                        if told_shell.as_deref() != Some(key.as_str()) {
+                            told_shell = Some(key);
+                            let (title, body) = shell_hook_text(
+                                notice["organization"].as_str().unwrap_or_default(),
+                                notice["group"].as_str().unwrap_or_default(),
+                                crate::residency::in_russian(),
+                            );
+                            let _ = app.notification().builder().title(title).body(body).show();
+                            let _ = app.emit("shell-hook", 0);
+                        }
+                    }
                 }
             }
             tokio::time::sleep(LOOK_EVERY).await;
@@ -183,5 +216,19 @@ mod tests {
         let rows = [serde_json::json!({"folder": "/x/a", "name": "a", "project": "A"})];
         assert_eq!(named(&rows, &mut told).len(), 1);
         assert!(named(&rows, &mut told).is_empty(), "once per folder");
+    }
+    /// SB-183 (node A-7): the first-time notice names the organization and the group, and says
+    /// where to turn it off, in both languages.
+    #[test]
+    fn the_shell_hook_notice_names_the_organization_and_the_way_out() {
+        let (title, body) = shell_hook_text("Acme", "Acme web", false);
+        assert_eq!(title, "Terminals now work in Acme's context in its folders");
+        assert_eq!(body, "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.");
+        let (title, body) = shell_hook_text("Acme", "Acme web", true);
+        assert!(title.contains("Acme"));
+        assert!(body.contains("Acme web") && body.contains("«Группы»"));
+        for text in [title, body] {
+            assert!(!text.contains('\u{2014}'), "no dash");
+        }
     }
 }

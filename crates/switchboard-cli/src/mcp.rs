@@ -17,6 +17,8 @@ const LINE_LIMIT: u64 = 1024 * 1024;
 const REFRESH_SPACING: i64 = 60;
 /// SB-145: a statistics range outside what is kept.
 const STATISTICS_DAYS: &str = "Statistics cover 1 to 90 days.";
+/// `switchboard_shell_hook_set` without its one argument.
+const SHELL_HOOK_ON: &str = "on is true or false.";
 /// SB-146: adding to one more group leaves none.
 const MOVE_ALSO_FROM: &str = "Name either also or from, not both.";
 pub(crate) const INSTRUCTIONS: &str = "Switchboard manages the Claude Code and Codex accounts on this machine. Read switchboard_status first. Remaining quota is in switchboard_usage; an unknown or stale value is not zero. A managed session changes account from the next request with switchboard_switch. A group holds repositories with accounts of its own, and a repository may be in several groups; tool names and fields call a group a project and its id a pool, but say group to the person. A repository a group's agents create or work in joins that group by itself; a repository in no group stays in the default group and is never made a group of its own. Never move account IDs to create a group. Automatic switching, when the operator turns it on, moves a group's managed sessions to its next account as one nears its limit. Folder rules are optional and off unless the operator saved one: when you start work in another repository or folder that may carry a rule, call switchboard_project_apply with it and tell the operator which rule applied. Changing the ordinary Claude Code login affects every claude session on the machine and needs global: true; ask the operator first.";
@@ -100,6 +102,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_suggestion","title":"Accept or decline a folder","description":"Add a folder Switchboard is still trying to add to its group now (accept), or keep it out for good (dismiss). Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["accept","dismiss"]},"folder":{"type":"string","minLength":1,"description":"The folder as switchboard_project_suggestions lists it."}},"required":["action","folder"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_sources","title":"A group's repository owners","description":"The repository owners (such as github.com/passioncode-ai) whose new repositories join a group by themselves; add and remove change the list by delta, none of them reads it. Only when the operator asks to change it.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1},"add":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}},"remove":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."},"pool":{"type":"string","description":"A group id for its own key; omit for the machine's key."}},"required":["model"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_shell_hook","title":"Terminals in organization folders","description":"Whether terminals on this computer follow organization folders (the terminal hook): its state (on, off, default_on: on because a group belongs to an organization, default_off), the choice, whether the folder map reads, and each start file Switchboard changed with its state (written, removed_by_person, skipped_symlink, skipped_owner, skipped_zdotdir_unknown, unreadable, policy_blocked); with path, the group, context and homes a terminal there gets. Reads files only.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_shell_hook_set","title":"Turn the terminal hook on or off","description":"Turn the terminal hook on or off for this computer's terminals, as switchboard shell on|off does. Only when the operator asks. off takes Switchboard's block out of every start file byte for byte and keeps it out; on writes it for every shell present, with or without an organization's group. Only Switchboard's own data folder changes start files. Answers the state switchboard_shell_hook reads.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -876,6 +880,13 @@ impl Server {
                 .await
             }
             "switchboard_repository_map" => self.repository_map(args).await,
+            "switchboard_shell_hook" => self
+                .folder(args)
+                .map(|dir| crate::shell::status(Some(&self.root), Some(&dir))),
+            "switchboard_shell_hook_set" => match args.get("on").and_then(Value::as_bool) {
+                Some(on) => crate::shell::set(Some(&self.root), on),
+                None => Err(SHELL_HOOK_ON.into()),
+            },
             "switchboard_rotation" => match self.call(Operation::Snapshot).await {
                 Ok(v) => {
                     let monitor = self.call(Operation::MonitorStatus).await.unwrap_or(

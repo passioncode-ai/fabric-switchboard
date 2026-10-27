@@ -327,6 +327,21 @@ Without `enabled`, the state (`on`, `applied`, `conflict` and the groups with a 
 `true` or `false` changes whether Codex in group folders uses the group's accounts, only when the
 operator asks.
 
+### `switchboard_shell_hook`: `path?`
+
+Whether this computer's terminals follow organization folders, as `switchboard shell status`
+reads it: `hook` (`on`, `off`, `default_on` because a group belongs to an organization,
+`default_off`), `choice`, `map`, each start file in `files` with its `state` (`written`,
+`removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
+`unreadable`, `policy_blocked`), and in `here` the group, context and homes a terminal gets in
+`path` (default the agent's folder). Reads files only.
+
+### `switchboard_shell_hook_set`: `on`
+
+Only when the operator asks. `false` takes Switchboard's block out of every start file byte for
+byte and keeps it out; `true` writes it for every shell present. Answers what
+`switchboard_shell_hook` reads. From another data folder it is refused and nothing changes.
+
 ### `switchboard_project_suggestion`: `action`, `folder`
 
 Only when the operator asks. `accept` adds a waiting folder to its group now; `dismiss` keeps it
@@ -453,3 +468,5 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "Doubling a ceiling is answered in the Switchboard window." | keep it here, or ask the operator to double it in the window |
 | "Give this group its own key under API keys first." | the operator saves the group's own OpenRouter key, then the ceiling |
 | "No open question with that id…" | call `switchboard_ceilings` for the open questions |
+| "Only Switchboard's own data folder can change your terminals' start files…" | run the server without `--data-dir`, or ask the operator to use the app's switch |
+| "No installed switchboard command was found for the hook to run…" | install Fabric Switchboard, then turn it on again |

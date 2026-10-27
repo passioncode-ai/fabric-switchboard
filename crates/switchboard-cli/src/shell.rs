@@ -92,10 +92,7 @@ pub fn set(data_dir: Option<&Path>, on: bool) -> Result<Value, String> {
     install::set_choice(&root, on)?;
     let report = install::apply(&root, &host, false, on);
     if on && report.no_hook {
-        return Err(
-            "The hook cannot name this executable or the data folder: a path is not absolute or not valid text."
-                .into(),
-        );
+        return Err(install::NO_PATH.into());
     }
     Ok(status(Some(&root), None))
 }

@@ -1,5 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
+import type { ShellHookNotice, ShellHookStatus } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
@@ -930,4 +931,86 @@ export function firstRunHint(current: { claude?: { status: string } | null; code
  */
 export function usableWhileBusy(key: string): boolean {
   return /^(nav-|refresh$|dismiss-notice$|countdown-toggle$|org-filter-|quota-|chart-|stats-|stat-[a-z]+-sort-|folders-|disk-map-toggle$|review-rules$|open-api-keys$|tour-|[a-z-]+-retry$)/.test(key);
+}
+
+/** SB-183 (node A-7): one start file's line in *Terminals in organization folders*; `command` is
+ * the line a person adds by hand (with *Copy*) when Switchboard could not write the file. */
+export interface ShellHookFileView { text: string; command: string | null; problem: boolean }
+export interface ShellHookView {
+  state: 'reading' | 'failed' | 'on' | 'default_on' | 'off' | 'default_off' | 'inactive';
+  line: string;
+  files: ShellHookFileView[];
+  /** The switch: Turn off while the hook is wanted, Turn on otherwise; disabled outside the installed app. */
+  action: { label: string; on: boolean; disabled: boolean } | null;
+  /** A block the person took out while the hook is on: *Add the block again* writes it back. */
+  readd: boolean;
+  note: string | null;
+  error: string | null;
+  retry: boolean;
+}
+/** The line a person adds to a start file Switchboard left alone. */
+export function shellInitLine(shell: string): string | null {
+  if (shell === 'zsh' || shell === 'bash') return `eval "$(switchboard shell init ${shell})"`;
+  if (shell === 'fish') return 'switchboard shell init fish | source';
+  return null;
+}
+/** A start file's path as the person knows it: `~/...` under their home. */
+export function homePath(path: string, home: string | null): string {
+  if (home && (path === home || path.startsWith(home.endsWith('/') ? home : `${home}/`))) return `~${path.slice(home.replace(/\/$/, '').length)}`;
+  return path;
+}
+function shellHookFile(file: { shell: string; path: string; state: string }, home: string | null): ShellHookFileView {
+  const path = homePath(file.path, home);
+  const shell = file.shell;
+  switch (file.state) {
+    case 'written': return { text: shell === 'fish' ? t('fish: its own file, added') : t('{shell}: {path}, added', { shell, path }), command: null, problem: false };
+    case 'skipped_symlink': return { text: t('{path} is a link, so Switchboard did not change it. Add this line yourself:', { path }), command: shellInitLine(shell), problem: true };
+    case 'skipped_zdotdir_unknown': return { text: t('zsh may read its start file from another folder (ZDOTDIR), so Switchboard created none. Add this line to the start file zsh reads:'), command: shellInitLine('zsh'), problem: true };
+    case 'skipped_owner': return { text: t('{path} belongs to another user, so Switchboard did not change it.', { path }), command: null, problem: true };
+    case 'unreadable': return { text: t('{path} could not be read, so Switchboard did not change it.', { path }), command: null, problem: true };
+    case 'removed_by_person': return { text: t('You took the block out of {path}, so Switchboard does not add it back.', { path }), command: null, problem: true };
+    case 'policy_blocked': return { text: t('PowerShell\'s execution policy stops profiles from loading, so the hook is inactive there. Switchboard does not change it. Whoever manages this computer can allow signed or local scripts for your user.'), command: null, problem: true };
+    default: return { text: t('{shell}: {path}, {state}', { shell, path, state: file.state }), command: null, problem: true };
+  }
+}
+/** What the Groups page's *Terminals in organization folders* section shows for a read (null while
+ * reading) and the last read's or save's error (SCN-075). */
+export function shellHookView(status: ShellHookStatus | null, error: string | null = null): ShellHookView {
+  const none = { files: [], action: null, readd: false, note: null };
+  if (!status) {
+    if (error) return { ...none, state: 'failed', line: t('The terminal hook\'s state could not be read.'), error, retry: true };
+    return { ...none, state: 'reading', line: t('Reading the terminal hook…'), error: null, retry: false };
+  }
+  const wanted = status.hook === 'on' || status.hook === 'default_on';
+  const files = status.files.map((f) => shellHookFile(f, status.home));
+  const active = status.files.some((f) => f.state === 'written');
+  const orgs = status.organizations;
+  let state: ShellHookView['state'] = status.hook;
+  let line: string;
+  if (wanted && !active) { state = 'inactive'; line = t('On, but no start file holds the hook yet, so terminals do not follow organization folders.'); }
+  else if (status.hook === 'default_on') line = orgs.length === 1 ? t('On: new terminals in {organization}\'s folders work in its context.', { organization: orgs[0] }) : t('On: new terminals in organization folders work in their context.');
+  else if (status.hook === 'on') line = t('On: new terminals in organization folders work in their context.');
+  else if (status.hook === 'off') line = t('Off: new terminals keep your own settings.');
+  else line = t('Off: no group belongs to an organization on this computer.');
+  const action = { label: wanted ? t('Turn off') : t('Turn on'), on: !wanted, disabled: !status.can_change };
+  const readd = wanted && status.can_change && status.files.some((f) => f.state === 'removed_by_person');
+  const note = status.can_change ? null : t('Only the installed app changes terminal settings.');
+  const map = status.map === 'ok' || status.map === 'missing' ? null : status.map === 'unknown_version' ? t('The folder map was written by another version of Switchboard, so no folder applies until it writes it again.') : t('The folder map could not be read, so no folder applies.');
+  return { state, line, files, action, readd, note, error: error ?? map, retry: false };
+}
+/** The notice after *Turn off* / *Turn on* (SCN-075 steps 2 and 3). */
+export function shellHookToggleNotice(on: boolean): string {
+  return on ? t('The terminal hook is on. New terminals in organization folders work in their context.') : t('The terminal hook is off. New terminals keep your own settings; terminals already open switch back at their next change of folder.');
+}
+/** The first-time notice (SCN-074 step 1): the same words the system notification carries. */
+export function shellHookNoticeText(notice: ShellHookNotice): { title: string; body: string } {
+  return {
+    title: t('Terminals now work in {organization}\'s context in its folders', { organization: notice.organization }),
+    body: t('New terminals opened in {group}\'s folders run claude and codex on {organization}\'s accounts and history. Turn this off under Groups.', { group: notice.group, organization: notice.organization }),
+  };
+}
+/** SCN-066: under *Codex in group folders*, while the terminal hook is on in an organization's folders. */
+export function codexHookLine(status: ShellHookStatus | null): string | null {
+  if (!status || !(status.hook === 'on' || status.hook === 'default_on') || !status.files.some((f) => f.state === 'written') || !status.organizations.length) return null;
+  return status.organizations.length === 1 ? t('In {organization}\'s folders, new terminals use its Codex accounts whether this is on or off.', { organization: status.organizations[0] }) : t('In organization folders, new terminals use their Codex accounts whether this is on or off.');
 }

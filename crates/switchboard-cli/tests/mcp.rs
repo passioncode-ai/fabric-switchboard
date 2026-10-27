@@ -213,9 +213,36 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_bindings",
             "switchboard_project_suggestion",
             "switchboard_project_sources",
-            "switchboard_openrouter_model"
+            "switchboard_openrouter_model",
+            "switchboard_shell_hook",
+            "switchboard_shell_hook_set"
         ]
     );
+    // SB-183 (node A-7): the terminal hook reads over MCP like `shell status`; setting it from
+    // another data folder is refused like `shell on|off --data-dir` and changes nothing.
+    let (error, hook) = agent.tool("switchboard_shell_hook", json!({"path": projects.path()}));
+    assert!(!error, "{hook}");
+    assert_eq!(hook["hook"], "default_off", "no organization here: {hook}");
+    assert_eq!(hook["choice"], "default");
+    assert_eq!(hook["files"], json!([]));
+    assert!(hook["terminal"]["hook_loaded"].is_boolean(), "{hook}");
+    let (error, refused) = agent.tool("switchboard_shell_hook_set", json!({"on": false}));
+    assert!(
+        error
+            && refused
+                .as_str()
+                .unwrap()
+                .contains("Only Switchboard's own data folder"),
+        "{refused}"
+    );
+    assert!(
+        !data.path().join("shell-hook").exists(),
+        "a refused set saves no choice"
+    );
+    let (error, refused) = agent.tool("switchboard_shell_hook_set", json!({}));
+    assert!(error, "on is required: {refused}");
+    let (error, refused) = agent.tool("switchboard_shell_hook", json!({"path": "relative"}));
+    assert!(error, "a relative folder is refused: {refused}");
     // SB-120: the agents overview reads; the default is Auto until the operator picks one.
     let (error, agents) = agent.tool("switchboard_agents", json!({}));
     assert!(!error, "{agents}");
@@ -293,6 +320,11 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         read_names.contains(&"switchboard_ceilings")
             && !read_names.contains(&"switchboard_ceiling_set")
             && !read_names.contains(&"switchboard_ceiling_answer")
+    );
+    assert!(
+        read_names.contains(&"switchboard_shell_hook")
+            && !read_names.contains(&"switchboard_shell_hook_set"),
+        "the terminal hook reads under --read-only and is never set there"
     );
     assert_eq!(
         reader.request(

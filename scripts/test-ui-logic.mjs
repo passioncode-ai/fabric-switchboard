@@ -902,4 +902,91 @@ check(() => {
   assert.match(main, /\$\{tourShown\(\) \? ' beside-tour' : ''\}/, 'the toast moves aside only beside a tour on screen');
   assert.doesNotMatch(main, /tourStep !== null \? ' beside-tour'/);
 });
+const i18nForShell = await load('../src/i18n.ts');
+// SB-183 (node A-7), the_shell_hook_section_reads_every_state: the Groups page's *Terminals in
+// organization folders* reads reading, failed, on by default with its organization, on, off, off
+// by default, installed but inactive, every start file's state (a link and ZDOTDIR with the line
+// to add), outside the installed app, a block the person took out, and the notices (SCN-074, SCN-075).
+check(() => {
+  const home = '/Users/ana';
+  const base = { choice: 'default', map: 'ok', files: [], organizations: ['Acme'], can_change: true, home };
+  const reading = logic.shellHookView(null);
+  assert.equal(reading.state, 'reading'); assert.equal(reading.action, null); assert.equal(reading.retry, false);
+  const failed = logic.shellHookView(null, 'Switchboard could not read its own state.');
+  assert.equal(failed.state, 'failed'); assert.equal(failed.retry, true);
+  assert.equal(failed.line, "The terminal hook's state could not be read.");
+  assert.equal(failed.error, 'Switchboard could not read its own state.');
+  const written = [{ shell: 'zsh', path: `${home}/.zshrc`, state: 'written' }, { shell: 'fish', path: `${home}/.config/fish/conf.d/fabric-switchboard.fish`, state: 'written' }];
+  const byDefault = logic.shellHookView({ ...base, hook: 'default_on', files: written });
+  assert.equal(byDefault.state, 'default_on');
+  assert.equal(byDefault.line, "On: new terminals in Acme's folders work in its context.");
+  assert.deepEqual(byDefault.files.map((f) => f.text), ['zsh: ~/.zshrc, added', 'fish: its own file, added']);
+  assert.deepEqual(byDefault.action, { label: 'Turn off', on: false, disabled: false });
+  assert.equal(byDefault.note, null); assert.equal(byDefault.readd, false); assert.equal(byDefault.error, null);
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'] }).line, 'On: new terminals in organization folders work in their context.');
+  const on = logic.shellHookView({ ...base, hook: 'on', choice: 'on', files: written });
+  assert.equal(on.state, 'on'); assert.equal(on.line, 'On: new terminals in organization folders work in their context.');
+  const off = logic.shellHookView({ ...base, hook: 'off', choice: 'off' });
+  assert.equal(off.state, 'off'); assert.equal(off.line, 'Off: new terminals keep your own settings.');
+  assert.deepEqual(off.action, { label: 'Turn on', on: true, disabled: false });
+  const none = logic.shellHookView({ ...base, hook: 'default_off', organizations: [] });
+  assert.equal(none.state, 'default_off'); assert.equal(none.line, 'Off: no group belongs to an organization on this computer.');
+  assert.equal(none.action.label, 'Turn on');
+  // Wanted, but no start file holds it: installed but inactive, with each file's reason.
+  const skipped = [
+    { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_symlink' },
+    { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_zdotdir_unknown' },
+    { shell: 'bash', path: `${home}/.bash_profile`, state: 'skipped_owner' },
+    { shell: 'bash', path: '/etc/bashrc', state: 'unreadable' },
+    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\profile.ps1', state: 'policy_blocked' },
+  ];
+  const inactive = logic.shellHookView({ ...base, hook: 'default_on', files: skipped });
+  assert.equal(inactive.state, 'inactive');
+  assert.equal(inactive.line, 'On, but no start file holds the hook yet, so terminals do not follow organization folders.');
+  assert.equal(inactive.action.label, 'Turn off', 'the person can still turn the choice off');
+  assert.deepEqual(inactive.files.map((f) => f.command), ['eval "$(switchboard shell init zsh)"', 'eval "$(switchboard shell init zsh)"', null, null, null]);
+  assert.ok(inactive.files.every((f) => f.problem));
+  assert.equal(inactive.files[0].text, '~/.zshrc is a link, so Switchboard did not change it. Add this line yourself:');
+  assert.match(inactive.files[1].text, /ZDOTDIR/);
+  assert.equal(inactive.files[2].text, '~/.bash_profile belongs to another user, so Switchboard did not change it.');
+  assert.equal(inactive.files[3].text, '/etc/bashrc could not be read, so Switchboard did not change it.', 'a path outside the home stays whole');
+  assert.match(inactive.files[4].text, /^PowerShell's execution policy stops profiles from loading/);
+  assert.equal(logic.shellHookView({ ...base, hook: 'on', files: [] }).state, 'inactive', 'on with no shell present');
+  assert.equal(logic.shellInitLine('fish'), 'switchboard shell init fish | source');
+  // A block the person took out: said, and the window can add it back.
+  const removed = logic.shellHookView({ ...base, hook: 'default_on', files: [written[0], { shell: 'bash', path: `${home}/.bash_profile`, state: 'removed_by_person' }] });
+  assert.equal(removed.state, 'default_on');
+  assert.equal(removed.files[1].text, 'You took the block out of ~/.bash_profile, so Switchboard does not add it back.');
+  assert.equal(removed.readd, true);
+  // Outside the installed app (a development build, serve): read, never changed.
+  const dev = logic.shellHookView({ ...base, hook: 'default_on', files: written, can_change: false });
+  assert.equal(dev.action.disabled, true); assert.equal(dev.readd, false);
+  assert.equal(dev.note, 'Only the installed app changes terminal settings.');
+  // The folder map from another version, or unreadable: said under the state.
+  assert.match(logic.shellHookView({ ...base, hook: 'default_on', files: written, map: 'unknown_version' }).error, /another version/);
+  assert.match(logic.shellHookView({ ...base, hook: 'default_on', files: written, map: 'unreadable' }).error, /could not be read/);
+  // A save that failed keeps the state and names the cause.
+  const saveFailed = logic.shellHookView({ ...base, hook: 'off', choice: 'off' }, "The terminal hook's choice could not be saved in Switchboard's data folder.");
+  assert.equal(saveFailed.state, 'off'); assert.match(saveFailed.error, /could not be saved/);
+  // The notices.
+  assert.equal(logic.shellHookToggleNotice(false), 'The terminal hook is off. New terminals keep your own settings; terminals already open switch back at their next change of folder.');
+  assert.equal(logic.shellHookToggleNotice(true), 'The terminal hook is on. New terminals in organization folders work in their context.');
+  assert.deepEqual(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }), {
+    title: "Terminals now work in Acme's context in its folders",
+    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.",
+  });
+  // SCN-066: the Codex section says what the hook does to Codex in an organization's folders.
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written }), "In Acme's folders, new terminals use its Codex accounts whether this is on or off.");
+  assert.equal(logic.codexHookLine({ ...base, hook: 'off', choice: 'off' }), null);
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: skipped }), null, 'inactive says nothing about Codex');
+  // Russian: every line has its entry, with the organization kept.
+  i18nForShell.setLocale('ru');
+  try {
+    const ru = logic.shellHookView({ ...base, hook: 'default_on', files: written });
+    assert.match(ru.line, /Acme/); assert.doesNotMatch(ru.line, /new terminals/);
+    assert.notEqual(ru.action.label, 'Turn off');
+    assert.doesNotMatch(logic.shellHookToggleNotice(false), /terminal hook/);
+    assert.match(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }).body, /Acme web/);
+  } finally { i18nForShell.setLocale('en'); }
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

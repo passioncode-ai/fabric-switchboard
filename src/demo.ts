@@ -3,7 +3,7 @@ import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover } from './types';
+import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -147,6 +147,29 @@ export function createDemoAdapter(): Adapter {
   };
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
   let codexOn = false;
+  // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
+  // off, default_off, inactive, zdotdir, removed, policy, dev, failed, notice); without it, on by
+  // default while the demo holds an organization's group. Synthetic paths only.
+  const shellParam = new URLSearchParams(location.search).get('shell');
+  const shellHome = '/Users/demo';
+  const zshrc: ShellHookFile = { shell: 'zsh', path: `${shellHome}/.zshrc`, state: 'written' };
+  const fishFile: ShellHookFile = { shell: 'fish', path: `${shellHome}/.config/fish/conf.d/fabric-switchboard.fish`, state: 'written' };
+  const shellStart: Record<string, ShellHookFile[]> = {
+    inactive: [{ ...zshrc, state: 'skipped_symlink' }, { shell: 'bash', path: `${shellHome}/.bash_profile`, state: 'skipped_owner' }],
+    zdotdir: [{ ...zshrc, state: 'skipped_zdotdir_unknown' }],
+    removed: [zshrc, { shell: 'bash', path: `${shellHome}/.bash_profile`, state: 'removed_by_person' }],
+    policy: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\profile.ps1', state: 'policy_blocked' }],
+  };
+  let shellChoice: 'on' | 'off' | 'default' = shellParam === 'on' ? 'on' : shellParam === 'off' ? 'off' : 'default';
+  let shellFiles: ShellHookFile[] = shellParam && shellStart[shellParam] ? shellStart[shellParam].map((f) => ({ ...f })) : shellParam === 'off' || shellParam === 'default_off' ? [] : [zshrc, fishFile].map((f) => ({ ...f }));
+  let shellNotice = shellParam === 'notice';
+  const shellOrganizations = () => shellParam === 'default_off' ? [] : shellParam ? ['Northwind'] : [...new Set((state.projects ?? []).map((p) => state.organizations?.find((o) => o.id === p.organization)?.name).filter((n): n is string => !!n))];
+  const shellStatus = (): ShellHookStatus => {
+    const organizations = shellOrganizations();
+    const hook = shellChoice === 'on' ? 'on' : shellChoice === 'off' ? 'off' : organizations.length ? 'default_on' : 'default_off';
+    const files = hook === 'default_off' && !shellParam ? [] : shellFiles;
+    return { hook, choice: shellChoice, map: 'ok', files: files.map((f) => ({ ...f })), organizations, can_change: shellParam !== 'dev', home: shellHome };
+  };
   let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
@@ -454,8 +477,21 @@ export function createDemoAdapter(): Adapter {
     async kimiRemove(id) { await pause(); kimi.accounts = kimi.accounts.filter((a) => a.account.id !== id); log('kimi_account', '', 'removed'); },
     async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
-    async shellHookNotice() { return null; },
-    async acknowledgeShellHookNotice() { await pause(); },
+    async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },
+    async acknowledgeShellHookNotice() { await pause(); shellNotice = false; },
+    async shellHookStatus() {
+      await pause();
+      if (shellParam === 'failed') throw new Error('Switchboard could not read its own state.');
+      return shellStatus();
+    },
+    async setShellHook(on) {
+      await pause();
+      if (shellParam === 'dev') throw new Error('Only the installed app changes terminal settings.');
+      shellChoice = on ? 'on' : 'off';
+      shellFiles = on ? (shellFiles.some((f) => f.state === 'written' || f.state === 'removed_by_person') ? shellFiles.map((f) => f.state === 'removed_by_person' ? { ...f, state: 'written' } : f) : [zshrc, fishFile].map((f) => ({ ...f }))) : shellFiles.filter((f) => f.state !== 'written' && f.state !== 'removed_by_person');
+      log('shell_hook', '', on ? 'on' : 'off');
+      return shellStatus();
+    },
     async updateStatus() { return { ...update }; },
     async setAutoUpdate(enabled) { await pause(); update.enabled = enabled; return { ...update }; },
     async restartToUpdate() { await pause(); throw new Error('No update is ready to install yet.'); },

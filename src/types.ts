@@ -143,6 +143,10 @@ export interface Adapter {
   shellHookNotice(): Promise<ShellHookNotice | null>;
   /** The window showed the notice: it is not given again. */
   acknowledgeShellHookNotice(): Promise<void>;
+  /** SB-183 (node A-7): the Groups page's *Terminals in organization folders* section. */
+  shellHookStatus(): Promise<ShellHookStatus>;
+  /** Turn off / Turn on: the same as `switchboard shell off|on`, refused outside the installed app. */
+  setShellHook(on: boolean): Promise<ShellHookStatus>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<AnalyticsStatus>;
   /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128).
@@ -180,6 +184,10 @@ export interface Chains { chains: Chain[]; effective: Chain | null; presets: Cha
 export interface LoginItem { available: boolean; enabled: boolean }
 /** The organization and its group whose presence put the terminal hook in place (SB-183). */
 export interface ShellHookNotice { organization: string; group: string }
+/** One start file the terminal hook changed or left alone, as `shell-hook.json` records it. */
+export interface ShellHookFile { shell: string; path: string; state: string }
+/** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
+export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; can_change: boolean; home: string | null }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */

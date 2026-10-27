@@ -84,6 +84,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_suggestion` | yes | add a waiting folder now or keep it out for good, only when the operator asks |
 | `switchboard_project_sources` | yes | a group's repository owners whose new repositories join it, by delta; only when the operator asks to change them |
 | `switchboard_openrouter_model` | yes | change the model agents start on, only when the operator asks |
+| `switchboard_shell_hook` | no | whether terminals follow organization folders, each start file Switchboard changed, and what a terminal gets in a folder |
+| `switchboard_shell_hook_set` | yes | turn the terminal hook on or off, only when the operator asks |
 
 Arguments, result fields and fixed error texts: read `references/tools.md` before the
 first write call, or when a result field is unclear.

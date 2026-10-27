@@ -1748,9 +1748,16 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   acknowledges it and is dropped when the hook is no longer wanted. The window reads it with the
   Tauri command `shell_hook_notice` (`Runtime::shell_hook_notice`: `{organization, group}` or
   null) and clears it with `acknowledge_shell_hook_notice`; the adapter's `shellHookNotice` and
-  `acknowledgeShellHookNotice`. The text and where it shows are node A-7's. Test:
+  `acknowledgeShellHookNotice`. Test:
   `lifecycle_tests::the_first_time_notice_waits_for_the_window_across_a_restart` (a second and a
-  third owner over the same folder: there until acknowledged, then never again).
+  third owner over the same folder: there until acknowledged, then never again). Where it shows
+  (node A-7): the app's folder watcher (`src-tauri/src/suggestions.rs` `watch`) reads it when the
+  folder counter moves and at least every 5 minutes, posts one system notification
+  (`shell_hook_text`, English or Russian as the menu) once per run while it waits, and emits
+  `shell-hook`; the window reads it when the list is first read, on that event and when it is
+  shown, shows the same words as a notice with *Open Groups* (`shellHookNoticeText` in
+  `src/ui-logic.ts`) and acknowledges it. A notice the window never showed is posted again at the
+  next start. Test: `suggestions::tests::the_shell_hook_notice_names_the_organization_and_the_way_out`.
 - **CLI.** `switchboard shell on` saves `on` and writes now (a block the person took out
   included); `switchboard shell off` saves `off` and takes every block out now; both answer
   `shell status`. The choice that cannot be saved answers “The terminal hook's choice could not be
@@ -1758,7 +1765,22 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   `shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only` (a temporary `HOME` with
   the app's own data folder in it; the hook names the installed CLI in `~/.local/bin`, not the
   development build running the test).
-  The MCP tool `switchboard_shell_hook` and the window's switch are node A-7.
+- **Window and MCP (node A-7).** `Runtime::shell_hook_status` answers what `shell status` reads
+  without the terminal's own fields (`terminal`, `here`, `folder`), plus `can_change` (this owner
+  holds the installed app's home, `enable_shell_hook`), `organizations` (the names of the
+  organizations a group is bound to, sorted) and `home` (to show start files as `~/...`).
+  `Runtime::set_shell_hook(on)` saves the choice and runs the installer at once, as
+  `shell on|off` does, then answers the status; an owner without the installed app's home refuses
+  with “Only the installed app changes terminal settings.” and changes nothing. Tauri
+  `shell_hook_status`, `set_shell_hook {on}`; the adapter's `shellHookStatus`, `setShellHook`;
+  the Groups page's *Terminals in organization folders* (`shellHookSection`, its view
+  `shellHookView`). MCP `switchboard_shell_hook {path?}` reads `shell status` for a folder (also
+  under `--read-only`); `switchboard_shell_hook_set {on}` is `shell on|off` (a write tool, absent
+  under `--read-only`; from another data folder refused like the CLI). Parity: `shell status` →
+  `switchboard_shell_hook`, `shell on|off` → `switchboard_shell_hook_set`. Tests:
+  `lifecycle_tests::the_windows_switch_turns_the_hook_off_and_on_through_the_owner`, MCP
+  `handshake_lists_tools_and_rejects_malformed_messages`, `mcp_parity`, ui-logic
+  `the_shell_hook_section_reads_every_state`.
 - **Uninstall** takes every block out first (section "Uninstall"). `remove_all` keeps a block it
   could not take out (a changed marker) in the record and names the file as a failure. Test:
   `remove_all_takes_every_block_out_whatever_the_choice` (a fish file the person added lines to
