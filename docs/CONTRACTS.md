@@ -1647,8 +1647,12 @@ read. New record fields `kind`, `attempt` and `mode` default for SB-114 files.
 `Operation::RecoveryHook` registers a session's own stop: the account is
 `LimitState::bound(session)`, else the ordinary Claude Code's. One live stop per session
 holds: a waiting stop moves to now with `attempt + 1`; a claimed one becomes `resumed` and
-a new stop follows; a stop within 1800 s of the session's last resumed stop is one attempt
-later. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
+a new stop follows; a stop within 1800 s of the session's last stop a host resumed (claimed,
+then resumed: it carries `mode`) is one attempt later. A stop the session's own `Stop` hook
+resumed while it waited (SB-204) has no `mode` and does not count, so a session that went on by
+itself and stopped again starts the backoff at 120 s (SB-209,
+`a_stop_the_session_resumed_by_itself_does_not_raise_the_next_attempt`); the file's format is
+unchanged. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
 
 ## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
 

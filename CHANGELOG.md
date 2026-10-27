@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- **A session that went on by itself is retried sooner.** A stop the session resumed on its own no longer counts as a failed restart: if it hits its limit again within 30 minutes, it is probed again after 2 minutes, not 5.
 - **Session hooks answer faster.** After each turn the hook now updates the launch record and settles a recovery stop at the same time, so it takes at most 1.5 s instead of 3 s; a stop on a limit is registered without waiting for the record. A slow launch in the log now says whether it was a launch or a continue.
 - **Launch records stay cheap as they pile up.** Linking a launch to the one it continues, handing it over and undoing a launch that never started no longer read every launch record kept for 90 days: each workflow keeps a small index and each launch names the records it took over, and the file work no longer runs on the threads that answer requests.
 - **A session started inside a launched session no longer takes over its record.** A `claude -p` that a launched session runs shares its launch id; its start is now listed under the launch as a nested session, and its turns and limit stop no longer count as the parent's. `/clear` in the parent still moves the record to the parent's new session.
