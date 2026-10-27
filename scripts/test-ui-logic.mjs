@@ -819,6 +819,14 @@ check(() => {
   assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: null }), 1000);
   assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: 'v-acme' }), null, 'linked again');
   assert.equal(logic.organizationReleasedAt(status, { id: 'o2', vesta_id: null }), null);
+  // SB-227: the minute's background pass reads the PassionCode.ai status again while Organizations
+  // is on screen (a local file read), so a mark a background read made shows without reopening it.
+  assert.deepEqual(logic.backgroundReads('orgs'), ['onboarding', 'passioncode']);
+  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding']);
+  assert.deepEqual(logic.backgroundReads('activity'), ['sessions']);
+  assert.deepEqual(logic.backgroundReads('agents'), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('tokens'), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('stats'), []);
   assert.equal(logic.organizationReleasedAt({ connected: false }, { id: 'o1' }), null, 'disconnected: no line');
   assert.equal(logic.organizationReleasedAt(null, { id: 'o1' }), null);
 });

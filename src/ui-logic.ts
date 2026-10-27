@@ -331,6 +331,19 @@ export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string
   if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
   return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
 }
+/** What the window's minute-by-minute background pass reads again besides the account list, by
+ * the page on screen: the organization checklist where its card is drawn (B-8; it lists sessions),
+ * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
+ * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
+ * mark a background read made shows without reopening the page). */
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode';
+export function backgroundReads(page: string): BackgroundRead[] {
+  if (page === 'orgs') return ['onboarding', 'passioncode'];
+  if (page === 'accounts') return ['onboarding'];
+  if (page === 'activity') return ['sessions'];
+  if (page === 'agents' || page === 'tokens') return ['ceilings'];
+  return [];
+}
 /** SB-160 (B-7, SCN-079): when the person stopped being in this organization on PassionCode.ai,
  * while it is not linked again; null otherwise (a disconnect is not leaving). */
 export function organizationReleasedAt(status: { connected: boolean; released?: { organization: string; at: number }[] } | null, organization: Pick<Organization, 'id' | 'vesta_id'>): number | null {

@@ -1497,6 +1497,60 @@ fn a_folder_in_groups_of_two_contexts_runs_in_the_personal_one() {
 }
 
 #[test]
+fn a_read_releases_only_an_organization_truly_absent_from_a_well_formed_list() {
+    // SB-227 (B-7): rows `apply_vesta` skips (a name over 80 characters, a row past the 32nd), a
+    // row with an id it cannot read, and a 200 with an empty list never unlink an organization;
+    // only a well-formed list that no longer names it does.
+    use switchboard_core::organizations::VestaOrganization;
+    let (_root, _vault, store) = setup();
+    let vesta = |id: &str, name: &str| VestaOrganization {
+        id: id.into(),
+        name: name.into(),
+        domains: Vec::new(),
+    };
+    let first: Vec<VestaOrganization> = (0..32)
+        .map(|i| vesta(&format!("v-{i:02}"), &format!("Org {i:02}")))
+        .collect();
+    assert_eq!(store.apply_vesta(&first).unwrap().added, 32);
+    let linked = |store: &switchboard_core::Store| {
+        store
+            .snapshot()
+            .unwrap()
+            .organizations
+            .iter()
+            .filter(|o| o.vesta_id.is_some())
+            .count()
+    };
+    assert_eq!(linked(&store), 32);
+    // v-00's name grew past 80 characters; one more organization came first, so v-31 is the
+    // 33rd row; and a row whose id cannot be read sits among them.
+    let mut read = vec![vesta("v-new", "New")];
+    read.extend(first.iter().cloned());
+    read[1].name = "N".repeat(81);
+    for odd in [vec![vesta("bad id", "Odd")], Vec::new()] {
+        let mut with = read.clone();
+        with.extend(odd);
+        let applied = store.apply_vesta(&with).unwrap();
+        assert_eq!(applied.released, 0, "{applied:?}");
+        assert_eq!(linked(&store), 32);
+    }
+    // A 200 with an empty list: no proof of leaving.
+    let applied = store.apply_vesta(&[]).unwrap();
+    assert_eq!(applied.released, 0);
+    assert_eq!(linked(&store), 32);
+    // A row with an id that cannot be read: not well formed, nothing released.
+    let applied = store
+        .apply_vesta(&[vesta("v-00", "Org 00"), vesta("bad id", "Odd")])
+        .unwrap();
+    assert_eq!(applied.released, 0);
+    // A well-formed list without v-05: only v-05 is released.
+    let rest: Vec<VestaOrganization> = first.iter().filter(|v| v.id != "v-05").cloned().collect();
+    let applied = store.apply_vesta(&rest).unwrap();
+    assert_eq!(applied.released, 1);
+    assert_eq!(linked(&store), 31);
+}
+
+#[test]
 fn organizations_from_passioncode_are_linked_kept_current_and_released() {
     // SB-159 (SCN-071): a typed organization of the same name or a shared domain is linked, not
     // duplicated; a new one is added; a rename and a new domain arrive; one the person left

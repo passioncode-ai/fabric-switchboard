@@ -638,8 +638,12 @@ mod tests {
         /// Refresh tokens already rotated; presenting one again revokes the grant, as Vesta does.
         rotated: Mutex<Vec<String>>,
         revoked: std::sync::atomic::AtomicBool,
-        /// The person left every organization on PassionCode.ai: the read lists none.
+        /// The person left Acme on PassionCode.ai: the read lists only another organization.
         left: std::sync::atomic::AtomicBool,
+        /// SB-227: the read answers 200 with an empty list.
+        empty: std::sync::atomic::AtomicBool,
+        /// SB-227: the read answers 500.
+        down: std::sync::atomic::AtomicBool,
     }
 
     async fn serve(server: Arc<Server>) -> String {
@@ -708,10 +712,24 @@ mod tests {
                 );
             }
             let name = s.name.lock().unwrap().clone();
-            if s.left.load(std::sync::atomic::Ordering::SeqCst) {
+            if s.down.load(std::sync::atomic::Ordering::SeqCst) {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "unavailable"})),
+                );
+            }
+            if s.empty.load(std::sync::atomic::Ordering::SeqCst) {
                 return (
                     axum::http::StatusCode::OK,
                     Json(json!({"organizations": []})),
+                );
+            }
+            if s.left.load(std::sync::atomic::Ordering::SeqCst) {
+                return (
+                    axum::http::StatusCode::OK,
+                    Json(json!({"organizations": [
+                        {"orgId": "v-other", "name": "Other", "domains": [], "role": "member", "current": false}
+                    ]})),
                 );
             }
             (
@@ -863,9 +881,13 @@ mod tests {
         assert_eq!(status(root.path()).unwrap()["released"], json!(released));
         // Nothing is removed: the organization stays, only its link goes.
         let snap = store.snapshot().unwrap();
-        assert_eq!(snap.organizations.len(), 1);
-        assert_eq!(snap.organizations[0].id, acme);
-        assert_eq!(snap.organizations[0].vesta_id, None);
+        assert_eq!(
+            snap.organizations.len(),
+            2,
+            "Acme, and Other the read lists"
+        );
+        let kept = snap.organization(&acme).unwrap();
+        assert_eq!(kept.vesta_id, None);
         // The file holds the id and the time, never the name.
         let file = std::fs::read_to_string(root.path().join(FILE)).unwrap();
         assert!(!file.contains("Acme"), "{file}");
@@ -898,9 +920,21 @@ mod tests {
             .left
             .store(false, std::sync::atomic::Ordering::SeqCst);
         let back = sync(root.path(), &store).await.unwrap();
-        assert!(back["released"].as_array().unwrap().is_empty(), "{back}");
+        // Acme's mark goes (Other, no longer listed, gets one of its own).
+        assert!(
+            !back["released"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["organization"] == acme.as_str()),
+            "{back}"
+        );
         assert_eq!(
-            store.snapshot().unwrap().organizations[0]
+            store
+                .snapshot()
+                .unwrap()
+                .organization(&acme)
+                .unwrap()
                 .vesta_id
                 .as_deref(),
             Some("v-acme")
@@ -911,6 +945,59 @@ mod tests {
         store.remove_organization(&acme).unwrap();
         let after = sync(root.path(), &store).await.unwrap();
         assert!(after["released"].as_array().unwrap().is_empty(), "{after}");
+    }
+
+    // SB-227: after a release, a read that cannot be made (500) or proves nothing (an empty list)
+    // keeps the mark and its first date, and never unlinks an organization still linked.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unreachable_or_empty_read_after_a_release_keeps_the_marks() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let server = Arc::new(Server::default());
+        *server.name.lock().unwrap() = "Acme".into();
+        let base = serve(server.clone()).await;
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        connect(
+            root.path(),
+            &store,
+            &base,
+            browser(server.clone(), base.clone(), "code=vapc_synthetic"),
+            cancel,
+        )
+        .await
+        .unwrap();
+        // Acme left: marked. Other, which the read lists, stays linked.
+        server.left.store(true, std::sync::atomic::Ordering::SeqCst);
+        let released = sync(root.path(), &store).await.unwrap()["released"].clone();
+        assert_eq!(released.as_array().unwrap().len(), 1, "{released}");
+        let other = |store: &Store| {
+            store
+                .snapshot()
+                .unwrap()
+                .organizations
+                .iter()
+                .find(|o| o.name == "Other")
+                .and_then(|o| o.vesta_id.clone())
+        };
+        assert_eq!(other(&store).as_deref(), Some("v-other"));
+        // The read fails: unreachable, the mark and Other's link stay.
+        server.down.store(true, std::sync::atomic::Ordering::SeqCst);
+        let read = sync(root.path(), &store).await.unwrap();
+        assert_eq!(read["state"], "unreachable", "{read}");
+        assert_eq!(read["released"], released);
+        assert_eq!(status(root.path()).unwrap()["released"], released);
+        assert_eq!(other(&store).as_deref(), Some("v-other"));
+        // A 200 with an empty list proves nothing: Other stays linked, nothing new is marked.
+        server
+            .down
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        server
+            .empty
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let read = sync(root.path(), &store).await.unwrap();
+        assert_eq!(read["state"], "ok", "{read}");
+        assert_eq!(read["released"], released);
+        assert_eq!(other(&store).as_deref(), Some("v-other"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
