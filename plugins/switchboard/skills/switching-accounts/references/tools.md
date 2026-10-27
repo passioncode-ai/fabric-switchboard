@@ -335,7 +335,8 @@ bound to an organization, `default_off`), `choice`, `map`, each start file in `f
 `state` (`written`, `removed_by_person`, `skipped_symlink`, `skipped_owner`,
 `skipped_zdotdir_unknown`, `unreadable`, `policy_blocked`: a PowerShell profile on Windows whose
 execution policy, `Restricted` or `AllSigned`, keeps it from loading; Switchboard never changes
-the policy), and in `here` the group, context and homes a terminal gets in
+the policy; `constrained_language`: PowerShell on Windows runs in Constrained Language Mode,
+where the hook cannot act), and in `here` the group, context and homes a terminal gets in
 `path` (default the agent's folder). Reads files only.
 
 ### `switchboard_shell_hook_set`: `on`

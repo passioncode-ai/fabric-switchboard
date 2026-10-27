@@ -1685,7 +1685,8 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   A-4), never by the lookup: a folder gets a row only when the group `Snapshot::project_for`
   chooses for it (`crates/switchboard-core/src/projects.rs:297`) is bound to an organization, and
   no row when that group is personal; `folder` is written in `canonicalize()` form.
-  `map::write` refuses two rows that name the same folder, compared component by component, with
+  `map::write` refuses two rows that name the same folder, compared component by component (on
+  Windows as the lookup compares them, below), with
   “Two rows of the terminal folder map name the same folder.” and writes nothing. Test:
   `shell::map::tests::the_map_holds_one_row_per_folder`.
 - **Lookup.** The longest row folder that holds the folder wins, compared whole component by
@@ -1698,7 +1699,16 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   or a control character. A folder with a `..` step is never matched (`/w/acme/../mine` is not
   inside `/w/acme`). Of two rows of the same length the earlier one wins, every time (a map with
   two rows for one folder, written by hand or by an older writer, answers its first); a row that
-  names its folder through a link holds no folder that resolves. Tests:
+  names its folder through a link holds no folder that resolves. On Windows folders compare as
+  Windows names them (`map::windows_key`, W2 2026-10-27): rows are written as `canonicalize`
+  answers (`\\?\C:\...`) and a terminal asks with `$PWD` (`C:\...`), so the verbatim prefix is
+  dropped (`\\?\UNC\host\share` is `\\host\share`), `/` reads as `\`, empty and `.` steps are
+  skipped and every part is compared without regard to case; a folder that is not absolute (no
+  drive and root, no share) or has a `..` step has no key and is never matched. This holds for a
+  folder that does not exist too, which `canonicalize` cannot resolve. Tests:
+  `shell::map::tests::a_windows_folder_compares_as_windows_names_it` (pure text, every platform),
+  `a_windows_terminal_folder_finds_its_verbatim_row` and
+  `shell::homes::tests::windows_rows_are_verbatim_and_a_plain_spelling_finds_them` (Windows),
   `shell::map::tests::a_link_out_of_a_group_folder_never_answers_its_homes`,
   `shell::map::tests::a_folder_with_a_parent_step_is_never_matched`,
   `shell::map::tests::a_row_stored_through_a_link_loses_to_the_resolved_folder`.
@@ -1891,7 +1901,8 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   "newline_added", "created", "at"}], "notice_pending"}`, `state` one of `written`,
   `removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
   `unreadable`, `policy_blocked` (a PowerShell profile whose execution policy keeps it from
-  running: not written, node A-8); `created` only when true,
+  running: not written, node A-8), `constrained_language` (PowerShell runs in Constrained
+  Language Mode on this computer: not written, SB-225); `created` only when true,
   `notice_pending` only while one waits; what `shell status` shows. Nothing ever written and
   nothing wanted: no record.
 - **The first-time notice.** The first run that writes a block while no choice is made saves
@@ -1947,10 +1958,14 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
 
 Code: `switchboard_runtime::shell::windows` (`profile_path`, `profile_paths`, `Policy`,
 `effective`, `profile_policy`, `group_policy`, `config_policy`, `Host`, `process_host`), the template
-`crates/switchboard-runtime/src/shell/hook.ps1`, `shell::install` (`Host::windows`, state
-`policy_blocked`), CLI `switchboard shell init pwsh`. Design:
+`crates/switchboard-runtime/src/shell/hook.ps1`, `shell::install` (`Host::windows`, states
+`policy_blocked` and `constrained_language`), `lockdown`, CLI `switchboard shell init pwsh`
+(`scripts::init_script`). Design:
 [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) row A-8; A-Q4 (the
-execution policy is never changed) and A-Q7 (no carried links on Windows) assumed.
+execution policy is never changed) assumed; A-Q7's carried links on Windows came with SB-226
+(section "The organizations' shell homes"). SB-225 (W2, 2026-10-27): base64 paths for `shell
+init`, the load-time question only in an interactive host, UTF-16LE profiles, Constrained
+Language Mode.
 
 - **Where.** `Microsoft.PowerShell_profile.ps1` (the console host's profile for the current user,
   which Windows Terminal and the PowerShell window load) in `<Documents>\WindowsPowerShell\`
@@ -1969,12 +1984,20 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   a script block (`& { $f = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'));
   if (Test-Path -LiteralPath $f) { . $f } }`). Everything else (markers, the person's removal, a
   link, another user's or unreadable file, the created-file rule, byte-for-byte removal) is A-3's
-  unchanged. Tests: `install::tests::a_powershell_profile_gets_the_block_and_gives_it_back_byte_identical`
+  unchanged. A profile may be UTF-16LE with its byte order mark (Windows PowerShell 5.1's `>` and
+  `Out-File` write it): it is read, written and given back in UTF-16LE, byte for byte. UTF-16
+  without the mark (valid UTF-8 full of NULs), a lone surrogate, an odd length or any NUL reads
+  `unreadable` and is never written; only PowerShell profiles are read as UTF-16, so a `.zshrc`
+  that starts with `FF FE` stays `unreadable`. Tests:
+  `install::tests::a_utf16_profile_is_written_in_its_own_encoding_and_given_back_byte_identical`, `install::tests::a_powershell_profile_gets_the_block_and_gives_it_back_byte_identical`
   (CRLF and no final break kept, the 7 profile created and deleted again),
   `a_powershell_block_the_person_removed_is_not_written_back` (and a linked profile skipped),
   `a_hook_path_that_is_not_ascii_keeps_the_powershell_block_ascii`.
 - **The script** `<data>/shell/hook.ps1`, written with a UTF-8 byte order mark (`shell init pwsh`
-  prints it without one, for `| Out-String | Invoke-Expression`). One script for 5.1 and 7: the
+  prints it without one, for `| Out-String | Invoke-Expression`, and with the CLI and data paths
+  as base64 of their UTF-8 decoded as it runs: Windows PowerShell 5.1 reads a command's output in
+  the console's code page, which would garble a path that is not ASCII; the printed script is
+  ASCII, `scripts::init_script`, `ps_base64`). One script for 5.1 and 7: the
   same transition as `core.sh` (the person's values kept in global variables, which no child
   process sees; a value the person changed is theirs; `SWITCHBOARD_SESSION` set: not loaded; a
   home inherited under `<data>\shell\` held, compared without regard to case), the same question
@@ -1982,8 +2005,14 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   `System.Diagnostics.Process` with no window, ten seconds for the CLI and two for its output,
   exit status 0, stderr read and dropped), the same answer rules (one line, four fields, homes
   `-` or rooted). Trigger: the `prompt` function is wrapped (5.1 has no location-changed event),
-  acting when `(Get-Location).Path` changed, once at load, and handing the person's prompt the
-  `$?` and `$LASTEXITCODE` it would have seen. A location that is not a file system folder
+  acting when `(Get-Location).Path` changed, and handing the person's prompt the `$?` and
+  `$LASTEXITCODE` it would have seen. At load it asks once, only in a shell a person types in
+  (SB-225): not when PowerShell was started with `-NonInteractive`, or with `-Command`, `-File`,
+  `-CommandWithArgs` or `-EncodedCommand` (any prefix PowerShell takes, after `-` or `/`) unless
+  `-NoExit` keeps it open; such a run asks at its first prompt, if any. `$global:
+  _switchboard_interactive`, set before the hook loads, decides it instead. In Constrained
+  Language Mode (`$ExecutionContext.SessionState.LanguageMode` is not `FullLanguage`) the hook
+  does nothing and sets no variable. A location that is not a file system folder
   (`HKLM:`) reads as `none`. Every function is `global:` and every error is caught, so the file
   works in any scope and never fails the profile. A prompt defined after the block replaces the
   wrapper. The CLI and data paths are single-quoted with every character PowerShell reads as a
@@ -1995,9 +2024,12 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   `windows::tests::the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global` (with
   PowerShell present, the written file also parses with no error through
   `[System.Management.Automation.Language.Parser]::ParseFile`),
-  `the_ps1_transition_matches_the_posix_one` (in a real `pwsh` against the POSIX tests' stub CLI;
-  run with PowerShell 7.6.9 on macOS on 2026-10-27, where it caught the empty-value restore;
-  skipped with the reason where PowerShell is not installed),
+  `the_ps1_transition_matches_the_posix_one` (under every PowerShell present: `pwsh` anywhere and,
+  on Windows, also Windows PowerShell 5.1's `powershell.exe`, against a stub CLI, a POSIX script or
+  on Windows a batch file; with scenarios for the non-interactive load, the argument rules and
+  `shell init`'s base64 read through a command's output; run with PowerShell 7.6.9 on macOS on
+  2026-10-27, where it caught the empty-value restore; skipped with the reason where no
+  PowerShell is installed),
   `install::tests::the_cli_a_hook_names_has_no_verbatim_prefix`,
   CLI `shell_init_pwsh_prints_the_powershell_hook_naming_this_cli`.
 - **The execution policy** is read, never changed, and no process is started for it: the scopes of
@@ -2023,12 +2055,22 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   `windows::tests::a_restricted_or_allsigned_policy_reads_as_policy_blocked`,
   `install::tests::a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked`,
   `a_policy_that_turns_blocked_keeps_what_off_gives_back`.
-- **Not covered.** Windows has no carried links (A-Q7): an organization's shell home there lacks
-  the person's `CLAUDE.md`, skills and hooks. The run lock (`flock` on the data folder) does not
+- **Constrained Language Mode** (SB-225), as PowerShell decides it for a script with no
+  signature: Windows Defender Application Control enforcing user-mode code integrity
+  (`WldpGetLockdownPolicy` for the PowerShell host answers `WLDP_LOCKDOWN_UMCIENFORCE_FLAG`; audit
+  alone does not count), or the machine's `__PSLockdownPolicy` (`HKLM\SYSTEM\CurrentControlSet\
+  Control\Session Manager\Environment`, decimal or `0x` hexadecimal) with its enforce bit 4
+  (`windows::lockdown`). Then no profile is written and each reads `constrained_language`
+  (window, MCP, `shell status`), with the same record rules as `policy_blocked`; the mode is never
+  changed. AppLocker's script rules are not read: there the hook's own check leaves it inert.
+  Tests: `windows::tests::constrained_language_mode_is_read_from_application_control_and_the_lockdown_variable`,
+  `install::tests::constrained_language_mode_writes_no_profile_and_says_so`.
+- **Not covered.** The run lock (`flock` on the data folder) does not
   exist on Windows. The Windows build is checked by `cargo xwin check --target
   x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli` (2026-10-27, exit 0); the
-  PowerShell hook has run in PowerShell 7.6.9 on macOS only: Windows PowerShell 5.1 and a Windows
-  host have not run any of this (SB-02).
+  PowerShell hook has run in PowerShell 7.6.9 on macOS only. The nightly's Windows runners run the
+  transition under Windows PowerShell 5.1 and PowerShell 7 and the Windows-only tests; a person's
+  Windows host has not run any of this (SB-02).
 
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 
@@ -2062,15 +2104,23 @@ managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026
   `worktrees_and_folders_the_person_keeps_get_their_own_rows`,
   `rows_are_written_in_canonical_form_for_folders_that_exist`.
 - **Claude shell home** `<data>/shell/claude-<pool>` (0700), for a pool with a row whose `claude`
-  is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`;
-  macOS and Linux, A-Q7), `.claude.json` with `hasCompletedOnboarding` and, when the person
+  is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`,
+  through `carry::link_into_shell_home`: symbolic links on macOS and Linux; on Windows, SB-226,
+  a folder as a directory junction and a file as a hard link on the same volume, neither needing
+  a privilege or an administrator; a junction is renewed when it leads elsewhere, a hard link
+  named in `<home>/.switchboard-links` when the person's file was replaced, and the homes'
+  fingerprint counts each carried file's time there so the next pass does it; a real file in the
+  home is never replaced, another volume carries nothing), `.claude.json` with `hasCompletedOnboarding` and, when the person
   registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
   file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
   without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
   placeholder is a fixed word, not a credential: the folder's `settings.local.json` carries the
   route and the folder's capability header and the proxy authenticates by the header. Test:
   `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
-  capability, no credential file and none of the person's secrets anywhere in the home).
+  capability, no credential file and none of the person's secrets anywhere in the home; on
+  Windows the file and folder read through the home), on Windows
+  `carry::windows_tests::a_shell_home_on_windows_carries_folders_as_junctions_and_files_as_hard_links`
+  and `a_junction_names_local_folders_only`.
 - **Codex shell home** `<data>/shell/codex-<pool>` (0700), for a pool with an enabled Codex
   account: an `AGENTS.md` link and `config.toml` (0600) with SB-143's marked provider blocks
   (`codex_route::with_provider`): `base_url = "http://<proxy>/codex/_auto/v1"`, the machine's auto
