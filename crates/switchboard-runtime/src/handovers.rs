@@ -55,6 +55,12 @@ pub struct Handover {
     /// was unreadable) is classified again when it is taken. Absent before 0.7.0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// SB-213: the OpenRouter key slot its script fetches (`agents key --machine | --pool`), the
+    /// one its first gate read; a console's take and the background's sweep gate that slot.
+    /// Absent before this build (the script fetches its folder's key) and for a start on no
+    /// OpenRouter key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<crate::spend::KeySlot>,
 }
 
 pub fn id_valid(id: &str) -> bool {
@@ -325,6 +331,7 @@ mod tests {
             created_at,
             paid: None,
             account: None,
+            key: None,
         }
     }
 

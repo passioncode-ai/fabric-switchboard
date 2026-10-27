@@ -856,6 +856,13 @@ enum AgentsCommand {
         /// key of its group wins over the machine's.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// With --service: exactly this group's own key, never the folder's or the machine's.
+        /// Session scripts name the key their spending check read this way.
+        #[arg(long, requires = "service", conflicts_with_all = ["dir", "machine"])]
+        pool: Option<String>,
+        /// With --service: exactly the machine's key, never a group's.
+        #[arg(long, requires = "service", conflicts_with = "dir")]
+        machine: bool,
     },
     /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
     /// change the default model, or remove it.
@@ -1547,14 +1554,27 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             AgentsCommand::Key {
                 service: Some(KeyService::Openrouter),
                 dir,
-            } => Operation::AgentKeyValue {
-                service: "openrouter".into(),
-                folder: match dir {
-                    Some(d) if d.is_absolute() => Some(d.clone()),
-                    Some(_) => return Err("--dir must be an absolute folder.".into()),
-                    None => std::env::current_dir().ok(),
-                },
-            },
+                pool,
+                machine,
+            } => {
+                use switchboard_runtime::spend::KeySlot;
+                // SB-213: a slot named is the key fetched, whatever group the folder is in now.
+                let slot = match (pool, machine) {
+                    (Some(pool), _) => Some(KeySlot::Group(pool.clone())),
+                    (None, true) => Some(KeySlot::Machine),
+                    (None, false) => None,
+                };
+                Operation::AgentKeyValue {
+                    service: "openrouter".into(),
+                    folder: match (dir, &slot) {
+                        (_, Some(_)) => None,
+                        (Some(d), None) if d.is_absolute() => Some(d.clone()),
+                        (Some(_), None) => return Err("--dir must be an absolute folder.".into()),
+                        (None, None) => std::env::current_dir().ok(),
+                    },
+                    slot,
+                }
+            }
             AgentsCommand::Openrouter { command } => match command {
                 OpenrouterCommand::Set { model, pool, .. } => Operation::AgentKeySet {
                     service: "openrouter".into(),

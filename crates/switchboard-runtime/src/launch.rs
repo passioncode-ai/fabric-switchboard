@@ -1818,6 +1818,9 @@ fn hermes_continuation_session(
             .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
         let context = key_context(store, &saved, &working_directory)?;
+        // SB-144, SB-213: the key of the project the agent starts in, by the slot its spend gate
+        // read, never by its folder when the script runs.
+        let (key_command, key_slot) = key_command(root, &saved)?;
         let (model, model_from) = match own_model {
             Some(m) if switchboard_core::agent_keys::model_valid(m) => (m.to_owned(), "hermes"),
             _ => (saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?, "key"),
@@ -1861,17 +1864,6 @@ fn hermes_continuation_session(
                 .map(|a| a.replace("{model}", &model)),
         );
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let key_command = [
-            "--data-dir".to_string(),
-            root.to_string_lossy().into_owned(),
-            "agents".into(),
-            "key".into(),
-            "--service".into(),
-            "openrouter".into(),
-            // SB-144: the key of the project the agent starts in (the command runs before `cd`).
-            "--dir".into(),
-            working_directory.to_string_lossy().into_owned(),
-        ];
         let content = script_with(
             &session,
             program,
@@ -1893,7 +1885,7 @@ fn hermes_continuation_session(
         crate::launches::record(root, &session, record, &launch_id)?;
         Ok((
             path.clone(),
-            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from, "script": path}),
+            json!({"launched": true, "agent": "hermes", "via": "openrouter", "model": model, "model_from": model_from, "script": path, "key_slot": key_slot}),
         ))
     }
 }
@@ -1987,6 +1979,9 @@ pub(crate) fn opencode_continuation_session(
             .agent_key_in("openrouter", Some(&working_directory))?
             .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
         let context = key_context(store, &saved, &working_directory)?;
+        // SB-144, SB-213: the key of the project the agent starts in, by the slot its spend gate
+        // read, never by its folder when the script runs.
+        let (key_command, key_slot) = key_command(root, &saved)?;
         let model = saved.model.ok_or(OPENROUTER_MODEL_NEEDED)?;
         if !switchboard_core::agent_keys::model_valid(&model) {
             return Err(switchboard_core::agent_keys::MODEL_INVALID.into());
@@ -2013,17 +2008,6 @@ pub(crate) fn opencode_continuation_session(
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         let model_arg = format!("openrouter/{model}");
         let args = ["--prompt", first.as_str(), "-m", model_arg.as_str()];
-        let key_command = [
-            "--data-dir".to_string(),
-            root.to_string_lossy().into_owned(),
-            "agents".into(),
-            "key".into(),
-            "--service".into(),
-            "openrouter".into(),
-            // SB-144: the key of the project the agent starts in (the command runs before `cd`).
-            "--dir".into(),
-            working_directory.to_string_lossy().into_owned(),
-        ];
         let content = script_with(
             &session,
             program,
@@ -2044,7 +2028,7 @@ pub(crate) fn opencode_continuation_session(
         crate::launches::record(root, &session, record, &launch_id)?;
         Ok((
             path.clone(),
-            json!({"launched": true, "agent": "opencode", "via": "openrouter", "model": model, "model_from": "key", "script": path}),
+            json!({"launched": true, "agent": "opencode", "via": "openrouter", "model": model, "model_from": "key", "script": path, "key_slot": key_slot}),
         ))
     }
 }
@@ -2140,6 +2124,42 @@ fn key_context(
         .snapshot()?
         .key_context(key.pool.as_deref(), Some(folder)))
 }
+/// SB-213: the arguments a session script fetches its OpenRouter key with, and the slot they
+/// name: `saved`, the key its folder resolves to now. The script runs later, outside the owner
+/// transaction, so it names the slot (`--pool <group>` or `--machine`) rather than its folder: a
+/// folder that joins another group meanwhile never makes it spend a key no gate read. Inside a
+/// gated start ([`crate::fallback::pinned`]) the slot is the one the gate read, or the start is
+/// refused.
+fn key_command(
+    root: &Path,
+    saved: &switchboard_core::agent_keys::AgentKey,
+) -> Result<(Vec<String>, crate::spend::KeySlot), String> {
+    let slot = match &saved.pool {
+        Some(pool) => crate::spend::KeySlot::Group(pool.clone()),
+        None => crate::spend::KeySlot::Machine,
+    };
+    if let Some(pin) = crate::fallback::pinned() {
+        if pin.key() != Some(&slot) {
+            return Err(crate::spend::STOP_FOLDER_MOVED.into());
+        }
+    }
+    let mut command = vec![
+        "--data-dir".to_string(),
+        root.to_string_lossy().into_owned(),
+        "agents".into(),
+        "key".into(),
+        "--service".into(),
+        "openrouter".into(),
+    ];
+    match &slot {
+        crate::spend::KeySlot::Machine => command.push("--machine".into()),
+        crate::spend::KeySlot::Group(pool) => {
+            command.push("--pool".into());
+            command.push(pool.clone());
+        }
+    }
+    Ok((command, slot))
+}
 fn openrouter_session(
     root: &Path,
     store: &Store,
@@ -2206,17 +2226,9 @@ fn openrouter_session(
         );
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let key_command = [
-        "--data-dir".to_string(),
-        root.to_string_lossy().into_owned(),
-        "agents".into(),
-        "key".into(),
-        "--service".into(),
-        "openrouter".into(),
-        // SB-144: the key of the project the agent starts in (the command runs before `cd`).
-        "--dir".into(),
-        working_directory.to_string_lossy().into_owned(),
-    ];
+    // SB-144, SB-213: the key of the project the agent starts in, by the slot its spend gate read,
+    // never by its folder when the script runs.
+    let (key_command, key_slot) = key_command(root, &saved)?;
     let content = script_with(
         &home,
         program,
@@ -2245,6 +2257,7 @@ fn openrouter_session(
             "via": "openrouter",
             "model": if takes_model { model } else { None },
             "model_choice": if takes_model { "launch" } else { "agent" },
+            "key_slot": key_slot,
         }),
     ))
 }
@@ -4048,8 +4061,12 @@ mod tests {
         assert!(text.contains("'-m' 'openrouter/xiaomi/mimo-v2.6-pro'"));
         assert!(text.contains("export OPENCODE_CONFIG_CONTENT="));
         assert!(
-            text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
-            "the key of the folder's project (SB-144)"
+            text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
+            "the key slot the gate read, the machine's here (SB-144, SB-213)"
+        );
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
         );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
@@ -4176,8 +4193,12 @@ mod tests {
             quote(base.join("agent-home").to_string_lossy().as_ref())
         )));
         assert!(
-            text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
-            "the key of the folder's project (SB-144)"
+            text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
+            "the key slot the gate read, the machine's here (SB-144, SB-213)"
+        );
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
         );
         let shell = text.lines().next().unwrap().trim_start_matches("#!");
         assert!(std::process::Command::new(shell)
@@ -4351,8 +4372,12 @@ mod tests {
                 "OPENROUTER_API_KEY=\"$('/opt/Switchboard Tools/switch'\\''board' '--data-dir' "
             ));
             assert!(
-                text.contains("'agents' 'key' '--service' 'openrouter' '--dir' "),
-                "the key of the folder's project (SB-144)"
+                text.contains("'agents' 'key' '--service' 'openrouter' '--machine'"),
+                "the key slot the gate read, the machine's here (SB-144, SB-213)"
+            );
+            assert!(
+                !text.contains("'--dir'"),
+                "never the folder's key at run time"
             );
             assert!(text.contains("export OPENROUTER_API_KEY\n"));
             assert!(text.contains(
@@ -4360,6 +4385,85 @@ mod tests {
             ));
             assert!(text.contains("unset ANTHROPIC_API_KEY"));
         }
+    }
+    /// SB-213, fix cycle 1, F1: the script names the key slot its start was gated on, so a folder
+    /// that leaves its group between the launch and the script's first line still runs on that
+    /// group's key: the key operation the script sends answers the slot, never the folder's key.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn an_openrouter_script_fetches_the_slot_its_gate_read_after_its_folder_moves() {
+        let f = fixture();
+        openrouter_key(&f, Some("moonshotai/kimi-k2"));
+        let other = f.temp.path().join("other");
+        fs::create_dir(&other).unwrap();
+        // As a launch resolves its folder.
+        let (project, other) = (
+            f.project.canonicalize().unwrap(),
+            other.canonicalize().unwrap(),
+        );
+        let beta = f
+            .store
+            .save_project(None, "Beta", &[project.clone(), other.clone()], &[])
+            .unwrap();
+        f.store
+            .set_agent_key_for(
+                "openrouter",
+                Some(&beta.pool),
+                "sk-or-v1-synthetic-beta-key",
+                Some("moonshotai/kimi-k2".into()),
+            )
+            .unwrap();
+        let (path, answer) = openrouter_launch(&f, "hermes", None).unwrap();
+        assert_eq!(answer["key_slot"], json!({ "group": beta.pool }));
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains(&format!(
+                "'agents' 'key' '--service' 'openrouter' '--pool' {}",
+                quote(&beta.pool)
+            )),
+            "the group's key by its slot"
+        );
+        assert!(
+            !text.contains("'--dir'"),
+            "never the folder's key at run time"
+        );
+        // After the launch the folder leaves Beta: by folder it would now get the machine's key.
+        f.store
+            .save_project(Some(&beta.pool), "Beta", &[other], &[])
+            .unwrap();
+        assert_eq!(
+            f.store
+                .agent_key_value_in("openrouter", Some(&project))
+                .unwrap(),
+            "sk-or-v1-synthetic-must-not-reach-disk"
+        );
+        // The operation the script's `agents key --service openrouter --pool <beta>` sends.
+        let operation: crate::Operation = serde_json::from_value(json!({
+            "operation": "agent_key_value",
+            "service": "openrouter",
+            "slot": { "group": beta.pool },
+        }))
+        .unwrap();
+        let fetched = crate::execute(f.store.clone(), &f.root, None, operation)
+            .await
+            .unwrap();
+        assert_eq!(fetched["key"], "sk-or-v1-synthetic-beta-key");
+        // A slot whose key is gone answers that no key is saved, never another key.
+        f.store
+            .remove_agent_key_for("openrouter", Some(&beta.pool))
+            .unwrap();
+        let operation: crate::Operation = serde_json::from_value(json!({
+            "operation": "agent_key_value",
+            "service": "openrouter",
+            "slot": { "group": beta.pool },
+        }))
+        .unwrap();
+        assert_eq!(
+            crate::execute(f.store.clone(), &f.root, None, operation)
+                .await
+                .unwrap_err(),
+            switchboard_core::agent_keys::NO_AGENT_KEY
+        );
     }
     /// SB-201: an agent launched on the OpenRouter key writes a session record, so Sessions
     /// lists it with its model and context; the context follows the key it runs on.

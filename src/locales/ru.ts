@@ -238,6 +238,7 @@ export const RU: Record<string, string> = {
   "This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.": "У этого ключа OpenRouter от его собственного лимита осталось меньше $0.50, поэтому платный агент на нём не запускается.",
   "A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.": "Потолок расходов достигнут, поэтому платный агент не запускается. Вопрос о потолке ждёт в окне Switchboard.",
   "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.": "Этот запуск подпадает под потолок расходов, а сколько потрачено, прочитать не удалось, поэтому платный агент не запускается.",
+  "This folder moved to another group while its spend was checked, so no paid agent starts. Start it again.": "Пока проверялись расходы, эта папка перешла в другую группу, поэтому платный агент не запускается. Запустите его ещё раз.",
   "Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.": "При удвоении потолок превысит $1,000, максимально допустимое значение. Вместо этого установите потолок не выше $1,000.",
   "No open question with that id: it was answered, or its ceiling changed or was removed.": "Открытого вопроса с таким идентификатором нет: на него уже ответили или его потолок изменился либо был удалён.",
   "At most 192 task ceilings. Clear one in the Switchboard window first.": "Можно задать не более 192 потолков для задач. Сначала снимите один из них в окне Switchboard.",

@@ -77,6 +77,11 @@ pub const STOP_KEY_EXHAUSTED: &str =
     "This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.";
 pub const STOP_CEILING_REACHED: &str = "A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.";
 pub const STOP_SPEND_UNKNOWN: &str = "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.";
+/// SB-213: a paid start whose folder moved to another group (and so to another key) after its
+/// gate read the key: a start by hand gated once more that saw it move again, a step of the
+/// automatic fallback, or a queued hand-over taken by a console or the background. It never
+/// starts on a key no gate read.
+pub const STOP_FOLDER_MOVED: &str = "This folder moved to another group while its spend was checked, so no paid agent starts. Start it again.";
 /// Raising or clearing a ceiling from the CLI or MCP (C-Q1): an agent may set a first ceiling or
 /// lower one, never loosen one.
 pub const RAISE_IN_WINDOW: &str = "Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.";
@@ -199,7 +204,10 @@ pub struct LastHandover {
 }
 
 /// Which saved OpenRouter key a paid step spends: the machine's, or a group's own (SB-144).
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Serialized as `"machine"` or `{"group": "<pool>"}`: a session script names it to fetch its key
+/// (`switchboard agents key --machine | --pool`) and a queued hand-over records it (SB-213).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum KeySlot {
     Machine,
     Group(String),
@@ -895,6 +903,26 @@ pub fn record_baseline(
             at: now,
         });
         Ok(true)
+    })
+}
+
+/// Drops the baseline [`record_baseline`] wrote for `workflow` on `key` at `at`, when the start it
+/// was written for never ran because its folder moved to another key (SB-213): kept, it would
+/// count the task on a key it never spent, and every later paid start of the task would read its
+/// spend as unknown. Only that exact record goes; a baseline an earlier start wrote stays. Safe
+/// because the gate that wrote it still holds the hand-over turn, so no other start of the task
+/// counted from it. Answers whether it was dropped.
+pub fn forget_baseline(
+    root: &Path,
+    workflow: &str,
+    key: &KeySlot,
+    at: i64,
+) -> Result<bool, String> {
+    change(root, None, at, |file| {
+        let before = file.baselines.len();
+        file.baselines
+            .retain(|b| !(b.workflow == workflow && b.key == key.name() && b.at == at));
+        Ok(file.baselines.len() != before)
     })
 }
 
