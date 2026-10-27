@@ -883,6 +883,7 @@ export const RU: Record<string, string> = {
   "Retry hold until {date}": "Повтор не раньше {date}",
   "Installing the update did not finish. Quit and reopen Switchboard to try again.": "Обновление не установилось до конца. Завершите Switchboard и откройте его снова, чтобы повторить.",
   "Check for updates": "Проверить обновления",
+  "Version {version} is ready. It starts on its own when Switchboard is idle in the background after {time} or opens again, or restart now.": "Версия {version} готова. Она включится сама, когда Switchboard будет простаивать в фоне после {time} или откроется снова. Можно и перезапустить сейчас.",
   "Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.": "Версия {version} готова. Она включится сама, когда Switchboard будет простаивать в фоне или откроется снова. Можно и перезапустить сейчас.",
   "This version needs a step by a person before it installs; its release notes say what to do. Switchboard keeps the current version.": "Эту версию нельзя установить автоматически: нужен ручной шаг, он описан в примечаниях к выпуску. Switchboard остаётся на текущей версии.",
   "Backups belong to the default data folder; this data folder has none.": "Резервные копии хранятся только для папки данных по умолчанию; у этой папки данных их нет.",

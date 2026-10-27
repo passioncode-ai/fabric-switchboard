@@ -73,6 +73,41 @@ class Manifest(unittest.TestCase):
             self.assertEqual(ua.manifest(TAG, release_folder(root), '# Changelog\n', now=NOW)['notes'], 'Fabric Switchboard 0.7.0.')
 
 
+class Urgent(unittest.TestCase):
+    """SB-207: a release can be marked urgent (SB-191) in latest.json, written before attestation."""
+
+    def test_an_unmarked_release_carries_no_urgent_key(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.assertNotIn('urgent', ua.manifest(TAG, release_folder(root), CHANGELOG, now=NOW))
+
+    def test_the_flag_marks_the_release_with_its_reason(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = release_folder(root)
+            document = ua.manifest(TAG, folder, CHANGELOG, now=NOW, urgent=' a credential leak fix ')
+            self.assertEqual(document['urgent'], 'a credential leak fix')
+            self.assertEqual(json.loads((folder / ua.MANIFEST).read_text())['urgent'], 'a credential leak fix')
+            self.assertEqual(ua.main(['manifest', '--tag', TAG, '--dir', str(folder), '--urgent', 'leak']), 0)
+            self.assertEqual(json.loads((folder / ua.MANIFEST).read_text())['urgent'], 'leak')
+
+    def test_a_changelog_line_marks_only_its_own_version(self):
+        marked = CHANGELOG.replace('- Automatic updates.', '- Automatic updates.\n- **Urgent:** fixes a lost managed session.')
+        with tempfile.TemporaryDirectory() as root:
+            self.assertEqual(ua.manifest(TAG, release_folder(root), marked, now=NOW)['urgent'], 'fixes a lost managed session.')
+        older = CHANGELOG.replace('- older', 'Urgent: an older release')
+        with tempfile.TemporaryDirectory() as root:
+            self.assertNotIn('urgent', ua.manifest(TAG, release_folder(root), older, now=NOW))
+
+    def test_a_mark_without_a_reason_writes_no_manifest(self):
+        # The app reads a blank reason as not urgent: the release would wait out the pause.
+        blank = CHANGELOG.replace('- Automatic updates.', '- Automatic updates.\nUrgent:')
+        for changelog, given in ((CHANGELOG, '  '), (blank, None)):
+            with tempfile.TemporaryDirectory() as root:
+                folder = release_folder(root)
+                with self.assertRaises(SystemExit):
+                    ua.manifest(TAG, folder, changelog, now=NOW, urgent=given)
+                self.assertFalse((folder / ua.MANIFEST).exists())
+
+
 class Platforms(unittest.TestCase):
     def test_a_missing_linux_package_writes_no_manifest(self):
         with tempfile.TemporaryDirectory() as root:

@@ -24,7 +24,8 @@
 # published. A published release is never rewritten: a fix is a new tag.
 #
 # Release:    merge the release PR (versions + a `## X.Y.Z` CHANGELOG section), then push an
-#             annotated vX.Y.Z tag on the merge commit.
+#             annotated vX.Y.Z tag on the merge commit. An `Urgent: <reason>` line in that
+#             section marks latest.json urgent (SB-207), before the publish job attests it.
 # Rehearsal:  push vX.Y.Z-rc.N (the push trigger ignores it), then
 #             gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false
 #             The signed set is kept as a workflow artifact for 14 days; no release is created.
