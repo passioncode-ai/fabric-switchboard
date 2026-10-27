@@ -1160,6 +1160,39 @@ check(() => {
 }
 // C-3 (SB-71): the fallback chains panel and its editor.
 {
+  // SB-229: the window's hand copies stay tied to the runtime: the takeover order is SWITCHABLE
+  // (agent_catalog.rs), and a chain's key is chain_view::scope_key's.
+  check(() => {
+    const catalog = readFileSync(new URL('../crates/switchboard-runtime/src/agent_catalog.rs', import.meta.url), 'utf8');
+    const switchable = /pub const SWITCHABLE: &\[&str\] = &\[([^\]]*)\]/.exec(catalog);
+    assert.ok(switchable, 'SWITCHABLE is declared in agent_catalog.rs');
+    assert.deepEqual(logic.TAKEOVER_ORDER, [...switchable[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+    const view = readFileSync(new URL('../crates/switchboard-runtime/src/chain_view.rs', import.meta.url), 'utf8');
+    for (const form of ['ChainScope::Machine => "machine".into()', 'ChainScope::Project { pool } => format!("project:{pool}")', 'ChainScope::Workflow { id } => format!("workflow:{id}")']) assert.ok(view.includes(form), form);
+    assert.equal(logic.chainScopeKey({ kind: 'machine' }), 'machine');
+    assert.equal(logic.chainScopeKey({ kind: 'project', pool: 'alpha' }), 'project:alpha');
+    assert.equal(logic.chainScopeKey({ kind: 'workflow', id: 'wf_0123456789abcdef' }), 'workflow:wf_0123456789abcdef');
+  });
+  // SB-229: a re-read is applied only when no action began after it was issued, and its
+  // failure is reported only then too; a success says so, so the caller clears its error.
+  {
+    const clock = new logic.MutationClock();
+    const later = () => { let settle; const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; }); return { promise, settle }; };
+    assert.deepEqual(await logic.clockedRead(clock, async () => 7), { state: 'applied', value: 7 });
+    const failed = await logic.clockedRead(clock, async () => { throw new Error('read failed'); });
+    assert.equal(failed.state, 'failed'); assert.equal(failed.error.message, 'read failed');
+    // An action began while the read was out: neither its value nor its failure is applied.
+    let pending = later(); let read = logic.clockedRead(clock, () => pending.promise); clock.begin(); clock.end(); pending.settle.resolve(1);
+    assert.deepEqual(await read, { state: 'stale' });
+    pending = later(); read = logic.clockedRead(clock, () => pending.promise); clock.begin(); pending.settle.reject(new Error('x'));
+    assert.deepEqual(await read, { state: 'stale' }, 'a failure during an action is not reported');
+    clock.end();
+    // Issued during an action: stale too.
+    clock.begin(); read = logic.clockedRead(clock, async () => 2); clock.end();
+    assert.deepEqual(await read, { state: 'stale' });
+    cases += 1;
+  }
+
   // Move up and Move down give the new order; a move past either end changes nothing.
   check(() => {
     assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 1, -1), ['codex', 'claude-code']);

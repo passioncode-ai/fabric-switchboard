@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
@@ -945,13 +945,17 @@ function availableAgentsPanel(view: AgentsOverview) {
 // C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
 let chainsView: Chains | null = null;
 let chainsError = '';
+/** SB-229: under the clock, so a read from before a Save never paints over the saved chain; a read
+ * that answers clears an earlier failure. */
 async function loadChains() {
-  try { chainsView = await adapter.chains(); chainsError = ''; } catch (error) { chainsError = safeError(error, 'read'); }
+  const read = await clockedRead(clock, () => adapter.chains());
+  if (read.state === 'applied') { chainsView = read.value; chainsError = ''; }
+  else if (read.state === 'failed') chainsError = safeError(read.error, 'read');
   backgroundRender();
 }
 const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;
 const chainAccountLabel = (id: string) => snapshot?.accounts.find((a) => a.id === id)?.label ?? kimi?.accounts.find((k) => k.account.id === id)?.account.label;
-const scopeKey = (scope: ChainScope) => scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
+const scopeKey = chainScopeKey;
 const chainFor = (key: string) => chainsView?.chains.find((c) => scopeKey(c.scope) === key) ?? null;
 const scopeLabel = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer') : scope.kind === 'project' ? projectOf(scope.pool)?.name ?? scope.pool : t('Task {id}', { id: shortWorkflow(scope.id) });
 /** The Groups card's line (SCN-081): the group's own chain, this computer's, or none. */
@@ -1000,7 +1004,7 @@ function chainRow(scope: ChainScope, primary: boolean) {
     info.append(steps);
   } else info.append(el('span', 'form-note', scope.kind === 'project' ? (chainFor('machine') ? t('Uses this computer\'s chain') : t('Uses this computer\'s chain, which is not set')) : t('Not set')));
   const actions = el('div', 'management-actions');
-  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(async () => { await adapter.setChain(scope, [], 'subscriptions-first'); chainsView = await adapter.chains(); }, t('This computer\'s chain is set.'), 'chain-edit-machine'), primary ? 'button primary' : 'button', 'chain-preset'));
+  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(() => adapter.setChain(scope, [], 'subscriptions-first'), t('This computer\'s chain is set.'), 'chain-edit-machine').then(loadChains), primary ? 'button primary' : 'button', 'chain-preset'));
   const editKey = `chain-edit-${anchor}`;
   if (chain || scope.kind === 'machine') actions.append(button(t('Edit…'), () => chainDialog(scope, chain?.executors ?? [], editKey), 'button', editKey));
   else actions.append(button(t('Set for this group…'), () => chainDialog(scope, [], editKey), 'button', editKey));
@@ -1082,7 +1086,8 @@ function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: s
     event.preventDefault();
     if (!steps.length) { context.error.textContent = t('Add an agent, or clear the chain instead.'); add.focus(); return; }
     const executors = steps.map((s) => ({ agent: s.agent, ...(s.account_id ? { account_id: s.account_id } : {}), ...(s.key ? { key: s.key } : {}) }));
-    void dialogSave(context, async () => { await adapter.setChain(scope, executors, null); chainsView = await adapter.chains(); }, chainSavedText(scope));
+    // SB-229: the save is the action; the chains are read again after it, and a failed re-read never fails the save.
+    void dialogSave(context, () => adapter.setChain(scope, executors, null), chainSavedText(scope)).then(loadChains);
   });
 }
 /** Focus goes back to the row's Edit… (this computer's for a task row, which goes when cleared). */
@@ -1092,7 +1097,7 @@ function clearChainDialog(scope: ChainScope, returnFocus: string) {
   const context = openDialog(question, consequence, returnFocus);
   const confirm = submit(t('Clear chain')); confirm.className = 'button danger'; context.actions.append(confirm);
   const cleared = scope.kind === 'machine' ? t('This computer\'s chain is cleared.') : scope.kind === 'project' ? t('The chain of {group} is cleared.', { group: scopeLabel(scope) }) : t('The chain of task {id} is cleared.', { id: shortWorkflow(scope.id) });
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setChain(scope, [], null); chainsView = await adapter.chains(); }, cleared); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setChain(scope, [], null), cleared).then(loadChains); });
   context.actions.querySelector('button')?.focus();
 }
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */

@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainStepView } from './types';
+import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
@@ -69,6 +69,14 @@ export class MutationClock {
   stamp(): number { return this.active > 0 ? -1 : this.generation; }
   /** True when no mutation began after the stamp and none is still running. */
   accepts(stamp: number): boolean { return stamp === this.generation && this.active === 0; }
+}
+/** SB-229: a background read under the clock: `applied` with its value, or `failed`, only when no
+ * user action began after it was issued; `stale` otherwise (its value or its failure may predate
+ * the action, so neither is shown). */
+export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<{ state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale' }> {
+  const stamp = clock.stamp();
+  try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale' }; }
+  catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale' }; }
 }
 
 export type RuleState = 'active' | 'paused' | 'expired';
@@ -736,8 +744,9 @@ export function ordinaryKimiNote(status: { signed_in: boolean; error: string | n
   return status.error ? t(status.error) : null;
 }
 
-/** SB-120: the order agents take over work in — the subscriptions-first preset (Claude Code,
- * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order. */
+/** SB-120: the order agents take over work in: the subscriptions-first preset (Claude Code,
+ * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order.
+ * The same list as `agent_catalog::SWITCHABLE`, tied by a check (SB-229). */
 export const TAKEOVER_ORDER = ['claude-code', 'codex', 'kimi-code', 'hermes', 'opencode'];
 const takeoverRank = (id: string) => { const i = TAKEOVER_ORDER.indexOf(id); return i < 0 ? TAKEOVER_ORDER.length : i; };
 export function sortAgents<T extends Pick<AgentRow, 'id'>>(agents: T[]): T[] {
@@ -753,6 +762,10 @@ export function defaultAgentChoices(agents: Pick<AgentRow, 'id' | 'name' | 'enab
     else if (agent.id === current) choices.push({ id: agent.id, label: agent.installed ? t('{agent} (disabled)', { agent: agent.name }) : t('{agent} (not installed)', { agent: agent.name }), on: true });
   }
   return choices;
+}
+/** C-3 (SB-71): the key a chain is filed under, `chain_view::scope_key`'s (tied by a check, SB-229). */
+export function chainScopeKey(scope: ChainScope): string {
+  return scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
 }
 /** C-3 (SB-71): a step moved one place up (`delta` -1) or down (+1); a move past either end
  * changes nothing. A new list: the one given stays as it was. */
