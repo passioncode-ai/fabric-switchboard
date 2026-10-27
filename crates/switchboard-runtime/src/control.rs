@@ -331,7 +331,14 @@ fn slow_request(kind: &'static str, took: Duration, lock_ms: Option<u64>) {
 }
 /// The operation's tag (`handovers`, `usage`, ...), never its arguments. The tags come from a
 /// request that parsed as an `Operation`, so they are the enum's own names: each is kept once.
+///
+/// A launch from outside the window arrives wrapped (`launched`, SB-212); its tag is the
+/// launch's own (`launch`, `continue`, ...), so a slow launch is told from a slow continue
+/// (SB-220).
 fn operation_kind(operation: &Operation) -> &'static str {
+    if let Operation::Launched { inner, .. } = operation {
+        return operation_kind(inner);
+    }
     static KINDS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
     let tag = serde_json::to_value(operation)
         .ok()
@@ -562,6 +569,18 @@ mod tests {
             operation_kind(&Operation::Handovers),
             operation_kind(&Operation::Handovers)
         ));
+        // SB-220: a launch from outside is named by what it launches.
+        let wrapped = crate::launched(
+            Operation::Continue {
+                workflow_id: "wf_0123456789abcdef".into(),
+                id: "acct".into(),
+                mode: "managed".into(),
+                working_directory: "/work".into(),
+                in_place: true,
+            },
+            crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+        );
+        assert_eq!(operation_kind(&wrapped), "continue");
     }
     use super::*;
     use crate::Owner;

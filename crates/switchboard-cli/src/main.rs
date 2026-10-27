@@ -2187,13 +2187,16 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     // session's stop, asks the owner only when the session has one, and prints `{}`: a Stop
     // hook's stdout is read by Claude Code as its decision.
     if hook["hook_event_name"].as_str() == Some("Stop") {
-        // SB-212: the launch record counts the turn.
-        launch_event(root, Some(&hook), launches::Event::Turn).await;
-        if let Some(session) = hook["session_id"].as_str() {
+        // SB-220: the launch record's turn and the recovery stop are asked side by side, each
+        // bounded like the start hook (SB-149), so the hook takes at most one deadline, not two.
+        let settle = async {
+            let Some(session) = hook["session_id"].as_str() else {
+                return;
+            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
-            // Bounded like the start hook (SB-149): a busy or absent owner never holds a turn.
+            // A busy or absent owner never holds a turn.
             if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
                 let _ = tokio::time::timeout(
                     SESSION_HOOK_DEADLINE,
@@ -2206,7 +2209,12 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
                 )
                 .await;
             }
-        }
+        };
+        // SB-212: the launch record counts the turn.
+        tokio::join!(
+            launch_event(root, Some(&hook), launches::Event::Turn),
+            settle
+        );
         return json!({});
     }
     let billing = match hook["error"].as_str() {
@@ -2214,20 +2222,27 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
         Some("billing_error") => true,
         _ => return json!({"registered": false, "reason": "not_a_limit"}),
     };
-    // SB-212: the launch record says where the session stopped.
-    launch_event(root, Some(&hook), launches::Event::Limit).await;
-    let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
-        return json!({"registered": false, "reason": "malformed_input"});
+    // SB-220: the stop's registration does not wait behind the record's update; both run side
+    // by side. SB-212: the launch record says where the session stopped.
+    let register = async {
+        let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
+            return json!({"registered": false, "reason": "malformed_input"});
+        };
+        let operation = Operation::RecoveryHook {
+            session: session.to_owned(),
+            directory: std::path::PathBuf::from(cwd),
+            billing,
+        };
+        match call(root, operation).await {
+            Ok(value) => value,
+            Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+        }
     };
-    let operation = Operation::RecoveryHook {
-        session: session.to_owned(),
-        directory: std::path::PathBuf::from(cwd),
-        billing,
-    };
-    match call(root, operation).await {
-        Ok(value) => value,
-        Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
-    }
+    let ((), answer) = tokio::join!(
+        launch_event(root, Some(&hook), launches::Event::Limit),
+        register
+    );
+    answer
 }
 /// One launch on one line (SB-212): its id, state and agent, who launched it, where and when.
 fn launch_line(l: &Value) -> String {
