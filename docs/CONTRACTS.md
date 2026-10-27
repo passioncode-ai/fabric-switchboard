@@ -886,6 +886,13 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   UUID v4), `launched_by` and `home_path` (the home relative to the data folder); `.session.json`
   gains `launch_id` and `launched_by`. A failed write of `.session.json` fails the launch as
   before; a failed write of the record is logged (`launch_record` `failed`) and never fails it.
+  A record and the home's `.session.json` hold no capability, so they are read as the other
+  records are (`read_private`), never by the strict read kept for `control.json` and
+  `proxy.json`: one whose access was widened (a copied data folder, a Windows file that inherited
+  its folder's access list) is narrowed again and stays in the history
+  (`launches::tests::a_record_whose_permissions_were_widened_stays_in_the_history`; in nightly
+  run 40564415348 of 2026-10-27 the strict read gave both Windows runners an empty history from
+  records planted with an inherited access list).
   The session's script exports `SWITCHBOARD_LAUNCH_ID=<launch_id>`; the variable is in the
   scrubbed list, so one inherited from a caller never reaches a session that has its own.
 - **`launched_by`**, every key present, null when unknown: `surface` (`window`, `cli`, `mcp`,

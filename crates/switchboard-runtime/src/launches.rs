@@ -282,7 +282,10 @@ fn read(root: &Path, id: &str) -> Option<Value> {
     if !valid_id(id) {
         return None;
     }
-    switchboard_core::private_fs::read_private_strict(&path(root, id), MAX_RECORD)
+    // Not `read_private_strict`, which is for capabilities: a record holds none, and a strict
+    // read drops one whose access list was widened (a copied folder, a Windows file that
+    // inherited its folder's list) from the history; this read narrows it again.
+    switchboard_core::private_fs::read_private(&path(root, id), MAX_RECORD)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
         .filter(Value::is_object)
@@ -501,7 +504,8 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     let id = record["launch_id"].as_str().map(str::to_owned);
     let home = home_of(root, &record);
     let current = home.as_ref().and_then(|home| {
-        switchboard_core::private_fs::read_private_strict(
+        // Read as the session list reads it (`launch::read_regular`), so the two never differ.
+        switchboard_core::private_fs::read_private(
             &home.join(crate::launch::SESSION_RECORD),
             MAX_RECORD,
         )
@@ -1004,5 +1008,40 @@ mod tests {
             r["home_path"] = planted.into();
             assert!(home_of(&root, &r).is_none(), "{planted}");
         }
+    }
+    /// A record or a home's `.session.json` whose permissions are not this user's alone (a data
+    /// folder copied or restored, a Windows file that inherited its folder's access list, as the
+    /// nightly's fixture did) is still history: neither holds a capability, so it is read as
+    /// every other record and narrowed again, never dropped (2026-10-27 nightly, Windows).
+    #[cfg(unix)]
+    #[test]
+    fn a_record_whose_permissions_were_widened_stays_in_the_history() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_temp, root, id) = fixture();
+        let home = root.join("runtimes").join("claude-default");
+        let widened = |p: &Path| fs::set_permissions(p, fs::Permissions::from_mode(0o644)).unwrap();
+        widened(&path(&root, &id));
+        widened(&home.join(crate::launch::SESSION_RECORD));
+        fs::write(home.join(".launch-pending"), b"").unwrap();
+        let transcript = Path::new("/synthetic/home/projects/x/0f3c.jsonl");
+        let answer = event(
+            &root,
+            &id,
+            Event::Start,
+            Some("0f3c"),
+            Some(transcript),
+            200,
+        );
+        assert_eq!(answer, json!({"recorded": true}));
+        let (listed, total) = history(&root);
+        assert_eq!(total, 1);
+        assert_eq!(listed[0]["launch_id"], id.as_str());
+        assert_eq!(listed[0]["provider_session_id"], "0f3c");
+        assert_eq!(
+            listed[0]["state"], "starting",
+            "the home still holds this launch, so its state is the home's"
+        );
+        let mode = fs::metadata(path(&root, &id)).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "narrowed again");
     }
 }
