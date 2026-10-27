@@ -843,9 +843,10 @@ mod tests {
         assert_eq!(rows[0].folder, s(&acme.canonicalize().unwrap()));
     }
 
-    /// Windows: `canonicalize()` answers `\\?\C:\...`; the reader resolves the folder it is
-    /// asked about the same way, so a plain `C:\...` spelling (what PowerShell's `$PWD` gives)
-    /// matches the row.
+    /// Windows: `canonicalize()` answers `\\?\C:\...`; the reader compares folders as Windows
+    /// names them, so a plain `C:\...` spelling (what PowerShell's `$PWD` gives) matches the row.
+    /// The Claude home is answered in the bound folder itself only, so the subfolder is asked
+    /// for the group's Codex home.
     #[cfg(windows)]
     #[test]
     fn windows_rows_are_verbatim_and_a_plain_spelling_finds_them() {
@@ -854,7 +855,10 @@ mod tests {
         let snapshot = Snapshot {
             organizations: vec![org(O1)],
             projects: vec![group("acme", &[&acme], Some(O1))],
-            accounts: vec![account("a", "acme", Provider::Claude)],
+            accounts: vec![
+                account("a", "acme", Provider::Claude),
+                account("c", "acme", Provider::Codex),
+            ],
             ..Snapshot::default()
         };
         sync(
@@ -875,9 +879,12 @@ mod tests {
         );
         std::fs::create_dir_all(acme.join("src")).unwrap();
         let plain = PathBuf::from(s(&acme).trim_start_matches(r"\\?\").to_owned());
-        assert_eq!(
-            map::answer(&w.root, &plain.join("src")).unwrap().pool,
-            "acme"
-        );
+        let here = map::answer(&w.root, &plain).unwrap();
+        assert_eq!(here.pool, "acme");
+        assert!(here.claude_home.is_some(), "the bound folder itself");
+        let below = map::answer(&w.root, &plain.join("src")).unwrap();
+        assert_eq!(below.pool, "acme");
+        assert_eq!(below.claude_home, None);
+        assert!(below.codex_home.is_some());
     }
 }
