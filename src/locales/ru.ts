@@ -1264,6 +1264,8 @@ export const RU: Record<string, string> = {
   "Connect PassionCode.ai…": "Подключить PassionCode.ai…",
   "Read now": "Прочитать сейчас",
   "Disconnect": "Отключить",
+  "{label}'s sign-in has ended. If {organization} removed your seat, ask its administrator; to keep using it, sign in again.": "Вход в аккаунт {label} больше не действует. Если ваше место в {organization} убрали, обратитесь к администратору организации; чтобы продолжить работу с аккаунтом, войдите снова.",
+  "None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.": "Ни в один аккаунт группы «{group}» не выполнен вход. Сессии в её папках получают отказ, пока вы не войдёте хотя бы в один.",
   "Its name and domains come from PassionCode.ai.": "Её название и домены приходят из PassionCode.ai.",
   "Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.": "Не подключён. Подключите, чтобы ваши организации из PassionCode.ai появились здесь с названиями и доменами и обновлялись сами.",
   "Sign in to PassionCode.ai again: the connection ended or was revoked.": "Войдите в PassionCode.ai снова: подключение закончилось или было отозвано.",

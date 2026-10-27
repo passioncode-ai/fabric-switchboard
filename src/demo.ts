@@ -95,6 +95,18 @@ export function createDemoAdapter(): Adapter {
     codex.usage!.used_percent = 100;
   }
   const signInRequired = new Set(['demo-claude-meadow']);
+  // SB-160 (B-6, B-7): `?org=ended` shows the seats of Northwind ended (account cards name it, its
+  // group's card says none is signed in).
+  if (new URLSearchParams(location.search).get('org') === 'ended') {
+    const northwind = { id: 'demo-org-northwind', name: 'Northwind', domains: ['northwind.test'], created_at: now() - 30 * 86_400 };
+    state.organizations = [northwind];
+    for (const [id, provider, email] of [['demo-claude-northwind', 'claude', 'dev@northwind.test'], ['demo-codex-northwind', 'codex', 'ops@northwind.test']] as const) {
+      state.accounts.unshift({ id, label: email, provider, kind: 'oauth', pool: 'northwind', enabled: true, created_at: now() - 86_400, identity: null, external_identity: { account_id: `synthetic-${id}`, organization_id: null, email }, usage: null });
+      signInRequired.add(id);
+    }
+    (state.projects ??= []).unshift({ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 20 * 86_400, organization: northwind.id });
+    passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now() - 40 * 86_400, read_at: now() - 3600, checked_at: now() - 3600, organizations: 0 };
+  }
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false };
   // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
