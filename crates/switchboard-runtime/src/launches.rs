@@ -300,8 +300,15 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
     };
     change(&mut record) && write(root, id, &record).is_ok()
 }
+#[cfg(test)]
+thread_local! {
+    /// How many full scans of the records this thread made (SB-219).
+    static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 /// Every record, by id. Only `<id>.json` regular files are read.
 fn all(root: &Path) -> BTreeMap<String, Value> {
+    #[cfg(test)]
+    SCANS.with(|n| n.set(n.get() + 1));
     let mut found = BTreeMap::new();
     let Ok(entries) = fs::read_dir(root.join(DIR)) else {
         return found;
@@ -316,6 +323,63 @@ fn all(root: &Path) -> BTreeMap<String, Value> {
         }
     }
     found
+}
+
+/// SB-219: the launches that continued each workflow, `launches/by-workflow/<workflow>.json` (a
+/// list of launch ids, oldest first, at most `WORKFLOW_INDEX_MAX`), so linking a continuation
+/// reads those records instead of every record. A workflow with no index (records from before
+/// it) is found by one full scan, which seeds its index.
+const BY_WORKFLOW: &str = "by-workflow";
+const WORKFLOW_INDEX_MAX: usize = 64;
+fn workflow_key(workflow: &str) -> Option<&str> {
+    ((1..=64).contains(&workflow.len())
+        && workflow
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-')))
+    .then_some(workflow)
+}
+fn index_path(root: &Path, workflow: &str) -> PathBuf {
+    root.join(DIR)
+        .join(BY_WORKFLOW)
+        .join(format!("{workflow}.json"))
+}
+fn indexed(root: &Path, workflow: &str) -> Option<Vec<String>> {
+    let bytes =
+        switchboard_core::private_fs::read_private(&index_path(root, workflow), MAX_RECORD).ok()?;
+    let ids: Vec<String> = serde_json::from_slice(&bytes).ok()?;
+    Some(ids.into_iter().filter(|id| valid_id(id)).collect())
+}
+fn index_write(root: &Path, workflow: &str, mut ids: Vec<String>) {
+    let mut seen = BTreeSet::new();
+    ids.reverse();
+    ids.retain(|id| seen.insert(id.clone()));
+    ids.truncate(WORKFLOW_INDEX_MAX);
+    ids.reverse();
+    let folder = root.join(DIR).join(BY_WORKFLOW);
+    if switchboard_core::private_fs::private_dir(&folder).is_ok() {
+        let _ = switchboard_core::private_fs::private_write(
+            &index_path(root, workflow),
+            json!(ids).to_string().as_bytes(),
+        );
+    }
+}
+/// The records a back-pointer names (`continued_from`, SB-219), or every record when the record
+/// has none (written before it).
+fn pointing_at(root: &Path, id: &str) -> Vec<(String, Value)> {
+    let from = read(root, id).and_then(|r| {
+        r["continued_from"].as_array().map(|ids| {
+            ids.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
+    });
+    match from {
+        Some(ids) => ids
+            .into_iter()
+            .filter_map(|other| read(root, &other).map(|r| (other, r)))
+            .collect(),
+        None => all(root).into_iter().collect(),
+    }
 }
 
 /// Writes a launch's `.session.json` in `dir` (its failure fails the launch, as before) and its
@@ -340,19 +404,24 @@ pub(crate) fn record(root: &Path, dir: &Path, mut record: Value, id: &str) -> Re
         .ok()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .into();
-    let _writing = writing();
-    if write(root, id, &record).is_err() {
-        crate::oplog::event(
-            "launch_record",
-            &[("result", crate::oplog::Field::Code("failed"))],
-        );
-        return Ok(());
-    }
-    link(root, id, &record, by.parent.as_deref());
+    // SB-219: file work under the records' lock, off the async workers.
+    crate::blocking::run(|| {
+        let _writing = writing();
+        if write(root, id, &record).is_err() {
+            crate::oplog::event(
+                "launch_record",
+                &[("result", crate::oplog::Field::Code("failed"))],
+            );
+            return;
+        }
+        link(root, id, &record, by.parent.as_deref());
+    });
     Ok(())
 }
 /// Where the work went: the parent a runner named, and the latest earlier launch that continued
-/// the same workflow, now continue as this launch, unless something already took them over.
+/// the same workflow, now continue as this launch, unless something already took them over. The
+/// launch names the records it took over in `continued_from` (SB-219), so undoing or moving the
+/// link reads those records only; the workflow's earlier launches come from its index.
 fn link(root: &Path, id: &str, record: &Value, parent: Option<&str>) {
     let continued = |r: &mut Value| {
         if !r["continued_as"].is_null() {
@@ -361,25 +430,57 @@ fn link(root: &Path, id: &str, record: &Value, parent: Option<&str>) {
         r["continued_as"] = json!({"kind": "launch", "id": id});
         true
     };
+    let mut from: Vec<String> = Vec::new();
     if let Some(parent) = parent.filter(|p| *p != id) {
-        update(root, parent, continued);
+        if update(root, parent, continued) {
+            from.push(parent.to_owned());
+        }
     }
-    let Some(workflow) = record["continues"].as_str() else {
-        return;
-    };
-    let previous = all(root)
-        .into_iter()
-        .filter(|(other, r)| {
-            other != id
-                && r["continues"].as_str() == Some(workflow)
-                && r["continued_as"].is_null()
-                && r["ended"] != NOT_STARTED
-        })
-        .max_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0))
-        .map(|(other, _)| other);
-    if let Some(previous) = previous {
-        update(root, &previous, continued);
+    if let Some(workflow) = record["continues"].as_str() {
+        let key = workflow_key(workflow);
+        let (candidates, ids): (Vec<(String, Value)>, Vec<String>) =
+            match key.and_then(|k| indexed(root, k)) {
+                Some(ids) => (
+                    ids.iter()
+                        .filter_map(|other| read(root, other).map(|r| (other.clone(), r)))
+                        .collect(),
+                    ids,
+                ),
+                None => {
+                    let mut same: Vec<(String, Value)> = all(root)
+                        .into_iter()
+                        .filter(|(_, r)| r["continues"].as_str() == Some(workflow))
+                        .collect();
+                    same.sort_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0));
+                    let ids = same.iter().map(|(k, _)| k.clone()).collect();
+                    (same, ids)
+                }
+            };
+        let previous = candidates
+            .into_iter()
+            .filter(|(other, r)| {
+                other != id
+                    && r["continues"].as_str() == Some(workflow)
+                    && r["continued_as"].is_null()
+                    && r["ended"] != NOT_STARTED
+            })
+            .max_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0))
+            .map(|(other, _)| other);
+        if let Some(previous) = previous {
+            if update(root, &previous, continued) {
+                from.push(previous);
+            }
+        }
+        if let Some(key) = key {
+            let mut ids = ids;
+            ids.push(id.to_owned());
+            index_write(root, key, ids);
+        }
     }
+    update(root, id, |r| {
+        r["continued_from"] = json!(from);
+        true
+    });
 }
 /// `ended` of a launch whose operation failed after its record was written.
 pub const NOT_STARTED: &str = "not_started";
@@ -389,21 +490,23 @@ fn not_started(root: &Path, id: &str, now: i64) {
     if !valid_id(id) {
         return;
     }
-    let _writing = writing();
-    update(root, id, |r| {
-        r["ended"] = NOT_STARTED.into();
-        r["ended_at"] = now.into();
-        true
-    });
-    for (other, r) in all(root) {
-        let to = &r["continued_as"];
-        if to["id"].as_str() == Some(id) || to["launch_id"].as_str() == Some(id) {
-            update(root, &other, |r| {
-                r["continued_as"] = Value::Null;
-                true
-            });
+    crate::blocking::run(|| {
+        let _writing = writing();
+        update(root, id, |r| {
+            r["ended"] = NOT_STARTED.into();
+            r["ended_at"] = now.into();
+            true
+        });
+        for (other, r) in pointing_at(root, id) {
+            let to = &r["continued_as"];
+            if to["id"].as_str() == Some(id) || to["launch_id"].as_str() == Some(id) {
+                update(root, &other, |r| {
+                    r["continued_as"] = Value::Null;
+                    true
+                });
+            }
         }
-    }
+    })
 }
 /// A hand-over left the launch `id` for a console (SB-108): the launch names it, and the launch
 /// it continues now says the work went through that hand-over.
@@ -411,20 +514,22 @@ pub(crate) fn link_handover(root: &Path, id: &str, handover: &str) {
     if !valid_id(id) {
         return;
     }
-    let _writing = writing();
-    update(root, id, |r| {
-        r["handover"] = handover.into();
-        true
-    });
-    let previous = all(root).into_iter().find(|(_, r)| {
-        r["continued_as"]["kind"] == "launch" && r["continued_as"]["id"].as_str() == Some(id)
-    });
-    if let Some((previous, _)) = previous {
-        update(root, &previous, |r| {
-            r["continued_as"] = json!({"kind": "handover", "id": handover, "launch_id": id});
+    crate::blocking::run(|| {
+        let _writing = writing();
+        update(root, id, |r| {
+            r["handover"] = handover.into();
             true
         });
-    }
+        let previous = pointing_at(root, id).into_iter().find(|(_, r)| {
+            r["continued_as"]["kind"] == "launch" && r["continued_as"]["id"].as_str() == Some(id)
+        });
+        if let Some((previous, _)) = previous {
+            update(root, &previous, |r| {
+                r["continued_as"] = json!({"kind": "handover", "id": handover, "launch_id": id});
+                true
+            });
+        }
+    })
 }
 
 /// What a session's own hook reports about its launch.
@@ -439,13 +544,40 @@ pub enum Event {
     Limit,
 }
 /// Records a hook's report on launch `id`; `recorded: false` when there is no such record or
-/// the report is malformed. Never an error: a hook must not fail its session.
+/// the report is malformed. Never an error: a hook must not fail its session. The owner calls
+/// `event_from`, which also takes the start's `source`.
+#[cfg(test)]
 pub(crate) fn event(
     root: &Path,
     id: &str,
     kind: Event,
     session: Option<&str>,
     transcript: Option<&Path>,
+    now: i64,
+) -> Value {
+    event_from(root, id, kind, session, transcript, None, now)
+}
+/// At most this many nested sessions a record names (SB-218).
+const MAX_NESTED: usize = 16;
+/// `SessionStart`'s `source` values that start a new session in the same process (Claude Code's
+/// `/clear`, a compaction, a resume): the launch's own session, under a new id.
+fn same_process(source: Option<&str>) -> bool {
+    matches!(source, Some("clear" | "compact" | "resume"))
+}
+/// `event` with the `SessionStart` hook's `source` (SB-218). A launched session's children
+/// inherit `SWITCHBOARD_LAUNCH_ID`, so a nested `claude -p` in the same home runs the same hooks
+/// on the same record. A start under a session id other than the one stored, unless its `source`
+/// says the launch's own process moved to a new session, is a nested session: it is named in
+/// `nested_sessions` (at most `MAX_NESTED`) and never replaces the parent's session or
+/// transcript, and a turn or limit of a session other than the stored one changes nothing
+/// (`{"recorded": false, "nested": true}`).
+pub(crate) fn event_from(
+    root: &Path,
+    id: &str,
+    kind: Event,
+    session: Option<&str>,
+    transcript: Option<&Path>,
+    source: Option<&str>,
     now: i64,
 ) -> Value {
     let session = session.filter(|s| valid_session(s));
@@ -459,30 +591,56 @@ pub(crate) fn event(
     if kind == Event::Start && session.is_none() && transcript.is_none() {
         return json!({"recorded": false});
     }
-    let _writing = writing();
-    let recorded = update(root, id, |r| {
-        match kind {
-            Event::Start => {
-                if let Some(session) = session {
-                    r["provider_session_id"] = session.into();
+    // SB-219: one small file under the records' lock, off the async workers.
+    crate::blocking::run(|| {
+        let _writing = writing();
+        let mut nested = false;
+        let recorded = update(root, id, |r| {
+            let other = |r: &Value| match (r["provider_session_id"].as_str(), session) {
+                (Some(stored), Some(session)) => stored != session,
+                _ => false,
+            };
+            if other(r) && !(kind == Event::Start && same_process(source)) {
+                nested = true;
+                if kind != Event::Start {
+                    return false;
                 }
-                if let Some(transcript) = transcript {
-                    r["transcript"] = transcript.to_string_lossy().into_owned().into();
+                let session = session.unwrap_or_default();
+                let list = r["nested_sessions"].as_array().cloned().unwrap_or_default();
+                if list.iter().any(|s| s == session) || list.len() >= MAX_NESTED {
+                    return false;
                 }
-                r["session_started_at"] = now.into();
+                let mut list = list;
+                list.push(session.into());
+                r["nested_sessions"] = list.into();
+                return true;
             }
-            Event::Turn => {
-                r["last_turn_at"] = now.into();
-                r["turns"] = (r["turns"].as_i64().unwrap_or(0) + 1).into();
+            match kind {
+                Event::Start => {
+                    if let Some(session) = session {
+                        r["provider_session_id"] = session.into();
+                    }
+                    if let Some(transcript) = transcript {
+                        r["transcript"] = transcript.to_string_lossy().into_owned().into();
+                    }
+                    r["session_started_at"] = now.into();
+                }
+                Event::Turn => {
+                    r["last_turn_at"] = now.into();
+                    r["turns"] = (r["turns"].as_i64().unwrap_or(0) + 1).into();
+                }
+                Event::Limit => {
+                    r["ended"] = "limit".into();
+                    r["ended_at"] = now.into();
+                }
             }
-            Event::Limit => {
-                r["ended"] = "limit".into();
-                r["ended_at"] = now.into();
-            }
+            true
+        });
+        if nested {
+            return json!({"recorded": recorded && kind == Event::Start, "nested": true});
         }
-        true
-    });
-    json!({"recorded": recorded})
+        json!({"recorded": recorded})
+    })
 }
 
 /// The home a record ran in, when it is one of Switchboard's own (never a path out of them).
@@ -698,6 +856,22 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
             .is_some_and(|age| age > keep);
         if meta.file_type().is_file() && old && fs::remove_file(entry.path()).is_ok() {
             removed += 1;
+        }
+    }
+    // SB-219: a workflow's index not written for as long goes too; it names no kept record.
+    if let Ok(entries) = fs::read_dir(root.join(DIR).join(BY_WORKFLOW)) {
+        for entry in entries.flatten() {
+            let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
+                meta.file_type().is_file()
+                    && meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| now.duration_since(t).ok())
+                        .is_some_and(|age| age > keep)
+            });
+            if old {
+                let _ = fs::remove_file(entry.path());
+            }
         }
     }
     removed
@@ -1043,5 +1217,112 @@ mod tests {
         );
         let mode = fs::metadata(path(&root, &id)).unwrap().permissions().mode();
         assert_eq!(mode & 0o077, 0, "narrowed again");
+    }
+
+    #[test]
+    fn a_nested_session_in_the_same_home_never_overwrites_its_parent() {
+        // SB-218: a `claude -p` the launched session runs inherits `SWITCHBOARD_LAUNCH_ID` and
+        // its hooks report on the parent's record.
+        let (_temp, root, id) = fixture();
+        let parent = Path::new("/synthetic/home/projects/x/parent.jsonl");
+        let child = Path::new("/synthetic/home/projects/x/child.jsonl");
+        event(&root, &id, Event::Start, Some("parent"), Some(parent), 200);
+        event(&root, &id, Event::Turn, Some("parent"), None, 210);
+        let answer = event(&root, &id, Event::Start, Some("child"), Some(child), 220);
+        assert_eq!(answer, json!({"recorded": true, "nested": true}));
+        let answer = event(&root, &id, Event::Turn, Some("child"), None, 230);
+        assert_eq!(answer, json!({"recorded": false, "nested": true}));
+        event(&root, &id, Event::Limit, Some("child"), None, 240);
+        let r = read_back(&root, &id);
+        assert_eq!(r["provider_session_id"], "parent");
+        assert_eq!(r["transcript"], parent.to_string_lossy().as_ref());
+        assert_eq!(
+            (r["turns"].clone(), r["last_turn_at"].clone()),
+            (json!(1), json!(210))
+        );
+        assert!(r["ended"].is_null(), "a child's limit is not the parent's");
+        assert_eq!(r["nested_sessions"], json!(["child"]));
+        // Named once.
+        event(&root, &id, Event::Start, Some("child"), Some(child), 250);
+        assert_eq!(read_back(&root, &id)["nested_sessions"], json!(["child"]));
+        // The parent's own `/clear` moves the record to its new session.
+        let cleared = Path::new("/synthetic/home/projects/x/cleared.jsonl");
+        let answer = event_from(
+            &root,
+            &id,
+            Event::Start,
+            Some("cleared"),
+            Some(cleared),
+            Some("clear"),
+            260,
+        );
+        assert_eq!(answer, json!({"recorded": true}));
+        event(&root, &id, Event::Turn, Some("cleared"), None, 270);
+        let r = read_back(&root, &id);
+        assert_eq!(r["provider_session_id"], "cleared");
+        assert_eq!(r["turns"], 2);
+    }
+
+    #[test]
+    fn linking_a_continuation_among_thousands_of_records_reads_no_full_scan() {
+        // SB-219: `link`, `link_handover` and `not_started` read every record under the records'
+        // lock. With the workflow's index and the back-pointer they read a handful.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        let home = root.join("runtimes").join("claude-default");
+        switchboard_core::private_fs::private_dir(&home).unwrap();
+        switchboard_core::private_fs::private_dir(&root.join(DIR)).unwrap();
+        let workflow = "wf_0123456789abcdef";
+        for n in 0..3_000 {
+            let continues = if n % 10 == 0 {
+                json!(workflow)
+            } else {
+                Value::Null
+            };
+            write(
+                &root,
+                &format!("old-{n:05}"),
+                &json!({"launch_id": format!("old-{n:05}"), "launched_at": n, "continues": continues}),
+            )
+            .unwrap();
+        }
+        let launch = |n: i64| {
+            let id = new_id();
+            record(
+                &root,
+                &home,
+                json!({"account_id": "a", "launched_at": 10_000 + n, "continues": workflow}),
+                &id,
+            )
+            .unwrap();
+            id
+        };
+        // The first launch of the workflow finds the records from before the index once.
+        let first = launch(1);
+        assert_eq!(
+            read_back(&root, "old-02990")["continued_as"]["id"],
+            first.as_str()
+        );
+        let scans = SCANS.with(|n| n.get());
+        let started = std::time::Instant::now();
+        let second = launch(2);
+        link_handover(&root, &second, "ho-0123456789ab");
+        not_started(&root, &second, 20_000);
+        let third = launch(3);
+        let took = started.elapsed();
+        assert_eq!(
+            SCANS.with(|n| n.get()),
+            scans,
+            "no full scan after the index exists"
+        );
+        assert!(took < std::time::Duration::from_secs(5), "took {took:?}");
+        // The links are what the scans gave: the second took the first over, was handed over,
+        // never started (so the first is free again), and the third took the first over.
+        assert_eq!(
+            read_back(&root, &first)["continued_as"]["id"],
+            third.as_str()
+        );
+        assert_eq!(read_back(&root, &second)["ended"], NOT_STARTED);
+        assert_eq!(read_back(&root, &third)["continued_from"], json!([first]));
     }
 }

@@ -1375,9 +1375,15 @@ fn end_session(home: &Path, marker: &Path, wait: Duration) -> Result<(), String>
         .and_then(|text| text.trim().parse::<libc::pid_t>().ok())
         .filter(|pid| *pid > 0)
         .ok_or(SIGN_IN_WOULD_NOT_END)?;
-    for signal in [libc::SIGHUP, libc::SIGTERM] {
+    for (n, signal) in [libc::SIGHUP, libc::SIGTERM].into_iter().enumerate() {
         // Checked before each signal: the pid must still be this home's script.
         if !runs_script_of(pid, home) {
+            // S2 (SB-221): after the hang-up the script may be gone already, its pid a zombie
+            // its parent has not reaped yet on a loaded machine (`ps` no longer shows the
+            // script); the session ended, so its home turns idle. Nothing is signalled again.
+            if n > 0 && idle_within(home, wait) {
+                return Ok(());
+            }
             return Err(SIGN_IN_WOULD_NOT_END.into());
         }
         signal_session(pid, signal);
@@ -3514,13 +3520,17 @@ mod tests {
         // The provider CLI waits for a code that never comes, as `claude auth login` does.
         let (login, exited) = terminal_session(root.path(), "sleep 60 & wait $!");
         assert_eq!(login_state(&login), "pending");
-        let started = std::time::Instant::now();
         cancel_login(&login).unwrap();
-        assert!(
-            started.elapsed() < END_WAIT,
-            "closing the window's signal ends it"
+        // S2 (SB-221): the hang-up, not the terminate after it, ended the session. Read from how
+        // the script exited, not from the wall clock: `cancel_login` asks `ps` and waits for the
+        // home to turn idle, and on a loaded machine that alone passed END_WAIT.
+        use std::os::unix::process::ExitStatusExt;
+        let status = exited.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGHUP),
+            "closing the window's signal ends it: {status:?}"
         );
-        exited.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(!login.home.exists());
     }
     #[cfg(unix)]

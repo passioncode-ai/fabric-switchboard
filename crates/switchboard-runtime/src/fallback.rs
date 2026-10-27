@@ -566,6 +566,7 @@ pub(crate) fn queue_handover(
         offered_until: answer["offeredUntil"].as_str().unwrap_or_default().into(),
         created_at: now,
         paid,
+        account: Some(account.to_owned()),
     };
     // SB-212: the launch the hand-over holds names it, and the launch it continues says the
     // work went through it.
@@ -1030,7 +1031,7 @@ where
 }
 
 /// How long the gate waits for one key's spend: OpenRouter's own read gives up at 10 s.
-const SPEND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+pub(crate) const SPEND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
 
 /// The spend gate for one step (SB-72, dossier C part D). Not paid (a subscription sign-in, Kimi
 /// Code): runs, nothing read. Paid: Hermes and OpenCode on the OpenRouter key a launch in `dir`
@@ -1087,6 +1088,52 @@ pub(crate) fn paid_kind(snapshot: &Snapshot, account_id: &str) -> Option<Paid> {
                 && matches!(a.provider, Provider::Claude | Provider::Codex)
         })
         .then_some(Paid::ApiKeyAccount)
+}
+
+/// What a queued hand-over spends when it is taken (SB-215): its record's `paid`; for a record
+/// without it (queued before 0.7.0, or while the snapshot was unreadable) what the start spends
+/// now. Hermes and OpenCode spend the OpenRouter key; a record naming its account is classified
+/// on `snapshot`; an older one by its agent and label. With no snapshot, or a Claude Code, Codex
+/// or unknown agent it cannot place, the start is taken as paid on an API-key account (the gate
+/// reads nothing for it, so a covering ceiling refuses it): fails closed, never as free.
+pub(crate) fn handover_paid(
+    snapshot: Option<&Snapshot>,
+    handover: &crate::handovers::Handover,
+) -> Option<Paid> {
+    if handover.paid.is_some() {
+        return handover.paid;
+    }
+    match handover.agent.as_str() {
+        "hermes" | "opencode" => return Some(Paid::OpenRouter),
+        "kimi-code" => return None,
+        _ => {}
+    }
+    let Some(snapshot) = snapshot else {
+        return Some(Paid::ApiKeyAccount);
+    };
+    if let Some(account) = &handover.account {
+        if snapshot.accounts.iter().any(|a| &a.id == account)
+            || snapshot.kimi_accounts.iter().any(|k| &k.id == account)
+        {
+            return paid_kind(snapshot, account);
+        }
+        return Some(Paid::ApiKeyAccount);
+    }
+    let matching: Vec<_> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| {
+            provider_agent(a.provider) == handover.agent && a.label == handover.account_label
+        })
+        .collect();
+    if matching.is_empty()
+        || matching
+            .iter()
+            .any(|a| a.kind == switchboard_core::AuthKind::ApiKey)
+    {
+        return Some(Paid::ApiKeyAccount);
+    }
+    None
 }
 
 /// The gate for one paid start, with or without a workflow (a launch by hand has none).
@@ -1225,6 +1272,20 @@ pub(crate) async fn gate_by_hand(
     dir: &std::path::Path,
     kind: Paid,
 ) -> Result<(), String> {
+    let budget_end = tokio::time::Instant::now() + GATE_BUDGET;
+    gate_within(store, root, workflow, dir, kind, budget_end).await
+}
+
+/// `gate_by_hand` inside a budget that ends at `budget_end` (SB-215: the background's sweep of
+/// queued hand-overs shares one budget across its gates).
+pub(crate) async fn gate_within(
+    store: &std::sync::Arc<switchboard_core::Store>,
+    root: &std::path::Path,
+    workflow: Option<&str>,
+    dir: &std::path::Path,
+    kind: Paid,
+    budget_end: tokio::time::Instant,
+) -> Result<(), String> {
     if gated() {
         return Ok(());
     }
@@ -1245,7 +1306,6 @@ pub(crate) async fn gate_by_hand(
         let store = store.clone();
         Box::pin(async move { crate::agent_keys::spend_read(&store, pool.as_deref()).await })
     };
-    let budget_end = tokio::time::Instant::now() + GATE_BUDGET;
     match paid_gate(
         root,
         &snapshot,
@@ -3604,6 +3664,7 @@ mod tests {
             offered_until: "2099-10-13T01:00:00Z".into(),
             created_at: crate::monitor::now(),
             paid: Some(Paid::OpenRouter),
+            account: None,
         };
         crate::handovers::record(root.path(), &handover).unwrap();
         let count = Arc::new(AtomicUsize::new(0));
@@ -3634,6 +3695,142 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(taken["handover"]["id"], handover.id);
+    }
+
+    #[tokio::test]
+    async fn a_paid_take_behind_a_hand_over_in_progress_answers_busy_and_keeps_it_waiting() {
+        // SB-215 (FD-71): a console's take of a paid hand-over waited for the turn as long as the
+        // automatic fallback held it; it now waits at most `TAKE_TURN_WAIT` (300 ms here: the
+        // lock is one per process and other tests wait for it meanwhile).
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), None).await;
+        crate::handovers::set_enabled(root.path(), true).unwrap();
+        let handover = crate::handovers::Handover {
+            id: crate::handovers::new_id(),
+            workflow: WF.into(),
+            agent: "hermes".into(),
+            account_label: "Hermes Agent".into(),
+            dir: dir.clone(),
+            script: root.path().join("hermes.command"),
+            offered_until: "2099-10-13T01:00:00Z".into(),
+            created_at: crate::monitor::now(),
+            paid: Some(Paid::OpenRouter),
+            account: None,
+        };
+        crate::handovers::record(root.path(), &handover).unwrap();
+        let turn = HAND_OVER.lock().await;
+        let started = std::time::Instant::now();
+        let busy = crate::TEST_TAKE_TURN_WAIT
+            .scope(
+                std::time::Duration::from_millis(300),
+                runtime.execute(Operation::HandoverTake {
+                    id: handover.id.clone(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        drop(turn);
+        assert_eq!(busy, crate::handovers::BUSY);
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
+        assert_eq!(crate::handovers::pending(root.path()), vec![handover]);
+    }
+
+    #[tokio::test]
+    async fn a_hand_over_queued_without_paid_is_gated_when_a_console_takes_it() {
+        // SB-215: a record from before 0.7.0 (no `paid`, no `account`) onto Hermes is gated
+        // as the start it is, not taken as free.
+        let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let dir = dir_of(&repo);
+        let runtime = paid_runtime(root.path(), Some(5.0)).await;
+        crate::handovers::set_enabled(root.path(), true).unwrap();
+        let handover = crate::handovers::Handover {
+            id: crate::handovers::new_id(),
+            workflow: WF.into(),
+            agent: "hermes".into(),
+            account_label: "Hermes Agent".into(),
+            dir: dir.clone(),
+            script: root.path().join("hermes.command"),
+            offered_until: "2099-10-13T01:00:00Z".into(),
+            created_at: crate::monitor::now(),
+            paid: None,
+            account: None,
+        };
+        crate::handovers::record(root.path(), &handover).unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let refused = TEST_READ
+            .scope(
+                test_read(spend(40.0, 30.0, 6.0), &count),
+                runtime.execute(Operation::HandoverTake {
+                    id: handover.id.clone(),
+                }),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::STOP_CEILING_REACHED);
+        assert_eq!(crate::handovers::pending(root.path()), vec![handover]);
+    }
+
+    #[test]
+    fn a_record_without_paid_is_classified_by_what_it_spends_now_and_fails_closed() {
+        // SB-215.
+        let mut snapshot = Snapshot::default();
+        let mut keyed = account("key", Provider::Claude, None);
+        keyed.kind = AuthKind::ApiKey;
+        keyed.label = "Work".into();
+        let mut signed = account("sub", Provider::Claude, None);
+        signed.label = "Home".into();
+        snapshot.accounts = vec![keyed, signed];
+        let record = |agent: &str, label: &str, account: Option<&str>| crate::handovers::Handover {
+            id: "ho-000000000001".into(),
+            workflow: WF.into(),
+            agent: agent.into(),
+            account_label: label.into(),
+            dir: "/work".into(),
+            script: "/data/x.command".into(),
+            offered_until: "2099-10-13T01:00:00Z".into(),
+            created_at: 1,
+            paid: None,
+            account: account.map(str::to_owned),
+        };
+        let paid = |h| handover_paid(Some(&snapshot), &h);
+        assert_eq!(
+            paid(record("hermes", "Hermes Agent", None)),
+            Some(Paid::OpenRouter)
+        );
+        assert_eq!(
+            paid(record("opencode", "OpenCode", None)),
+            Some(Paid::OpenRouter)
+        );
+        assert_eq!(paid(record("kimi-code", "Kimi", None)), None);
+        assert_eq!(
+            paid(record("claude-code", "Work", None)),
+            Some(Paid::ApiKeyAccount)
+        );
+        assert_eq!(paid(record("claude-code", "Home", None)), None);
+        assert_eq!(paid(record("claude-code", "Home", Some("sub"))), None);
+        assert_eq!(
+            paid(record("claude-code", "Home", Some("key"))),
+            Some(Paid::ApiKeyAccount)
+        );
+        // What it cannot place is paid: an unknown agent, a removed account, no snapshot.
+        assert_eq!(paid(record("unknown", "", None)), Some(Paid::ApiKeyAccount));
+        assert_eq!(
+            paid(record("claude-code", "Gone", None)),
+            Some(Paid::ApiKeyAccount)
+        );
+        assert_eq!(
+            paid(record("codex", "x", Some("gone"))),
+            Some(Paid::ApiKeyAccount)
+        );
+        assert_eq!(
+            handover_paid(None, &record("claude-code", "Home", Some("sub"))),
+            Some(Paid::ApiKeyAccount)
+        );
+        // A record that says what it spends is taken at its word.
+        let mut said = record("claude-code", "Home", Some("sub"));
+        said.paid = Some(Paid::OpenRouter);
+        assert_eq!(paid(said), Some(Paid::OpenRouter));
     }
 
     #[cfg(unix)]

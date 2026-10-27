@@ -209,6 +209,11 @@ pub enum Operation {
         provider_session_id: Option<String>,
         #[serde(default)]
         transcript: Option<PathBuf>,
+        /// SB-218: `SessionStart`'s `source` when the launch's own process moved to a new
+        /// session (`clear`, `compact`, `resume`); absent for a new session. Sent only then, so
+        /// an owner from before it decodes every other event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     /// SB-212: every launch record, newest first; with `launch_id`, that launch and its chain.
     Launches {
@@ -3253,6 +3258,26 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
 /// restart keeps the lock through the old owner's drain and frees it once the new owner runs,
 /// and Fabric Dashboards gives each read 10 s.
 pub const STORE_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+/// How long a console's take of a paid hand-over waits for the hand-over turn (SB-215, FD-71):
+/// the automatic fallback holds it across a whole hand-over, gate and launch. Past it the take
+/// answers `handovers::BUSY` and the hand-over keeps waiting.
+pub const TAKE_TURN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+tokio::task_local! {
+    /// A test's own `TAKE_TURN_WAIT`: `HAND_OVER` is one lock per process, so a test that holds
+    /// it must hold it briefly.
+    pub(crate) static TEST_TAKE_TURN_WAIT: std::time::Duration;
+}
+fn take_turn_wait() -> std::time::Duration {
+    // In tests a neighbour holds the lock across 10 s reads (SB-221), so a take that does not
+    // test the wait itself waits as long as the fallback's own tests do.
+    #[cfg(test)]
+    return TEST_TAKE_TURN_WAIT
+        .try_with(|w| *w)
+        .unwrap_or(std::time::Duration::from_secs(60));
+    #[cfg(not(test))]
+    TAKE_TURN_WAIT
+}
 /// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
 /// store's lock is held and no owner answers (an owner draining or starting, another offline
 /// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
@@ -3687,14 +3712,22 @@ async fn execute(
         Operation::HandoverTake { id } => {
             // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
             // with the hand-over turn, when a console takes it. Refused, it stays waiting: the
-            // window may double the ceiling meanwhile.
-            let paid = handovers::waiting(root, &id).and_then(|h| h.paid.map(|kind| (h, kind)));
+            // window may double the ceiling meanwhile. SB-215: a record without `paid` is
+            // classified as its start spends now, and the turn is waited for at most
+            // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
+            let paid = handovers::waiting(root, &id).and_then(|h| {
+                fallback::handover_paid(store.snapshot().ok().as_ref(), &h).map(|kind| (h, kind))
+            });
             let _turn = match &paid {
                 Some((waiting, kind)) => {
                     let turn = if fallback::gated() {
                         None
                     } else {
-                        Some(fallback::HAND_OVER.lock().await)
+                        Some(
+                            tokio::time::timeout(take_turn_wait(), fallback::HAND_OVER.lock())
+                                .await
+                                .map_err(|_| handovers::BUSY.to_string())?,
+                        )
                     };
                     fallback::gate_by_hand(
                         &store,
@@ -3875,12 +3908,11 @@ async fn execute(
         } => {
             // C-Q9: replacing a key whose spend a ceiling counts (a capped group's own, any key
             // under a machine ceiling, a task ceiling's baseline key) starts that count again.
-            let replaces = service == "openrouter"
-                && store
-                    .agent_key_for(&service, pool.as_deref())
-                    .ok()
-                    .flatten()
-                    .is_some();
+            // SB-223: whether the slot holds a key is read inside the spend write lock.
+            let replaces = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
             let saved = spend::guard_group_key(root, pool.as_deref(), replaces, by, || {
                 store.set_agent_key_for(&service, pool.as_deref(), &key, model)
             })?;
@@ -3905,12 +3937,10 @@ async fn execute(
             // C-Q9: removing a key whose spend a ceiling counts moves its paid steps to a key the
             // ceiling does not count, or out of a machine ceiling's sum. A key that is not saved
             // removes nothing and loosens nothing.
-            let exists = service == "openrouter"
-                && store
-                    .agent_key_for(&service, pool.as_deref())
-                    .ok()
-                    .flatten()
-                    .is_some();
+            let exists = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
             let removed = spend::guard_group_key(root, pool.as_deref(), exists, by, || {
                 store.remove_agent_key_for(&service, pool.as_deref())
             })?;
@@ -5072,12 +5102,14 @@ async fn execute(
             event,
             provider_session_id,
             transcript,
-        } => Ok(launches::event(
+            source,
+        } => Ok(launches::event_from(
             root,
             &launch_id,
             event,
             provider_session_id.as_deref(),
             transcript.as_deref(),
+            source.as_deref(),
             monitor::now(),
         )),
         Operation::Launches { launch_id } => {
@@ -9915,6 +9947,7 @@ mod launch_record_tests {
                 event: launches::Event::Turn,
                 provider_session_id: None,
                 transcript: None,
+                source: None,
             })
             .await
             .unwrap();

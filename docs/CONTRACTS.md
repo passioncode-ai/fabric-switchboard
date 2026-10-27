@@ -45,7 +45,7 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
-Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
+Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`; a launch from outside the window, which arrives wrapped as `launched`, is tagged by what it launches, `launch` or `continue`, SB-220), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
 Windows protection is an OS implementation behind the same Vault/Store contract; build success does not certify provider login or screen-reader behavior. macOS signing uses an existing Developer ID private key locally without export. Notary acceptance remains a separate receipt.
 
@@ -660,7 +660,24 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   waiting) and when the background opens it in Terminal (`handovers::sweep`: refused, it is taken
   without a start, log `handover outcome=spend_refused`)
   (`a_queued_paid_hand_over_is_gated_again_when_it_is_taken`,
-  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). A start by hand the gate
+  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). SB-215: what a
+  queued hand-over spends is its record's `paid`; a record without it (queued before 0.7.0, or
+  while the snapshot was unreadable) is classified when it is taken as the start it is now
+  (`fallback::handover_paid`: Hermes and OpenCode on the OpenRouter key, the record's `account`
+  on the current snapshot, an older record by its agent and label), and what cannot be placed (no
+  snapshot, an unknown agent, a removed account) is taken as paid on an API-key account, never
+  as free (`a_record_without_paid_is_classified_by_what_it_spends_now_and_fails_closed`,
+  `a_hand_over_queued_without_paid_is_gated_when_a_console_takes_it`). A console's take waits for
+  `HAND_OVER` at most `TAKE_TURN_WAIT` (10 s), then answers `handovers::BUSY` and the hand-over
+  keeps waiting (FD-71; `a_paid_take_behind_a_hand_over_in_progress_answers_busy_and_keeps_it_waiting`).
+  The background's sweep gives its gates one `GATE_BUDGET` (20 s) per pass and starts a gate only
+  while a whole 12 s read still fits, since a read cut short is unknown and would refuse the
+  hand-over for good; a due paid hand-over left over waits for the next pass (log `handover`
+  `outcome=gate_deferred` with `count`;
+  `handovers::tests::a_sweeps_gates_stay_inside_its_budget_and_the_rest_wait_for_the_next_pass`).
+  The counted-key refusal reads a saved key that could not be read as saved: with a ceiling
+  counting it, `AgentKeySet` and `AgentKeyRemove` from the CLI or MCP are refused rather than let
+  through (`spend::saved_or_unknown`, `a_key_read_that_failed_counts_as_a_saved_key`). A start by hand the gate
   skips is refused with the reason's sentence (`spend::refusal`: `STOP_KEY_EXHAUSTED`,
   `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`) before anything is offered or
   started; a paid continue writes the task's baseline like a hand-over. The fallback's own step
@@ -690,7 +707,14 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   is not saved removes nothing and is not refused
   (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`,
   `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`,
-  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Deleting a
+  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Whether the
+  slot holds a key is read inside that lock (SB-223), and the lock is the core's `SPEND_WRITE`,
+  which a backup's restore also holds while it puts a saved key or `spend.json` back: a first key
+  the window or a restore saves while a CLI replacement waits is one that replacement replaces,
+  so it is refused (`spend::tests::a_first_key_saved_while_a_cli_replacement_waits_is_one_it_replaces`,
+  `two_cli_saves_of_one_slot_at_once_save_one_first_key_and_refuse_the_other`,
+  `a_backups_key_is_put_back_under_the_spend_write_lock`); a group's key saved while the group is
+  deleted is refused or goes with it (`a_key_save_racing_the_groups_removal_leaves_no_key_without_its_group`). Deleting a
   group (`switchboard project delete`, `RemoveProject`) removes its own OpenRouter key with it, so
   the same rule holds there: from the CLI or MCP a group that holds its own key is refused with
   `KEY_COUNTED_BY_CEILING` while a machine ceiling is set or a task ceiling counts from that key,
@@ -925,7 +949,19 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   writes `last_turn_at` and adds one to `turns`; `StopFailure` on `rate_limit` or `billing_error`
   writes `ended: "limit"` and `ended_at`. Without the variable, or with an input that is not a
   JSON object, nothing is asked. The `Stop` hook makes at most two calls of 1.5 s each (the turn,
-  then a recovery stop the session has), so it takes up to 3 s, inside the plugin's 5 s timeout.
+  and a recovery stop the session has), side by side since SB-220, so it takes up to 1.5 s, well
+  inside the plugin's 5 s timeout; `StopFailure` registers its stop beside the record's update,
+  not after it.
+  **A nested session (SB-218).** A launched session's children inherit `SWITCHBOARD_LAUNCH_ID`,
+  so a `claude -p` it runs in the same home reports on its parent's record. A `SessionStart` under
+  a session id other than the one stored is a nested session unless its `source` is `clear`,
+  `compact` or `resume` (the launch's own process under a new session, which moves the record to
+  it): its id is added to `nested_sessions` (at most 16, each once) and the parent's
+  `provider_session_id` and `transcript` stay; a `Stop` or `StopFailure` of a session other than
+  the stored one changes nothing and answers `{"recorded": false, "nested": true}`
+  (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
+  sends `source` only for those three values; an owner from before it refuses the field, and the
+  hook sends the start once more without it, which that owner records as before.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
@@ -939,6 +975,15 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`a_launch_that_never_started_is_not_where_the_work_went`). A first session that continues no
   workflow and names no parent gets no `continued_as` from the fallback or a recovery: they hand
   over a workflow, and only a launch that continued that workflow is linked.
+  **Without reading every record (SB-219).** A launch names the records it took over in
+  `continued_from` (a list, empty when none), and each workflow keeps an index of the launches
+  that continued it, `launches/by-workflow/<workflow>.json` (0600, at most 64 ids, pruned with the
+  records after 90 days unwritten); a hand-over and a launch that never started read only the
+  records `continued_from` names, and a continuation only the workflow's indexed launches. A
+  record from before it has no `continued_from`, and a workflow with no index is found by one full
+  scan, which seeds the index. The records' file work runs in a blocking section, off the async
+  workers (`launches::tests::linking_a_continuation_among_thousands_of_records_reads_no_full_scan`,
+  3,000 records).
 - **The plain session list says it too.** `sessions()` (CLI `sessions`, MCP `switchboard_sessions` without `history`) copies `provider_session_id`, `transcript`, `session_started_at`, `last_turn_at`, `turns`, `ended`, `ended_at` and `continued_as` from the record of the launch a home's `.session.json` names (`launches::add_outcome`), so the card of a home's latest session says how it ended and where its work went (fabric-dashboards, board `62d78b7f`, 2026-10-26). A missing record leaves the row as before (`a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went`).
 - **Reading.** `Operation::Launches {}` lists every record newest first, at most 500, with `total`
   and each record's `state` now: its home's own (`starting`, `running`, `ended`, `unknown`) while
@@ -1386,7 +1431,10 @@ written by an earlier version still reads. Evidence:
   marks it `resumed` and logs `recovery_continued` with `settled`; with no owner running the
   CLI settles it under the store's lock. An unreadable file asks nothing. The input is read up
   to 8 MiB, since a Stop input carries the turn's whole last message. Its stdout is `{}`:
-  Claude Code reads a Stop hook's output as a decision. Evidence:
+  Claude Code reads a Stop hook's output as a decision. An input past 8 MiB cannot be parsed and
+  also answers `{}`, never `malformed_input` (SB-210; the turn is then not counted and a stop it
+  had stays waiting until a later turn settles it). Evidence:
+  `a_stop_input_past_the_hook_limit_answers_no_decision`,
   `a_session_that_goes_on_by_itself_settles_its_stop`,
   `the_stop_hook_after_a_turn_is_silent_and_never_fails`,
   `a_long_last_message_still_settles_the_stop_with_no_owner_running`,
@@ -1470,6 +1518,10 @@ and every read wait on is taken under it, never the other way round, and only fo
   `a_restore_waits_for_a_removal_or_a_save_and_never_overwrites_their_item`).
 - The order of the credential and the metadata is the one before H-2: the credential first, so
   a crash between them leaves metadata that names a credential that works.
+- These tests read "not held behind a Keychain call" as a snapshot wait under 80 % of the slow
+  vault's call, now one second: a snapshot held behind a call waits all of it (S2: the fixed
+  150 ms bound before failed at load average ~58, where a snapshot also waits for a core and
+  for a metadata write; `not_behind_keychain` in `crates/switchboard-core/tests/storage.rs`).
 - A quota check compares its credential under the metadata lock (`same_generation`). A write no
   longer holds that lock, so the store's vault wrapper marks each item while a write or a
   removal of it runs, and a check that finds its item marked is refused as `credential_changed`,
@@ -1579,7 +1631,13 @@ the monitor starts overflow in Terminal; recording refuses at 256 directory entr
 (including permanent `.taken` receipts). Individual records are at most 16 KiB.
 Exclusive private-file creation chooses one taker on every platform; the receipt remains
 after completion or a crash and prevents republication. A pending record with a receipt
-is not offered again. Expired/unparseable deadlines never launch.
+is not offered again. Expired/unparseable deadlines never launch. Since 0.7.0 a record
+carries `paid` and `account` (the account id it continues on), and a field this build does not
+know is ignored, not refused (SB-215,
+`handovers::tests::a_record_with_a_field_this_build_does_not_know_is_still_read`); builds before
+0.7.0 refuse unknown fields, and every record 0.7.0 queues carries `account`, so after a downgrade
+to 0.6.x every queued record reads as unparseable and is removed by the sweep, its offer lost (an older build cannot be
+fixed from here).
 `fabric-handovers` absent means off. Pending/taken records and recovery state are
 operational state, excluded from account backups and removed by uninstall. A queue
 record never contains a prompt or credential. Evidence: `handovers::tests`,
@@ -1603,8 +1661,12 @@ read. New record fields `kind`, `attempt` and `mode` default for SB-114 files.
 `Operation::RecoveryHook` registers a session's own stop: the account is
 `LimitState::bound(session)`, else the ordinary Claude Code's. One live stop per session
 holds: a waiting stop moves to now with `attempt + 1`; a claimed one becomes `resumed` and
-a new stop follows; a stop within 1800 s of the session's last resumed stop is one attempt
-later. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
+a new stop follows; a stop within 1800 s of the session's last stop a host resumed (claimed,
+then resumed: it carries `mode`) is one attempt later. A stop the session's own `Stop` hook
+resumed while it waited (SB-204) has no `mode` and does not count, so a session that went on by
+itself and stopped again starts the backoff at 120 s (SB-209,
+`a_stop_the_session_resumed_by_itself_does_not_raise_the_next_attempt`); the file's format is
+unchanged. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
 
 ## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
 

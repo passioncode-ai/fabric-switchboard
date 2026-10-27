@@ -2327,8 +2327,17 @@ fn longest_snapshot_wait<T: Send + 'static>(
     }
     (longest, worker.join().unwrap())
 }
-/// A bound far under every Keychain delay the H-2 tests set, and far over a snapshot's own time.
-const SNAPSHOT_BOUND: std::time::Duration = std::time::Duration::from_millis(150);
+/// The Keychain delay of the SB-206 and H-2 slow vaults below. Before S2 the tests read a
+/// snapshot wait over a fixed 150 ms as "held behind a Keychain call", and failed at load average
+/// ~58: on a busy Mac a snapshot also waits for a core and for the metadata write (`publish`)
+/// it queues behind. A call of a whole second keeps the two apart.
+const KEYCHAIN_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+/// Whether a snapshot that waited `waited` was not held behind a Keychain call of `keychain`. One
+/// that was waits the whole call, less the 10 ms between snapshots; the bound, 80 % of the call,
+/// leaves the machine's load the rest.
+fn not_behind_keychain(waited: std::time::Duration, keychain: std::time::Duration) -> bool {
+    waited < keychain.mul_f64(0.8)
+}
 
 #[test]
 fn a_renewals_slow_credential_write_does_not_hold_the_metadata() {
@@ -2339,7 +2348,7 @@ fn a_renewals_slow_credential_write_does_not_hold_the_metadata() {
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
         delay: std::time::Duration::ZERO,
-        put_delay: std::time::Duration::from_millis(800),
+        put_delay: KEYCHAIN_DELAY,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     let id = store
@@ -2364,7 +2373,7 @@ fn a_renewals_slow_credential_write_does_not_hold_the_metadata() {
         Some("next")
     );
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind a renewal's credential write"
     );
 }
@@ -2376,8 +2385,8 @@ fn saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata(
     let root = tempfile::tempdir().unwrap();
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
-        delay: std::time::Duration::from_millis(250),
-        put_delay: std::time::Duration::from_millis(250),
+        delay: KEYCHAIN_DELAY,
+        put_delay: KEYCHAIN_DELAY,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     for n in 0..2 {
@@ -2392,7 +2401,7 @@ fn saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata(
             )
             .unwrap();
     }
-    // Two token comparisons and one write: 750 ms of Keychain.
+    // Two token comparisons and one write: three Keychain calls.
     let saving = store.clone();
     let (waited, saved) = longest_snapshot_wait(&store, move || {
         saving.upsert(
@@ -2411,7 +2420,7 @@ fn saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata(
         "a-2".to_string()
     );
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind a save's Keychain calls"
     );
 }
@@ -2428,8 +2437,8 @@ fn renewing_rows_reads_and_writes_the_keychain_without_holding_the_metadata() {
     let root = tempfile::tempdir().unwrap();
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
-        delay: std::time::Duration::from_millis(200),
-        put_delay: std::time::Duration::from_millis(200),
+        delay: KEYCHAIN_DELAY,
+        put_delay: KEYCHAIN_DELAY,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     let rows: Vec<(String, Option<String>)> = ["default", "work"]
@@ -2462,7 +2471,7 @@ fn renewing_rows_reads_and_writes_the_keychain_without_holding_the_metadata() {
         );
     }
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind a renewal of rows"
     );
 }
@@ -2942,7 +2951,7 @@ fn a_removal_during_a_saves_held_write_neither_deadlocks_nor_stalls_a_snapshot()
     std::thread::sleep(std::time::Duration::from_millis(100));
     let waited = timed_snapshot(&store);
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, ANSWER),
         "a snapshot waited {waited:?} behind a removal waiting for a save"
     );
     vault.release();
@@ -3311,7 +3320,7 @@ fn saving_and_removing_agent_keys_never_holds_the_metadata() {
     let root = TempDir::new().unwrap();
     let vault = Arc::new(SlowAgentVault {
         inner: MemoryVault::default(),
-        delay: std::time::Duration::from_millis(300),
+        delay: KEYCHAIN_DELAY,
     });
     let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     let folder = TempDir::new().unwrap();
@@ -3332,7 +3341,7 @@ fn saving_and_removing_agent_keys_never_holds_the_metadata() {
         "sk-or-v1-second"
     );
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind an agent key's save"
     );
     let removing = store.clone();
@@ -3342,7 +3351,7 @@ fn saving_and_removing_agent_keys_never_holds_the_metadata() {
     assert_eq!(removed, Ok(true));
     assert!(vault.inner.get(&saved.id).is_err());
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind an agent key's removal"
     );
     let pool = group.pool.clone();
@@ -3355,7 +3364,7 @@ fn saving_and_removing_agent_keys_never_holds_the_metadata() {
     assert!(vault.inner.get(&pool_key.id).is_err());
     assert!(store.snapshot().unwrap().agent_keys.is_empty());
     assert!(
-        waited < SNAPSHOT_BOUND,
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
         "a snapshot waited {waited:?} behind a group's key deletions"
     );
 }
