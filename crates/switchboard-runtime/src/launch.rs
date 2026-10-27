@@ -4408,6 +4408,8 @@ mod tests {
         assert!(fs::read_to_string(path)
             .unwrap()
             .contains(&format!("export SWITCHBOARD_CONTEXT='org:{acme}'")));
+        #[cfg(windows)]
+        let _ = path;
     }
     fn goose_installed(_: &str) -> Option<PathBuf> {
         Some(PathBuf::from("/opt/Agent Tools/goose"))

@@ -1914,7 +1914,6 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
-    #[cfg(unix)]
     const WF: &str = "wf_0123456789abcdef";
 
     #[test]

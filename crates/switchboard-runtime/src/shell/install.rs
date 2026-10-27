@@ -463,6 +463,8 @@ fn find(text: &str) -> Found {
 struct Read {
     text: String,
     stamp: Option<(u64, Option<std::time::SystemTime>)>,
+    /// Read only where permission bits exist (unix).
+    #[cfg_attr(not(unix), allow(dead_code))]
     mode: Option<u32>,
 }
 /// Reads a start file the installer may change, or says why it may not.

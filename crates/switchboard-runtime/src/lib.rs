@@ -9088,6 +9088,7 @@ mod lifecycle_tests {
     /// home: off gives the start file back byte for byte and keeps it out, on writes it again;
     /// the section reads the organization by name. An owner that is not the installed app
     /// refuses and changes nothing.
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_windows_switch_turns_the_hook_off_and_on_through_the_owner() {
         let root = tempfile::tempdir().unwrap();

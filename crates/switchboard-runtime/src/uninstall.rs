@@ -630,6 +630,7 @@ mod tests {
         assert_eq!(done["data_folder_removed"], true);
     }
 
+    #[cfg(unix)]
     fn claude_snapshot(folder: &Path) -> switchboard_core::Snapshot {
         switchboard_core::Snapshot {
             projects: vec![switchboard_core::Project {
@@ -660,6 +661,7 @@ mod tests {
             ..Default::default()
         }
     }
+    #[cfg(unix)]
     fn bound_folder(temp: &tempfile::TempDir, root: &Path) -> PathBuf {
         let app = temp.path().join("app");
         std::fs::create_dir_all(app.join(".git/info")).unwrap();
@@ -667,6 +669,7 @@ mod tests {
         crate::bindings::sync(root, &claude_snapshot(&app), "127.0.0.1:4000", "session").unwrap();
         app
     }
+    #[cfg(unix)]
     fn no_places() -> Places {
         Places {
             bin: None,
