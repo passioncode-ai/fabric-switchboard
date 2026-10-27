@@ -28,3 +28,25 @@ iteration branch's copy stops at SB-211). New ids are left as `new-1`, `new-2`, 
 Board message for the lead (not a backlog row): Vesta's rollout note "plain `claude` or `codex` is not bound
 to a context" is Vesta's to update now that the hook ships on by default (dossier A section 5, dossier B
 section 7, B-9).
+
+## C-9: chains and ceilings
+
+### Existing rows
+
+| Row | Change | New state text |
+|---|---|---|
+| SB-71 | **State: done** at the 0.7.0 release | **done** in 0.7.0: core, CLI and MCP released in `v0.6.8` (state as before); the window's *Fallback chains* panel on Agents and the Groups card line (C-3, merged `de077ff`), readiness and the last hand-over in `Operation::Chains`, `switchboard chain list` and `switchboard_chain_get` (C-2, merged `1cd483b`), a group's chain found through the workflow's checkout (C-8, `1cd483b`); scenarios SCN-080 to SCN-082; CONTRACTS → Fallback chains. Follow-ups SB-229, SB-232 |
+| SB-72 | **Split** | **done** for its shipped part in 0.7.0: this computer's daily ceiling (every saved OpenRouter key added up per UTC day), a group's daily ceiling on its own key, a task ceiling counted since the task's first paid hand-over (C-Q2, labelled), the key's own limit read at every paid start with a $0.50 floor, the double-or-keep question answered in the window only (C-Q1, C-Q7, C-Q9), the gate on every paid start (C-Q8) with one budget (SB-214) and the key slot it read (SB-213): C-4 and C-2 (`1cd483b`), C-5 and C-6 (`dc734fd`), C-7 (`cc2c3e5`), S2 (`25d58d6`), S5 (`76d1a21`); CONTRACTS → Spending ceilings; SCN-083, SCN-084. **Moved out:** ceilings enforced at the provider through a key Switchboard issues per scope from the Observatory door (XA-01's first enforcement; the door lives only on the operator's estate, dossier C section 4) and grant-backed project ceilings read from the project's policy go to **SB-96** (grant check) and **SB-97** (metering through the proxy, which also replaces the task measure). Follow-ups SB-216, SB-217, SB-230, SB-233 |
+| SB-73 | **State** | the status part is **done** in 0.7.0: readiness of every chain step and the last hand-over with the steps it passed over, in the window (C-3), `switchboard chain list` and MCP `switchboard_chain_get` (C-2); the spend gate before each paid step (C-5). **Left (phase 2):** steps pinned to project paid keys (SB-96), a Hermes executor's own limit, Kimi Code on a paid key, live acceptance on a capped key |
+| SB-96 | **State** (add) | 2026-10-28: 0.7.0 ships Switchboard's own ceilings (SB-72's shipped part); keyed pins still skip as `agent_not_automatic_yet` until this row's grant check exists; the grant-backed per-project ceiling moved here from SB-72 |
+| SB-97 | **State** (add) | 2026-10-28: when metering lands it replaces 0.7.0's task measure (the key's `usage` since the first paid hand-over, which over-counts when agents share a key); provider-side keys per scope moved here from SB-72 |
+
+### New rows
+
+| id | P | Title | Source | State |
+|---|---|---|---|---|
+| new-5 | P3 | Analytics for chains and ceilings (decision C-Q6): `app_active` gains the counts `chains` and `ceilings` (counts only), with a group id and a workflow id planted in `events_carry_counts_and_the_installation_id_never_an_identity`; not built in 0.7.0 | [questions](questions.md) C-Q6; [ANALYTICS](../../ANALYTICS.md#chains-and-ceilings-070) | open |
+| new-6 | P2 | A group's managed sessions share one route, so they all stop on one account at once: six managed sessions of the PassionCode group stopped together (about 05:33 UTC 2026-10-26) while one account still held quota. Spread a group's sessions over its accounts | fabric-workspace report, recorded in the [canvas](canvas.md) wave 2 state | open |
+| new-7 | P3 | SB-204's second source: sessions started before the plugin's 0.6.83 update have no `Stop` hook, so their stops wait for the one-day horizon (7 stops seen 2026-10-26); settle a stop also on the session's first successful request through the proxy | [canvas](canvas.md) wave 2 state | open |
+| new-8 | P3 | The agent-settings unreadable sentence says "restore it from a backup", but a restore never writes over an existing setting: name the order (delete it first), as spend.json's sentence does (`spend::UNREADABLE`) | w2/context round 1, [canvas](canvas.md) | open |
+| new-9 | P3 | One session per agent home, and the `openrouter` pool sentinel in launch records: launches on the OpenRouter key write `pool: openrouter` in their record (`crates/switchboard-runtime/src/launch.rs:1879`, `:2022`, `:2245`); check whether a group id `openrouter` is refused and reserve it if not, and say what a second launch of the same agent home does | w2/context round 1, [canvas](canvas.md) | open |

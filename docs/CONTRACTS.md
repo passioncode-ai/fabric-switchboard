@@ -443,12 +443,183 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   OpenRouter key they spend, `key_scope`) and Claude Code or Codex on an API-key account (C-Q3);
   `spend` is null: a read never starts the workflow engine, a hand-over or a network call, and a
   key's spend is read only at a paid hand-over (C-5). `last_handover` is spend.json's record
-  (written by the hand-over gate after every hand-over, below; null until the first); `ceilings_unreadable: true` when spend.json cannot be read,
+  (written by the hand-over gate after every hand-over, [Spending ceilings](#spending-ceilings-sb-72-070); null until the first); `ceilings_unreadable: true` when spend.json cannot be read,
   the chains staying readable. Tauri commands `chains` and `set_chain {scope, executors, preset?}`
   (labels and codes only). Tests `chain_view::tests` and
   `owner_tests::the_chain_view_names_why_each_step_would_be_skipped`.
 - The automatic fallback (SB-73, below) walks the chain that applies; its spend gate checks the
-  spending ceilings below (SB-72) before every paid step.
+  [spending ceilings](#spending-ceilings-sb-72-070) before every paid step. Where ceilings are
+  stored, who may set them and how the gate decides: that section.
+
+## Automatic fallback, phase 1 (SB-73, 2026-10-06)
+
+Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: automatic). Code:
+`crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
+`continuation::{list_open, checkouts}`, called by the monitor after rotation.
+
+- **Trigger:** a chain applies (SB-71: the workflow's, else its group's, else the machine's; none
+  set, nothing happens), and the executor of an open workflow without a
+  waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
+  executor's `accountRef`, only that account decides (one Switchboard does not hold decides
+  nothing). When it names none, the executor is taken to be the ordinary CLI of its provider, but
+  only while no session Switchboard launched for that provider is running
+  (`launch::launched_session_running`: an isolated home of one of its accounts or a managed home
+  that is not idle), since such a session could be the executor on a healthy account (2026-10-07).
+- **Cadence:** at most one `project-observatory full workflow list --status open --json` a minute,
+  only while a chain exists and some account is limited; a scan that finds nothing to hand over
+  (or cannot read the engine) waits 5 minutes (LC-08); at most 4 workflows a pass; a workflow
+  handed over or tried is left alone 15 minutes. Each engine read runs off the async workers
+  (`spawn_blocking`) with a 15-second deadline (a person's `switchboard continue` waits a minute);
+  at the deadline the engine's whole process group is killed (LC-02).
+- **Hand-over:** the chain in order; each step resolves to a usable account (enabled, not the
+  executor's, not limited, not needing a new sign-in, not another saved row of the executor's or
+  a limited account's login (SB-62 rows share one limit); a pinned one only if usable; else the
+  provider's least-used); the hand-over is `Operation::Continue` in `isolated` mode in the first of
+  the workflow's checkouts that exists here; every refusal of `switchboard continue` applies, and
+  the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
+  chain; a failed launch after an offer stops (the offer lapses).
+- **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
+  (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
+  no account and no key pin is tried when Hermes is installed, the key is saved and the
+  `switchboard` command exists (`launch::hermes_continuation_basics`, no process started), never
+  for a Hermes executor. At the hand-over those basics come first; only then is the model read:
+  `hermes config get model --json` within 5 s in its own process group, killed with everything it
+  started at the deadline (`hermes::run_within`; a Hermes that does not answer gives no model).
+  The model is the one the ordinary Hermes runs on OpenRouter (`hermes::openrouter_model`, from
+  `hermes config get model`; operator 2026-10-12: «у меня Гермес был на DeepSeek V4 Pro»), else the
+  key's default model; with neither, `hermes_continuation_preflight` refuses before the offer and
+  the chain moves on. The answer says which (`modelFrom`: `hermes` or `key`). Hermes runs in
+  `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a `config.yaml` Switchboard writes:
+  Observatory's MCP server, `auth.adopt_external_logins: false`), the handoff prompt in
+  `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600; the folder also holds the script and
+  a `.session.json`, so the hand-over is listed under Sessions as `hermes` labelled with its model;
+  folders of hand-overs that ended more than 7 days ago go at the next one,
+  `prune_hermes_sessions`; `config.yaml` values are written as YAML double-quoted scalars with
+  everything outside printable ASCII escaped) naming `owner agent:hermes` and a UUID
+  `sessionId` Switchboard made (Observatory wants a UUID and Hermes's own ids are not one, seen in
+  the rehearsal below: the session had to work both out), and Terminal running `hermes chat
+  --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
+  session with the prompt as its first turn; the key is read from `switchboard agents key --service
+  openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
+  ceiling, and since 0.7.0 the [spend gate](#spending-ceilings-sb-72-070) decides whether the step starts. Measured 2026-10-12 with Hermes 0.21.4: an empty
+  `HERMES_HOME` starts without the setup wizard, and the session lists
+  `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
+  **Rehearsed live 2026-10-12** (a 0.6.19 build on its own data folder, the real engine and
+  OpenRouter): workflow `wf_932609d34cf14593` with a Claude executor, offered after the engine's
+  two-minute silence (`handoff:9c1cc21b63c64cc2`); the Hermes session accepted it within about 30 s
+  (executor `hermes`), wrote its final checkpoint and closed the workflow: "Accepted by
+  agent:hermes running model moonshotai/kimi-k2 via provider openrouter". Spend of the day's probes
+  and the rehearsal together: $0.07 of the key's $10.
+  `--mode managed` with Hermes or a Kimi account is refused (`MANAGED_NOT_FOR_AGENT`). Tests
+  `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
+  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`,
+  `a_hermes_that_hangs_is_cut_off_with_everything_it_started`,
+  `hermes_config_escapes_every_value_into_plain_ascii`,
+  `finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does`. Other agents,
+  a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
+  (`agent_not_automatic_yet`) until their launch recipes and the project grant they need exist
+  (SB-96, SB-73 phase 2). A Hermes executor at its limit is not detected yet.
+- **The spend gate (0.7.0, C-5; SB-72):** before each paid step the hand-over asks the gate of
+  [Spending ceilings](#spending-ceilings-sb-72-070); a step it skips moves the chain on.
+- **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
+  since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
+  gate skipped every step it reached and none was tried; log event `spend_gate` with `verdict`
+  (`run`, `spend_unread`, `key_exhausted`, `ceiling_reached`, `spend_unknown`,
+  `ceilings_unreadable`) for each paid step reached, or `record` `unwritten` when the last
+  hand-over could not be written; store event `fallback` `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
+  pack or the prompt.
+- **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
+  names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it
+  holds the checkout; else the one group holding the checkout, whoever's account worked there
+  (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
+  group); else, with several groups holding it (SB-146) and none of them the executor's, the
+  group `Snapshot::project_for` names (the first holding group with an enabled account, an
+  organization's group last when organizations exist; else the first), the one the folder's proxy
+  route and paid key use, logged `group_ambiguous`; with no group holding it, the executor
+  account's group as before. The engine is asked for the checkout whenever the workflow's, the
+  executor group's or the machine's chain is set, or any group has a chain. When no chain applies
+  to the chosen group the pass logs `no_chain` and leaves no retry mark, so a chain set meanwhile
+  is used at the next scan; the 15-minute mark is set once a chain resolves, and also after
+  `engine_unreadable` and `no_checkout`, which are attempts not repeated every minute. Tests
+  `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
+  `a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous`,
+  `no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan`.
+
+- **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
+
+## Spending ceilings (SB-72, 0.7.0)
+
+Design: [dossier C](runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) parts C
+and D; decisions C-Q1 to C-Q9 in [questions](runs/2026-10-26-iteration-0.7.0/questions.md);
+scenarios SCN-083 and SCN-084 in [scenarios](ux/scenarios.md). Code:
+`crates/switchboard-runtime/src/spend.rs` (the file, the rules, `decide`) and
+`crates/switchboard-runtime/src/fallback.rs` (the gate). The operator rule it follows: a reached
+ceiling is a question, "double or keep", with no recommended answer, and only the operator doubles
+(fabric-workspace `knowledge/authority.md`, cited in dossier C section 5). In brief, each point
+detailed in the two entries below:
+
+- **Ceilings.** One per scope (`ChainScope`): this computer's, per UTC day, counting every saved
+  OpenRouter key's `usage_daily` added up; a group's, per UTC day, only on the group's own
+  OpenRouter key (`spend::group_has_own_key`, `spend.rs:390`); a task's (one workflow), counting its
+  key's `usage` since the task's first paid hand-over (C-Q2, labelled: it over-counts when agents
+  share the key and is checked only at a start). Whole cents from $0.01 to $1,000
+  (`MIN_CENTS`, `MAX_CENTS`, `spend.rs:28-29`). The key's own limit at OpenRouter stays the only
+  bound on what a running session spends; a ceiling decides whether a paid agent starts.
+- **Who may loosen one.** Only the window, in the app's own process: raising, clearing, doubling
+  (C-Q1), deleting a group that holds a ceiling (C-Q7), and removing or replacing a key a ceiling
+  counts (C-Q9). The CLI and MCP set a first ceiling, lower one and answer *keep*
+  (`switchboard ceiling list|set|keep`, `crates/switchboard-cli/src/main.rs:769`;
+  `continue --ceiling`, `:170`; MCP `switchboard_ceilings`, `switchboard_ceiling_set`,
+  `switchboard_ceiling_answer`, `crates/switchboard-cli/src/mcp.rs:88-90`). The window's Tauri
+  commands `ceilings`, `set_ceiling`, `answer_ceiling` (`src-tauri/src/main.rs:798`, `:834`,
+  `:848`) always speak as the window.
+- **The gate.** Every paid start through Switchboard passes it once: a paid step of the automatic
+  fallback (`fallback::spend_gate`, `fallback.rs:1162`), a paid start by hand (C-Q8,
+  `fallback::gate_by_hand`, `:1412`: `continue` onto Hermes, OpenCode or an API-key account,
+  `agents launch --openrouter`, `agents launch` through the proxy on an API-key account, `launch`
+  on an API-key account), and a queued paid hand-over when a console takes it or the background
+  opens it (`fallback::gate_take`, `:1455`). Paid means Hermes and OpenCode on an OpenRouter key,
+  and Claude Code or Codex on an API-key account (C-Q3: no spend is read for those, so under a
+  ceiling they read `spend_unknown`); a subscription sign-in and Kimi Code on a saved Kimi account
+  are never gated. `spend::decide` (`spend.rs:958`) skips, in order: `key_exhausted` (less than
+  $0.50 left of the key's own limit, `MIN_REMAINING_USD`, `spend.rs:32`, with or without a
+  ceiling), `ceiling_reached`, `spend_unknown`; with no covering ceiling an unread key runs
+  (`spend_unread`). One gate at a time in the process (`HAND_OVER`, `fallback.rs:947`).
+- **The budget.** A fallback pass's gates together, and a start by hand's gates together, take at
+  most `GATE_BUDGET`, 20 s (`fallback.rs:1047`), counted only inside the gates (`GateBudget`,
+  `:1053`, SB-214); each OpenRouter read gets what is left, at most `SPEND_READ_TIMEOUT`, 12 s
+  (`:1151`; the read itself times out at 10 s, `crates/switchboard-runtime/src/agent_keys.rs:14`), and a read cut short is
+  unknown, never zero. The background's sweep of queued hand-overs has one budget per pass; a
+  console's take waits for its turn at most `TAKE_TURN_WAIT`, 10 s (`lib.rs:3330`).
+- **The key slot a gate read (SB-213, S5).** The gate decides on the key the start's folder
+  resolves to (`spend::key_slot`, `spend.rs:400`; the same rule as the launch,
+  `agent_keys::key_in`, `crates/switchboard-core/src/agent_keys.rs:309`), pins it
+  (`fallback::Pin`, `fallback.rs:964`) and compares it again inside the owner transaction; a start
+  whose folder moved to another group is gated once more on its new key, and moved again is
+  refused (`STOP_FOLDER_MOVED`). The session script names the slot the gate read
+  (`launch::key_command`, `launch.rs:2133`, through `switchboard agents key --service openrouter
+  --pool <group>` or `--machine`, `crates/switchboard-cli/src/main.rs:861-865`), so a move after
+  the transaction changes nothing it spends.
+- **Questions.** A reached ceiling opens one question per scope and value (`spend::open_question`,
+  `spend.rs:686`): *Double to $2X* (window only) or *Keep $X*, two answers of equal weight; a
+  doubled ceiling is tied to its new value and the next hit asks again (`spend::answer`, `:754`;
+  `a_doubled_ceiling_is_tied_to_its_value_and_the_next_hit_asks_again`, `spend.rs:1133`).
+  The app posts one notification per new question (`suggestions::reached_ceilings`,
+  `src-tauri/src/suggestions.rs:128`).
+- **Records.** `<data>/spend.json` (0600, at most 128 KiB, `spend.rs:20-25`; carried in backups,
+  `crates/switchboard-core/src/backup.rs:77`; removed by `switchboard uninstall`,
+  `crates/switchboard-runtime/src/uninstall.rs:35`): ceilings, questions, task baselines and the
+  last hand-over, never a key or a label. Log events `ceiling` (set, cleared, reached, kept,
+  doubled, removed) and `spend_gate` (each paid step's verdict, `fallback.rs:1303`). No analytics
+  event or prop ([ANALYTICS](ANALYTICS.md#chains-and-ceilings-070)).
+- **Not covered.** A running managed session moved onto an API-key account without a start
+  (`switchboard_switch`, automatic switching, SB-98's failover) is not gated (C-N2, SB-217); paid
+  starts moved off a capped group's key by moving its folder or disabling its accounts are no longer
+  counted by that group's ceiling (C-N1, SB-216); after a downgrade to 0.6.x paid steps run with no
+  ceiling. Waiting outside this repository: keyed pins checked against the project's grant (SB-96)
+  and per-grant metering through the proxy, which would replace the task measure (SB-97).
+
 - **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:
   `crates/switchboard-runtime/src/spend.rs`. `<data>/spend.json` (0600, at most 128 KiB, carried in
   backups, removed by `switchboard uninstall`), never `Snapshot`, so a 0.6.x build still reads the
@@ -551,75 +722,6 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   look stats spend.json and, only when its stamp moved, reads the ceilings and posts one system
   notification per newly opened question (`suggestions::reached_ceilings`,
   `a_reached_ceiling_is_announced_once_per_question`), then emits `spend-changed` to the window.
-
-## Automatic fallback, phase 1 (SB-73, 2026-10-06)
-
-Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: automatic). Code:
-`crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
-`continuation::{list_open, checkouts}`, called by the monitor after rotation.
-
-- **Trigger:** a chain applies (SB-71: the workflow's, else its group's, else the machine's; none
-  set, nothing happens), and the executor of an open workflow without a
-  waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
-  executor's `accountRef`, only that account decides (one Switchboard does not hold decides
-  nothing). When it names none, the executor is taken to be the ordinary CLI of its provider — but
-  only while no session Switchboard launched for that provider is running
-  (`launch::launched_session_running`: an isolated home of one of its accounts or a managed home
-  that is not idle), since such a session could be the executor on a healthy account (2026-10-07).
-- **Cadence:** at most one `project-observatory full workflow list --status open --json` a minute,
-  only while a chain exists and some account is limited; a scan that finds nothing to hand over
-  (or cannot read the engine) waits 5 minutes (LC-08); at most 4 workflows a pass; a workflow
-  handed over or tried is left alone 15 minutes. Each engine read runs off the async workers
-  (`spawn_blocking`) with a 15-second deadline (a person's `switchboard continue` waits a minute);
-  at the deadline the engine's whole process group is killed (LC-02).
-- **Hand-over:** the chain in order; each step resolves to a usable account (enabled, not the
-  executor's, not limited, not needing a new sign-in, not another saved row of the executor's or
-  a limited account's login (SB-62 rows share one limit); a pinned one only if usable; else the
-  provider's least-used); the hand-over is `Operation::Continue` in `isolated` mode in the first of
-  the workflow's checkouts that exists here — every refusal of `switchboard continue` applies, and
-  the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
-  chain; a failed launch after an offer stops (the offer lapses).
-- **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
-  (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
-  no account and no key pin is tried when Hermes is installed, the key is saved and the
-  `switchboard` command exists (`launch::hermes_continuation_basics`, no process started), never
-  for a Hermes executor. At the hand-over those basics come first; only then is the model read —
-  `hermes config get model --json` within 5 s in its own process group, killed with everything it
-  started at the deadline (`hermes::run_within`; a Hermes that does not answer gives no model).
-  The model is the one the ordinary Hermes runs on OpenRouter (`hermes::openrouter_model`, from
-  `hermes config get model`; operator 2026-10-12: «у меня Гермес был на DeepSeek V4 Pro»), else the
-  key's default model; with neither, `hermes_continuation_preflight` refuses before the offer and
-  the chain moves on. The answer says which (`modelFrom`: `hermes` or `key`). Hermes runs in
-  `runtimes/hermes-continue/agent-home` (its `HERMES_HOME`, a `config.yaml` Switchboard writes:
-  Observatory's MCP server, `auth.adopt_external_logins: false`), the handoff prompt in
-  `runtimes/hermes-continue/<wf>/handoff-prompt.txt` (0600; the folder also holds the script and
-  a `.session.json`, so the hand-over is listed under Sessions as `hermes` labelled with its model;
-  folders of hand-overs that ended more than 7 days ago go at the next one,
-  `prune_hermes_sessions`; `config.yaml` values are written as YAML double-quoted scalars with
-  everything outside printable ASCII escaped) naming `owner agent:hermes` and a UUID
-  `sessionId` Switchboard made — Observatory wants a UUID and Hermes's own ids are not one (seen in
-  the rehearsal below: the session had to work both out) — and Terminal running `hermes chat
-  --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
-  session with the prompt as its first turn; the key is read from `switchboard agents key --service
-  openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
-  ceiling, and since 0.7.0 the spend gate (below) decides whether the step starts. Measured 2026-10-12 with Hermes 0.21.4: an empty
-  `HERMES_HOME` starts without the setup wizard, and the session lists
-  `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
-  **Rehearsed live 2026-10-12** (a 0.6.19 build on its own data folder, the real engine and
-  OpenRouter): workflow `wf_932609d34cf14593` with a Claude executor, offered after the engine's
-  two-minute silence (`handoff:9c1cc21b63c64cc2`); the Hermes session accepted it within about 30 s
-  (executor `hermes`), wrote its final checkpoint and closed the workflow — "Accepted by
-  agent:hermes running model moonshotai/kimi-k2 via provider openrouter". Spend of the day's probes
-  and the rehearsal together: $0.07 of the key's $10.
-  `--mode managed` with Hermes or a Kimi account is refused (`MANAGED_NOT_FOR_AGENT`). Tests
-  `a_hermes_step_runs_on_the_openrouter_key_after_the_subscriptions_run_out`,
-  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`,
-  `a_hermes_that_hangs_is_cut_off_with_everything_it_started`,
-  `hermes_config_escapes_every_value_into_plain_ascii`,
-  `finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does`. Other agents,
-  a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
-  (`agent_not_automatic_yet`) until their launch recipes and the project grant they need exist
-  (SB-96, SB-73 phase 2). A Hermes executor at its limit is not detected yet.
 - **The spend gate (0.7.0, C-5; SB-72, dossier C part D).** Code: `fallback::spend_gate`, called
   by `hand_over` before each `Step::Run`. Not paid, never gated and nothing read: a subscription
   sign-in and Kimi Code on a saved Kimi account. Paid: Hermes and OpenCode, on the OpenRouter key
@@ -645,7 +747,7 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   both start on the last dollar (`two_hand_overs_racing_for_the_last_dollar_are_decided_one_after_the_other`);
   the same lock and the same gate cover every paid start by hand (C-Q8): `continue` (also
   `--to-console` and on the default agent) onto Hermes, OpenCode or an API-key account,
-  `agents launch --via openrouter`, `agents launch` through the proxy on an API-key account, and
+  `agents launch --openrouter`, `agents launch` through the proxy on an API-key account, and
   `launch` on an API-key account (`fallback::gate_by_hand`). `Runtime::execute` resolves the
   start's account first (`paid_start`: the default agent's account for a `continue` that names
   none, the pool's selected account for a launch through the proxy, where a subscription account
@@ -782,32 +884,6 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `an_opencode_step_under_a_ceiling_it_cannot_read_is_gated_like_hermes`,
   `the_last_hand_over_is_recorded_with_its_skipped_steps`) and
   `agent_keys::tests::the_gate_reads_a_saved_keys_spend_and_an_unanswered_read_is_unknown`.
-- **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
-  since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
-  gate skipped every step it reached and none was tried; log event `spend_gate` with `verdict`
-  (`run`, `spend_unread`, `key_exhausted`, `ceiling_reached`, `spend_unknown`,
-  `ceilings_unreadable`) for each paid step reached, or `record` `unwritten` when the last
-  hand-over could not be written; store event `fallback` `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
-  pack or the prompt.
-- **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
-  names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it
-  holds the checkout; else the one group holding the checkout, whoever's account worked there
-  (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
-  group); else, with several groups holding it (SB-146) and none of them the executor's, the
-  group `Snapshot::project_for` names (the first holding group with an enabled account, an
-  organization's group last when organizations exist; else the first), the one the folder's proxy
-  route and paid key use, logged `group_ambiguous`; with no group holding it, the executor
-  account's group as before. The engine is asked for the checkout whenever the workflow's, the
-  executor group's or the machine's chain is set, or any group has a chain. When no chain applies
-  to the chosen group the pass logs `no_chain` and leaves no retry mark, so a chain set meanwhile
-  is used at the next scan; the 15-minute mark is set once a chain resolves, and also after
-  `engine_unreadable` and `no_checkout`, which are attempts not repeated every minute. Tests
-  `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
-  `a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous`,
-  `no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan`.
-
-- **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
 
 ## Launch in place (SB-75, 2026-10-06)
 

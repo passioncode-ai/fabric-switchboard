@@ -110,6 +110,23 @@ Accounts present when analytics first runs are counted in `app_installed`, not r
 An account added or removed while analytics is off, or before the person answered, is never
 reported later.
 
+## Chains and ceilings (0.7.0)
+
+Release 0.7.0 adds no event and no prop. Nothing about fallback chains, spending ceilings and their
+questions, the spend gate, the terminal hook, the organization checklist or launch records is
+sent: `app_active` carries the same counts as before (`counts`,
+`crates/switchboard-runtime/src/analytics.rs:686-724`), and
+`grep -n '"chains"\|"ceilings"' crates/switchboard-runtime/src/analytics.rs` prints nothing.
+
+Decision C-Q6 of the 0.7.0 iteration ([questions](runs/2026-10-26-iteration-0.7.0/questions.md),
+assumed) chose, when these surfaces are counted at all, two counts in `app_active` and no new
+event: `chains` (how many fallback chains are set) and `ceilings` (how many spending ceilings),
+counts only, never a scope, a group id, an amount or a workflow id. It was not built in 0.7.0. When
+it is, the same change adds both props to the table above and plants a group id and a workflow id
+in `events_carry_counts_and_the_installation_id_never_an_identity`
+(`crates/switchboard-runtime/src/analytics.rs:872`), as the privacy rule in
+[AGENTS.md](../AGENTS.md) requires.
+
 ## The shared installation id
 
 All PassionCode.ai tools share one file:
