@@ -387,7 +387,7 @@ function render(options: { background?: boolean } = {}): boolean {
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
     // VIS-21, UX-01: while a page shows its empty state, that state carries the one primary action.
     const empty = (list?: unknown[]) => !!snapshot && !(list ?? []).length;
-    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu());
+    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu(orgCardLeads() ? 'button quiet' : 'button primary'));
     if (page === 'projects' && !empty(snapshot?.projects)) actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
     // SB-228 (VIS-21): the organization card's own action leads; this one goes quiet beside it.
     if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), orgCardLeads() ? 'button quiet' : 'button primary', 'org-add'));
