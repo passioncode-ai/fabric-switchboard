@@ -153,7 +153,7 @@ export function createDemoAdapter(): Adapter {
     return { complete: steps.every((s) => s.state === 'done' || s.state === 'optional'), degraded: [], steps };
   };
   const loginItem = { available: true, enabled: true };
-  const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false };
+  const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false, restart_after: null };
   // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
   const usage = new URLSearchParams(location.search).get('usage');
   const analytics = { available: true, enabled: true, disclosed: usage !== 'ask' && usage !== 'sent', sent_before: usage === 'sent' };

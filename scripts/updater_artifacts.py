@@ -8,7 +8,10 @@ itself. Run by the release workflow only; the signing key never leaves its `rele
   linux     --appimage-dir <dir> --out <dir> --arch x64|arm64
                                                   the AppImage + .sig (SB-88; the .deb does not
                                                   update itself)
-  manifest  --tag vX.Y.Z --dir <dir>              latest.json from the packages and signatures there
+  manifest  --tag vX.Y.Z --dir <dir> [--urgent <reason>]
+                                                  latest.json from the packages and signatures there;
+                                                  urgent (SB-207) from --urgent or an `Urgent: <reason>`
+                                                  line in the version's CHANGELOG section
   check     --tag vX.Y.Z --dir <dir>              every entry of latest.json names a file in <dir>,
                                                   under this tag, with that file's own signature
 
@@ -45,6 +48,27 @@ WINDOWS_TARGETS = tuple(f'windows-{a}' for a in ARCHES.values())
 LINUX_TARGETS = tuple(f'linux-{a}' for a in ARCHES.values())
 REQUIRED_TARGETS = (*MACOS_TARGETS, *WINDOWS_TARGETS, *LINUX_TARGETS)
 NOTES_LIMIT = 4000
+# SB-207: a line of the version's CHANGELOG section that marks the release urgent (SB-191: an
+# installed copy then restarts into it at the next idle moment, without the six-hour pause).
+URGENT_LINE = re.compile(r'^\s*(?:[-*]\s*)?(?:\*\*)?Urgent:(?:\*\*)?\s*(.*?)\s*$', re.IGNORECASE)
+
+
+def urgent_reason(notes, given=None):
+    """Why the release is urgent, or None: the --urgent reason, else the first `Urgent: <reason>`
+    line of the version's notes. A marker without a reason is refused, since the app treats a
+    blank reason as not urgent and the release would silently wait out the pause."""
+    if given is not None:
+        reason = given.strip()
+        if not reason:
+            raise SystemExit('--urgent needs a reason; latest.json not written.')
+        return reason
+    for line in notes.splitlines():
+        found = URGENT_LINE.match(line)
+        if found:
+            if not found.group(1):
+                raise SystemExit('The CHANGELOG section has an `Urgent:` line without a reason; latest.json not written.')
+            return found.group(1)
+    return None
 
 
 def version(root=ROOT):
@@ -153,9 +177,10 @@ def linux(appimage_dir, out, v, arch):
     return image, sign(image, v)
 
 
-def manifest(tag, folder, changelog, now=None):
+def manifest(tag, folder, changelog, now=None, urgent=None):
     """latest.json in Tauri's static format: one entry per platform, each with the download URL
-    under this tag and the text of that file's own .sig."""
+    under this tag and the text of that file's own .sig; `urgent` with its reason when the release
+    is marked (SB-207). Written before the publish workflow attests the release files."""
     found = TAG.match(tag)
     if not found:
         raise SystemExit(f'{tag!r} is not a release tag.')
@@ -170,9 +195,12 @@ def manifest(tag, folder, changelog, now=None):
         for target in targets:
             platforms[target] = dict(entry)
     notes = section(changelog, v)[:NOTES_LIMIT] or f'Fabric Switchboard {v}.'
+    reason = urgent_reason(section(changelog, v), urgent)
     moment = now or datetime.datetime.now(datetime.timezone.utc)
     document = {'version': v, 'notes': notes, 'pub_date': moment.strftime('%Y-%m-%dT%H:%M:%SZ'),
                 'platforms': platforms}
+    if reason:
+        document['urgent'] = reason
     (folder / MANIFEST).write_text(json.dumps(document, indent=2) + '\n', encoding='utf-8')
     return document
 
@@ -228,6 +256,7 @@ def main(argv=None):
         command = sub.add_parser(name)
         command.add_argument('--tag', required=True)
         command.add_argument('--dir', required=True, type=Path)
+    sub.choices['manifest'].add_argument('--urgent', metavar='REASON', help='mark the release urgent (SB-191, SB-207)')
     args = parser.parse_args(argv)
     if args.command == 'macos':
         for path in macos(args.app, args.out, version()):
@@ -239,8 +268,9 @@ def main(argv=None):
         for path in linux(args.appimage_dir, args.out, version(), args.arch):
             print(f'wrote {path.name}')
     elif args.command == 'manifest':
-        document = manifest(args.tag, args.dir, (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'))
-        print(f'wrote {MANIFEST}: {document["version"]}, {", ".join(sorted(document["platforms"]))}')
+        document = manifest(args.tag, args.dir, (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'), urgent=args.urgent)
+        mark = ', urgent' if 'urgent' in document else ''
+        print(f'wrote {MANIFEST}: {document["version"]}, {", ".join(sorted(document["platforms"]))}{mark}')
     else:
         errors = check(args.tag, args.dir)
         for error in errors:

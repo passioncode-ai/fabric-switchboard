@@ -440,13 +440,17 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
   };
 }
 
-/** What About says about automatic updates (SB-55), and whether "Restart to update" is offered. */
-export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission'>): { text: string; restart: boolean } {
+/** What About says about automatic updates (SB-55), and whether "Restart to update" is offered.
+ * `when` formats a time (Unix seconds) for the line that says when a paused update starts (SB-208). */
+export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean } {
   if (!status.available) return { text: t(status.reason ?? 'Automatic updates work in the installed app only.'), restart: false };
   if (status.state === 'ready' && status.version) {
     return status.needs_permission
       ? { text: t('Version {version} is ready. Restarting asks for an administrator password to replace the app.', { version: status.version }), restart: true }
-      : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
+      // SB-208: during SB-191's pause it does not start at the next idle moment; say from when.
+      : status.restart_after
+        ? { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background after {time} or opens again, or restart now.', { version: status.version, time: when(status.restart_after) }), restart: true }
+        : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
   }
   // SB-104: a check that failed says so, even with automatic updates off (a manual check).
   if (status.state === 'failed' && status.error) return { text: t(status.error), restart: false };

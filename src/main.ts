@@ -2335,7 +2335,7 @@ async function checkUpdatesNow() {
   try { updateState = await adapter.checkForUpdates(); }
   catch (error) { showNotice(safeError(error), true); }
   await loadUpdate();
-  if (updateState) showNotice(updateLine(updateState).text, updateState.state === 'failed');
+  if (updateState) showNotice(updateLine(updateState, date).text, updateState.state === 'failed');
   backgroundRender();
 }
 /** SB-55: the backend checks, downloads and installs on its own; the window only reads the state, once a minute while a check can still change it. */
@@ -2352,7 +2352,7 @@ function updateControls(panel: HTMLElement) {
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = status.enabled; box.disabled = !status.available; box.dataset.focus = 'auto-update';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { updateState = await adapter.setAutoUpdate(wanted); await loadUpdate(); }, wanted ? t('Switchboard will install new versions on its own.') : t('Automatic updates are off. Switchboard will not check for new versions.'), 'auto-update'); });
   option.append(box, el('span', '', t('Install updates automatically')));
-  const line = updateLine(status);
+  const line = updateLine(status, date);
   panel.append(option, el('p', 'form-note', line.text));
   if (line.restart) panel.append(button(t('Restart to update'), () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, t('Restarting Switchboard with the new version…'), 'update-restart'), 'button', 'update-restart'));
   // LC-16: the person can always ask, with automatic updates off too.

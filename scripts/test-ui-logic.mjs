@@ -406,6 +406,12 @@ check(() => {
   // A ready update stays offered even after the switch is turned off: it is already installed.
   assert.equal(logic.updateLine({ ...base, enabled: false, state: 'ready', version: '0.7.0' }).restart, true);
   assert.match(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', needs_permission: true }).text, /administrator password/);
+  // SB-208: during SB-191's six-hour pause the line says from when it starts on its own.
+  const paused = logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: 1_800_000_000 }, (s) => `at ${s}`);
+  assert.equal(paused.restart, true);
+  assert.equal(paused.text, 'Version 0.7.0 is ready. It starts on its own when Switchboard is idle in the background after at 1800000000 or opens again, or restart now.');
+  assert.match(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: 1_800_000_000 }).text, /after 2027-01-15 08:00 or opens again/);
+  assert.doesNotMatch(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: null }).text, /after/);
 });
 
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.

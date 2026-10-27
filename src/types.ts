@@ -241,4 +241,6 @@ export interface UpdateStatus {
   checked_at: number | null;
   error: string | null;
   needs_permission: boolean;
+  /** SB-208: when a ready update may start on its own, while SB-191's pause holds it (Unix seconds); null otherwise. */
+  restart_after: number | null;
 }
