@@ -792,6 +792,54 @@ async fn set_chain(
         })
         .await
 }
+/// SB-72 (C-7): every spending ceiling, the open questions oldest first and the last hand-over;
+/// numbers and codes only. An unreadable spend.json is the core's error, never "none".
+#[tauri::command]
+async fn ceilings(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Ceilings).await
+}
+/// The window's own operations on ceilings: always as the window (C-Q1), which alone may raise,
+/// clear or double a ceiling. They run in the app's process, never through the control listener.
+fn window_set_ceiling(scope: switchboard_core::ChainScope, usd: Option<f64>) -> Operation {
+    Operation::SetCeiling {
+        scope,
+        usd,
+        by: switchboard_runtime::spend::Surface::Window,
+    }
+}
+fn window_answer_ceiling(id: String, answer: switchboard_runtime::spend::Answer) -> Operation {
+    Operation::AnswerCeiling {
+        id,
+        answer,
+        by: switchboard_runtime::spend::Surface::Window,
+    }
+}
+/// Sets a scope's ceiling in dollars, or clears it with `usd: null`.
+#[tauri::command]
+async fn set_ceiling(
+    scope: switchboard_core::ChainScope,
+    usd: Option<f64>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(window_set_ceiling(scope, usd))
+        .await
+}
+/// Answers a reached ceiling's question: `double` or `keep`, from the person in the window.
+#[tauri::command]
+async fn answer_ceiling(
+    id: String,
+    answer: switchboard_runtime::spend::Answer,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(window_answer_ceiling(id, answer))
+        .await
+}
 /// SB-120: every catalog agent — installed, enabled for switching, default, command.
 #[tauri::command]
 async fn agents_overview(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1338,6 +1386,9 @@ fn main() {
             agents_overview,
             chains,
             set_chain,
+            ceilings,
+            set_ceiling,
+            answer_ceiling,
             agent_enable,
             agent_default,
             openrouter_models,
@@ -1473,6 +1524,46 @@ mod tests {
             .collect()
     }
 
+    /// C-7 (C-Q1): the window's ceiling commands always speak as the window, and the answer
+    /// and amount travel unchanged; `answer` reads the window's words `keep` and `double`.
+    #[test]
+    fn the_windows_ceiling_commands_speak_as_the_window() {
+        use switchboard_runtime::spend::{Answer, Surface};
+        let set = window_set_ceiling(switchboard_core::ChainScope::Machine, Some(5.0));
+        assert!(matches!(
+            set,
+            Operation::SetCeiling { scope: switchboard_core::ChainScope::Machine, usd: Some(u), by: Surface::Window } if u == 5.0
+        ));
+        let clear = window_set_ceiling(
+            switchboard_core::ChainScope::Project {
+                pool: "alpha".into(),
+            },
+            None,
+        );
+        assert!(matches!(
+            clear,
+            Operation::SetCeiling {
+                usd: None,
+                by: Surface::Window,
+                ..
+            }
+        ));
+        let answer: Answer = serde_json::from_value(json!("double")).unwrap();
+        assert!(matches!(
+            window_answer_ceiling("q_0123456789abcdef".into(), answer),
+            Operation::AnswerCeiling { answer: Answer::Double, by: Surface::Window, ref id } if id == "q_0123456789abcdef"
+        ));
+        assert!(serde_json::from_value::<Answer>(json!("raise")).is_err());
+        // The window's scope shape is the core's.
+        let scope: switchboard_core::ChainScope =
+            serde_json::from_value(json!({"kind": "project", "pool": "alpha"})).unwrap();
+        assert_eq!(
+            scope,
+            switchboard_core::ChainScope::Project {
+                pool: "alpha".into()
+            }
+        );
+    }
     /// SB-30: an argument the app does not know never stops it from starting.
     #[test]
     fn unknown_arguments_are_ignored_and_background_is_recognised() {

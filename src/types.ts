@@ -122,6 +122,12 @@ export interface Adapter {
   chains(): Promise<Chains>;
   /** Sets a scope's chain in order; an empty list clears it; `preset` stands for the list. */
   setChain(scope: ChainScope, executors: ChainExecutor[], preset?: string | null): Promise<{ chain: Chain | null }>;
+  /** SB-72 (C-7): every spending ceiling, the open questions oldest first and the last hand-over; numbers and codes only. */
+  ceilings(): Promise<Ceilings>;
+  /** Sets a scope's ceiling in dollars, or clears it with `null`; the window may raise or clear (C-Q1). */
+  setCeiling(scope: ChainScope, usd: number | null): Promise<unknown>;
+  /** Answers a reached ceiling's question: `double` only from the window, `keep` from anywhere. */
+  answerCeiling(id: string, answer: 'keep' | 'double'): Promise<unknown>;
   agentEnable(agent: string, enabled: boolean): Promise<unknown>;
   agentDefault(agent: string | null): Promise<unknown>;
   openrouterModels(): Promise<OpenrouterModels>;
@@ -183,6 +189,11 @@ export interface LastHandover { at: number; workflow: string; outcome: string; s
 export interface ChainPreset { id: string; agents: { agent: string; name: string | null }[] }
 /** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
 export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
+/** One spending ceiling as `spend::view` gives it: machine and group per UTC day, a task since its first paid hand-over. */
+export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null }
+/** An open question of a reached ceiling; `double_usd` is null when doubling would pass $1,000. */
+export interface CeilingQuestionView { id: string; scope: ChainScope; cents: number; usd: number; double_usd: number | null; spent: number; reached_at: number }
+export interface Ceilings { ceilings: CeilingView[]; questions: CeilingQuestionView[]; last_handover: LastHandover | null; limits: { min_usd: number; max_usd: number; min_remaining_usd: number } }
 export interface LoginItem { available: boolean; enabled: boolean }
 /** The organization and its group whose presence put the terminal hook in place (SB-183). */
 export interface ShellHookNotice { organization: string; group: string }

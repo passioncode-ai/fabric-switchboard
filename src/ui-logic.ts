@@ -1206,3 +1206,61 @@ export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboardin
   }
   return { lead: firstRunHint(input.current) };
 }
+/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00). */
+export function dollars(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+/** One answer to a reached ceiling. There is no `recommended` field and no primary class: the
+ * rule is a question without a recommended option (C-Q1, SCN-084). */
+export interface CeilingAction { answer: 'double' | 'keep'; label: string; className: string; disabled: boolean }
+/** The question a reached ceiling asks: its sentence and its two answers of equal weight, in a
+ * fixed order (double, then keep). `double` is the core's doubled value, `null` when doubling
+ * would pass $1,000 (that button stays, unavailable, and `note` says why). */
+export function ceilingQuestion(q: { value: number; double?: number | null; kind?: 'machine' | 'project' | 'workflow'; scope?: string }): { text: string; actions: CeilingAction[]; note: string | null } {
+  const usd = dollars(q.value);
+  const doubled = q.double === undefined ? q.value * 2 : q.double;
+  const text = q.kind === 'project' ? t('{group}\'s daily ceiling of {usd} is reached.', { group: q.scope ?? '', usd })
+    : q.kind === 'workflow' ? t('The ceiling of task {id}, {usd}, is reached.', { id: q.scope ?? '', usd })
+      : t('This computer\'s daily ceiling of {usd} is reached.', { usd });
+  // One class for both: the same size, weight and contrast.
+  const className = 'button ceiling-answer';
+  return {
+    text,
+    actions: [
+      { answer: 'double', label: t('Double to {usd}', { usd: dollars(doubled ?? q.value * 2) }), className, disabled: doubled === null },
+      { answer: 'keep', label: t('Keep {usd}', { usd }), className, disabled: false },
+    ],
+    note: doubled === null ? t('Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.') : null,
+  };
+}
+/** The warning beside a ceiling when a running agent can spend past it on the key's own limit
+ * (SCN-083): no limit, a limit that is not daily, or a daily limit above the ceiling. `null` when
+ * there is no ceiling, the key was not read, or its daily limit is no higher than the ceiling. */
+export function ceilingWarning(ceiling: number | null, credit: Pick<OpenrouterCredit, 'limit' | 'limit_reset'> | null): string | null {
+  if (ceiling === null || !credit) return null;
+  const tail = t('A running agent can spend up to the key\'s own limit; Switchboard\'s ceiling only decides whether it is started.');
+  if (credit.limit === null || !Number.isFinite(credit.limit)) return `${t('This key has no spending limit of its own.')} ${t('A running agent can spend without a limit; Switchboard\'s ceiling only decides whether it is started.')}`;
+  if (credit.limit_reset !== 'daily') {
+    const reason = credit.limit_reset === 'monthly' ? t('The key\'s own limit resets monthly, not daily.')
+      : credit.limit_reset === 'weekly' ? t('The key\'s own limit resets weekly, not daily.')
+        : t('The key\'s own limit never resets.');
+    return `${reason} ${tail}`;
+  }
+  if (credit.limit > ceiling) return `${t('The key\'s own limit, {limit} a day, is higher than this ceiling.', { limit: dollars(credit.limit) })} ${tail}`;
+  return null;
+}
+/** The ceiling line of the machine key panel and a group key row. */
+export function ceilingLine(ceiling: { usd: number; doubled_from: number | null; active: boolean } | null): string {
+  if (!ceiling) return t('Daily ceiling: not set');
+  const value = ceiling.doubled_from !== null ? t('Daily ceiling: {usd}, doubled from {from}', { usd: dollars(ceiling.usd), from: dollars(ceiling.doubled_from) }) : t('Daily ceiling: {usd}', { usd: dollars(ceiling.usd) });
+  return ceiling.active ? value : `${t('Inactive: this group has no key of its own now.')} ${value}`;
+}
+/** The key's own limit at OpenRouter, shown beside Switchboard's ceiling on a group key row. */
+export function keyLimitLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_reset'>): string {
+  if (credit.limit === null || !Number.isFinite(credit.limit)) return t('Key\'s own limit: none');
+  const limit = dollars(credit.limit);
+  if (credit.limit_reset === 'daily') return t('Key\'s own limit: {limit}, resets daily', { limit });
+  if (credit.limit_reset === 'weekly') return t('Key\'s own limit: {limit}, resets weekly', { limit });
+  if (credit.limit_reset === 'monthly') return t('Key\'s own limit: {limit}, resets monthly', { limit });
+  return t('Key\'s own limit: {limit}, never resets', { limit });
+}

@@ -1163,4 +1163,55 @@ check(() => {
     assert.equal(logic.shortWorkflow('wf_0123456789abcdef'), 'wf_01234567');
   });
 }
+// C-7 (SB-72): spending ceilings in the window.
+{
+  // The question has two answers of equal weight: the same class, neither primary, none recommended.
+  check(() => {
+    const q = logic.ceilingQuestion({ value: 5 });
+    assert.equal(q.actions.length, 2);
+    const [double, keep] = q.actions;
+    assert.equal(double.answer, 'double');
+    assert.equal(keep.answer, 'keep');
+    assert.equal(double.label, 'Double to $10.00');
+    assert.equal(keep.label, 'Keep $5.00');
+    assert.equal(double.className, keep.className, 'the same class');
+    assert.ok(!double.className.includes('primary') && !keep.className.includes('primary'), 'neither is primary');
+    for (const action of q.actions) assert.ok(!('recommended' in action), 'no recommended flag');
+    assert.equal(double.disabled, false);
+    assert.equal(q.note, null);
+    assert.equal(logic.ceilingQuestion({ value: 5, kind: 'machine' }).text, "This computer's daily ceiling of $5.00 is reached.");
+    assert.equal(logic.ceilingQuestion({ value: 3, kind: 'project', scope: 'Alpha Web' }).text, "Alpha Web's daily ceiling of $3.00 is reached.");
+    assert.equal(logic.ceilingQuestion({ value: 2, kind: 'workflow', scope: 'wf_01234567' }).text, 'The ceiling of task wf_01234567, $2.00, is reached.');
+    // Doubling past $1,000 is refused by the core: the button stays beside Keep, unavailable, and the note says why.
+    const top = logic.ceilingQuestion({ value: 600, double: null });
+    assert.equal(top.actions[0].disabled, true);
+    assert.equal(top.actions[0].className, top.actions[1].className);
+    assert.equal(top.note, 'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.');
+    assert.equal(logic.ceilingQuestion({ value: 5, double: 10 }).actions[0].label, 'Double to $10.00');
+  });
+  // The key's own limit beside Switchboard's ceiling: a warning when a running agent can pass it.
+  check(() => {
+    const monthly = logic.ceilingWarning(5, { limit: 20, limit_reset: 'monthly' });
+    assert.equal(monthly, "The key's own limit resets monthly, not daily. A running agent can spend up to the key's own limit; Switchboard's ceiling only decides whether it is started.");
+    assert.match(logic.ceilingWarning(5, { limit: 20, limit_reset: 'weekly' }), /resets weekly, not daily/);
+    assert.match(logic.ceilingWarning(5, { limit: 20, limit_reset: null }), /never resets/);
+    assert.equal(logic.ceilingWarning(5, { limit: 10, limit_reset: 'daily' }), "The key's own limit, $10.00 a day, is higher than this ceiling. A running agent can spend up to the key's own limit; Switchboard's ceiling only decides whether it is started.");
+    assert.match(logic.ceilingWarning(5, { limit: null, limit_reset: null }), /no spending limit of its own/);
+    assert.equal(logic.ceilingWarning(5, { limit: 5, limit_reset: 'daily' }), null, 'a daily limit no higher than the ceiling: nothing to warn');
+    assert.equal(logic.ceilingWarning(5, null), null, 'the key was not read: nothing to say');
+    assert.equal(logic.ceilingWarning(null, { limit: 20, limit_reset: 'monthly' }), null, 'no ceiling: nothing to compare');
+  });
+  // The ceiling line on the machine panel and each group row.
+  check(() => {
+    assert.equal(logic.ceilingLine(null), 'Daily ceiling: not set');
+    assert.equal(logic.ceilingLine({ usd: 5, doubled_from: null, active: true }), 'Daily ceiling: $5.00');
+    assert.equal(logic.ceilingLine({ usd: 10, doubled_from: 5, active: true }), 'Daily ceiling: $10.00, doubled from $5.00');
+    assert.equal(logic.ceilingLine({ usd: 3, doubled_from: null, active: false }), 'Inactive: this group has no key of its own now. Daily ceiling: $3.00');
+    assert.equal(logic.dollars(1000), '$1000.00');
+    assert.equal(logic.keyLimitLine({ limit: 20, limit_reset: 'monthly' }), "Key's own limit: $20.00, resets monthly");
+    assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: 'daily' }), "Key's own limit: $10.00, resets daily");
+    assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: null }), "Key's own limit: $10.00, never resets");
+    assert.equal(logic.keyLimitLine({ limit: null, limit_reset: null }), "Key's own limit: none");
+  });
+}
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

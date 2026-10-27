@@ -3,7 +3,7 @@ import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
+import type { PassioncodeStatus, Ceilings, CeilingView, CeilingQuestionView, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -42,6 +42,22 @@ export function createDemoAdapter(): Adapter {
   // SB-144: project pools with an OpenRouter key of their own (values never kept in the demo).
   const projectKeys = new Map<string, { saved_at: number; model: string | null }>();
   const openrouter: OpenrouterStatus = { service: 'openrouter', saved: false, saved_at: null, model: null, credit: null, credit_error: null };
+  // C-7 (SB-72): every state of the spending ceilings by `?ceilings=` (set, reached, failed);
+  // synthetic only. `set` and `reached` save a machine key (daily limit $10) and a key of its own
+  // for Alpha Web (monthly limit $20, so its warning shows), with a ceiling on each and on one task.
+  const ceilingsParam = new URLSearchParams(location.search).get('ceilings');
+  let demoCeilings: CeilingView[] = [];
+  let demoQuestions: CeilingQuestionView[] = [];
+  const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
+  if (ceilingsParam === 'set' || ceilingsParam === 'reached') {
+    Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'xiaomi/mimo-v2.6-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
+    projectKeys.set('alpha-web', { saved_at: now() - 3600, model: 'xiaomi/mimo-v2.6-pro' });
+    demoCeilings = [ceilingView({ kind: 'machine' }, 1000), ceilingView({ kind: 'project', pool: 'alpha-web' }, 300), ceilingView({ kind: 'workflow', id: 'wf_0123456789abcdef' }, 200)];
+  }
+  if (ceilingsParam === 'reached') demoQuestions = [
+    { id: 'q_0123456789abcdef', scope: { kind: 'machine' }, cents: 1000, usd: 10, double_usd: 20, spent: 10.04, reached_at: now() - 1500 },
+    { id: 'q_fedcba9876543210', scope: { kind: 'project', pool: 'alpha-web' }, cents: 300, usd: 3, double_usd: 6, spent: 3.1, reached_at: now() - 600 },
+  ];
   const setup: AgentSetup = { cli_path: null, bundled_cli: '/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard', linked_cli: null, can_link: true, commands: { claude_code: 'claude mcp add --scope user switchboard -- switchboard mcp', codex: 'codex mcp add switchboard -- switchboard mcp', claude_plugin: 'claude plugin marketplace add passioncode-ai/fabric-switchboard && claude plugin install switchboard@switchboard' }, connected: { claude_code: true, codex: false }, agent_prompt: 'Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.', proved: { client: 'claude-code', at: now() - 3600 } };
   state.accounts[0].external_identity = studio;
   state.accounts[1].external_identity = codexIdentity;
@@ -528,6 +544,35 @@ export function createDemoAdapter(): Adapter {
       demoChains.push(chain);
       log('fallback_chain', '', 'set');
       return { chain: structuredClone(chain) };
+    },
+    async ceilings() {
+      await pause();
+      if (ceilingsParam === 'failed') throw new Error('Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.');
+      for (const c of demoCeilings) { const own = c.scope.kind !== 'project' || projectKeys.has(c.scope.pool); c.active = own; c.inactive_reason = own ? null : 'no_own_key'; }
+      const view: Ceilings = { ceilings: demoCeilings, questions: demoQuestions, last_handover: lastHandover, limits: { min_usd: 0.01, max_usd: 1000, min_remaining_usd: 0.5 } };
+      return structuredClone(view);
+    },
+    async setCeiling(scope, usd) {
+      await pause();
+      const cents = usd === null ? null : Math.round(usd * 100);
+      if (cents !== null && (!Number.isFinite(cents) || cents < 1 || cents > 100_000)) throw new Error('Enter an amount from $0.01 to $1,000.');
+      if (cents !== null && scope.kind === 'project' && !projectKeys.has(scope.pool)) throw new Error('Give this group its own key under API keys first.');
+      demoCeilings = demoCeilings.filter((c) => scopeKey(c.scope) !== scopeKey(scope));
+      demoQuestions = demoQuestions.filter((q) => scopeKey(q.scope) !== scopeKey(scope));
+      if (cents !== null) demoCeilings.push(ceilingView(structuredClone(scope), cents));
+      log('ceiling', '', cents === null ? 'cleared' : 'set');
+    },
+    async answerCeiling(id, answer) {
+      await pause();
+      const q = demoQuestions.find((x) => x.id === id);
+      const c = q && demoCeilings.find((x) => scopeKey(x.scope) === scopeKey(q.scope) && x.cents === q.cents);
+      if (!q || !c) throw new Error('No open question with that id: it was answered, or its ceiling changed or was removed.');
+      if (answer === 'double') {
+        if (q.cents * 2 > 100_000) throw new Error('Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.');
+        Object.assign(c, { cents: q.cents * 2, usd: (q.cents * 2) / 100, doubled_from: q.usd, set_at: now() });
+      }
+      demoQuestions = demoQuestions.filter((x) => x.id !== id);
+      return { answer, ceiling: structuredClone(c) };
     },
     async agentEnable(agent, enabled) { await pause(); if (!catalogAgents.some((a) => a.id === agent)) throw new Error('No such agent in the catalog. Run switchboard agents list.'); agentDisabled.delete(agent); if (!enabled) { agentDisabled.add(agent); if (agentDefault === agent) agentDefault = null; } },
     async agentDefault(agent) { await pause(); if (agent && !SWITCHABLE.includes(agent)) throw new Error('Switchboard cannot hand work to this agent yet, so it cannot be the default.'); if (agent && agentDisabled.has(agent)) throw new Error('This agent is disabled for taking over work. Enable it on the Agents page, then try again.'); agentDefault = agent; },
