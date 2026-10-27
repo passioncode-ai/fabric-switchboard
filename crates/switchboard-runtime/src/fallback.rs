@@ -3303,7 +3303,14 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(refused, spend::STOP_CEILING_REACHED);
+        // A hand-over to the console launches in place, which Windows does not have yet: there
+        // it is refused for that, before any spend is read, and nothing is queued either.
+        let expected = if cfg!(windows) {
+            crate::launch::IN_PLACE_UNSUPPORTED
+        } else {
+            spend::STOP_CEILING_REACHED
+        };
+        assert_eq!(refused, expected);
         assert!(crate::handovers::pending(root.path()).is_empty());
         // On the default agent: Hermes, refused the same way. Written as the file holds it:
         // `set_default` refuses an agent this computer lacks, and a CI runner has no Hermes.
