@@ -81,10 +81,20 @@ pub(crate) fn sh_quote(value: &str) -> String {
 pub(crate) fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
 }
-/// `value` as one single-quoted string of PowerShell (a quote is doubled; nothing else is
-/// special there, `$` and the backtick included).
+/// `value` as one single-quoted string of PowerShell. Every character PowerShell reads as a
+/// single quote is doubled: U+0027 and the typographic U+2018, U+2019, U+201A and U+201B;
+/// nothing else is special there, `$` and the backtick included.
 pub(crate) fn ps_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 /// The hook script for `kind`, calling the CLI at `cli` with the data folder `data`. None when

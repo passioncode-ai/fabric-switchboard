@@ -1868,7 +1868,7 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
 ## The terminal hook for PowerShell (SB-183, node A-8, 2026-10-27)
 
 Code: `switchboard_runtime::shell::windows` (`profile_path`, `profile_paths`, `Policy`,
-`effective`, `group_policy`, `config_policy`, `Host`, `process_host`), the template
+`effective`, `profile_policy`, `group_policy`, `config_policy`, `Host`, `process_host`), the template
 `crates/switchboard-runtime/src/shell/hook.ps1`, `shell::install` (`Host::windows`, state
 `policy_blocked`), CLI `switchboard shell init pwsh`. Design:
 [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) row A-8; A-Q4 (the
@@ -1908,16 +1908,28 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   `$?` and `$LASTEXITCODE` it would have seen. A location that is not a file system folder
   (`HKLM:`) reads as `none`. Every function is `global:` and every error is caught, so the file
   works in any scope and never fails the profile. A prompt defined after the block replaces the
-  wrapper. Tests: `windows::tests::the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global`,
+  wrapper. The CLI and data paths are single-quoted with every character PowerShell reads as a
+  single quote doubled (U+0027 and the typographic U+2018, U+2019, U+201A, U+201B), and the CLI
+  path loses the `\\?\` prefix a canonical Windows path carries (`\\?\UNC\` becomes `\\`;
+  `install::plain_path`). A variable the hook gives back as unset is removed with
+  `[NullString]::Value`: a bare `$null` reaches .NET as an empty string, which .NET 9
+  (PowerShell 7.5 and later) keeps as an empty value. Tests:
+  `windows::tests::the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global` (with
+  PowerShell present, the written file also parses with no error through
+  `[System.Management.Automation.Language.Parser]::ParseFile`),
   `the_ps1_transition_matches_the_posix_one` (in a real `pwsh` against the POSIX tests' stub CLI;
-  skipped with the reason where PowerShell is not installed, which was the case on 2026-10-27),
+  run with PowerShell 7.6.9 on macOS on 2026-10-27, where it caught the empty-value restore;
+  skipped with the reason where PowerShell is not installed),
+  `install::tests::the_cli_a_hook_names_has_no_verbatim_prefix`,
   CLI `shell_init_pwsh_prints_the_powershell_hook_naming_this_cli`.
 - **The execution policy** is read, never changed, and no process is started for it: the scopes of
   `Get-ExecutionPolicy -List` in its order (MachinePolicy, UserPolicy, Process, CurrentUser,
-  LocalMachine), the first set wins, none set (or `Default`) is `Restricted` on a Windows client
+  LocalMachine), the first set wins, except Process (`PSExecutionPolicyPreference`): that scope
+  belongs to the process reading it, here the app, and a terminal the person opens starts with
+  its own, so it is never read (`profile_policy`); none set (or `Default`) is `Restricted` on a Windows client
   and `RemoteSigned` on Windows Server (`InstallationType`). 5.1: Group Policy
   `HKLM`/`HKCU\SOFTWARE\Policies\Microsoft\Windows\PowerShell` (`EnableScripts` 0 is
-  `Restricted`, 1 applies `ExecutionPolicy`), Process `PSExecutionPolicyPreference`, CurrentUser and
+  `Restricted`, 1 applies `ExecutionPolicy`), CurrentUser and
   LocalMachine `HKCU`/`HKLM\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`
   `ExecutionPolicy`. 7: Group Policy `...\Policies\Microsoft\PowerShellCore` (or 5.1's when
   `UseWindowsPowerShellPolicySetting` is 1), CurrentUser `<Documents>\PowerShell\powershell.config.json`
@@ -1925,16 +1937,20 @@ execution policy is never changed) and A-Q7 (no carried links on Windows) assume
   `$PSHOME` that cannot be found is read as the file PowerShell 7 ships, `RemoteSigned`).
   `Restricted` loads no profile and `AllSigned` refuses the unsigned hook: that profile is not
   written (a block an earlier run wrote stays until `shell off`) and is recorded `policy_blocked`,
+  keeping what an earlier run did to it (`newline_added`, `created`), so `shell off` during the
+  block or after it is lifted still gives the person's bytes back and deletes a profile
+  Switchboard created,
   which the window, MCP `switchboard_shell_hook` and `shell status` show (SCN-075). The next run
   under a policy that allows local scripts writes it. Tests:
   `windows::tests::a_restricted_or_allsigned_policy_reads_as_policy_blocked`,
-  `install::tests::a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked`.
+  `install::tests::a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked`,
+  `a_policy_that_turns_blocked_keeps_what_off_gives_back`.
 - **Not covered.** Windows has no carried links (A-Q7): an organization's shell home there lacks
   the person's `CLAUDE.md`, skills and hooks. The run lock (`flock` on the data folder) does not
   exist on Windows. The Windows build is checked by `cargo xwin check --target
   x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli` (2026-10-27, exit 0); the
-  PowerShell hook has not run in PowerShell, and nothing of this has run on a Windows host
-  (SB-02).
+  PowerShell hook has run in PowerShell 7.6.9 on macOS only: Windows PowerShell 5.1 and a Windows
+  host have not run any of this (SB-02).
 
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 

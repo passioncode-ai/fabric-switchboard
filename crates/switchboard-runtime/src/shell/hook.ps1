@@ -37,7 +37,9 @@ if (-not [Environment]::GetEnvironmentVariable('SWITCHBOARD_SESSION') -and
                 if ($held[$n]['w']) {
                     [Environment]::SetEnvironmentVariable($name, $held[$n]['s'])
                 } else {
-                    [Environment]::SetEnvironmentVariable($name, $null)
+                    # [NullString]: a bare $null reaches .NET as an empty string, and since
+                    # .NET 9 (PowerShell 7.5) an empty value is kept, not removed.
+                    [Environment]::SetEnvironmentVariable($name, [NullString]::Value)
                 }
                 $held.Remove($n)
             }

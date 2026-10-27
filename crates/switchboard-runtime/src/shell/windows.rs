@@ -16,7 +16,8 @@
 //!   `powershell.config.json` (`<Documents>\PowerShell\` for the user, `$PSHOME` for the
 //!   machine). Group Policy sits under `Software\Policies\Microsoft\Windows\PowerShell` (5.1)
 //!   and `Software\Policies\Microsoft\PowerShellCore` (7), `EnableScripts` and
-//!   `ExecutionPolicy`; Process is `PSExecutionPolicyPreference`. `Restricted` loads no profile
+//!   `ExecutionPolicy`. The Process scope (`PSExecutionPolicyPreference`) is the reading
+//!   process's own, not a new terminal's, so it is never read ([`profile_policy`]). `Restricted` loads no profile
 //!   and `AllSigned` refuses the unsigned hook: both read as `policy_blocked`, and nothing is
 //!   written to that profile. No child process: registry values and files only.
 //!
@@ -121,6 +122,16 @@ pub fn effective(scopes: &Scopes, server: bool) -> Policy {
         Some(policy) => policy,
     }
 }
+/// The policy a new terminal's profile meets: [`effective`] without the Process scope. That
+/// scope (`PSExecutionPolicyPreference`) belongs to the process that reads it, here the app,
+/// and a terminal the person opens starts with its own.
+pub fn profile_policy(scopes: &Scopes, server: bool) -> Policy {
+    let terminal = Scopes {
+        process: None,
+        ..*scopes
+    };
+    effective(&terminal, server)
+}
 /// A Group Policy scope: `EnableScripts` 0 turns scripts off (`Restricted`), 1 applies
 /// `ExecutionPolicy`; without `EnableScripts` the policy is not configured.
 pub fn group_policy(enable_scripts: Option<u32>, policy: Option<&str>) -> Option<Policy> {
@@ -187,22 +198,16 @@ pub fn process_host() -> Option<Host> {
         "InstallationType",
     )
     .is_some_and(|kind| kind.starts_with("Server"));
-    let process = std::env::var("PSExecutionPolicyPreference")
-        .ok()
-        .and_then(|v| Policy::parse(&v));
     let mut editions = Vec::new();
     let desktop = std::env::var_os("SystemRoot")
         .map(|root| PathBuf::from(root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe"));
     if desktop.is_some_and(|exe| exe.is_file()) {
-        editions.push((
-            Edition::Desktop,
-            effective(&desktop_scopes(process), server),
-        ));
+        editions.push((Edition::Desktop, profile_policy(&desktop_scopes(), server)));
     }
     let pshome = core_home();
     if pshome.is_some() || documents.join(Edition::Core.folder()).is_dir() {
-        let scopes = core_scopes(process, &documents, pshome.as_deref());
-        editions.push((Edition::Core, effective(&scopes, server)));
+        let scopes = core_scopes(&documents, pshome.as_deref());
+        editions.push((Edition::Core, profile_policy(&scopes, server)));
     }
     Some(Host {
         documents,
@@ -212,7 +217,7 @@ pub fn process_host() -> Option<Host> {
 
 /// Windows PowerShell 5.1's scopes, from the registry.
 #[cfg(windows)]
-fn desktop_scopes(process: Option<Policy>) -> Scopes {
+fn desktop_scopes() -> Scopes {
     use registry::Root;
     const SHELL: &str = r"SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell";
     const POLICY: &str = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell";
@@ -228,7 +233,8 @@ fn desktop_scopes(process: Option<Policy>) -> Scopes {
     Scopes {
         machine_policy: gpo(Root::Machine),
         user_policy: gpo(Root::User),
-        process,
+        // The app's own Process scope is not the terminal's (profile_policy).
+        process: None,
         current_user: set(Root::User),
         local_machine: set(Root::Machine),
     }
@@ -239,7 +245,7 @@ fn desktop_scopes(process: Option<Policy>) -> Scopes {
 /// `powershell.config.json`. A `$PSHOME` that cannot be found (an install reached only
 /// through an app alias on `PATH`) is read as the file PowerShell 7 ships, `RemoteSigned`.
 #[cfg(windows)]
-fn core_scopes(process: Option<Policy>, documents: &Path, pshome: Option<&Path>) -> Scopes {
+fn core_scopes(documents: &Path, pshome: Option<&Path>) -> Scopes {
     use registry::Root;
     const CORE: &str = r"SOFTWARE\Policies\Microsoft\PowerShellCore";
     const DESKTOP: &str = r"SOFTWARE\Policies\Microsoft\Windows\PowerShell";
@@ -265,7 +271,8 @@ fn core_scopes(process: Option<Policy>, documents: &Path, pshome: Option<&Path>)
     Scopes {
         machine_policy: gpo(Root::Machine),
         user_policy: gpo(Root::User),
-        process,
+        // The app's own Process scope is not the terminal's (profile_policy).
+        process: None,
         current_user: file(&documents.join(Edition::Core.folder()).join(config)),
         local_machine: match pshome {
             Some(home) => file(&home.join(config)),
@@ -474,6 +481,29 @@ mod tests {
             ..user
         };
         assert_eq!(effective(&process, false), Policy::AllSigned);
+        // A profile in a new terminal never meets the app's own Process scope.
+        let app = Scopes {
+            process: Some(Policy::Bypass),
+            current_user: Some(Policy::Restricted),
+            ..Scopes::default()
+        };
+        assert_eq!(profile_policy(&app, false), Policy::Restricted);
+        assert!(profile_policy(&app, false).blocks_profiles());
+        let app = Scopes {
+            process: Some(Policy::AllSigned),
+            ..user
+        };
+        assert_eq!(profile_policy(&app, false), Policy::RemoteSigned);
+        assert_eq!(
+            profile_policy(
+                &Scopes {
+                    process: Some(Policy::Bypass),
+                    ..Scopes::default()
+                },
+                true
+            ),
+            Policy::RemoteSigned
+        );
         let machine = Scopes {
             machine_policy: Some(Policy::AllSigned),
             user_policy: Some(Policy::Bypass),
@@ -553,6 +583,52 @@ mod tests {
         assert!(bytes.starts_with(b"\xef\xbb\xbf# Fabric Switchboard"));
         // Unchanged bytes are not written again.
         assert_eq!(scripts::write(&root, Kind::Pwsh, cli), Ok(false));
+
+        // PowerShell also ends a single-quoted string at U+2018, U+2019, U+201A and U+201B:
+        // each one is doubled too.
+        let typographic = Path::new("/Users/o\u{2019}brien \u{2018}a\u{201a}b\u{201b}/switchboard");
+        let text = scripts::script(Kind::Pwsh, typographic, data).unwrap();
+        assert!(
+            text.contains(
+                "$global:_switchboard_cli = '/Users/o\u{2019}\u{2019}brien \u{2018}\u{2018}a\u{201a}\u{201a}b\u{201b}\u{201b}/switchboard'"
+            ),
+            "{text}"
+        );
+        // With PowerShell on this machine, the written file parses with no error.
+        #[cfg(unix)]
+        let pwsh = transition::pwsh();
+        #[cfg(not(unix))]
+        let pwsh: Option<std::path::PathBuf> = None;
+        if let Some(pwsh) = pwsh {
+            let root = tmp.path().join("typographic");
+            std::fs::create_dir_all(&root).unwrap();
+            assert_eq!(scripts::write(&root, Kind::Pwsh, typographic), Ok(true));
+            let hook = scripts::hook_path(&root, Kind::Pwsh);
+            let command = format!(
+                "$e = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile({}, [ref]$null, [ref]$e); $e | ForEach-Object {{ $_.Message }}",
+                scripts::ps_quote(&hook.to_string_lossy())
+            );
+            let out = std::process::Command::new(pwsh)
+                .args([
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    &command,
+                ])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{out:?}");
+            let errors = String::from_utf8_lossy(&out.stdout);
+            assert!(errors.trim().is_empty(), "{errors}");
+            assert!(
+                out.stderr.is_empty(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        } else {
+            eprintln!("parse skipped: pwsh is not installed on this machine");
+        }
     }
 
     /// The POSIX shells' transition (`scripts::tests`) in a real PowerShell, against the same
@@ -576,7 +652,7 @@ mod tests {
         use std::path::{Path, PathBuf};
         use std::process::Command;
 
-        fn pwsh() -> Option<PathBuf> {
+        pub fn pwsh() -> Option<PathBuf> {
             let on_path = std::env::var_os("PATH").and_then(|path| {
                 std::env::split_paths(&path)
                     .map(|dir| dir.join("pwsh"))

@@ -236,11 +236,26 @@ pub fn installed_app(exe: &Path, home: Option<&Path>) -> bool {
 /// never names itself (its file goes with the next `cargo clean`), only an installed copy found
 /// the same way. None: no CLI to name.
 pub fn hook_cli() -> Option<PathBuf> {
-    if !cfg!(debug_assertions) {
-        return crate::launch::agent_cli();
+    let cli = if !cfg!(debug_assertions) {
+        crate::launch::agent_cli()
+    } else {
+        let current = std::env::current_exe().ok()?.canonicalize().ok()?;
+        crate::launch::installed_cli(&current)
+    };
+    cli.map(|p| plain_path(&p))
+}
+
+/// `path` as a script names it: without the `\\?\` prefix a canonical Windows path carries
+/// (`\\?\UNC\server\share` becomes `\\server\share`), which PowerShell's own path
+/// handling does not read as a plain file system path.
+pub(crate) fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix("\\\\?\\UNC\\") {
+        return PathBuf::from(format!("\\\\{rest}"));
     }
-    let current = std::env::current_exe().ok()?.canonicalize().ok()?;
-    crate::launch::installed_cli(&current)
+    PathBuf::from(text.strip_prefix("\\\\?\\").unwrap_or(text))
 }
 
 /// What the installer did to one start file.
@@ -703,9 +718,17 @@ fn install_one(
     }
     // The execution policy is read, never changed (A-Q4): the profile is left as it is, a block
     // in it from an earlier run included, until the policy lets it run.
+    // What an earlier run did to the file (a line break added, the file created) stays in the
+    // record, so `shell off` and a later relaxed policy still give it back.
     if target.policy_blocked {
         report.skipped += 1;
-        return Some(entry(State::PolicyBlocked, false));
+        return Some(Entry {
+            created: previous.is_some_and(|e| e.created),
+            ..entry(
+                State::PolicyBlocked,
+                previous.is_some_and(|e| e.newline_added),
+            )
+        });
     }
     let read = match read_start(&target.path, host) {
         Ok(read) => read,
@@ -1563,6 +1586,80 @@ mod tests {
         apply(&w.root, &w.host, true, false);
         assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
         assert!(!profile(&w, Edition::Core).exists());
+    }
+
+    /// A profile written while scripts ran, then blocked by a stricter policy: the record keeps
+    /// what Switchboard did to it, so `shell off` (during the block or after it is relaxed) gives
+    /// back the person's bytes and deletes the profile Switchboard created.
+    #[test]
+    fn a_policy_that_turns_blocked_keeps_what_off_gives_back() {
+        let mut w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let original = "Set-Alias ll Get-ChildItem";
+        let desktop = profile(&w, Edition::Desktop);
+        let core = profile(&w, Edition::Core);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, original).unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 2, "{report:?}");
+        assert!(core.is_file());
+        let blocked = |w: &mut World, policy: Policy| {
+            w.host.windows = Some(windows::Host {
+                documents: w.host.home.join("Documents"),
+                editions: vec![(Edition::Desktop, policy), (Edition::Core, policy)],
+            });
+        };
+        // Blocked: both profiles keep their block untouched, recorded as policy_blocked.
+        blocked(&mut w, Policy::AllSigned);
+        apply(&w.root, &w.host, true, false);
+        for path in [&desktop, &core] {
+            assert_eq!(state_of(&w, path), Some(State::PolicyBlocked));
+            assert!(block_in(&std::fs::read_to_string(path).unwrap()));
+        }
+        // Off while blocked: the person's bytes back, the created profile gone.
+        set_choice(&w.root, false).unwrap();
+        let off = apply(&w.root, &w.host, true, false);
+        assert_eq!(off.removed, 2, "{off:?}");
+        assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
+        assert!(!core.exists());
+
+        // On again, blocked, then relaxed: the flags survive the blocked run, so off still
+        // gives the same back.
+        set_choice(&w.root, true).unwrap();
+        blocked(&mut w, Policy::RemoteSigned);
+        apply(&w.root, &w.host, true, false);
+        blocked(&mut w, Policy::Restricted);
+        apply(&w.root, &w.host, true, false);
+        blocked(&mut w, Policy::RemoteSigned);
+        apply(&w.root, &w.host, true, false);
+        for path in [&desktop, &core] {
+            assert_eq!(state_of(&w, path), Some(State::Written));
+        }
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
+        assert!(!core.exists());
+    }
+
+    #[test]
+    fn the_cli_a_hook_names_has_no_verbatim_prefix() {
+        for (given, named) in [
+            (
+                r"\\?\C:\Program Files\Fabric Switchboard\switchboard.exe",
+                r"C:\Program Files\Fabric Switchboard\switchboard.exe",
+            ),
+            (
+                r"\\?\UNC\server\share\switchboard.exe",
+                r"\\server\share\switchboard.exe",
+            ),
+            (r"C:\tools\switchboard.exe", r"C:\tools\switchboard.exe"),
+            ("/usr/local/bin/switchboard", "/usr/local/bin/switchboard"),
+        ] {
+            assert_eq!(
+                plain_path(Path::new(given)),
+                PathBuf::from(named),
+                "{given}"
+            );
+        }
     }
 
     #[test]
