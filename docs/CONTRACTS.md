@@ -542,6 +542,15 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   names the order of recovery: delete it first, since a restore never writes over an existing
   setting. Tests in `spend::tests` and
   `spending_ceilings_are_set_read_and_answered_through_the_runtime`.
+  The window (0.7.0, C-7): Tauri commands `ceilings`, `set_ceiling {scope, usd}` (`usd: null`
+  clears) and `answer_ceiling {id, answer}` run in the app's own process and always send
+  `by: window`, the one surface that may raise, clear or double (C-Q1;
+  `tests::the_windows_ceiling_commands_speak_as_the_window` in `src-tauri/src/main.rs`). The
+  question's two answers share one class with no primary and no recommended flag
+  (`ceilingQuestion` in `src/ui-logic.ts`, `scripts/test-ui-logic.mjs`). The app's 15-second
+  look stats spend.json and, only when its stamp moved, reads the ceilings and posts one system
+  notification per newly opened question (`suggestions::reached_ceilings`,
+  `a_reached_ceiling_is_announced_once_per_question`), then emits `spend-changed` to the window.
 
 ## Automatic fallback, phase 1 (SB-73, 2026-10-06)
 

@@ -5,11 +5,11 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
+import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -258,7 +258,7 @@ function showNotice(text: string, error = false) { notice = t(text); noticeError
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
-  if (target === 'activity') void loadSessions(); if (target === 'agents') { void loadAgents(); void loadChains(); } if (target === 'projects') void loadChains(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
+  if (target === 'activity') void loadSessions(); if (target === 'agents') { void loadAgents(); void loadChains(); void loadCeilings(); } if (target === 'projects') void loadChains(); if (target === 'tokens') { groupKeyStatus = null; void loadOpenrouter(); void loadCeilings(); } if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
   render();
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
   else document.querySelector<HTMLElement>('h1')?.focus();
@@ -293,6 +293,7 @@ async function reload() {
   void loadBackups(readStamp);
   if (page === 'agents') void loadAgents();
   if (page === 'agents' || page === 'projects') void loadChains();
+  if (page === 'agents' || page === 'tokens') { groupKeyStatus = null; void loadCeilings(); }
   if (page === 'orgs') void loadPassioncode();
   void adapter.analytics().then((value) => { if (clock.accepts(readStamp)) { analyticsState = value; analyticsError = false; } }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { if (clock.accepts(readStamp)) { loginItem = value; loginItemError = false; } }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -835,6 +836,7 @@ const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).a
 /** SB-120: the Agents page — the default agent, what is installed and takes over work,
  * what can be installed, then the OpenRouter key and the tools registration. */
 function renderAgents(main: HTMLElement) {
+  ceilingBanners(main);
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
   else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
   else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), chainsPanel(), availableAgentsPanel(agentsView));
@@ -1114,13 +1116,16 @@ function hermesDialog() {
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
 async function loadOpenrouter(stamp?: number) {
-  try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; } } catch (error) { openrouterError = safeError(error, 'read'); }
+  try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; groupKeyStatus = null; } } catch (error) { openrouterError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** SB-144: the Tokens page: the key every folder uses, and each project's own. */
 function renderTokens(main: HTMLElement) {
   if (!openrouter && !openrouterError) void loadOpenrouter();
+  if (openrouterKeys && !groupKeyStatus) loadGroupKeys();
+  ceilingBanners(main);
   main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
+  const tasks = taskCeilingsPanel(); if (tasks) main.append(tasks);
 }
 /** On Agents, where the key used to be: one line to the Tokens page. */
 function tokensPointer() {
@@ -1147,10 +1152,132 @@ function projectKeysPanel() {
     const actions = el('div', 'management-actions');
     if (own) actions.append(button(t('Change model'), () => openrouterModelDialog(target), 'text-button', `key-model-${project.pool}`), button(t('Replace key'), () => openrouterKeyDialog(target), 'text-button', `key-replace-${project.pool}`), button(t('Remove key'), () => openrouterRemoveDialog(target), 'text-button danger-text', `key-remove-${project.pool}`));
     else actions.append(button(t('Add key…'), () => openrouterKeyDialog(target), 'text-button', `key-add-${project.pool}`));
-    item.append(actions); list.append(item);
+    item.append(actions);
+    item.append(groupCeilingLine(project.pool, !!own));
+    list.append(item);
   }
   section.append(list);
   return section;
+}
+/* C-7 (SB-72, SCN-083, SCN-084): spending ceilings in the window. The window is the only surface
+ * that may raise, clear or double a ceiling (C-Q1); the question has two answers of equal weight. */
+let ceilingsView: Ceilings | null = null;
+let ceilingsError = '';
+async function loadCeilings() {
+  const stamp = clock.stamp();
+  try { const view = await adapter.ceilings(); if (clock.accepts(stamp)) { ceilingsView = view; ceilingsError = ''; } } catch (error) { ceilingsError = safeError(error, 'read'); }
+  backgroundRender();
+}
+/** Each group key's status (its own limit at OpenRouter), read once per visit to API keys. */
+let groupKeyStatus: Record<string, OpenrouterStatus | null> | null = null; let groupKeysLoading = false;
+function loadGroupKeys() {
+  if (groupKeysLoading || !openrouterKeys) return;
+  groupKeysLoading = true;
+  const pools = openrouterKeys.keys.map((k) => k.pool).filter((pool): pool is string => !!pool);
+  void Promise.all(pools.map(async (pool) => [pool, await adapter.openrouterKeyStatus(pool).catch(() => null)] as const))
+    .then((rows) => { groupKeyStatus = Object.fromEntries(rows); })
+    .finally(() => { groupKeysLoading = false; backgroundRender(); });
+}
+const ceilingOf = (scope: ChainScope): CeilingView | null => ceilingsView?.ceilings.find((c) => scopeKey(c.scope) === scopeKey(scope)) ?? null;
+const ceilingAnchor = (scope: ChainScope) => scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project-${scope.pool}` : `workflow-${scope.id}`;
+/** One banner per open question, oldest first (SCN-084), on Agents and API keys. */
+function ceilingBanners(main: HTMLElement) {
+  if (ceilingsError) {
+    const failed = el('div', 'notice error stale-list'); failed.setAttribute('role', 'status');
+    // The core's own sentence for an unreadable file already says what failed; another error gets the lead.
+    const unreadable = ceilingsError.startsWith('Spending ceilings (spend.json) could not be read');
+    failed.append(el('span', '', unreadable ? t(ceilingsError) : `${t('Ceiling questions could not be read.')} ${t(ceilingsError)}`), button(t('Retry'), () => void loadCeilings(), 'text-button', 'ceilings-retry'));
+    main.append(failed);
+  }
+  for (const q of ceilingsView?.questions ?? []) main.append(ceilingBanner(q));
+}
+function ceilingBanner(q: CeilingQuestionView) {
+  const question = ceilingQuestion({ value: q.usd, double: q.double_usd, kind: q.scope.kind, scope: q.scope.kind === 'machine' ? undefined : q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : scopeLabel(q.scope) });
+  const banner = el('section', 'login-banner ceiling-banner'); const id = `ceiling-question-${q.id}`;
+  banner.setAttribute('role', 'group'); banner.setAttribute('aria-labelledby', id);
+  const copy = el('div', 'login-copy'); const lead = el('strong', '', question.text); lead.id = id;
+  copy.append(lead, el('span', '', t('Reached {time}. No paid agent starts past it until you answer.', { time: date(q.reached_at) })));
+  if (question.note) copy.append(el('span', '', question.note));
+  const actions = el('div', 'login-actions ceiling-actions');
+  for (const action of question.actions) {
+    const control = button(action.label, () => void answerCeiling(q, action.answer), action.className, `ceiling-${action.answer}-${q.id}`);
+    if (action.disabled) { control.disabled = true; control.dataset.locked = 'true'; }
+    actions.append(control);
+  }
+  banner.append(copy, actions);
+  return banner;
+}
+function answerCeiling(q: CeilingQuestionView, answer: 'keep' | 'double') {
+  const usd = dollars(answer === 'double' ? q.double_usd ?? q.usd * 2 : q.usd);
+  const group = scopeLabel(q.scope); const task = q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : '';
+  const success = answer === 'double'
+    ? (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling is now {usd}.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} is now {usd}.', { group, usd }) : t('The ceiling of task {id} is now {usd}.', { id: task, usd }))
+    : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
+  void mutate(async () => { await adapter.answerCeiling(q.id, answer); ceilingsView = await adapter.ceilings(); }, success, 'page-title');
+}
+/** The ceiling of this computer (machine panel) or a group (its key row), beside the key's own limit. */
+function ceilingBlock(scope: ChainScope, credit: OpenrouterCredit | null) {
+  const block = el('div', 'ceiling-block'); const anchor = ceilingAnchor(scope);
+  if (!ceilingsView) { block.append(el('p', 'form-note', ceilingsError ? t('Daily ceiling: not read') : t('Reading spending ceilings…'))); return block; }
+  const ceiling = ceilingOf(scope);
+  block.append(el('p', 'ceiling-line', ceilingLine(ceiling)));
+  if (scope.kind === 'machine') block.append(el('p', 'form-note', t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.')));
+  else if (credit) block.append(el('p', 'form-note', keyLimitLine(credit)));
+  const warning = ceiling?.active ? ceilingWarning(ceiling.usd, credit) : null;
+  if (warning) block.append(el('p', 'ceiling-warning', warning));
+  const actions = el('div', 'management-actions');
+  const canSet = scope.kind === 'machine' || !!ceiling?.active || (scope.kind === 'project' && !!openrouterKeys?.keys.some((k) => k.pool === scope.pool));
+  if (canSet) actions.append(button(t('Set ceiling…'), () => ceilingDialog(scope, ceiling, `ceiling-set-${anchor}`), scope.kind === 'machine' ? 'button' : 'text-button', `ceiling-set-${anchor}`));
+  if (ceiling) actions.append(button(t('Clear'), () => clearCeilingDialog(scope, ceiling, canSet ? `ceiling-set-${anchor}` : 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
+  block.append(actions);
+  return block;
+}
+/** A group key row's ceiling: its line with the key's own limit, or why it has none. */
+function groupCeilingLine(pool: string, own: boolean) {
+  if (own || ceilingOf({ kind: 'project', pool })) return ceilingBlock({ kind: 'project', pool }, own ? groupKeyStatus?.[pool]?.credit ?? null : null);
+  const block = el('div', 'ceiling-block'); block.append(el('p', 'form-note', t('A daily ceiling needs the group\'s own key.'))); return block;
+}
+/** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here. */
+function taskCeilingsPanel() {
+  const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
+  if (!tasks.length) return null;
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'task-ceilings-heading');
+  const heading = el('h2', '', t('Task ceilings')); heading.id = 'task-ceilings-heading';
+  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), el('p', 'form-note', t('Set from the command line: switchboard continue --ceiling <usd>.')));
+  const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Task ceilings'));
+  for (const c of tasks) {
+    const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
+    text.append(el('span', 'repository-name', scopeLabel(c.scope)), el('span', 'folder-note', ` · ${dollars(c.usd)}`));
+    const anchor = ceilingAnchor(c.scope);
+    item.append(text, button(t('Clear'), () => clearCeilingDialog(c.scope, c, 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFocus: string) {
+  const name = scopeLabel(scope);
+  const context = openDialog(scope.kind === 'machine' ? t('Daily ceiling for this computer') : t('Daily ceiling for {group}', { group: name }), scope.kind === 'machine' ? t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.') : t('Counts this group\'s own key, per UTC day.'), returnFocus);
+  const amount = input(current ? current.usd.toFixed(2) : '', 'number'); amount.min = '0.01'; amount.max = '1000'; amount.step = '0.01'; amount.inputMode = 'decimal';
+  const grid = el('div', 'form-grid');
+  grid.append(field(t('Dollars per UTC day'), amount, t('From $0.01 to $1,000. When it is reached, no paid agent starts until you answer.')));
+  context.body.append(grid); context.actions.append(submit(t('Save ceiling')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = Number(amount.value);
+    if (!Number.isFinite(value) || value < 0.01 || value > 1000) { context.error.textContent = t('Enter an amount from $0.01 to $1,000.'); amount.focus(); return; }
+    const usd = dollars(Math.round(value * 100) / 100);
+    void dialogSave(context, async () => { await adapter.setCeiling(scope, Math.round(value * 100) / 100); ceilingsView = await adapter.ceilings(); }, scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd }));
+  });
+  amount.focus();
+}
+function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus: string) {
+  const name = scopeLabel(scope); const usd = dollars(ceiling.usd);
+  const question = scope.kind === 'machine' ? t('Remove this computer\'s daily ceiling of {usd}?', { usd }) : scope.kind === 'project' ? t('Remove the daily ceiling of {group}, {usd}?', { group: name, usd }) : t('Remove the ceiling of task {id}, {usd}?', { id: shortWorkflow(scope.id), usd });
+  const context = openDialog(question, t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
+  const confirm = submit(t('Remove ceiling')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setCeiling(scope, null); ceilingsView = await adapter.ceilings(); }, t('Ceiling removed.')); });
+  context.actions.querySelector('button')?.focus();
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
 /** SB-79: one OpenRouter key that agents launched from Switchboard run on (SCN-045). */
@@ -1163,6 +1290,8 @@ function openrouterPanel() {
   if (!openrouter) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
   if (!openrouter.saved) {
     section.append(el('p', 'form-note', t('No key is saved.')), button(t('Add OpenRouter key'), () => openrouterKeyDialog(), 'button primary', 'openrouter-add'));
+    // This computer's ceiling adds up every saved key, so it is shown while a group's key is saved too.
+    if (openrouterKeys?.keys.length || ceilingOf({ kind: 'machine' })) { const ceiling = ceilingBlock({ kind: 'machine' }, null); ceiling.classList.add('is-machine'); section.append(ceiling); }
     return section;
   }
   const facts = el('div', 'openrouter-facts');
@@ -1173,6 +1302,8 @@ function openrouterPanel() {
   const actions = el('div', 'management-actions');
   actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
   section.append(actions, el('p', 'form-note', t('Launch an agent on the key from Agents: its Set up button under Installed. CLI: switchboard agents launch <agent> --openrouter.')));
+  // C-7: this computer's spending ceiling, set apart from the key's own actions.
+  const ceiling = ceilingBlock({ kind: 'machine' }, openrouter.credit); ceiling.classList.add('is-machine'); section.append(ceiling);
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
@@ -2739,6 +2870,8 @@ function backgroundRefresh() {
     if (page === 'accounts' || page === 'orgs') loadOnboarding();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
+    // C-7: the ceilings are a local file read, only while a page that shows them is on screen.
+    if (page === 'agents' || page === 'tokens') void loadCeilings();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
@@ -2749,6 +2882,8 @@ setInterval(backgroundRefresh, 60_000);
 onProjectSuggestions(() => backgroundRefresh());
 // SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window says so once.
 onShellHook(() => { shellHookState = null; checkShellHookNotice(); backgroundRefresh(); });
+// C-7 (SB-72): spend.json changed (a ceiling reached, set or answered); the questions are read again at once.
+onSpendChanged(() => { void loadCeilings(); });
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });

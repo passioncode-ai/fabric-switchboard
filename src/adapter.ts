@@ -17,6 +17,11 @@ export function onShellHook(callback: () => void) {
   if (!native) return;
   void import('@tauri-apps/api/event').then(({ listen }) => listen('shell-hook', () => callback())).catch(() => { /* read again when the window is shown */ });
 }
+/** SB-72 (C-7): spend.json changed (a ceiling set or answered, a question opened); the window reads the ceilings again. */
+export function onSpendChanged(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('spend-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => readWithDeadline(invoke('snapshot')),
@@ -77,6 +82,9 @@ export const nativeAdapter: Adapter = {
   agentsOverview: () => readWithDeadline(invoke('agents_overview'), 20_000),
   chains: () => readWithDeadline(invoke('chains'), 20_000),
   setChain: (scope, executors, preset) => invoke('set_chain', { scope, executors, preset: preset ?? null }),
+  ceilings: () => readWithDeadline(invoke('ceilings')),
+  setCeiling: (scope, usd) => invoke('set_ceiling', { scope, usd }),
+  answerCeiling: (id, answer) => invoke('answer_ceiling', { id, answer }),
   agentEnable: (agent, enabled) => invoke('agent_enable', { agent, enabled }),
   agentDefault: (agent) => invoke('agent_default', { agent }),
   openrouterModels: () => readWithDeadline(invoke('openrouter_models'), 20_000),

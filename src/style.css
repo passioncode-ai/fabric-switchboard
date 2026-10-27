@@ -584,3 +584,14 @@ g:hover > .chart-bar { opacity: .82; }
 .shell-hook-files { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
 .shell-hook-files > li { margin: 0; }
 .shell-hook-files .policy-row { margin-top: var(--space-1); }
+/* C-7 (SB-72): spending ceilings. A group key row wraps so its ceiling reads on its own line. */
+.key-list .repository-row { flex-wrap: wrap; }
+.ceiling-block { flex-basis: 100%; display: grid; gap: var(--space-1); margin: 0; }
+.ceiling-block.is-machine { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.key-list .repository-row { row-gap: var(--space-1); }
+.ceiling-block p { margin: 0; overflow-wrap: anywhere; }
+.ceiling-block .management-actions { margin-top: var(--space-1); }
+.ceiling-line { color: var(--ink); font-weight: 600; }
+.ceiling-warning { color: var(--ink); border-left: 3px solid var(--warn); padding-left: var(--space-2); }
+/* The question's two answers carry one class and share the space equally: neither leads (SCN-084). */
+.ceiling-actions .ceiling-answer { flex: 1 1 0; min-width: 8.5rem; white-space: nowrap; }
