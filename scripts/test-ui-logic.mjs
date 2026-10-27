@@ -1097,4 +1097,70 @@ check(() => {
     assert.deepEqual(logic.orgSetups(lonely), [], 'PassionCode.ai listing none: no card');
   });
 }
+// C-3 (SB-71): the fallback chains panel and its editor.
+{
+  // Move up and Move down give the new order; a move past either end changes nothing.
+  check(() => {
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 1, -1), ['codex', 'claude-code']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex', 'hermes'], 0, 1), ['codex', 'claude-code', 'hermes']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 0, -1), ['claude-code', 'codex']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 1, 1), ['claude-code', 'codex']);
+    const list = ['a', 'b']; logic.moveStep(list, 1, -1); assert.deepEqual(list, ['a', 'b'], 'the list given is not changed');
+  });
+  // The account choice mirrors the core's rules (chains.rs validate_executor) and what the fallback runs.
+  check(() => {
+    const subscription = { id: 'c1', label: 'Work Max', provider: 'claude', kind: 'oauth', enabled: true };
+    const claudeApi = { id: 'c2', label: 'Claude API', provider: 'claude', kind: 'api_key', enabled: true };
+    const codex = { id: 'x1', label: 'Codex Pro', provider: 'codex', kind: 'oauth', enabled: true };
+    const off = { id: 'c3', label: 'Old', provider: 'claude', kind: 'oauth', enabled: false };
+    const kimi = [{ id: 'k1', label: 'Kimi one' }];
+    assert.deepEqual(logic.accountsForStep('hermes', [subscription]), [], 'another agent never runs on a subscription sign-in');
+    assert.deepEqual(logic.accountsForStep('opencode', [claudeApi], kimi), [], 'OpenRouter agents run on the key, never pinned');
+    assert.deepEqual(logic.accountsForStep('claude-code', [subscription, claudeApi, codex, off]).map((a) => a.id), ['c1', 'c2']);
+    assert.deepEqual(logic.accountsForStep('codex', [subscription, codex]).map((a) => a.id), ['x1']);
+    assert.deepEqual(logic.accountsForStep('kimi-code', [subscription, codex], kimi), [{ id: 'k1', label: 'Kimi one' }]);
+    assert.deepEqual(logic.accountsForStep('aider', [claudeApi]), [], 'an agent the fallback cannot run gets no pin');
+  });
+  // The chain in one line, its steps in order with a pinned account named.
+  check(() => {
+    const names = { 'claude-code': 'Claude Code', codex: 'Codex', 'kimi-code': 'Kimi Code', hermes: 'Hermes' };
+    const nameOf = (id) => names[id] ?? id;
+    assert.equal(logic.chainSummary([], nameOf), 'Not set');
+    assert.equal(logic.chainSummary(null, nameOf), 'Not set');
+    assert.equal(logic.chainSummary(['claude-code', 'codex', 'kimi-code', 'hermes'].map((agent) => ({ agent })), nameOf), 'Claude Code → Codex → Kimi Code → Hermes');
+    assert.equal(logic.chainSummary([{ agent: 'codex', account_id: 'x1' }, { agent: 'opencode' }], nameOf, (id) => (id === 'x1' ? 'Codex Pro' : undefined)), 'Codex (Codex Pro) → opencode');
+    assert.equal(logic.chainSummary([{ agent: 'hermes', key: 'alpha/prod/OPENROUTER_API_KEY' }], nameOf), 'Hermes (key alpha/prod/OPENROUTER_API_KEY)');
+  });
+  // One readiness line per step, for every state and reason the chains view gives.
+  check(() => {
+    const step = (state, reason = null, extra = {}) => ({ agent: 'claude-code', name: 'Claude Code', state, reason, paid: false, ...extra });
+    assert.equal(logic.stepReasonText(step('ready', null, { account_label: 'Work Max' })), 'Ready: Work Max');
+    assert.equal(logic.stepReasonText(step('ready')), 'Ready');
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'group', spend: null }), 'Alpha web'), 'Ready: the key of Alpha web. Spend not read yet.');
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'machine', spend: null })), "Ready: this computer's key. Spend not read yet.");
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, account_label: 'Claude API' })), 'Ready: Claude API. Spend not read yet.');
+    assert.equal(logic.stepReasonText(step('skipped', 'no_usable_account')), 'Skipped: no account with room');
+    assert.equal(logic.stepReasonText(step('skipped', 'agent_disabled')), 'Skipped: disabled under Installed');
+    assert.equal(logic.stepReasonText(step('skipped', 'sign_in_required')), 'Skipped: needs a sign-in');
+    assert.equal(logic.stepReasonText(step('skipped', 'agent_settings_unreadable')), 'Skipped: agent settings could not be read');
+    assert.equal(logic.stepReasonText(step('skipped', 'ceiling_reached')), "Skipped: today's ceiling reached");
+    assert.equal(logic.stepReasonText(step('skipped', 'key_exhausted')), 'Skipped: less than $0.50 left on the key');
+    assert.equal(logic.stepReasonText(step('skipped', 'spend_unknown')), 'Skipped: spend could not be read');
+    assert.equal(logic.stepReasonText(step('skipped', 'something_new')), 'Skipped (something_new)');
+    assert.equal(logic.stepReasonText(step('not_automatic', 'agent_not_automatic_yet')), 'Not automatic yet');
+    assert.equal(logic.stepReasonText(step('not_automatic', 'key_pinned', { key: 'alpha/prod/OPENROUTER_API_KEY' })), 'Pinned to key alpha/prod/OPENROUTER_API_KEY: not automatic yet (waits for project grants)');
+    assert.equal(logic.stepReasonText(step('not_installed')), 'Not installed');
+  });
+  // The last hand-over in a line: its outcome, then the steps passed over with their reasons.
+  check(() => {
+    const nameOf = (id) => ({ hermes: 'Hermes', codex: 'Codex' })[id] ?? id;
+    assert.equal(logic.handoverOutcomeText('offered'), 'handed over');
+    assert.equal(logic.handoverOutcomeText('launch_failed'), 'the launch failed after the offer');
+    assert.equal(logic.handoverOutcomeText('every_step_refused'), 'every step was refused');
+    assert.equal(logic.handoverOutcomeText('no_usable_executor'), 'no agent could take it');
+    assert.equal(logic.handoverOutcomeText('ceiling_reached'), "today's ceiling reached");
+    assert.deepEqual(logic.handoverSkipped([{ agent: 'hermes', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }], nameOf), ['Hermes: no account with room', 'Codex: disabled under Installed']);
+    assert.equal(logic.shortWorkflow('wf_0123456789abcdef'), 'wf_01234567');
+  });
+}
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

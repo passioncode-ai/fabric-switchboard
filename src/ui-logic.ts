@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep } from './types';
+import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
@@ -737,6 +737,81 @@ export function defaultAgentChoices(agents: Pick<AgentRow, 'id' | 'name' | 'enab
   }
   return choices;
 }
+/** C-3 (SB-71): a step moved one place up (`delta` -1) or down (+1); a move past either end
+ * changes nothing. A new list: the one given stays as it was. */
+export function moveStep<T>(steps: readonly T[], index: number, delta: number): T[] {
+  const next = [...steps]; const to = index + delta;
+  if (index < 0 || index >= next.length || to < 0 || to >= next.length) return next;
+  [next[index], next[to]] = [next[to], next[index]];
+  return next;
+}
+/** The saved accounts a chain step may be pinned to, mirroring the core's rules
+ * (`chains.rs validate_executor`) and what the fallback runs (`fallback.rs resolve_with`): Claude
+ * Code on Claude accounts, Codex on Codex accounts, Kimi Code on saved Kimi Code accounts. Hermes
+ * and OpenCode run on the OpenRouter key, and a pinned account would only make them wait, so they
+ * get none; another agent never runs on a subscription sign-in. Disabled accounts are never used. */
+export function accountsForStep<A extends Pick<Account, 'id' | 'label' | 'provider' | 'enabled'>>(agent: string, accounts: readonly A[], kimiAccounts: readonly { id: string; label: string }[] = []): { id: string; label: string }[] {
+  if (agent === 'kimi-code') return kimiAccounts.map((k) => ({ id: k.id, label: k.label }));
+  const provider = agent === 'claude-code' ? 'claude' : agent === 'codex' ? 'codex' : null;
+  if (!provider) return [];
+  return accounts.filter((a) => a.provider === provider && a.enabled).map((a) => ({ id: a.id, label: a.label }));
+}
+/** A chain in one line, its steps in order: “Claude Code → Codex”, a pinned account or key in
+ * brackets; no chain reads “Not set”. */
+export function chainSummary(executors: readonly ChainExecutor[] | null | undefined, nameOf: (agent: string) => string, accountLabel: (id: string) => string | undefined = () => undefined): string {
+  if (!executors?.length) return t('Not set');
+  return executors.map((e) => {
+    const name = nameOf(e.agent);
+    if (e.key) return t('{agent} (key {key})', { agent: name, key: e.key });
+    const label = e.account_id ? accountLabel(e.account_id) ?? e.account_id : null;
+    return label ? `${name} (${label})` : name;
+  }).join(' → ');
+}
+/** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
+ * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
+export function skipReasonText(reason: string | null | undefined): string | null {
+  switch (reason) {
+    case 'no_usable_account': return t('no account with room');
+    case 'agent_disabled': return t('disabled under Installed');
+    case 'sign_in_required': return t('needs a sign-in');
+    case 'agent_settings_unreadable': return t('agent settings could not be read');
+    case 'agent_not_automatic_yet': case 'key_pinned': return t('not automatic yet');
+    case 'ceiling_reached': return t('today\'s ceiling reached');
+    case 'key_exhausted': return t('less than $0.50 left on the key');
+    case 'spend_unknown': return t('spend could not be read');
+    case 'ceilings_unreadable': return t('spending ceilings could not be read');
+    default: return null;
+  }
+}
+/** One readiness line for a step (SCN-082): ready on which account or key, or why not. A paid
+ * step's spend is read only at a hand-over, so the window says it has not been read. */
+export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key'>, groupName?: string): string {
+  if (step.state === 'ready') {
+    const where = step.key_scope === 'group' ? (groupName ? t('the key of {group}', { group: groupName }) : t('the group\'s key')) : step.key_scope === 'machine' ? t('this computer\'s key') : step.account_label ?? '';
+    const line = where ? t('Ready: {where}', { where }) : t('Ready');
+    return step.paid ? `${line}. ${t('Spend not read yet.')}` : line;
+  }
+  if (step.state === 'not_installed') return t('Not installed');
+  if (step.state === 'not_automatic') return step.reason === 'key_pinned' && step.key ? t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key }) : t('Not automatic yet');
+  const phrase = skipReasonText(step.reason);
+  return phrase ? t('Skipped: {reason}', { reason: phrase }) : t('Skipped ({code})', { code: step.reason ?? '?' });
+}
+/** What the last hand-over did, as a phrase after “Last hand-over: {time},”. */
+export function handoverOutcomeText(outcome: string): string {
+  switch (outcome) {
+    case 'offered': return t('handed over');
+    case 'launch_failed': return t('the launch failed after the offer');
+    case 'every_step_refused': return t('every step was refused');
+    case 'no_usable_executor': return t('no agent could take it');
+    default: return skipReasonText(outcome) ?? outcome;
+  }
+}
+/** The steps the last hand-over passed over, one “Agent: reason” each. */
+export function handoverSkipped(skipped: readonly { agent: string; reason: string }[], nameOf: (agent: string) => string): string[] {
+  return skipped.map((s) => `${nameOf(s.agent)}: ${skipReasonText(s.reason) ?? s.reason}`);
+}
+/** A workflow id short enough for a row: wf_ and its first eight hex digits. */
+export const shortWorkflow = (id: string) => id.slice(0, 11);
 /** A token count as OpenRouter shows context: 1.05M, 200K, 10M. */
 export function tokenCount(n: number): string {
   if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(2))}M`;

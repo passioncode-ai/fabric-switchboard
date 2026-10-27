@@ -157,7 +157,26 @@ export function createDemoAdapter(): Adapter {
     { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-work' }, { agent: 'opencode' }], updated_at: now() - 7200 },
     { scope: { kind: 'workflow', id: 'wf_0123456789abcdef' }, executors: [{ agent: 'claude-code' }, { agent: 'hermes', key: 'alpha-web/prod/OPENROUTER_API_KEY' }], updated_at: now() - 600 },
   ];
-  const lastHandover: LastHandover = { at: now() - 3 * 3600, workflow: 'wf_0123456789abcdef', outcome: 'offered', skipped: [{ agent: 'hermes', reason: 'no_usable_account' }] };
+  let lastHandover: LastHandover | null = { at: now() - 3 * 3600, workflow: 'wf_0123456789abcdef', outcome: 'offered', skipped: [{ agent: 'hermes', reason: 'no_usable_account' }] };
+  // C-3: every state of the chains panel by `?chains=` (none, failed, stale, reasons, skipped,
+  // launch_failed); synthetic only.
+  const chainsParam = new URLSearchParams(location.search).get('chains');
+  let chainReads = 0;
+  if (chainsParam === 'none') { demoChains = []; lastHandover = null; }
+  if (chainsParam === 'skipped') lastHandover = { at: now() - 900, workflow: 'wf_fedcba9876543210', outcome: 'ceiling_reached', skipped: [{ agent: 'claude-code', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }, { agent: 'hermes', reason: 'ceiling_reached' }] };
+  if (chainsParam === 'launch_failed') lastHandover = { at: now() - 900, workflow: 'wf_fedcba9876543210', outcome: 'launch_failed', skipped: [] };
+  // Eight steps, one per readiness line the panel can show (SCN-082), on this computer's chain.
+  const reasonSteps: { executor: ChainExecutor; view: Partial<ChainStepView> }[] = [
+    { executor: { agent: 'claude-code', account_id: 'demo-claude-work' }, view: { state: 'ready', account_id: 'demo-claude-work', account_label: 'Studio' } },
+    { executor: { agent: 'codex' }, view: { state: 'skipped', reason: 'sign_in_required' } },
+    { executor: { agent: 'kimi-code' }, view: { state: 'skipped', reason: 'no_usable_account' } },
+    { executor: { agent: 'hermes' }, view: { state: 'skipped', reason: 'ceiling_reached', paid: true } },
+    { executor: { agent: 'opencode' }, view: { state: 'skipped', reason: 'key_exhausted', paid: true } },
+    { executor: { agent: 'hermes', key: 'alpha-web/prod/OPENROUTER_API_KEY' }, view: { state: 'not_automatic', reason: 'key_pinned', key: 'alpha-web/prod/OPENROUTER_API_KEY' } },
+    { executor: { agent: 'aider' }, view: { state: 'not_automatic', reason: 'agent_not_automatic_yet' } },
+    { executor: { agent: 'goose' }, view: { state: 'not_installed', reason: null } },
+  ];
+  if (chainsParam === 'reasons') demoChains[0] = { scope: { kind: 'machine' }, executors: reasonSteps.map((r) => r.executor), updated_at: now() - 60 };
   const scopeKey = (scope: ChainScope) => (scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`);
   const stepView = (e: ChainExecutor, pool: string | null): ChainStepView => {
     const base = { agent: e.agent, name: catalogAgents.find((a) => a.id === e.agent)?.name ?? null, paid: false };
@@ -488,8 +507,13 @@ export function createDemoAdapter(): Adapter {
     async hermesModel() { return structuredClone(hermes); },
     async agentsOverview() { return structuredClone(agentsView()); },
     async chains() {
+      chainReads += 1;
+      if (chainsParam === 'failed' || (chainsParam === 'stale' && chainReads > 1)) { await pause(); throw new Error('Storage unavailable. Check Keychain access and retry.'); }
       const presets = [{ id: 'subscriptions-first', agents: presetAgents.map((agent) => ({ agent, name: catalogAgents.find((a) => a.id === agent)?.name ?? null })) }];
-      const readiness = Object.fromEntries(demoChains.map((c) => [scopeKey(c.scope), c.executors.map((e) => stepView(e, c.scope.kind === 'project' ? c.scope.pool : null))]));
+      const readiness = Object.fromEntries(demoChains.map((c) => [scopeKey(c.scope), c.executors.map((e) => {
+        const forced = reasonSteps.find((r) => r.executor === e);
+        return forced ? { agent: e.agent, name: catalogAgents.find((a) => a.id === e.agent)?.name ?? null, paid: false, reason: null, ...forced.view } as ChainStepView : stepView(e, c.scope.kind === 'project' ? c.scope.pool : null);
+      })]));
       return structuredClone({ chains: demoChains, effective: demoChains.find((c) => c.scope.kind === 'machine') ?? null, presets, readiness, last_handover: lastHandover, ceilings_unreadable: false, limits_known: true });
     },
     async setChain(scope, executors, preset) {
