@@ -104,6 +104,9 @@ struct Target {
     zdotdir_unknown: bool,
     /// A PowerShell profile whose execution policy keeps it from running: never written.
     policy_blocked: bool,
+    /// PowerShell runs in Constrained Language Mode on this computer, where the hook cannot
+    /// act: never written.
+    constrained: bool,
 }
 
 /// The start files of the shells present for `host`: on Windows the PowerShell profiles only
@@ -125,6 +128,7 @@ fn targets(host: &Host) -> Vec<Target> {
             create: true,
             zdotdir_unknown: false,
             policy_blocked: profile.blocked,
+            constrained: profile.constrained,
         });
     }
     out
@@ -145,6 +149,7 @@ fn posix_targets(host: &Host) -> Vec<Target> {
             path: zsh,
             own_file: false,
             policy_blocked: false,
+            constrained: false,
         });
     }
     let bash = if host.macos {
@@ -164,6 +169,7 @@ fn posix_targets(host: &Host) -> Vec<Target> {
             path: bash,
             own_file: false,
             policy_blocked: false,
+            constrained: false,
         });
     }
     let fish = host.home.join(".config").join("fish");
@@ -175,6 +181,7 @@ fn posix_targets(host: &Host) -> Vec<Target> {
             create: true,
             zdotdir_unknown: false,
             policy_blocked: false,
+            constrained: false,
         });
     }
     out
@@ -273,6 +280,10 @@ pub enum State {
     /// A PowerShell profile whose execution policy (`Restricted` or `AllSigned`) keeps it, or
     /// the unsigned hook, from running: nothing written, the policy never changed (A-Q4).
     PolicyBlocked,
+    /// PowerShell runs in Constrained Language Mode on this computer (Windows Defender
+    /// Application Control, or `__PSLockdownPolicy`), where the hook cannot act: nothing
+    /// written, the mode never changed (SB-225).
+    ConstrainedLanguage,
 }
 
 /// One start file in the record.
@@ -459,16 +470,51 @@ fn find(text: &str) -> Found {
     }
 }
 
+/// How a start file's text is stored. Windows PowerShell 5.1 writes UTF-16LE with a byte order
+/// mark (`>` and `Out-File`), so a profile may be either; it is written back as it was read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Encoding {
+    Utf8,
+    Utf16Le,
+}
+impl Encoding {
+    fn encode(self, text: &str) -> Vec<u8> {
+        match self {
+            Encoding::Utf8 => text.as_bytes().to_vec(),
+            Encoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+        }
+    }
+}
+/// A start file's bytes as text: UTF-8 (a byte order mark kept as `U+FEFF`), or UTF-16LE when
+/// it starts with that byte order mark (the mark kept the same way, so the bytes come back
+/// exactly). None for anything else, and for text holding a NUL: UTF-16 without a byte order
+/// mark reads as valid UTF-8 full of NULs, and a block written into it would garble it.
+fn decode(bytes: &[u8]) -> Option<(String, Encoding)> {
+    if bytes.starts_with(b"\xff\xfe") {
+        let (pairs, rest) = bytes.as_chunks::<2>();
+        if !rest.is_empty() {
+            return None;
+        }
+        let units: Vec<u16> = pairs.iter().map(|pair| u16::from_le_bytes(*pair)).collect();
+        let text = String::from_utf16(&units).ok()?;
+        return (!text.contains('\0')).then_some((text, Encoding::Utf16Le));
+    }
+    let text = String::from_utf8(bytes.to_vec()).ok()?;
+    (!text.contains('\0')).then_some((text, Encoding::Utf8))
+}
+
 /// The start file as read: its text and the stamp the write compares against.
 struct Read {
     text: String,
+    encoding: Encoding,
     stamp: Option<(u64, Option<std::time::SystemTime>)>,
     /// Read only where permission bits exist (unix).
     #[cfg_attr(not(unix), allow(dead_code))]
     mode: Option<u32>,
 }
 /// Reads a start file the installer may change, or says why it may not.
-fn read_start(path: &Path, host: &Host) -> Result<Option<Read>, State> {
+/// `utf16`: a PowerShell profile, which may be UTF-16LE; no other start file is read as such.
+fn read_start(path: &Path, host: &Host, utf16: bool) -> Result<Option<Read>, State> {
     let meta = match std::fs::symlink_metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(State::Unreadable),
@@ -490,7 +536,9 @@ fn read_start(path: &Path, host: &Host) -> Result<Option<Read>, State> {
     #[cfg(not(unix))]
     let _ = host;
     let bytes = std::fs::read(path).map_err(|_| State::Unreadable)?;
-    let text = String::from_utf8(bytes).map_err(|_| State::Unreadable)?;
+    let (text, encoding) = decode(&bytes)
+        .filter(|(_, encoding)| utf16 || *encoding == Encoding::Utf8)
+        .ok_or(State::Unreadable)?;
     #[cfg(unix)]
     let mode = {
         use std::os::unix::fs::PermissionsExt;
@@ -500,6 +548,7 @@ fn read_start(path: &Path, host: &Host) -> Result<Option<Read>, State> {
     let mode = None;
     Ok(Some(Read {
         text,
+        encoding,
         stamp: Some((meta.len(), meta.modified().ok())),
         mode,
     }))
@@ -514,7 +563,8 @@ enum Wrote {
     Failed,
 }
 /// Replaces `path` with `text` through a file in the same folder renamed over it, keeping its
-/// mode, only when the file still has the stamp it was read with (`None`: it did not exist).
+/// mode and its encoding, only when the file still has the stamp it was read with (`None`: it
+/// did not exist, and is written as UTF-8).
 fn write_start(
     path: &Path,
     text: &str,
@@ -548,7 +598,8 @@ fn write_start(
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         }
-        file.write_all(text.as_bytes())?;
+        let encoding = read.map_or(Encoding::Utf8, |r| r.encoding);
+        file.write_all(&encoding.encode(text))?;
         file.sync_all()
     })();
     if written.is_err() {
@@ -722,17 +773,20 @@ fn install_one(
     // in it from an earlier run included, until the policy lets it run.
     // What an earlier run did to the file (a line break added, the file created) stays in the
     // record, so `shell off` and a later relaxed policy still give it back.
-    if target.policy_blocked {
+    // Constrained Language Mode likewise (SB-225): the hook would load and do nothing.
+    if target.policy_blocked || target.constrained {
         report.skipped += 1;
+        let state = if target.constrained {
+            State::ConstrainedLanguage
+        } else {
+            State::PolicyBlocked
+        };
         return Some(Entry {
             created: previous.is_some_and(|e| e.created),
-            ..entry(
-                State::PolicyBlocked,
-                previous.is_some_and(|e| e.newline_added),
-            )
+            ..entry(state, previous.is_some_and(|e| e.newline_added))
         });
     }
-    let read = match read_start(&target.path, host) {
+    let read = match read_start(&target.path, host, target.kind == scripts::Kind::Pwsh) {
         Ok(read) => read,
         Err(state) => {
             report.skipped += 1;
@@ -852,7 +906,7 @@ fn remove_from(
             out.kept.extend(previous.cloned());
             continue;
         }
-        let read = match read_start(&path, host) {
+        let read = match read_start(&path, host, shell == scripts::Kind::Pwsh.name()) {
             Ok(Some(read)) => read,
             Ok(None) => continue,
             // A link or another user's file was never written: nothing to take out.
@@ -1441,6 +1495,7 @@ mod tests {
         w.host.windows = Some(windows::Host {
             documents: w.host.home.join("Documents"),
             editions: vec![(Edition::Desktop, desktop), (Edition::Core, core)],
+            constrained: false,
         });
         w
     }
@@ -1574,6 +1629,7 @@ mod tests {
                 (Edition::Desktop, Policy::RemoteSigned),
                 (Edition::Core, Policy::AllSigned),
             ],
+            constrained: false,
         });
         let report = apply(&w.root, &w.host, true, false);
         assert_eq!(report.written, 1, "{report:?}");
@@ -1608,6 +1664,7 @@ mod tests {
             w.host.windows = Some(windows::Host {
                 documents: w.host.home.join("Documents"),
                 editions: vec![(Edition::Desktop, policy), (Edition::Core, policy)],
+                constrained: false,
             });
         };
         // Blocked: both profiles keep their block untouched, recorded as policy_blocked.
@@ -1640,6 +1697,93 @@ mod tests {
         apply(&w.root, &w.host, true, false);
         assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
         assert!(!core.exists());
+    }
+
+    /// SB-225: Windows PowerShell 5.1 writes UTF-16LE with a byte order mark (`>`, `Out-File`).
+    /// Such a profile gets the block in UTF-16LE and gives the same bytes back; one in UTF-16
+    /// without the mark (valid UTF-8 full of NULs) is left alone and reads `unreadable`.
+    #[test]
+    fn a_utf16_profile_is_written_in_its_own_encoding_and_given_back_byte_identical() {
+        let utf16 =
+            |text: &str| -> Vec<u8> { text.encode_utf16().flat_map(u16::to_le_bytes).collect() };
+        let w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let desktop = profile(&w, Edition::Desktop);
+        let core = profile(&w, Edition::Core);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(core.parent().unwrap()).unwrap();
+        let original = utf16("\u{feff}Set-Alias ll Get-ChildItem\r\n# Сергей's profile\r\n");
+        std::fs::write(&desktop, &original).unwrap();
+        let unmarked = utf16("Set-Alias ll Get-ChildItem\r\n");
+        std::fs::write(&core, &unmarked).unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 1, "{report:?}");
+        let bytes = std::fs::read(&desktop).unwrap();
+        assert!(bytes.starts_with(b"\xff\xfe"), "still UTF-16LE");
+        let (text, encoding) = decode(&bytes).unwrap();
+        assert_eq!(encoding, Encoding::Utf16Le);
+        assert!(text.starts_with("\u{feff}Set-Alias ll Get-ChildItem\r\n# Сергей's profile\r\n"));
+        assert!(block_in(&text), "{text}");
+        assert_eq!(state_of(&w, &desktop), Some(State::Written));
+        // Without the mark: never written, never garbled.
+        assert_eq!(std::fs::read(&core).unwrap(), unmarked);
+        assert_eq!(state_of(&w, &core), Some(State::Unreadable));
+        // Again: nothing changes. Off: the person's bytes back.
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read(&desktop).unwrap(), bytes);
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read(&desktop).unwrap(), original);
+        assert_eq!(std::fs::read(&core).unwrap(), unmarked);
+        // Odd lengths and lone surrogates are not text.
+        assert_eq!(decode(b"\xff\xfea"), None);
+        assert_eq!(decode(b"\xff\xfe\x00\xd8"), None);
+        assert_eq!(
+            decode("\u{feff}x".as_bytes()),
+            Some(("\u{feff}x".to_owned(), Encoding::Utf8))
+        );
+    }
+
+    /// SB-225: in Constrained Language Mode the hook can do nothing, so no profile is written;
+    /// a block written before stays until `shell off`, which still gives the bytes back.
+    #[test]
+    fn constrained_language_mode_writes_no_profile_and_says_so() {
+        let mut w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let desktop = profile(&w, Edition::Desktop);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, "# mine\n").unwrap();
+        let constrained = |w: &mut World, on: bool| {
+            if let Some(host) = w.host.windows.as_mut() {
+                host.constrained = on;
+            }
+        };
+        constrained(&mut w, true);
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 0, "{report:?}");
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
+        assert!(!profile(&w, Edition::Core).exists(), "nothing created");
+        let status = map::status(Some(&w.root), None, &|_| None);
+        let states: Vec<&str> = status["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["state"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            states,
+            ["constrained_language", "constrained_language"],
+            "{status}"
+        );
+        // Lifted: written; constrained again: the block stays, recorded as such; off: gone.
+        constrained(&mut w, false);
+        assert_eq!(apply(&w.root, &w.host, true, false).written, 2);
+        constrained(&mut w, true);
+        apply(&w.root, &w.host, true, false);
+        assert!(block_in(&std::fs::read_to_string(&desktop).unwrap()));
+        assert_eq!(state_of(&w, &desktop), Some(State::ConstrainedLanguage));
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
+        assert!(!profile(&w, Edition::Core).exists());
     }
 
     #[test]

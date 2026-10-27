@@ -981,18 +981,20 @@ check(() => {
     { shell: 'bash', path: `${home}/.bash_profile`, state: 'skipped_owner' },
     { shell: 'bash', path: '/etc/bashrc', state: 'unreadable' },
     { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' },
+    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1', state: 'constrained_language' },
   ];
   const inactive = logic.shellHookView({ ...base, hook: 'default_on', files: skipped });
   assert.equal(inactive.state, 'inactive');
   assert.equal(inactive.line, 'On, but no start file holds the hook yet, so terminals do not follow organization folders.');
   assert.equal(inactive.action.label, 'Turn off', 'the person can still turn the choice off');
-  assert.deepEqual(inactive.files.map((f) => f.command), ['eval "$(switchboard shell init zsh)"', 'eval "$(switchboard shell init zsh)"', null, null, null]);
+  assert.deepEqual(inactive.files.map((f) => f.command), ['eval "$(switchboard shell init zsh)"', 'eval "$(switchboard shell init zsh)"', null, null, null, null]);
   assert.ok(inactive.files.every((f) => f.problem));
   assert.equal(inactive.files[0].text, '~/.zshrc is a link, so Switchboard did not change it. Add this line yourself:');
   assert.match(inactive.files[1].text, /ZDOTDIR/);
   assert.equal(inactive.files[2].text, '~/.bash_profile belongs to another user, so Switchboard did not change it.');
   assert.equal(inactive.files[3].text, '/etc/bashrc could not be read, so Switchboard did not change it.', 'a path outside the home stays whole');
   assert.match(inactive.files[4].text, /^PowerShell's execution policy stops profiles from loading/);
+  assert.equal(inactive.files[5].text, 'PowerShell runs in Constrained Language Mode on this computer, so the hook is inactive there. Switchboard does not change this mode. Whoever manages this computer sets it.');
   assert.equal(logic.shellHookView({ ...base, hook: 'on', files: [] }).state, 'inactive', 'on with no shell present');
   assert.equal(logic.shellInitLine('fish'), 'switchboard shell init fish | source');
   // A linked PowerShell profile (node A-8): the line PowerShell reads.

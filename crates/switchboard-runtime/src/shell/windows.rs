@@ -140,6 +140,30 @@ pub fn group_policy(enable_scripts: Option<u32>, policy: Option<&str>) -> Option
         _ => policy.and_then(Policy::parse),
     }
 }
+/// Whether PowerShell is held to Constrained Language Mode for scripts on this computer, as
+/// PowerShell itself decides it for a script with no signature: a Windows Defender Application
+/// Control policy that enforces user-mode code integrity (`WldpGetLockdownPolicy` answers
+/// `WLDP_LOCKDOWN_UMCIENFORCE_FLAG` for the PowerShell host), or the `__PSLockdownPolicy`
+/// variable with its enforce bit (4) in the machine's environment (Windows PowerShell reads it;
+/// PowerShell 7 too in debug builds, so both editions count it). AppLocker's script rules are
+/// not read here: there the hook itself sees the language mode and does nothing (`hook.ps1`).
+pub fn lockdown(wldp: Option<u32>, lockdown_policy: Option<&str>) -> bool {
+    // `WLDP_LOCKDOWN_UMCIENFORCE_FLAG`; the audit flag alone (8) only reports.
+    const UMCI_ENFORCE: u32 = 0x4;
+    let wdac = wldp.is_some_and(|state| state & UMCI_ENFORCE != 0);
+    // A number as PowerShell converts the text: decimal, or hexadecimal after `0x`.
+    let variable = lockdown_policy
+        .map(str::trim)
+        .and_then(
+            |value| match value.strip_prefix("0x").or(value.strip_prefix("0X")) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                None => value.parse::<u32>().ok(),
+            },
+        )
+        .is_some_and(|value| value & 0x4 != 0);
+    wdac || variable
+}
+
 /// The policy a `powershell.config.json` sets, if any.
 pub fn config_policy(bytes: &[u8]) -> Option<Policy> {
     let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
@@ -155,6 +179,9 @@ pub struct Host {
     pub documents: PathBuf,
     /// The editions installed and the policy in force for each.
     pub editions: Vec<(Edition, Policy)>,
+    /// PowerShell runs in Constrained Language Mode on this computer ([`lockdown`]): the hook
+    /// cannot act there, so no profile is written.
+    pub constrained: bool,
 }
 /// One profile the installer looks after.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,6 +190,8 @@ pub struct Profile {
     pub path: PathBuf,
     /// The execution policy keeps this profile (or the hook it reads) from running.
     pub blocked: bool,
+    /// Constrained Language Mode: the hook would load and do nothing.
+    pub constrained: bool,
 }
 impl Host {
     /// The profiles of the editions installed, each with whether its policy blocks it.
@@ -178,6 +207,7 @@ impl Host {
                     .iter()
                     .find(|(e, _)| *e == edition)
                     .is_some_and(|(_, policy)| policy.blocks_profiles()),
+                constrained: self.constrained,
             })
             .collect()
     }
@@ -209,10 +239,39 @@ pub fn process_host() -> Option<Host> {
         let scopes = core_scopes(&documents, pshome.as_deref());
         editions.push((Edition::Core, profile_policy(&scopes, server)));
     }
+    let machine_variable = registry::string(
+        registry::Root::Machine,
+        r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        "__PSLockdownPolicy",
+    );
+    let constrained = lockdown(wldp::powershell_lockdown(), machine_variable.as_deref());
     Some(Host {
         documents,
         editions,
+        constrained,
     })
+}
+
+/// Windows Defender Application Control, as PowerShell asks it.
+#[cfg(windows)]
+mod wldp {
+    use windows_sys::Win32::System::WindowsProgramming::{
+        WldpGetLockdownPolicy, WLDP_HOST_ID_POWERSHELL, WLDP_HOST_INFORMATION,
+        WLDP_HOST_INFORMATION_REVISION,
+    };
+    /// The lockdown state for the PowerShell host, None when it cannot be read.
+    pub fn powershell_lockdown() -> Option<u32> {
+        let host = WLDP_HOST_INFORMATION {
+            dwRevision: WLDP_HOST_INFORMATION_REVISION,
+            dwHostId: WLDP_HOST_ID_POWERSHELL,
+            szSource: std::ptr::null(),
+            hSource: std::ptr::null_mut(),
+        };
+        let mut state: u32 = 0;
+        // SAFETY: `host` and `state` live for the call; no source is named.
+        let status = unsafe { WldpGetLockdownPolicy(&host, &mut state, 0) };
+        (status >= 0).then_some(state)
+    }
 }
 
 /// Windows PowerShell 5.1's scopes, from the registry.
@@ -418,6 +477,7 @@ mod tests {
                 (Edition::Core, Policy::RemoteSigned),
                 (Edition::Desktop, Policy::Restricted),
             ],
+            constrained: false,
         };
         assert_eq!(
             host.profiles(),
@@ -426,11 +486,13 @@ mod tests {
                     edition: Edition::Desktop,
                     path: profile_path(documents, Edition::Desktop),
                     blocked: true,
+                    constrained: false,
                 },
                 Profile {
                     edition: Edition::Core,
                     path: profile_path(documents, Edition::Core),
                     blocked: false,
+                    constrained: false,
                 },
             ]
         );
@@ -440,6 +502,38 @@ mod tests {
             let found = process_host().map(|h| h.documents);
             assert_eq!(found, dirs::document_dir());
         }
+    }
+
+    /// SB-225: Constrained Language Mode, as PowerShell decides it for a script with no
+    /// signature: Application Control enforcing user-mode code integrity, or the machine's
+    /// `__PSLockdownPolicy` with its enforce bit. Audit alone does not constrain.
+    #[test]
+    fn constrained_language_mode_is_read_from_application_control_and_the_lockdown_variable() {
+        assert!(!lockdown(None, None));
+        assert!(!lockdown(Some(0), None));
+        assert!(!lockdown(Some(0x8000_0000 | 0x8), None), "audit only");
+        assert!(lockdown(Some(0x8000_0000 | 0x4), None));
+        assert!(lockdown(Some(0x8000_0000 | 0x4 | 0x8), None));
+        for (value, constrained) in [
+            ("4", true),
+            (" 4 ", true),
+            ("0x4", true),
+            ("0x8", false),
+            ("8", false),
+            ("12", true),
+            ("0", false),
+            ("", false),
+            ("constrained", false),
+        ] {
+            assert_eq!(lockdown(None, Some(value)), constrained, "{value:?}");
+        }
+        // Every profile of a constrained computer says so.
+        let host = Host {
+            documents: PathBuf::from("/Users/ana/Documents"),
+            editions: vec![(Edition::Desktop, Policy::RemoteSigned)],
+            constrained: true,
+        };
+        assert!(host.profiles().iter().all(|p| p.constrained && !p.blocked));
     }
 
     #[test]
@@ -606,11 +700,7 @@ mod tests {
             "{text}"
         );
         // With PowerShell on this machine, the written file parses with no error.
-        #[cfg(unix)]
-        let pwsh = transition::pwsh();
-        #[cfg(not(unix))]
-        let pwsh: Option<std::path::PathBuf> = None;
-        if let Some(pwsh) = pwsh {
+        if let Some(pwsh) = transition::shells().into_iter().next() {
             let root = tmp.path().join("typographic");
             std::fs::create_dir_all(&root).unwrap();
             assert_eq!(scripts::write(&root, Kind::Pwsh, typographic), Ok(true));
@@ -642,34 +732,51 @@ mod tests {
         }
     }
 
-    /// The POSIX shells' transition (`scripts::tests`) in a real PowerShell, against the same
-    /// stub CLI they use: entering, moving, leaving, a value the person set, a launched session, a
-    /// home inherited from a hooked parent, an answer of another form, and the prompt's own
-    /// `$?` and `$LASTEXITCODE`. Needs `pwsh` and a POSIX stub, so it runs on macOS or Linux
-    /// with PowerShell 7 installed; anywhere else it says why it was skipped (the Windows run is
-    /// SB-02).
+    /// The POSIX shells' transition (`scripts::tests`) in a real PowerShell, against a stub CLI
+    /// that answers as `shell env` does: entering, moving, leaving, a value the person set, a
+    /// launched session, a home inherited from a hooked parent, an answer of another form and
+    /// the prompt's own `$?` and `$LASTEXITCODE`; a `-Command` run that loads the hook asks
+    /// nothing as it loads; `shell init pwsh`'s base64 paths read through a command's output.
+    /// Runs under every PowerShell present (SB-225): PowerShell 7 (`pwsh`) anywhere, and on
+    /// Windows also Windows PowerShell 5.1 (`powershell.exe`, part of Windows, so on every
+    /// Windows runner). The stub is a POSIX script, on Windows a batch file. Skipped, with the
+    /// reason, where no PowerShell is installed.
     #[test]
     fn the_ps1_transition_matches_the_posix_one() {
-        #[cfg(unix)]
-        transition::run();
-        #[cfg(not(unix))]
-        eprintln!("skipped: the stub CLI is a POSIX script; the live check on Windows is SB-02");
+        let shells = transition::shells();
+        if shells.is_empty() {
+            eprintln!(
+                "skipped: no PowerShell (pwsh or powershell.exe) is installed on this machine"
+            );
+            return;
+        }
+        for shell in &shells {
+            eprintln!("transition under {}", shell.display());
+            transition::run_all(shell);
+        }
     }
 
-    #[cfg(unix)]
     mod transition {
-        use super::super::super::scripts::{self, ps_quote, sh_quote, Kind};
+        use super::super::super::scripts::{self, ps_quote, Kind};
         use std::collections::BTreeMap;
         use std::path::{Path, PathBuf};
         use std::process::Command;
 
-        pub fn pwsh() -> Option<PathBuf> {
+        /// Every PowerShell on this machine: PowerShell 7 on `PATH` or where it installs, and on
+        /// Windows Windows PowerShell 5.1.
+        pub fn shells() -> Vec<PathBuf> {
+            let exe = if cfg!(windows) { "pwsh.exe" } else { "pwsh" };
             let on_path = std::env::var_os("PATH").and_then(|path| {
                 std::env::split_paths(&path)
-                    .map(|dir| dir.join("pwsh"))
+                    .map(|dir| dir.join(exe))
                     .find(|p| p.is_file())
             });
-            on_path.or_else(|| {
+            let usual: Vec<PathBuf> = if cfg!(windows) {
+                std::env::var_os("ProgramFiles")
+                    .map(|p| PathBuf::from(p).join(r"PowerShell\7\pwsh.exe"))
+                    .into_iter()
+                    .collect()
+            } else {
                 [
                     "/usr/local/bin/pwsh",
                     "/opt/homebrew/bin/pwsh",
@@ -679,8 +786,25 @@ mod tests {
                 ]
                 .into_iter()
                 .map(PathBuf::from)
-                .find(|p| p.is_file())
-            })
+                .collect()
+            };
+            let mut out: Vec<PathBuf> = on_path
+                .or_else(|| usual.into_iter().find(|p| p.is_file()))
+                .into_iter()
+                .collect();
+            if cfg!(windows) {
+                let desktop = std::env::var_os("SystemRoot").map(|root| {
+                    PathBuf::from(root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+                });
+                out.extend(desktop.filter(|p| p.is_file()));
+            }
+            out
+        }
+
+        /// One argument of a batch file: its text in double quotes (no name here holds `"`).
+        #[cfg_attr(not(windows), allow(dead_code))]
+        fn bat(value: &str) -> String {
+            format!("\"{value}\"")
         }
 
         struct World {
@@ -697,12 +821,15 @@ mod tests {
         }
         fn world() -> World {
             let tmp = tempfile::tempdir().unwrap();
-            // Spaces and quotes in every path the hook names.
-            let root = tmp
-                .path()
-                .canonicalize()
-                .unwrap()
-                .join("it's a \"quoted\" dir");
+            // Spaces and quotes in every path the hook names; a Windows name cannot hold `"`.
+            // Plain on Windows (no `\\?\`), as PowerShell names its location.
+            let base = if cfg!(windows) {
+                "it's a dir"
+            } else {
+                "it's a \"quoted\" dir"
+            };
+            let root =
+                crate::shell::install::plain_path(&tmp.path().canonicalize().unwrap()).join(base);
             let data = root.join("data dir");
             let work = root.join("work");
             let (acme, globex, mine) = (work.join("acme"), work.join("globex"), work.join("mine"));
@@ -713,21 +840,58 @@ mod tests {
             let acme_claude = s(&data.join("shell").join("claude-acme"));
             let acme_codex = s(&data.join("shell").join("codex-acme"));
             let globex_claude = s(&data.join("shell").join("claude-globex"));
-            let cli = root.join("bin dir").join("switchboard");
-            std::fs::create_dir_all(cli.parent().unwrap()).unwrap();
+            let bin = root.join("bin dir");
+            std::fs::create_dir_all(&bin).unwrap();
             let log = root.join("calls.log");
-            let stub = format!(
-                "#!/bin/sh\ndir=\nwhile [ $# -gt 0 ]; do case $1 in --dir) dir=$2; shift;; esac; shift; done\nprintf '%s\\n' \"$dir\" >> {log}\ncase $dir in\n  {acme}|{acme}/*) printf 'acme\\torg:o-acme\\t%s\\t%s\\n' {ac} {ax} ;;\n  {globex}|{globex}/*) printf 'globex\\torg:o-globex\\t%s\\t-\\n' {gc} ;;\n  *) echo none ;;\nesac\n",
-                log = sh_quote(&s(&log)),
-                acme = sh_quote(&s(&acme)),
-                globex = sh_quote(&s(&globex)),
-                ac = sh_quote(&acme_claude),
-                ax = sh_quote(&acme_codex),
-                gc = sh_quote(&globex_claude),
-            );
-            std::fs::write(&cli, stub).unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(unix)]
+            let cli = {
+                use super::super::super::scripts::sh_quote;
+                let cli = bin.join("switchboard");
+                let stub = format!(
+                    "#!/bin/sh\ndir=\nwhile [ $# -gt 0 ]; do case $1 in --dir) dir=$2; shift;; esac; shift; done\nprintf '%s\\n' \"$dir\" >> {log}\ncase $dir in\n  {acme}|{acme}/*) printf 'acme\\torg:o-acme\\t%s\\t%s\\n' {ac} {ax} ;;\n  {globex}|{globex}/*) printf 'globex\\torg:o-globex\\t%s\\t-\\n' {gc} ;;\n  *) echo none ;;\nesac\n",
+                    log = sh_quote(&s(&log)),
+                    acme = sh_quote(&s(&acme)),
+                    globex = sh_quote(&s(&globex)),
+                    ac = sh_quote(&acme_claude),
+                    ax = sh_quote(&acme_codex),
+                    gc = sh_quote(&globex_claude),
+                );
+                std::fs::write(&cli, stub).unwrap();
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+                cli
+            };
+            // A batch file answering the folders the scenarios visit (cmd compares them without
+            // case), with CRLF lines, as cmd reads labels reliably only then.
+            #[cfg(not(unix))]
+            let cli = {
+                let cli = bin.join("switchboard.cmd");
+                let lines = [
+                    "@echo off".to_owned(),
+                    "setlocal".to_owned(),
+                    "set \"dir=\"".to_owned(),
+                    ":next".to_owned(),
+                    "if \"%~1\"==\"\" goto asked".to_owned(),
+                    "if \"%~1\"==\"--dir\" set \"dir=%~2\"".to_owned(),
+                    "shift".to_owned(),
+                    "goto next".to_owned(),
+                    ":asked".to_owned(),
+                    format!(">>{} echo(%dir%", bat(&s(&log))),
+                    format!("if /i \"%dir%\"=={} goto acme", bat(&s(&acme))),
+                    format!("if /i \"%dir%\"=={} goto acme", bat(&s(&acme.join("src")))),
+                    format!("if /i \"%dir%\"=={} goto globex", bat(&s(&globex))),
+                    "echo none".to_owned(),
+                    "exit /b 0".to_owned(),
+                    ":acme".to_owned(),
+                    format!("echo acme\torg:o-acme\t{acme_claude}\t{acme_codex}"),
+                    "exit /b 0".to_owned(),
+                    ":globex".to_owned(),
+                    format!("echo globex\torg:o-globex\t{globex_claude}\t-"),
+                    "exit /b 0".to_owned(),
+                ];
+                std::fs::write(&cli, lines.join("\r\n") + "\r\n").unwrap();
+                cli
+            };
             World {
                 _tmp: tmp,
                 data,
@@ -739,6 +903,30 @@ mod tests {
                 acme_claude,
                 acme_codex,
                 globex_claude,
+            }
+        }
+        /// Replaces the stub with one that prints `acme\torg:o-acme` (two fields), writes to the
+        /// error stream and exits 3.
+        fn stub_of_another_form(w: &World) {
+            #[cfg(unix)]
+            std::fs::write(
+                &w.cli,
+                "#!/bin/sh\necho 'acme\torg:o-acme'\necho noise >&2\nexit 3\n",
+            )
+            .unwrap();
+            #[cfg(not(unix))]
+            std::fs::write(
+                &w.cli,
+                "@echo off\r\necho acme\torg:o-acme\r\necho noise 1>&2\r\nexit /b 3\r\n",
+            )
+            .unwrap();
+        }
+        /// A native command that fails with exit code 7.
+        fn exit_7() -> &'static str {
+            if cfg!(windows) {
+                "cmd /c exit 7"
+            } else {
+                "/bin/sh -c 'exit 7'"
             }
         }
         fn show(tag: &str) -> String {
@@ -753,26 +941,54 @@ mod tests {
                 ps_quote(&dir.to_string_lossy())
             )
         }
-        fn pwsh_run(w: &World, pwsh: &Path, env: &[(&str, &str)], body: &str) -> (String, String) {
+        /// Runs `body` after loading the hook as written, in a shell a person types in unless
+        /// `interactive` is false (then the hook decides from the arguments, `-NonInteractive`).
+        fn pwsh_run_as(
+            w: &World,
+            pwsh: &Path,
+            env: &[(&str, &str)],
+            body: &str,
+            interactive: bool,
+        ) -> (String, String) {
             let hook = scripts::hook_path(&w.data, Kind::Pwsh);
             std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
             std::fs::write(&hook, scripts::script(Kind::Pwsh, &w.cli, &w.data).unwrap()).unwrap();
+            let preset = if interactive {
+                "$global:_switchboard_interactive = $true\n"
+            } else {
+                ""
+            };
             let script = format!(
-                "Set-StrictMode -Version Latest\n. {}\n{body}",
+                "$ProgressPreference = 'SilentlyContinue'\nSet-StrictMode -Version Latest\n{preset}. {}\n{body}",
                 ps_quote(&hook.to_string_lossy())
             );
             let mut command = Command::new(pwsh);
+            command.args(["-NoLogo", "-NoProfile", "-NonInteractive"]);
+            if cfg!(windows) {
+                // A file, run with this process's own policy: a Windows client's default
+                // (`Restricted`) runs no script, and the machine's policy is never changed.
+                let file = w.data.parent().unwrap().join("run.ps1");
+                std::fs::write(&file, format!("\u{feff}{script}")).unwrap();
+                command
+                    .args(["-ExecutionPolicy", "Bypass", "-File"])
+                    .arg(&file);
+                for name in [
+                    "CLAUDE_CONFIG_DIR",
+                    "CODEX_HOME",
+                    "SWITCHBOARD_CONTEXT",
+                    "SWITCHBOARD_SESSION",
+                    "SWITCHBOARD_SHELL_HOOK",
+                ] {
+                    command.env_remove(name);
+                }
+            } else {
+                command
+                    .args(["-Command", &script])
+                    .env_clear()
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("HOME", w.data.parent().unwrap());
+            }
             command
-                .args([
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    &script,
-                ])
-                .env_clear()
-                .env("PATH", "/usr/bin:/bin")
-                .env("HOME", w.data.parent().unwrap())
                 .env("POWERSHELL_TELEMETRY_OPTOUT", "1")
                 .env("POWERSHELL_UPDATECHECK", "Off")
                 .current_dir(&w.mine);
@@ -784,6 +1000,9 @@ mod tests {
                 String::from_utf8_lossy(&out.stdout).into_owned(),
                 String::from_utf8_lossy(&out.stderr).into_owned(),
             )
+        }
+        fn pwsh_run(w: &World, pwsh: &Path, env: &[(&str, &str)], body: &str) -> (String, String) {
+            pwsh_run_as(w, pwsh, env, body, true)
         }
         fn seen(out: &str) -> BTreeMap<String, String> {
             out.lines()
@@ -892,11 +1111,7 @@ mod tests {
             // An answer of another form changes nothing, and the person's prompt still sees the
             // last command's status and exit code.
             let w = world();
-            std::fs::write(
-                &w.cli,
-                "#!/bin/sh\necho 'acme\torg:o-acme'\necho noise >&2\nexit 3\n",
-            )
-            .unwrap();
+            stub_of_another_form(&w);
             let body = [
                 "function global:prompt { \"ok=$? code=$LASTEXITCODE\" }".to_owned(),
                 // Read again, so the wrapper wraps this prompt.
@@ -909,7 +1124,7 @@ mod tests {
                     "Set-Location -LiteralPath {}",
                     ps_quote(&w.acme.to_string_lossy())
                 ),
-                "/bin/sh -c 'exit 7'".to_owned(),
+                exit_7().to_owned(),
                 "Get-Item -LiteralPath '/no/such/item' -ErrorAction SilentlyContinue".to_owned(),
                 "prompt".to_owned(),
                 show("acme"),
@@ -921,16 +1136,95 @@ mod tests {
             assert_eq!(v["acme SWITCHBOARD_CONTEXT"], "unset");
             assert!(out.contains("ok=False code=7"), "{out}{err}");
             assert!(!err.contains("noise"), "{err}");
-        }
 
-        pub fn run() {
-            let Some(pwsh) = pwsh() else {
-                eprintln!(
-                    "skipped: pwsh (PowerShell 7) is not installed on this machine; the live check on Windows is SB-02"
+            // SB-225: a `-Command` or `-NonInteractive` run that reads profiles loads the hook but
+            // asks nothing as it loads; at a prompt it follows the folder as usual.
+            let w = world();
+            let body = [
+                show("loaded"),
+                "Write-Output ('hook ' + $env:SWITCHBOARD_SHELL_HOOK)".to_owned(),
+                cd(&w.acme),
+                show("acme"),
+            ]
+            .join("\n");
+            let (out, err) = pwsh_run_as(&w, pwsh, &[], &body, false);
+            assert!(out.contains("hook 1"), "{out}{err}");
+            let v = seen(&out);
+            assert_eq!(v["loaded CLAUDE_CONFIG_DIR"], "unset", "{out}{err}");
+            assert_eq!(v["acme CLAUDE_CONFIG_DIR"], w.acme_claude, "{out}{err}");
+            assert_eq!(calls(&w), 1, "only the prompt asked");
+            // How a start's arguments are read: a person types in it unless it runs a command or
+            // a file without -NoExit, or is -NonInteractive.
+            let cases: &[(&[&str], bool)] = &[
+                (&[], true),
+                (&["-NoLogo", "-NoProfile"], true),
+                (&["-ExecutionPolicy", "Bypass", "-Login"], true),
+                (&["-NonInteractive"], false),
+                (&["-noni"], false),
+                (&["-c", "Get-Date"], false),
+                (&["-Command", "Get-Date"], false),
+                (&["/Command", "Get-Date"], false),
+                (&["-File", "x.ps1"], false),
+                (&["-f", "x.ps1"], false),
+                (&["-EncodedCommand", "AA=="], false),
+                (&["-ec", "AA=="], false),
+                (&["-e", "AA=="], false),
+                (&["-cwa", "x"], false),
+                (&["-NoExit", "-Command", "Set-Location C:\\"], true),
+                (&["-Command", "x", "-NoExit"], false),
+                (&["-NoProfile", "-Command", "-NonInteractive"], false),
+            ];
+            let w = world();
+            let body = cases
+                .iter()
+                .enumerate()
+                .map(|(i, (args, _))| {
+                    let list: Vec<String> = args.iter().map(|a| ps_quote(a)).collect();
+                    format!(
+                        "Write-Output ('case{i} ' + (_switchboard_interactive_args @({})))",
+                        list.join(", ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let (out, err) = pwsh_run(&w, pwsh, &[], &body);
+            for (i, (args, interactive)) in cases.iter().enumerate() {
+                let want = format!("case{i} {}", if *interactive { "True" } else { "False" });
+                assert!(
+                    out.lines().any(|l| l.trim_end() == want),
+                    "{args:?}: {out}{err}"
                 );
-                return;
+            }
+
+            // SB-225: `shell init pwsh` carries its paths as base64, so a path that is not ASCII
+            // survives a command's output decoded in the console's code page (5.1).
+            let w = world();
+            let data = w.data.join("Сергей’s data");
+            std::fs::create_dir_all(&data).unwrap();
+            let init = scripts::init_script(Kind::Pwsh, &w.cli, &data).unwrap();
+            assert!(init.is_ascii(), "the printed script is ASCII");
+            let file = w.data.join("init.txt");
+            std::fs::write(&file, &init).unwrap();
+            let through_a_command = if cfg!(windows) {
+                format!("cmd /c type {}", ps_quote(&file.to_string_lossy()))
+            } else {
+                format!("/bin/cat {}", ps_quote(&file.to_string_lossy()))
             };
-            run_all(&pwsh);
+            let body = format!(
+                "Remove-Variable -Name _switchboard_shell -Scope Global\n{through_a_command} | Out-String | Invoke-Expression\nWrite-Output ('data ' + [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($global:_switchboard_data)))"
+            );
+            let (out, err) = pwsh_run(&w, pwsh, &[], &body);
+            use base64::Engine;
+            let read = out
+                .lines()
+                .find_map(|l| l.strip_prefix("data "))
+                .and_then(|b| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(b.trim())
+                        .ok()
+                })
+                .unwrap_or_else(|| panic!("{out}{err}"));
+            assert_eq!(read, data.to_string_lossy().as_bytes(), "{out}{err}");
         }
     }
 }

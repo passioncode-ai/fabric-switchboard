@@ -108,7 +108,8 @@ const NOT_OWN_FOLDER: &str = "Only Switchboard's own data folder can change your
 const NO_INSTALLED_CLI: &str = "No installed switchboard command was found for the hook to run. Install Fabric Switchboard, then run this command again.";
 
 /// `switchboard shell init <shell>`: the hook script, naming this executable and the data
-/// folder.
+/// folder (for PowerShell as base64, so Windows PowerShell 5.1's console code page cannot
+/// garble a path that is not ASCII).
 pub fn init(data_dir: Option<&Path>, shell: InitShell) -> Result<String, String> {
     let root = match data_dir {
         Some(root) => root.to_owned(),
@@ -117,7 +118,7 @@ pub fn init(data_dir: Option<&Path>, shell: InitShell) -> Result<String, String>
     let cli = std::env::current_exe()
         .and_then(|p| p.canonicalize())
         .map_err(|_| "The path of this switchboard executable could not be read.".to_string())?;
-    scripts::script(shell.kind(), &cli, &root).ok_or_else(|| {
+    scripts::init_script(shell.kind(), &cli, &root).ok_or_else(|| {
         "The hook cannot name this executable or the data folder: a path is not absolute or not valid text."
             .into()
     })
@@ -322,6 +323,9 @@ pub fn status_text(value: &Value) -> String {
             }
             Some("policy_blocked") => {
                 "PowerShell's execution policy stops profiles, so the hook is inactive".to_owned()
+            }
+            Some("constrained_language") => {
+                "PowerShell runs in Constrained Language Mode, so the hook is inactive".to_owned()
             }
             Some(other) => other.to_owned(),
             None => String::new(),

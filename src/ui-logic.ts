@@ -1076,6 +1076,7 @@ function shellHookFile(file: { shell: string; path: string; state: string }, hom
     case 'unreadable': return { text: t('{path} could not be read, so Switchboard did not change it.', { path }), command: null, problem: true };
     case 'removed_by_person': return { text: t('You took the block out of {path}, so Switchboard does not add it back.', { path }), command: null, problem: true };
     case 'policy_blocked': return { text: t('PowerShell\'s execution policy stops profiles from loading, so the hook is inactive there. Switchboard does not change it. Whoever manages this computer can allow signed or local scripts for your user.'), command: null, problem: true };
+    case 'constrained_language': return { text: t('PowerShell runs in Constrained Language Mode on this computer, so the hook is inactive there. Switchboard does not change this mode. Whoever manages this computer sets it.'), command: null, problem: true };
     default: return { text: t('{shell}: {path}, {state}', { shell, path, state: file.state }), command: null, problem: true };
   }
 }

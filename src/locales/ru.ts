@@ -1302,6 +1302,7 @@ export const RU: Record<string, string> = {
   "{path} belongs to another user, so Switchboard did not change it.": "Файл {path} принадлежит другому пользователю, поэтому Switchboard его не менял.",
   "{path} could not be read, so Switchboard did not change it.": "Файл {path} не удалось прочитать, поэтому Switchboard его не менял.",
   "You took the block out of {path}, so Switchboard does not add it back.": "Вы убрали блок из {path}, поэтому Switchboard не добавляет его снова.",
+  "PowerShell runs in Constrained Language Mode on this computer, so the hook is inactive there. Switchboard does not change this mode. Whoever manages this computer sets it.": "PowerShell на этом компьютере работает в режиме ограниченного языка (Constrained Language Mode), поэтому привязка там не работает. Switchboard этот режим не меняет. Его задаёт тот, кто управляет этим компьютером.",
   "PowerShell's execution policy stops profiles from loading, so the hook is inactive there. Switchboard does not change it. Whoever manages this computer can allow signed or local scripts for your user.": "Политика выполнения PowerShell не даёт загружать профили, поэтому привязка там не работает. Switchboard эту политику не меняет. Тот, кто управляет этим компьютером, может разрешить подписанные или локальные скрипты для вашего пользователя.",
   "{shell}: {path}, {state}": "{shell}: {path}, {state}",
   "The terminal hook's state could not be read.": "Не удалось прочитать состояние привязки терминалов.",
