@@ -165,3 +165,23 @@ One `CARGO_TARGET_DIR` for every 0.7.0 worktree: `/Users/sshlg/DATA/_worktrees/s
 ### S5 merged; the stability and Windows plan's waves are all in (2026-10-28)
 
 `w5/s5-spend-edges` `ed1669e` merged (SB-213, SB-214). Round 1 (seam): the scripts fetched their OpenRouter key by folder at run time and the take and sweep were unpinned; round 2 (adversarial): 8 of 10 plants caught, gaps P3, P9, P10. Fix cycle 1 `ed1669e`: every OpenRouter script names the slot its gate read (`agents key --pool`/`--machine`), take and sweep go through `fallback::gate_take`, a refused start releases its own baseline, by-hand gates share a `GateBudget`, tests for P3, P9, P10, each seen failing with its defect planted. Re-read (R3): pass, no blocker; `git grep PLANT` empty (the pushed WIP `1a77ad9` carried planted defects, reverted in `ed1669e`; only the head is merged). Merged gate: tsc, ui-logic, locale, vocabulary, brand, docs 0; clippy 0; core, runtime (743), cli, fabric-switchboard 0 failed. Left: SB-233. The plan's waves W1, W1b, W2, S1 to S5 are merged; a nightly on the iteration follows.
+
+### Wave 5 docs: A-9, B-9, C-9 and the release draft (2026-10-28)
+
+Branch `w5/docs` from the iteration head `a476db1`, documentation only, one commit per node.
+- **A-9** `107f2e0`: CONTRACTS "Context binding in 0.7.0" maps every contract of dossier A section 5 to
+  its section, code (file:line) and test; AGENTS.md lifecycle row for the hook's `shell env` question and
+  PowerShell in *Writes*; design H-3 amended (on by default, PowerShell, shell homes); CLI.md's hook section
+  no longer "in progress". Found: node A-6 (proxy guard tests) was never built; proposed as a row.
+- **C-9** `07294c3`: CONTRACTS `## Spending ceilings (SB-72, 0.7.0)`, the storage and the gate moved under
+  it with a summary (ceilings, who loosens, gate, budget, key slot, questions, records, not covered);
+  AGENTS.md `GET /key` only at a paid start; ANALYTICS.md records C-Q6 as not built; terminology and
+  strings; the XA-01 state line.
+- **B-9** `a1059ce`: [ORGANIZATION.md](../../ORGANIZATION.md) and [ORGANIZATION.ru.md](../../ORGANIZATION.ru.md),
+  every step with its proof command and a Windows column; Copylot en-US `82a68bc7`, ru-RU `faec18a8`.
+- **Release draft**: the CHANGELOG's Unreleased section opens with the release paragraph and eight headline
+  entries (Copylot `2358e52a`); [release-notes-draft.md](release-notes-draft.md) (Copylot `a903757b`).
+- **Backlog**: [wave5-backlog.md](wave5-backlog.md) holds every proposed change to the guarded backlog, for
+  the lead to copy in under its lease (SB-71 done, SB-72 split, SB-73 status, SB-183 title, SB-201, SB-202,
+  SB-160, SB-125, SB-96, SB-97; nine new rows, `new-1` to `new-9`).
+
