@@ -263,6 +263,23 @@ check(() => {
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
 });
 
+// SB-213 fix cycle 1, P10: every spend-gate stop sentence (spend.rs `pub const STOP_*`) reaches the
+// window as the backend wrote it: listed verbatim in safeErrors and never rewritten by coreErrors.
+check(() => {
+  const spend = readFileSync(new URL('../crates/switchboard-runtime/src/spend.rs', import.meta.url), 'utf8');
+  const stops = [...spend.matchAll(/pub const (STOP_\w+): &str =\s*"((?:[^"\\]|\\.)*)";/g)];
+  assert(stops.length >= 4, `the STOP_* sentences were found (${stops.length})`);
+  const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
+  const safeStart = adapter.indexOf('const safeErrors = new Set([');
+  const safe = adapter.slice(safeStart, adapter.indexOf(']);', safeStart));
+  const core = adapter.slice(adapter.indexOf('const coreErrors'));
+  for (const [, name, sentence] of stops) {
+    const quoted = `'${sentence.replace(/'/g, "\\'")}'`;
+    assert(safe.includes(`  ${quoted},`), `${name} is in safeErrors verbatim`);
+    assert(!core.includes(quoted), `${name} is not rewritten by coreErrors`);
+  }
+});
+
 // Lifecycle LC-08: the sign-in poll runs only while a sign-in waits; without one, no timer wakes.
 check(() => {
   const timers = new Map(); let next = 0;

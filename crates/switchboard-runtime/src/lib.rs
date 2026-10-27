@@ -411,8 +411,14 @@ pub enum Operation {
     AgentKeyValue {
         service: String,
         /// SB-144: the folder the agent starts in; its project's key wins over the machine's.
+        /// A script written before SB-213 names it.
         #[serde(default)]
         folder: Option<PathBuf>,
+        /// SB-213: the exact key slot a session script names (`--machine`, `--pool <group>`),
+        /// the one its start's spend gate read; `folder` is then not read. A slot whose key is
+        /// gone answers that no key is saved, never another key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<spend::KeySlot>,
     },
     /// Durable stopped-session registrations and capacity notices (SB-114), CLI/host only.
     Recovery,
@@ -1057,34 +1063,43 @@ impl Runtime {
         // Moved, the transaction is let go and the start gated once more on the key it spends
         // now, inside the same budget; moved again, it is refused. The order stays: the
         // hand-over turn, then the gate (no transaction), then the transaction.
-        let (_turn, _mutation) = match &paid {
+        let (_turn, _mutation, pin) = match &paid {
             Some((workflow, dir, kind)) => {
                 let turn = fallback::HAND_OVER.lock().await;
-                let budget_end = tokio::time::Instant::now() + fallback::GATE_BUDGET;
-                let gate = || {
-                    fallback::gate_pinned(
+                // Fix cycle 1, F3: only the time inside the gates is charged, so the wait for the
+                // owner transaction between two gates never leaves the second with nothing.
+                let budget = fallback::by_hand_budget();
+                let gate = || async {
+                    let started = tokio::time::Instant::now();
+                    let pin = fallback::gate_pinned(
                         &self.store,
                         &self.root,
                         workflow.as_deref(),
                         dir,
                         *kind,
-                        budget_end,
+                        budget.limit(fallback::SPEND_READ_TIMEOUT),
                     )
+                    .await;
+                    budget.charge(started.elapsed());
+                    pin
                 };
                 let mut pin = gate().await?;
                 let mut again = true;
                 loop {
                     let mutation = self.mutations.lock().await;
                     if pin.holds(&self.store.snapshot()?) {
-                        break (Some(turn), mutation);
+                        break (Some(turn), mutation, Some(pin));
                     }
-                    drop(mutation);
-                    spend_gate_moved(again);
+                    let held = mutation; // PLANT F
+                    // Its start never runs on this key: the baseline its gate wrote goes (F2).
+                    pin.release(&self.root);
+                    fallback::log_moved(again);
                     if !again {
                         return Err(spend::STOP_FOLDER_MOVED.into());
                     }
                     again = false;
                     pin = gate().await?;
+                    drop(held);
                 }
             }
             None => {
@@ -1094,18 +1109,19 @@ impl Runtime {
                 // the step before anything is offered; the pass goes on down the chain.
                 if let Some(pin) = fallback::pinned() {
                     if !pin.holds(&self.store.snapshot()?) {
-                        spend_gate_moved(false);
+                        pin.release(&self.root);
+                        fallback::log_moved(false);
                         return Err(spend::STOP_FOLDER_MOVED.into());
                     }
                 }
-                (None, mutation)
+                (None, mutation, None)
             }
         };
         let reported = Reported::of(&operation, &self.store);
         let run = execute(self.store.clone(), &self.root, Some(self), operation);
         // The gate passed above: the operation's own gate is not run again.
         let result = if paid.is_some() {
-            fallback::as_gated(run).await
+            fallback::as_gated(pin, run).await
         } else {
             run.await
         };
@@ -3362,17 +3378,6 @@ where
         }
     }
 }
-/// Logs that a paid start's folder moved to another key after its gate (SB-213): gated again,
-/// or refused.
-fn spend_gate_moved(again: bool) {
-    oplog::event(
-        "spend_gate",
-        &[(
-            "folder_moved",
-            oplog::Field::Code(if again { "gated_again" } else { "refused" }),
-        )],
-    );
-}
 /// SB-120: the account a `Continue` that names none runs on, the machine's default agent:
 /// OpenCode and Hermes run on the OpenRouter key; Claude Code, Codex and Kimi Code on the account a
 /// one-step chain of that agent would choose now. Resolved once, before the spend gate (C-Q8).
@@ -3772,8 +3777,8 @@ async fn execute(
         })),
         Operation::HandoverTake { id } => {
             // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
-            // with the hand-over turn, when a console takes it. Refused, it stays waiting: the
-            // window may double the ceiling meanwhile. SB-215: a record without `paid` is
+            // with the hand-over turn, when a console takes it, on the key slot its script names
+            // (SB-213). Refused, it stays waiting: the window may double the ceiling meanwhile. SB-215: a record without `paid` is
             // classified as its start spends now, and the turn is waited for at most
             // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
             let paid = handovers::waiting(root, &id).and_then(|h| {
@@ -3790,12 +3795,13 @@ async fn execute(
                                 .map_err(|_| handovers::BUSY.to_string())?,
                         )
                     };
-                    fallback::gate_by_hand(
+                    // SB-213: on the key slot its script fetches; a moved folder refuses it.
+                    fallback::gate_take(
                         &store,
                         root,
-                        Some(&waiting.workflow),
-                        &waiting.dir,
+                        waiting,
                         *kind,
+                        tokio::time::Instant::now() + fallback::GATE_BUDGET,
                     )
                     .await?;
                     turn
@@ -4008,8 +4014,25 @@ async fn execute(
             Ok(json!({ "removed": removed }))
         }
         Operation::AgentKeys { service } => agent_keys::list(&store, &service),
-        Operation::AgentKeyValue { service, folder } => {
-            Ok(json!({"key": store.agent_key_value_in(&service, folder.as_deref())?}))
+        Operation::AgentKeyValue {
+            service,
+            folder,
+            slot,
+        } => {
+            let key = match slot.filter(|_| false) { // PLANT A2
+                Some(slot) => {
+                    let pool = match &slot {
+                        spend::KeySlot::Machine => None,
+                        spend::KeySlot::Group(pool) => Some(pool.as_str()),
+                    };
+                    let entry = store
+                        .agent_key_for(&service, pool)?
+                        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+                    store.agent_key_secret(&entry)?
+                }
+                None => store.agent_key_value_in(&service, folder.as_deref())?,
+            };
+            Ok(json!({ "key": key }))
         }
         Operation::HermesModel => tokio::task::spawn_blocking(hermes::status)
             .await
@@ -4235,6 +4258,8 @@ async fn execute(
                 "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
+                    // SB-213: the key slot its script fetches, for a queued hand-over's record.
+                    "keySlot": launched["key_slot"],
                 }));
             }
             if id == hermes::HERMES_TARGET {
@@ -4282,6 +4307,8 @@ async fn execute(
                 "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
+                    // SB-213: the key slot its script fetches, for a queued hand-over's record.
+                    "keySlot": launched["key_slot"],
                 }));
             }
             // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —

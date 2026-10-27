@@ -519,9 +519,16 @@ switchboard agents openrouter model anthropic/claude-sonnet-4.5
 switchboard agents openrouter remove
 switchboard agents openrouter set --key-stdin --pool client-alpha   # SB-144: the key agents in that project's folders run on
 switchboard agents openrouter list         # every saved key with its project, and the projects without one
-switchboard agents key --service openrouter --dir /work/app   # the key of that folder's project, else the machine's (launch scripts call this)
+switchboard agents key --service openrouter --pool client-alpha   # exactly that group's own key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --machine   # exactly the machine's key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --dir /work/app   # the key of that folder's group, else the machine's (scripts written before 0.7.0)
 switchboard agents key --service openrouter   # the value, for a session script's export only
 ```
+
+A session script names the key slot its start's spending check read (`--pool` or `--machine`),
+never its folder: a folder that joins another group between the launch and the script's first
+line still runs on the key that was checked. A slot whose key was removed meanwhile answers that
+no key is saved, and the script stops before the agent starts.
 
 `set` refuses interactive input: pipe the key (`< key.txt`, `pbpaste |`). `status` asks
 OpenRouter itself (`GET /api/v1/key`) and shows `limit_remaining` and `usage_daily`; a refused

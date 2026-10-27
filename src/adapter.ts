@@ -217,7 +217,7 @@ const safeErrors = new Set([
   'This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.',
   'A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.',
   'A spending ceiling covers this start and its spend could not be read, so no paid agent starts.',
-  // SB-213: the start's folder moved to another group (another key) after its gate, twice.
+  // SB-213: the start's folder moved to another group (another key) after its gate read the key.
   'This folder moved to another group while its spend was checked, so no paid agent starts. Start it again.',
   'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.',
   'No open question with that id: it was answered, or its ceiling changed or was removed.',

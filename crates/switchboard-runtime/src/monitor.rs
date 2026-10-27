@@ -272,16 +272,9 @@ impl Pass {
             time,
             crate::launch::start_terminal,
             |h: &crate::handovers::Handover| crate::fallback::handover_paid(snapshot.as_ref(), h),
+            // SB-213: gated on the key slot its script names; a moved folder refuses it.
             |h: crate::handovers::Handover, kind, end| async move {
-                crate::fallback::gate_within(
-                    &runtime.store,
-                    &runtime.root,
-                    Some(&h.workflow),
-                    &h.dir,
-                    kind,
-                    end,
-                )
-                .await
+                crate::fallback::gate_take(&runtime.store, &runtime.root, &h, kind, end).await
             },
             crate::fallback::GATE_BUDGET,
             crate::fallback::SPEND_READ_TIMEOUT,
