@@ -45,7 +45,7 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
-Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle — CLI included — while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`), so a client's stall can be told apart from a wait on the way to the owner. A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
+Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
 Windows protection is an OS implementation behind the same Vault/Store contract; build success does not certify provider login or screen-reader behavior. macOS signing uses an existing Developer ID private key locally without export. Notary acceptance remains a separate receipt.
 
@@ -1402,7 +1402,49 @@ still saved and still holds that token: a removal or a sign-in meanwhile keeps i
 (SB-179). Evidence: `adopting_a_renewal_never_holds_the_account_list_across_keychain_reads`,
 `a_renewal_never_writes_an_account_removed_while_its_reads_ran`,
 `a_sign_in_stored_while_a_renewal_reads_keeps_its_place`,
-`a_renewal_writes_under_the_lock_so_a_removal_waits_for_it`.
+`a_renewal_writes_under_the_lock_so_a_removal_waits_for_it`. Since H-2 (0.7.0) "the lock" for
+the re-read and the write is the store's credential lock, not the metadata lock (below).
+
+**No Keychain call holds the account metadata (H-2, 0.7.0; SB-174, SB-206).** On 2026-10-27, on
+0.6.83, a renewal's `store` phase held the store's metadata lock up to 69.3 s (the Keychain write
+of the successor), and `sessions` and `recovery`, which start with `snapshot()`, waited 63 to
+64 s behind it. The store now has two locks. Every writer of an account's credential
+(`adopt_refreshed_for`, `upsert`/`add` through `save_account`, `renew_rows`,
+`restore_missing_credential`, `remove`) holds the **credential lock** across its Keychain reads
+and writes, so they never interleave with each other; the **metadata lock** that `snapshot()`
+and every read wait on is taken under it, never the other way round, and only for the metadata.
+
+- A renewal writes the successor under the credential lock, taking the metadata lock only to
+  check that the account is still saved. It stores no metadata, so a crash after the write
+  leaves the row naming an item that holds the working successor; a refused write leaves the
+  spent token stored and the successor with the runtime (`refresh.rs` `stash`), which stores it
+  on the next pass. No token is lost (`a_renewals_slow_credential_write_does_not_hold_the_metadata`,
+  `a_renewal_whose_write_fails_leaves_the_stored_token_and_the_metadata_as_they_were`).
+- `save_account` plans under the metadata lock (which rows' tokens to compare, which row the
+  save is), reads those rows without it, writes the credential, then takes the metadata lock
+  again and publishes the same plan against the metadata as it is then. Only credential writers
+  add or remove an account or change its credential, and they wait for the credential lock, so
+  the reads stay true; a group change can still land meanwhile, and then the first write is put
+  back and the save planned again, at most 4 times. A refused metadata write puts the old
+  credential back (or removes the new item), as before
+  (`saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata`,
+  `a_save_whose_metadata_cannot_be_written_puts_the_old_credential_back`,
+  `a_save_whose_credential_write_fails_changes_nothing`,
+  `a_login_moved_into_the_group_while_its_save_writes_is_updated_not_copied`).
+- `renew_rows` checks the rows, reads every row's credential, writes them, then publishes, all
+  Keychain calls outside the metadata lock; a failure puts every written row back
+  (`renewing_rows_reads_and_writes_the_keychain_without_holding_the_metadata`).
+- The order of the credential and the metadata is the one before H-2: the credential first, so
+  a crash between them leaves metadata that names a credential that works.
+- A quota check compares its credential under the metadata lock (`same_generation`). A write no
+  longer holds that lock, so the store's vault wrapper marks each item while a write or a
+  removal of it runs, and a check that finds its item marked is refused as `credential_changed`,
+  as it would be once the write landed (`a_quota_verdict_read_while_a_renewal_writes_is_refused_as_a_change`,
+  `a_write_in_flight_during_the_generation_read_is_still_seen`). A save's own publication still
+  clears a verdict of the old generation, from the metadata as it is at publication.
+- Left under the metadata lock: `remove`'s deletion (so a selection cannot route to the account
+  between the route check and the deletion), and the Keychain reads of `route`, `credential`,
+  selection and the rotation's candidate check, which validate the credential they select.
 
 **Sign-ins needed (SB-182, PRD-01).** `recovery`, `RecoveryClaim` and `MonitorStatus` read the
 accounts whose rejected lineage nothing replaced (`RefreshState::sign_in_required`): each such

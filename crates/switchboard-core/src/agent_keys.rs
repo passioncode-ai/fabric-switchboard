@@ -3,7 +3,7 @@
 //! per project pool; an agent gets the key of the project whose folder it starts in, else the
 //! machine's. The value lives only in the vault, under the UUID recorded here with the service,
 //! the pool, when it was saved and the default model; the metadata never holds it.
-use crate::{append_event, now, uuid_valid, vault, Credential, Snapshot, Store};
+use crate::{append_event, now, uuid_valid, vault, Credential, Snapshot, Store, Vault};
 use serde::{Deserialize, Serialize};
 
 /// The services an agent key may be for.

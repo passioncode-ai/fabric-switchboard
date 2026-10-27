@@ -1,5 +1,5 @@
 //! Optional project rules: a project folder names the account its sessions should use.
-use crate::{append_event, now, AuthKind, Provider, Snapshot, Store, MAX_ACCOUNTS};
+use crate::{append_event, now, AuthKind, Provider, Snapshot, Store, Vault, MAX_ACCOUNTS};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 

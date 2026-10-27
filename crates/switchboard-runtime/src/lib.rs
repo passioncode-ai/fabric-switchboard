@@ -836,6 +836,8 @@ impl Runtime {
         native: NativeSources,
     ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
+        // H-2: `control_slow` names the time a request waited for the store's lock.
+        store.observe_lock_waits(control::lock_waited);
         let proxy = start_proxy(&root, store.clone()).await?;
         let refresh = refresh::RefreshState::default();
         refresh.remember_in(root.join("renewal-state.json"));

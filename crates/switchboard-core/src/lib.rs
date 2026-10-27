@@ -291,8 +291,15 @@ pub struct Snapshot {
 pub struct Store {
     root: PathBuf,
     _lock: File,
-    vault: Arc<dyn Vault>,
+    vault: Arc<CountedVault>,
     state: Mutex<Snapshot>,
+    /// H-2 (SB-174, SB-206): held by every writer of an account's credential (a save, a sign-in's
+    /// rows, a renewal, a restore, a removal) across its Keychain reads and writes, so they never
+    /// interleave; the metadata lock (`state`) is taken under it, never the other way round, and
+    /// only for the metadata itself. A snapshot therefore never waits for a Keychain write.
+    credential_writes: Mutex<()>,
+    /// H-2: told how long each take of the metadata lock waited (`control_slow`'s `lock_ms`).
+    lock_observer: std::sync::OnceLock<fn(std::time::Duration)>,
     /// Counts changes a backup must capture: credentials, accounts and policies — not quota.
     changes: std::sync::atomic::AtomicU64,
     /// PRD-01: counts credential writes only (every vault put or delete, kept or refused), so
@@ -541,25 +548,200 @@ const VAULT_UNAVAILABLE: &str = "Credential storage unavailable";
 
 /// The store's own view of its vault: counts every write and removal after it returns, kept
 /// or refused (a refused write may still have changed the item), for `credential_changes`.
+/// H-2: it also marks each item while a write or removal of it runs, since writes no longer hold
+/// the metadata lock: a quota check comparing its credential under that lock sees a write in
+/// flight (`Store::same_generation`). The count moves before the mark is cleared.
 struct CountedVault {
     inner: Arc<dyn Vault>,
     writes: Arc<std::sync::atomic::AtomicU64>,
+    writing: Mutex<std::collections::HashMap<String, usize>>,
+}
+impl CountedVault {
+    fn written(&self, id: &str, write: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+        if let Ok(mut writing) = self.writing.lock() {
+            *writing.entry(id.to_owned()).or_default() += 1;
+        }
+        let result = write();
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut writing) = self.writing.lock() {
+            if let Some(n) = writing.get_mut(id) {
+                *n -= 1;
+                if *n == 0 {
+                    writing.remove(id);
+                }
+            }
+        }
+        result
+    }
+    /// Whether a write or removal of `id` runs now; true when that cannot be known.
+    fn is_writing(&self, id: &str) -> bool {
+        self.writing.lock().map_or(true, |w| w.contains_key(id))
+    }
 }
 impl Vault for CountedVault {
     fn get(&self, id: &str) -> Result<Credential, String> {
         self.inner.get(id)
     }
     fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
-        let result = self.inner.put(id, value);
-        self.writes
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        result
+        self.written(id, || self.inner.put(id, value))
     }
     fn delete(&self, id: &str) -> Result<(), String> {
-        let result = self.inner.delete(id);
-        self.writes
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        result
+        self.written(id, || self.inner.delete(id))
+    }
+}
+
+/// H-2: how many times a save plans again when the metadata moved under its write.
+const SAVE_ATTEMPTS: usize = 4;
+/// One `save_account` call, planned against the metadata without touching the vault.
+struct SaveRequest<'a> {
+    label: &'a str,
+    provider: Provider,
+    kind: AuthKind,
+    pool: &'a str,
+    credential: &'a Credential,
+    external_identity: Option<&'a ExternalIdentity>,
+    upsert: bool,
+    /// The id a new row takes, the same in every plan of this save.
+    new_id: String,
+    created_at: i64,
+}
+/// What a save does against one state of the metadata. A plan lives for one step of one save,
+/// so its size does not matter.
+#[allow(clippy::large_enum_variant)]
+enum SavePlan {
+    /// These rows' credentials must be read (outside the metadata lock) before it can say.
+    Read(Vec<String>),
+    /// The row it writes (a saved one, or a new one with `new_id`), that row's credential before
+    /// it, and the metadata to publish.
+    Ready {
+        account: Account,
+        old: Option<Credential>,
+        candidate: Snapshot,
+    },
+}
+impl SaveRequest<'_> {
+    /// The same decisions `save_account` made under one lock before H-2, from `reads` (each
+    /// row's credential, read under the credential lock) instead of the vault.
+    fn plan(
+        &self,
+        state: &Snapshot,
+        reads: &BTreeMap<String, Result<Credential, String>>,
+    ) -> Result<SavePlan, String> {
+        let identity_of = |a: &Account| {
+            let both_known = a
+                .external_identity
+                .as_ref()
+                .is_some_and(|i| i.account_id.is_some())
+                && self
+                    .external_identity
+                    .is_some_and(|i| i.account_id.is_some());
+            let identity_match = a
+                .external_identity
+                .as_ref()
+                .zip(self.external_identity)
+                .is_some_and(|(a, b)| a.matches(b));
+            (both_known, identity_match)
+        };
+        let in_pool = |a: &&Account| a.provider == self.provider && a.pool == self.pool;
+        let missing: Vec<String> = state
+            .accounts
+            .iter()
+            .filter(in_pool)
+            .filter(|a| {
+                let (both_known, identity_match) = identity_of(a);
+                (!self.upsert || !both_known || identity_match) && !reads.contains_key(&a.id)
+            })
+            .map(|a| a.id.clone())
+            .collect();
+        if !missing.is_empty() {
+            return Ok(SavePlan::Read(missing));
+        }
+        let read = |id: &str| -> Result<Credential, String> {
+            match reads.get(id) {
+                Some(read) => read.clone(),
+                None => Err(VAULT_UNAVAILABLE.into()),
+            }
+            .map_err(vault::surface("Credential storage unavailable"))
+        };
+        let mut matched = None;
+        for a in state.accounts.iter().filter(in_pool) {
+            let (both_known, identity_match) = identity_of(a);
+            let token_match = if !self.upsert || !both_known {
+                read(&a.id)?.access_token == self.credential.access_token
+            } else {
+                false
+            };
+            if identity_match || token_match {
+                if !self.upsert {
+                    return Err("Account credential already exists in this pool".into());
+                }
+                if matched.is_some() {
+                    return Err("Account identity is ambiguous in this pool".into());
+                }
+                matched = Some(a.clone());
+            }
+        }
+        let (account, old) = if let Some(mut account) = matched {
+            let old = read(&account.id)?;
+            account.label = self.label.into();
+            account.kind = self.kind;
+            account.identity = self.credential.account_id.clone();
+            account.external_identity = self
+                .external_identity
+                .cloned()
+                .or(account.external_identity);
+            // A new credential generation cannot inherit an old generation's quota verdict.
+            if old.access_token != self.credential.access_token
+                || old.expires_at != self.credential.expires_at
+            {
+                account.usage = None;
+                account.usage_health = None;
+            }
+            (account, Some(old))
+        } else {
+            if state.accounts.len() >= MAX_ACCOUNTS {
+                return Err("Account limit reached".into());
+            }
+            (
+                Account {
+                    id: self.new_id.clone(),
+                    label: self.label.into(),
+                    provider: self.provider,
+                    kind: self.kind,
+                    pool: self.pool.into(),
+                    enabled: true,
+                    created_at: self.created_at,
+                    identity: self.credential.account_id.clone(),
+                    usage: None,
+                    external_identity: self.external_identity.cloned(),
+                    usage_health: None,
+                },
+                None,
+            )
+        };
+        let mut candidate = state.clone();
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == account.id) {
+            *a = account.clone();
+        } else {
+            candidate.accounts.push(account.clone());
+        }
+        append_event(
+            &mut candidate,
+            if old.is_some() {
+                "account_updated"
+            } else {
+                "account_added"
+            },
+            Some(&account.id),
+            "success",
+        );
+        validate_snapshot(&candidate)?;
+        Ok(SavePlan::Ready {
+            account,
+            old,
+            candidate,
+        })
     }
 }
 
@@ -580,8 +762,11 @@ impl Store {
             vault: Arc::new(CountedVault {
                 inner: vault,
                 writes: credential_changes.clone(),
+                writing: Default::default(),
             }),
             state: Mutex::new(state),
+            credential_writes: Mutex::new(()),
+            lock_observer: std::sync::OnceLock::new(),
             changes: Default::default(),
             credential_changes,
             writes: Default::default(),
@@ -598,7 +783,45 @@ impl Store {
         &self.root
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Snapshot>, String> {
-        self.state.lock().map_err(|_| STORE_UNAVAILABLE.into())
+        let guard = match self.state.try_lock() {
+            Ok(guard) => {
+                self.lock_waited(std::time::Duration::ZERO);
+                guard
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let started = std::time::Instant::now();
+                let guard = self.state.lock().map_err(|_| STORE_UNAVAILABLE)?;
+                self.lock_waited(started.elapsed());
+                guard
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(STORE_UNAVAILABLE.into()),
+        };
+        Ok(guard)
+    }
+    fn lock_waited(&self, waited: std::time::Duration) {
+        if let Some(observer) = self.lock_observer.get() {
+            observer(waited);
+        }
+    }
+    /// H-2: `observer` is told, on the taking thread, how long each take of the store's metadata
+    /// lock waited (zero when it was free). Set once; a second observer is ignored.
+    pub fn observe_lock_waits(&self, observer: fn(std::time::Duration)) {
+        let _ = self.lock_observer.set(observer);
+    }
+    /// H-2: the lock every credential writer holds across its Keychain calls (see
+    /// `credential_writes`). Taken before the metadata lock, never while holding it.
+    fn credential_lock(&self) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+        self.credential_writes
+            .lock()
+            .map_err(|_| STORE_UNAVAILABLE.into())
+    }
+    /// Puts `old` back as `id`'s credential, or removes the item when there was none.
+    fn restore_credential(&self, id: &str, old: Option<&Credential>) -> Result<(), String> {
+        match old {
+            Some(old) => self.vault.put(id, old),
+            None => self.vault.delete(id),
+        }
+        .map_err(|_| "Storage failure; credential cleanup requires recovery".into())
     }
     fn publish(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
         validate_snapshot(&candidate)?;
@@ -1021,118 +1244,81 @@ impl Store {
         {
             return Err("Credential identity does not match account identity".into());
         }
-        let mut state = self.lock()?;
-        let mut matched = None;
-        for a in &state.accounts {
-            if a.provider != provider || a.pool != pool {
-                continue;
-            }
-            let both_known = a
-                .external_identity
-                .as_ref()
-                .is_some_and(|i| i.account_id.is_some())
-                && external_identity
-                    .as_ref()
-                    .is_some_and(|i| i.account_id.is_some());
-            let identity_match = a
-                .external_identity
-                .as_ref()
-                .zip(external_identity.as_ref())
-                .is_some_and(|(a, b)| a.matches(b));
-            let token_match = if !upsert || !both_known {
-                self.vault
-                    .get(&a.id)
-                    .map_err(vault::surface("Credential storage unavailable"))?
-                    .access_token
-                    == credential.access_token
-            } else {
-                false
-            };
-            if identity_match || token_match {
-                if !upsert {
-                    return Err("Account credential already exists in this pool".into());
-                }
-                if matched.is_some() {
-                    return Err("Account identity is ambiguous in this pool".into());
-                }
-                matched = Some(a.clone());
-            }
-        }
-        let (account, old_credential) = if let Some(mut account) = matched {
-            let old = self
-                .vault
-                .get(&account.id)
-                .map_err(vault::surface("Credential storage unavailable"))?;
-            account.label = label.trim().into();
-            account.kind = kind;
-            account.identity = credential.account_id.clone();
-            account.external_identity = external_identity.or(account.external_identity);
-            // A new credential generation cannot inherit an old generation's quota verdict.
-            if old.access_token != credential.access_token
-                || old.expires_at != credential.expires_at
-            {
-                account.usage = None;
-                account.usage_health = None;
-            }
-            (account, Some(old))
-        } else {
-            if state.accounts.len() >= MAX_ACCOUNTS {
-                return Err("Account limit reached".into());
-            }
-            (
-                Account {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    label: label.trim().into(),
-                    provider,
-                    kind,
-                    pool,
-                    enabled: true,
-                    created_at: now(),
-                    identity: credential.account_id.clone(),
-                    usage: None,
-                    external_identity,
-                    usage_health: None,
-                },
-                None,
-            )
+        // H-2 (SB-206): every Keychain read and write runs under the credential lock only. The
+        // metadata lock is taken to plan (which rows to read, which row the save is), and again
+        // to publish the same plan against the metadata as it is then. Nothing but a credential
+        // writer changes a credential or adds or removes an account, and they all wait for this
+        // lock, so the reads stay true; a group change can still land meanwhile, and then the
+        // first write is put back and the save planned again.
+        let _writes = self.credential_lock()?;
+        let save = SaveRequest {
+            label: label.trim(),
+            provider,
+            kind,
+            pool: &pool,
+            credential: &credential,
+            external_identity: external_identity.as_ref(),
+            upsert,
+            new_id: uuid::Uuid::new_v4().to_string(),
+            created_at: now(),
         };
-        let mut candidate = state.clone();
-        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == account.id) {
-            *a = account.clone();
-        } else {
-            candidate.accounts.push(account.clone());
-        }
-        append_event(
-            &mut candidate,
-            if old_credential.is_some() {
-                "account_updated"
-            } else {
-                "account_added"
-            },
-            Some(&account.id),
-            "success",
-        );
-        validate_snapshot(&candidate)?;
-        self.vault
-            .put(&account.id, &credential)
-            .map_err(vault::surface("Credential storage unavailable"))?;
-        if self.publish(&mut state, candidate).is_err() {
-            let restored = if let Some(old) = old_credential {
-                self.vault.put(&account.id, &old)
-            } else {
-                self.vault.delete(&account.id)
+        let mut reads: BTreeMap<String, Result<Credential, String>> = BTreeMap::new();
+        for _ in 0..SAVE_ATTEMPTS {
+            let planned = save.plan(&*self.lock()?, &reads)?;
+            let (id, old) = match planned {
+                SavePlan::Read(ids) => {
+                    self.read_into(&mut reads, ids);
+                    continue;
+                }
+                SavePlan::Ready { account, old, .. } => (account.id, old),
             };
-            restored.map_err(|_| "Storage failure; credential cleanup requires recovery")?;
-            return Err("Account metadata could not be saved".into());
+            // The credential first: a crash before the metadata leaves the saved row naming its
+            // previous credential's item, now holding the new one, or an item no row names.
+            self.vault
+                .put(&id, &credential)
+                .map_err(vault::surface("Credential storage unavailable"))?;
+            let mut state = self.lock()?;
+            match save.plan(&state, &reads) {
+                Ok(SavePlan::Ready {
+                    account, candidate, ..
+                }) if account.id == id => {
+                    let published = self.publish(&mut state, candidate);
+                    drop(state);
+                    if published.is_err() {
+                        self.restore_credential(&id, old.as_ref())?;
+                        return Err("Account metadata could not be saved".into());
+                    }
+                    self.changed();
+                    return Ok(account);
+                }
+                replanned => {
+                    drop(state);
+                    self.restore_credential(&id, old.as_ref())?;
+                    if let SavePlan::Read(ids) = replanned? {
+                        self.read_into(&mut reads, ids);
+                    }
+                }
+            }
         }
-        self.changed();
-        Ok(account)
+        Err("Account metadata could not be saved".into())
+    }
+    /// Reads each of `ids`' credentials into `reads`, outside the metadata lock.
+    fn read_into(
+        &self,
+        reads: &mut BTreeMap<String, Result<Credential, String>>,
+        ids: Vec<String>,
+    ) {
+        for id in ids {
+            let read = self.vault.get(&id);
+            reads.insert(id, read);
+        }
     }
     /// One sign-in renews every saved row of its login at once (SB-62, SB-78): each row keeps its
     /// pool and, unless `labels` names a new one, its label; all take the new credential and
     /// identity, and the metadata is published once. If any credential or the metadata cannot be
     /// written, every credential already replaced is put back — no row is left on the old
-    /// credential while another holds the new one.
+    /// credential while another holds the new one. H-2 (SB-206): the Keychain is read and written
+    /// under the credential lock only, the metadata lock taken to check the rows and to publish.
     pub fn renew_rows(
         &self,
         provider: Provider,
@@ -1151,50 +1337,70 @@ impl Store {
             return Err("Label, pool or identity is invalid".into());
         }
         credential.validate(provider, AuthKind::OAuth)?;
-        let mut state = self.lock()?;
-        let mut candidate = state.clone();
-        let mut renewed = Vec::new();
-        let mut olds = Vec::new();
-        for (id, label) in rows {
-            let account = candidate
-                .accounts
-                .iter_mut()
-                .find(|a| &a.id == id && a.provider == provider && a.kind == AuthKind::OAuth)
-                .ok_or("Account not found")?;
-            if !account
-                .external_identity
-                .as_ref()
-                .is_some_and(|i| i.matches(external_identity))
-            {
-                return Err("Credential identity does not match account identity".into());
+        let _writes = self.credential_lock()?;
+        // The rows are checked before any Keychain read, as before; their credentials and
+        // identities cannot change while the credential lock is held.
+        let checked = |state: &Snapshot| -> Result<(), String> {
+            for (id, _) in rows {
+                let account = state
+                    .accounts
+                    .iter()
+                    .find(|a| &a.id == id && a.provider == provider && a.kind == AuthKind::OAuth)
+                    .ok_or("Account not found")?;
+                if !account
+                    .external_identity
+                    .as_ref()
+                    .is_some_and(|i| i.matches(external_identity))
+                {
+                    return Err("Credential identity does not match account identity".into());
+                }
             }
+            Ok(())
+        };
+        checked(&*self.lock()?)?;
+        let mut olds: Vec<(String, Credential)> = Vec::new();
+        for (id, _) in rows {
             let old = self
                 .vault
                 .get(id)
                 .map_err(vault::surface("Credential storage unavailable"))?;
-            if let Some(label) = label {
-                account.label = label.trim().into();
-            }
-            account.identity = credential.account_id.clone();
-            account.external_identity = Some(external_identity.clone());
-            if old.access_token != credential.access_token
-                || old.expires_at != credential.expires_at
-            {
-                account.usage = None;
-                account.usage_health = None;
-            }
-            renewed.push(account.clone());
             olds.push((id.clone(), old));
         }
-        for account in &renewed {
-            append_event(
-                &mut candidate,
-                "account_updated",
-                Some(&account.id),
-                "success",
-            );
-        }
-        validate_snapshot(&candidate)?;
+        let plan = |state: &Snapshot| -> Result<(Snapshot, Vec<Account>), String> {
+            checked(state)?;
+            let mut candidate = state.clone();
+            let mut renewed = Vec::new();
+            for ((id, label), (_, old)) in rows.iter().zip(&olds) {
+                let account = candidate
+                    .accounts
+                    .iter_mut()
+                    .find(|a| &a.id == id)
+                    .ok_or("Account not found")?;
+                if let Some(label) = label {
+                    account.label = label.trim().into();
+                }
+                account.identity = credential.account_id.clone();
+                account.external_identity = Some(external_identity.clone());
+                if old.access_token != credential.access_token
+                    || old.expires_at != credential.expires_at
+                {
+                    account.usage = None;
+                    account.usage_health = None;
+                }
+                renewed.push(account.clone());
+            }
+            for account in &renewed {
+                append_event(
+                    &mut candidate,
+                    "account_updated",
+                    Some(&account.id),
+                    "success",
+                );
+            }
+            validate_snapshot(&candidate)?;
+            Ok((candidate, renewed))
+        };
+        plan(&*self.lock()?)?;
         let mut written: Vec<&(String, Credential)> = Vec::new();
         let mut failure = None;
         for entry in &olds {
@@ -1206,14 +1412,23 @@ impl Store {
                 }
             }
         }
-        if failure.is_none() && self.publish(&mut state, candidate).is_err() {
-            failure = Some("Account metadata could not be saved".into());
+        let mut renewed = Vec::new();
+        if failure.is_none() {
+            let mut state = self.lock()?;
+            match plan(&state) {
+                Ok((candidate, rows)) => {
+                    if self.publish(&mut state, candidate).is_err() {
+                        failure = Some("Account metadata could not be saved".into());
+                    } else {
+                        renewed = rows;
+                    }
+                }
+                Err(error) => failure = Some(error),
+            }
         }
         if let Some(error) = failure {
             for (id, old) in written {
-                self.vault
-                    .put(id, old)
-                    .map_err(|_| "Storage failure; credential cleanup requires recovery")?;
+                self.restore_credential(id, Some(old))?;
             }
             return Err(error);
         }
@@ -1315,24 +1530,29 @@ impl Store {
         id: &str,
         credential: &Credential,
     ) -> Result<bool, String> {
-        let state = self.lock()?;
-        let a = state
-            .accounts
-            .iter()
-            .find(|a| a.id == id)
-            .ok_or("Account not found")?;
+        // H-2: under the credential lock, the metadata lock only to find the account (a removal
+        // waits for the credential lock, so it stays saved).
+        let _writes = self.credential_lock()?;
+        let (provider, kind) = {
+            let state = self.lock()?;
+            let a = state
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .ok_or("Account not found")?;
+            (a.provider, a.kind)
+        };
         if self
             .vault
             .get(id)
-            .is_ok_and(|c| c.validate(a.provider, a.kind).is_ok())
+            .is_ok_and(|c| c.validate(provider, kind).is_ok())
         {
             return Ok(false);
         }
-        credential.validate(a.provider, a.kind)?;
+        credential.validate(provider, kind)?;
         self.vault
             .put(id, credential)
             .map_err(vault::surface("Credential storage unavailable"))?;
-        drop(state);
         self.changed();
         Ok(true)
     }
@@ -1362,11 +1582,12 @@ impl Store {
         refreshed: &Credential,
         owner: Option<&str>,
     ) -> Result<(Vec<String>, Vec<String>), String> {
-        // H-1 (0.6.83): the account list is read under the lock and every Keychain read and
-        // write runs without it. A Keychain read has no deadline and waits behind every other
-        // in the process; with the list locked across all of them, a snapshot (and `recovery`,
+        // H-1 (0.6.83): the account list is read under the lock and every Keychain read runs
+        // without it. A Keychain read has no deadline and waits behind every other in the
+        // process; with the list locked across all of them, a snapshot (and `recovery`,
         // `sessions`, the window) waited out every saved account's read, up to 91 s on a loaded
-        // Mac. Each write still runs under the lock, after checking the account is saved.
+        // Mac. H-2 (SB-174): each write ran under the lock too, and a renewal's `store` phase
+        // held it up to 69.3 s on 2026-10-27; it now runs under the credential lock only.
         let accounts: Vec<Account> = self
             .lock()?
             .accounts
@@ -1405,13 +1626,18 @@ impl Store {
             {
                 return Err("Credential identity does not match account identity".into());
             }
-            // One write, under the lock, after checking that the account is still saved and
-            // still holds the spent token: a removal or a sign-in writing this account (both
-            // hold the lock across their own write) is never interleaved with it, and a sign-in
-            // stored since the read keeps its place (SB-179). Only the reads of accounts that
-            // hold the spent token are repeated here; the N reads above run without the lock.
-            let saved = self.lock()?;
-            if !saved.accounts.iter().any(|s| s.id == a.id)
+            // One write, under the credential lock, after checking that the account is still
+            // saved and still holds the spent token: a removal or a sign-in writing this account
+            // (both hold the credential lock across their own write) is never interleaved with
+            // it, and a sign-in stored since the read keeps its place (SB-179). Only the reads of
+            // accounts that hold the spent token are repeated here; the N reads above run
+            // without either lock. The metadata lock is taken only for the check (H-2): a
+            // renewal stores no metadata, so a crash after the write leaves the saved row
+            // naming an item that holds the working successor, and a refused write leaves the
+            // spent token there and the successor with the caller (`refresh.rs` `stash`).
+            let writes = self.credential_lock()?;
+            let saved = self.lock()?.accounts.iter().any(|s| s.id == a.id);
+            if !saved
                 || self
                     .vault
                     .get(&a.id)
@@ -1423,7 +1649,7 @@ impl Store {
                 continue;
             }
             let written = self.vault.put(&a.id, refreshed);
-            drop(saved);
+            drop(writes);
             if written.is_err() {
                 // The copies already written stay written; the caller keeps the successor
                 // for the rest, which still hold the spent token.
@@ -1572,7 +1798,11 @@ impl Store {
     }
     /// Vault deletion precedes metadata publication. On disk failure the visible account
     /// remains, but its missing credential prevents use. Retrying removal is safe.
+    /// H-2: it takes the credential lock first, so no renewal or save writes the item it
+    /// deletes; the deletion itself still runs under the metadata lock, so a selection cannot
+    /// route to the account between the route check and the deletion.
     pub fn remove(&self, id: &str) -> Result<(), String> {
+        let _writes = self.credential_lock()?;
         let mut state = self.lock()?;
         if state.routes.values().any(|v| v == id) {
             return Err("Select another account or disable this account before removing it".into());
@@ -1742,6 +1972,11 @@ impl Store {
         read: (Result<Credential, String>, u64),
     ) -> Result<(), String> {
         let (read, at) = read;
+        // H-2: a write of this item in flight (it no longer holds the metadata lock) changes
+        // the generation the check read; refused as a change, as it would read once landed.
+        if self.vault.is_writing(id) {
+            return Err(OBSERVATION_CREDENTIAL_CHANGED.into());
+        }
         let current = if self.credential_changes() == at {
             read
         } else {
