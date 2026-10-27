@@ -2086,6 +2086,13 @@ async fn launch_event(root: &std::path::Path, hook: Option<&Value>, event: launc
     let Some(hook) = hook.filter(|h| h.is_object()) else {
         return;
     };
+    // A start names its session or its transcript; another object asks nothing (N-5).
+    if event == launches::Event::Start
+        && !hook["session_id"].is_string()
+        && !hook["transcript_path"].is_string()
+    {
+        return;
+    }
     let operation = Operation::LaunchEvent {
         launch_id,
         event,

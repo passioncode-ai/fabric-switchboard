@@ -64,8 +64,9 @@ pub enum Surface {
 
 /// Who launched a session. A request may carry `caller_folder`; the owner turns it into
 /// `caller_project` (the group's pool, or none) and never stores the folder.
+/// Unknown fields are ignored, not refused: a later command may add one, and refusing it would
+/// make a launch fail in the update window (N-7).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LaunchedBy {
     pub surface: Surface,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,7 +209,8 @@ pub(crate) fn resolve(
 
 struct Scope {
     by: LaunchedBy,
-    recorded: Arc<Mutex<Option<String>>>,
+    /// The launch this operation recorded and the data folder its record is in.
+    recorded: Arc<Mutex<Option<(String, PathBuf)>>>,
 }
 tokio::task_local! {
     static SCOPE: Scope;
@@ -225,7 +227,12 @@ pub(crate) fn capturing() -> bool {
 /// The launch id the running operation's launch recorded so far, if any.
 pub(crate) fn recorded() -> Option<String> {
     SCOPE
-        .try_with(|s| s.recorded.lock().ok().and_then(|id| id.clone()))
+        .try_with(|s| {
+            s.recorded
+                .lock()
+                .ok()
+                .and_then(|id| id.as_ref().map(|(id, _)| id.clone()))
+        })
         .ok()
         .flatten()
 }
@@ -247,6 +254,15 @@ where
         )
         .await;
     let id = recorded.lock().ok().and_then(|mut id| id.take());
+    // N-1: a launch that failed after its record was written never started; nothing continues
+    // as it, so a later launch that starts takes the link.
+    let id = match (&result, id) {
+        (Err(_), Some((id, root))) => {
+            not_started(&root, &id, crate::monitor::now());
+            None
+        }
+        (_, id) => id.map(|(id, _)| id),
+    };
     result.map(|mut value| {
         if let (Some(id), Some(answer)) = (id, value.as_object_mut()) {
             answer.insert("launch_id".into(), id.into());
@@ -313,7 +329,7 @@ pub(crate) fn record(root: &Path, dir: &Path, mut record: Value, id: &str) -> Re
     )?;
     let _ = SCOPE.try_with(|s| {
         if let Ok(mut recorded) = s.recorded.lock() {
-            *recorded = Some(id.to_owned());
+            *recorded = Some((id.to_owned(), root.to_owned()));
         }
     });
     record["home_path"] = dir
@@ -351,12 +367,39 @@ fn link(root: &Path, id: &str, record: &Value, parent: Option<&str>) {
     let previous = all(root)
         .into_iter()
         .filter(|(other, r)| {
-            other != id && r["continues"].as_str() == Some(workflow) && r["continued_as"].is_null()
+            other != id
+                && r["continues"].as_str() == Some(workflow)
+                && r["continued_as"].is_null()
+                && r["ended"] != NOT_STARTED
         })
         .max_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0))
         .map(|(other, _)| other);
     if let Some(previous) = previous {
         update(root, &previous, continued);
+    }
+}
+/// `ended` of a launch whose operation failed after its record was written.
+pub const NOT_STARTED: &str = "not_started";
+/// The launch `id` never started (its operation failed after the record was written): it says
+/// so, and a launch that named it as where its work went no longer does.
+fn not_started(root: &Path, id: &str, now: i64) {
+    if !valid_id(id) {
+        return;
+    }
+    let _writing = writing();
+    update(root, id, |r| {
+        r["ended"] = NOT_STARTED.into();
+        r["ended_at"] = now.into();
+        true
+    });
+    for (other, r) in all(root) {
+        let to = &r["continued_as"];
+        if to["id"].as_str() == Some(id) || to["launch_id"].as_str() == Some(id) {
+            update(root, &other, |r| {
+                r["continued_as"] = Value::Null;
+                true
+            });
+        }
     }
 }
 /// A hand-over left the launch `id` for a console (SB-108): the launch names it, and the launch
@@ -408,6 +451,11 @@ pub(crate) fn event(
             && t.as_os_str().len() <= 4096
             && !t.to_string_lossy().chars().any(char::is_control)
     });
+    // N-5: a start names the provider's session or its transcript; any other object is not a
+    // `SessionStart` input and writes nothing.
+    if kind == Event::Start && session.is_none() && transcript.is_none() {
+        return json!({"recorded": false});
+    }
     let _writing = writing();
     let recorded = update(root, id, |r| {
         match kind {
@@ -869,6 +917,84 @@ mod tests {
         assert_eq!(shown["down"][0]["via"], "continued_as");
         let shown = show(&root, &second).unwrap();
         assert_eq!(shown["up"][0]["launch_id"], first.as_str());
+    }
+    /// N-1: a launch whose start failed never becomes where the work went. The launch it would
+    /// have continued keeps `continued_as` null, the failed one says it never started and is not
+    /// taken for the workflow's latest launch, and the next launch that starts takes the link.
+    #[tokio::test]
+    async fn a_launch_that_never_started_is_not_where_the_work_went() {
+        let (_temp, root, first) = fixture();
+        let workflow = "wf_0123456789abcdef";
+        update(&root, &first, |r| {
+            r["continues"] = workflow.into();
+            true
+        });
+        let home = root.join("runtimes").join("claude-continue");
+        switchboard_core::private_fs::private_dir(&home).unwrap();
+        let failed = new_id();
+        let (r, h, f) = (root.clone(), home.clone(), failed.clone());
+        let answer = scoped(Some(LaunchedBy::surface(Surface::Cli)), async move {
+            record(
+                &r,
+                &h,
+                json!({"launched_at": 200, "continues": workflow}),
+                &f,
+            )?;
+            Err::<Value, String>("Terminal could not be opened.".into())
+        })
+        .await;
+        assert!(answer.is_err());
+        assert!(read_back(&root, &first)["continued_as"].is_null());
+        assert_eq!(read_back(&root, &failed)["ended"], "not_started");
+        let started = new_id();
+        let (r, h, s) = (root.clone(), home.clone(), started.clone());
+        let answer = scoped(Some(LaunchedBy::surface(Surface::Cli)), async move {
+            record(
+                &r,
+                &h,
+                json!({"launched_at": 300, "continues": workflow}),
+                &s,
+            )?;
+            Ok(json!({"launched": true}))
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer["launch_id"], started.as_str());
+        assert_eq!(
+            read_back(&root, &first)["continued_as"],
+            json!({"kind": "launch", "id": started})
+        );
+        assert!(read_back(&root, &failed)["continued_as"].is_null());
+    }
+    /// N-5: a JSON object that is not a `SessionStart` input (no `session_id`, no
+    /// `transcript_path`) writes nothing, not even `session_started_at`.
+    #[test]
+    fn a_start_without_a_session_or_a_transcript_writes_nothing() {
+        let (_temp, root, id) = fixture();
+        let before = read_back(&root, &id);
+        let answer = event(&root, &id, Event::Start, None, None, 500);
+        assert_eq!(answer["recorded"], false);
+        let answer = event(
+            &root,
+            &id,
+            Event::Start,
+            Some("not a session id"),
+            Some(Path::new("relative/t.jsonl")),
+            500,
+        );
+        assert_eq!(answer["recorded"], false);
+        assert_eq!(read_back(&root, &id), before);
+    }
+    /// N-7: a later command's new `launched_by` field reaches an owner of this version and is
+    /// ignored, never the version skew `deny_unknown_fields` made of it.
+    #[test]
+    fn a_field_this_version_does_not_know_is_ignored() {
+        let by: LaunchedBy = serde_json::from_value(json!({
+            "surface": "cli", "by": "runner", "a_later_field": {"x": 1}
+        }))
+        .unwrap();
+        assert_eq!(by.by.as_deref(), Some("runner"));
+        assert_eq!(by.surface, Surface::Cli);
     }
     #[test]
     fn a_planted_home_path_is_never_followed() {
