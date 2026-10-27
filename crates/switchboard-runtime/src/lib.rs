@@ -1921,7 +1921,8 @@ impl Runtime {
     /// state `switchboard shell status` reads (the hook, the choice, the folder map, each start
     /// file) without the terminal's own fields, plus `can_change` (this owner is the installed
     /// app, so the window's switch works), the organizations whose groups the hook follows by
-    /// name, and the person's home for showing start files as `~/...`.
+    /// name, the organization groups it does not follow and why (`unmapped`, SB-222), and the
+    /// person's home for showing start files as `~/...`.
     pub fn shell_hook_status(&self) -> Value {
         let root = self.root.clone();
         let mut value = blocking::run(move || shell::map::status(Some(&root), None, &|_| None));
@@ -1933,6 +1934,12 @@ impl Runtime {
         value["can_change"] = json!(self.shell_hook.lock().is_ok_and(|h| h.is_some()));
         value["organizations"] = json!(self.shell_hook_organizations(false));
         value["codex_organizations"] = json!(self.shell_hook_organizations(true));
+        // SB-222: organization groups the map holds no row for, and why, for the window's line.
+        value["unmapped"] = json!(self
+            .store
+            .snapshot()
+            .map(|snapshot| blocking::run(move || shell::homes::unmapped(&snapshot)))
+            .unwrap_or_default());
         value["home"] = json!(dirs::home_dir().and_then(|h| h.to_str().map(str::to_owned)));
         value
     }
@@ -9158,6 +9165,7 @@ mod lifecycle_tests {
         assert_eq!(status["can_change"], true);
         assert_eq!(status["hook"], "default_on");
         assert_eq!(status["organizations"], json!(["Acme"]));
+        assert_eq!(status["unmapped"], json!([]), "SB-222: its group has a row");
         assert_eq!(status["files"][0]["state"], "written");
         assert!(
             status.get("terminal").is_none(),

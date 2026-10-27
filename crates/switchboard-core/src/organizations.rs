@@ -433,8 +433,9 @@ impl Store {
     /// SB-159: brings the person's PassionCode.ai organizations in. A linked one takes Vesta's
     /// name and domains (a name or domain another organization here holds is left as it was);
     /// an unlinked one of the same name or with a shared domain is linked rather than duplicated,
-    /// keeping its accounts; the rest are added. One linked here that Vesta no longer lists is
-    /// kept as a local organization.
+    /// keeping its accounts; the rest are added. One linked here that a well-formed answer no
+    /// longer lists is kept as a local organization (SB-227: an empty list, or a row whose id
+    /// cannot be read, releases nothing).
     pub fn apply_vesta(&self, read: &[VestaOrganization]) -> Result<VestaApplied, String> {
         // Names compare as `validate` compares them: trimmed, lowercased.
         let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
@@ -527,10 +528,20 @@ impl Store {
                 }
             }
         }
-        for o in &mut candidate.organizations {
-            if o.vesta_id.as_ref().is_some_and(|v| !seen.contains(v)) {
-                o.vesta_id = None;
-                applied.released += 1;
+        // SB-227: only a well-formed list proves the person left: one that names something and
+        // whose every row has an id that can be read. An organization is released only when no
+        // row of it names its link, whether or not that row was taken above (a name too long,
+        // a row past the 32nd).
+        let well_formed = !read.is_empty() && read.iter().all(|v| vesta_id_valid(&v.id));
+        if well_formed {
+            for o in &mut candidate.organizations {
+                if o.vesta_id
+                    .as_ref()
+                    .is_some_and(|v| !read.iter().any(|r| &r.id == v))
+                {
+                    o.vesta_id = None;
+                    applied.released += 1;
+                }
             }
         }
         if applied != VestaApplied::default() {

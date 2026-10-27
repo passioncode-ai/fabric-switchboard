@@ -160,6 +160,62 @@ fn rows_with(
     out
 }
 
+/// SB-222: a group bound to an organization that has no row in the folder map, and why: every
+/// folder of it belongs to another group there (`held`, naming the first such group), is not on
+/// this computer (`missing`), or it has no folder yet (`no_folder`). The window names it where the
+/// hook is off by default, rather than saying no group belongs to an organization.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Unmapped {
+    /// The organization's name.
+    pub organization: String,
+    /// The group's name.
+    pub group: String,
+    pub reason: &'static str,
+    /// For `held`: the name of the group that takes the folder.
+    pub held_by: Option<String>,
+}
+
+/// Every group bound to an organization with no row in the map [`rows`] writes, by the same rule
+/// (`Snapshot::project_for` there, a folder that resolves), sorted by organization then group.
+pub(crate) fn unmapped(snapshot: &Snapshot) -> Vec<Unmapped> {
+    let mut out = Vec::new();
+    for project in &snapshot.projects {
+        let Some(org) = organization(snapshot, project).and_then(|id| snapshot.organization(id))
+        else {
+            continue;
+        };
+        let mut held_by: Option<String> = None;
+        let mut mapped = false;
+        for folder in project.folders.iter().map(PathBuf::from) {
+            match snapshot.project_for(&folder) {
+                Some(other) if other.pool != project.pool => {
+                    held_by.get_or_insert_with(|| other.name.clone());
+                }
+                _ if folder.canonicalize().is_ok() => mapped = true,
+                _ => {}
+            }
+        }
+        if mapped {
+            continue;
+        }
+        let reason = if project.folders.is_empty() {
+            "no_folder"
+        } else if held_by.is_some() {
+            "held"
+        } else {
+            "missing"
+        };
+        out.push(Unmapped {
+            organization: org.name.clone(),
+            group: project.name.clone(),
+            reason,
+            held_by,
+        });
+    }
+    out.sort_by(|a, b| (&a.organization, &a.group).cmp(&(&b.organization, &b.group)));
+    out
+}
+
 /// A fingerprint of everything the homes and the map follow beyond what the Claude bindings
 /// already hash: the groups' organizations, the pools' Codex accounts and the person's carried
 /// settings file's stamp.
@@ -748,6 +804,60 @@ mod tests {
         gone.organizations.push(org(O2));
         assert!(!organizations_present(&gone));
         assert!(rows(&gone, &bound(&[&acme])).is_empty());
+    }
+
+    // SB-222: a group bound to an organization with no row in the map says why, so the window
+    // names it instead of saying no group belongs to an organization.
+    #[test]
+    fn an_organization_group_without_a_row_names_why() {
+        let w = world();
+        let mine = folder(&w, "mine");
+        let shared = folder(&w, "shared");
+        let acme = folder(&w, "acme");
+        let gone = w.work.join("gone");
+        let mut snapshot = Snapshot {
+            organizations: vec![org(O1), org(O2)],
+            projects: vec![
+                group("mine", &[&mine, &shared], None),
+                group("acme", &[&shared], Some(O1)),
+                group("beta", &[&gone], Some(O2)),
+            ],
+            accounts: vec![account("a", "mine", Provider::Claude)],
+            ..Snapshot::default()
+        };
+        assert!(rows(&snapshot, &bound(&[])).is_empty());
+        assert_eq!(
+            unmapped(&snapshot),
+            vec![
+                Unmapped {
+                    organization: format!("Org {O1}"),
+                    group: "acme".into(),
+                    reason: "held",
+                    held_by: Some("mine".into()),
+                },
+                Unmapped {
+                    organization: format!("Org {O2}"),
+                    group: "beta".into(),
+                    reason: "missing",
+                    held_by: None,
+                },
+            ]
+        );
+        // A group with no folder yet, and a group whose folder has a row, are told apart.
+        snapshot.projects[1].folders.push(s(&acme));
+        snapshot.projects[2].folders.clear();
+        assert_eq!(
+            unmapped(&snapshot),
+            vec![Unmapped {
+                organization: format!("Org {O2}"),
+                group: "beta".into(),
+                reason: "no_folder",
+                held_by: None,
+            }]
+        );
+        // A personal group is never listed.
+        snapshot.projects.truncate(1);
+        assert!(unmapped(&snapshot).is_empty());
     }
 
     #[test]

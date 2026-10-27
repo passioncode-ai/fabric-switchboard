@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
@@ -128,16 +128,29 @@ function orgSetupCard(setup: OrgSetup) {
   const list = el('ol', 'org-setup-steps');
   for (const line of setup.lines) {
     const item = el('li', `org-setup-step is-${line.state}`);
-    const text = el('div', 'org-setup-text'); text.append(el('strong', '', line.title), el('span', '', line.line));
+    const text = el('div', 'org-setup-text'); const words = el('span', '', line.line);
+    // SB-228: a command the line names is code, as everywhere else in the window.
+    if (line.command) words.append(' ', el('code', 'address', line.command));
+    text.append(el('strong', '', line.title), words);
     item.append(el('span', `org-setup-state is-${line.state}`, orgSetupStateLabel(line.state)), text); list.append(item);
   }
   card.append(title, list);
+  // SB-228: a read behind the checklist that failed, said once under the steps.
+  const caveat = orgSetupCaveat(onboarding); if (caveat) card.append(el('p', 'form-note org-setup-caveat', caveat));
   if (onboardingError) card.append(el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
   const actions = el('div', 'org-setup-actions');
   const action = orgSetupAction(setup);
   if (action) actions.append(action.kind === 'group' ? button(action.label, () => projectDialog(undefined, action.organization), 'button primary', `${id}-group`) : button(action.label, () => void startLogin('claude', '', action.pool), 'button primary', `${id}-sign-in`));
   if (page === 'accounts') actions.append(button(t('Hide'), () => { orgSetupHidden = [...orgSetupHidden, setup.organization.id]; try { noticeStore()?.setItem(ORG_SETUP_HIDDEN_KEY, JSON.stringify(orgSetupHidden)); } catch { /* hidden for this window only */ } render(); restoreFocus('page-title'); }, 'text-button', `${id}-hide`));
   if (actions.childElementCount) card.append(actions);
+  return card;
+}
+/** SB-228 (SCN-076): the first checklist read failed: the newest organization's card with the note only. */
+function orgSetupUnreadCard(organization: { id: string; name: string }) {
+  const id = `org-setup-${organization.id}`;
+  const card = el('section', 'org-setup'); card.setAttribute('aria-labelledby', `${id}-title`);
+  const title = el('h2', '', orgSetupTitle({ organization })); title.id = `${id}-title`;
+  card.append(title, el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
   return card;
 }
 function usageQuestionCard() {
@@ -230,6 +243,8 @@ async function readContext(): Promise<Context> {
 }
 function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
 async function refreshContext() { applyContext(await readContext()); }
+/** SB-228 (VIS-21): an organization card with its own action is on this page. */
+const orgCardLeads = () => orgSetupLeads({ onboarding, page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep });
 /** SB-202 (B-8): the checklist is read again with the account list; a machine without organizations reads nothing. */
 function loadOnboarding() {
   if (!(snapshot?.organizations ?? []).length) { onboarding = null; onboardingError = false; return; }
@@ -372,9 +387,10 @@ function render(options: { background?: boolean } = {}): boolean {
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
     // VIS-21, UX-01: while a page shows its empty state, that state carries the one primary action.
     const empty = (list?: unknown[]) => !!snapshot && !(list ?? []).length;
-    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu());
+    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu(orgCardLeads() ? 'button quiet' : 'button primary'));
     if (page === 'projects' && !empty(snapshot?.projects)) actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
-    if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-add'));
+    // SB-228 (VIS-21): the organization card's own action leads; this one goes quiet beside it.
+    if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), orgCardLeads() ? 'button quiet' : 'button primary', 'org-add'));
     header.append(actions);
   }
   main.append(header);
@@ -386,7 +402,11 @@ function render(options: { background?: boolean } = {}): boolean {
   if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
-  if (snapshot && (page === 'accounts' || page === 'orgs')) for (const setup of orgSetups(onboarding)) if (orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep })) main.append(orgSetupCard(setup));
+  if (snapshot && (page === 'accounts' || page === 'orgs')) {
+    for (const setup of orgSetups(onboarding)) if (orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep })) main.append(orgSetupCard(setup));
+    const unread = orgSetupUnread({ onboarding, failed: onboardingError, organizations: snapshot.organizations ?? [], page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep });
+    if (unread) main.append(orgSetupUnreadCard(unread));
+  }
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
@@ -925,13 +945,16 @@ function availableAgentsPanel(view: AgentsOverview) {
 // C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
 let chainsView: Chains | null = null;
 let chainsError = '';
+/** SB-229: under the clock, so a read from before a Save never paints over the saved chain (it may
+ * only fill an empty panel); a read that answers clears an earlier failure. */
 async function loadChains() {
-  try { chainsView = await adapter.chains(); chainsError = ''; } catch (error) { chainsError = safeError(error, 'read'); }
+  const read = await clockedRead(clock, () => adapter.chains());
+  ({ view: chainsView, error: chainsError } = afterRead({ view: chainsView, error: chainsError }, read, false, (error) => safeError(error, 'read')));
   backgroundRender();
 }
 const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;
 const chainAccountLabel = (id: string) => snapshot?.accounts.find((a) => a.id === id)?.label ?? kimi?.accounts.find((k) => k.account.id === id)?.account.label;
-const scopeKey = (scope: ChainScope) => scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
+const scopeKey = chainScopeKey;
 const chainFor = (key: string) => chainsView?.chains.find((c) => scopeKey(c.scope) === key) ?? null;
 const scopeLabel = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer') : scope.kind === 'project' ? projectOf(scope.pool)?.name ?? scope.pool : t('Task {id}', { id: shortWorkflow(scope.id) });
 /** The Groups card's line (SCN-081): the group's own chain, this computer's, or none. */
@@ -980,7 +1003,7 @@ function chainRow(scope: ChainScope, primary: boolean) {
     info.append(steps);
   } else info.append(el('span', 'form-note', scope.kind === 'project' ? (chainFor('machine') ? t('Uses this computer\'s chain') : t('Uses this computer\'s chain, which is not set')) : t('Not set')));
   const actions = el('div', 'management-actions');
-  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(async () => { await adapter.setChain(scope, [], 'subscriptions-first'); chainsView = await adapter.chains(); }, t('This computer\'s chain is set.'), 'chain-edit-machine'), primary ? 'button primary' : 'button', 'chain-preset'));
+  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(() => adapter.setChain(scope, [], 'subscriptions-first'), t('This computer\'s chain is set.'), 'chain-edit-machine').then(loadChains), primary ? 'button primary' : 'button', 'chain-preset'));
   const editKey = `chain-edit-${anchor}`;
   if (chain || scope.kind === 'machine') actions.append(button(t('Edit…'), () => chainDialog(scope, chain?.executors ?? [], editKey), 'button', editKey));
   else actions.append(button(t('Set for this group…'), () => chainDialog(scope, [], editKey), 'button', editKey));
@@ -1062,7 +1085,8 @@ function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: s
     event.preventDefault();
     if (!steps.length) { context.error.textContent = t('Add an agent, or clear the chain instead.'); add.focus(); return; }
     const executors = steps.map((s) => ({ agent: s.agent, ...(s.account_id ? { account_id: s.account_id } : {}), ...(s.key ? { key: s.key } : {}) }));
-    void dialogSave(context, async () => { await adapter.setChain(scope, executors, null); chainsView = await adapter.chains(); }, chainSavedText(scope));
+    // SB-229: the save is the action; the chains are read again after it, and a failed re-read never fails the save.
+    void dialogSave(context, () => adapter.setChain(scope, executors, null), chainSavedText(scope)).then(loadChains);
   });
 }
 /** Focus goes back to the row's Edit… (this computer's for a task row, which goes when cleared). */
@@ -1072,7 +1096,7 @@ function clearChainDialog(scope: ChainScope, returnFocus: string) {
   const context = openDialog(question, consequence, returnFocus);
   const confirm = submit(t('Clear chain')); confirm.className = 'button danger'; context.actions.append(confirm);
   const cleared = scope.kind === 'machine' ? t('This computer\'s chain is cleared.') : scope.kind === 'project' ? t('The chain of {group} is cleared.', { group: scopeLabel(scope) }) : t('The chain of task {id} is cleared.', { id: shortWorkflow(scope.id) });
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setChain(scope, [], null); chainsView = await adapter.chains(); }, cleared); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setChain(scope, [], null), cleared).then(loadChains); });
   context.actions.querySelector('button')?.focus();
 }
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
@@ -1163,9 +1187,11 @@ function projectKeysPanel() {
  * that may raise, clear or double a ceiling (C-Q1); the question has two answers of equal weight. */
 let ceilingsView: Ceilings | null = null;
 let ceilingsError = '';
-async function loadCeilings() {
-  const stamp = clock.stamp();
-  try { const view = await adapter.ceilings(); if (clock.accepts(stamp)) { ceilingsView = view; ceilingsError = ''; } } catch (error) { ceilingsError = safeError(error, 'read'); }
+/** SB-230: `afterSave` is the re-read right after a saved change: its failure keeps what is shown
+ * and names nothing (the change stands; the next read reports). */
+async function loadCeilings(afterSave = false) {
+  const read = await clockedRead(clock, () => adapter.ceilings());
+  ({ view: ceilingsView, error: ceilingsError } = afterRead({ view: ceilingsView, error: ceilingsError }, read, afterSave, (error) => safeError(error, 'read')));
   backgroundRender();
 }
 /** Each group key's status (its own limit at OpenRouter), read once per visit to API keys. */
@@ -1213,7 +1239,8 @@ function answerCeiling(q: CeilingQuestionView, answer: 'keep' | 'double') {
   const success = answer === 'double'
     ? (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling is now {usd}.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} is now {usd}.', { group, usd }) : t('The ceiling of task {id} is now {usd}.', { id: task, usd }))
     : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
-  void mutate(async () => { await adapter.answerCeiling(q.id, answer); ceilingsView = await adapter.ceilings(); }, success, 'page-title');
+  // SB-230: the answer is the action; its banner goes with it, and the ceilings are read again after.
+  void mutate(async () => { await adapter.answerCeiling(q.id, answer); if (ceilingsView) ceilingsView = { ...ceilingsView, questions: ceilingsView.questions.filter((open) => open.id !== q.id) }; }, success, 'page-title').then(() => loadCeilings(true));
 }
 /** The ceiling of this computer (machine panel) or a group (its key row), beside the key's own limit. */
 function ceilingBlock(scope: ChainScope, credit: OpenrouterCredit | null) {
@@ -1267,7 +1294,7 @@ function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFoc
     const value = Number(amount.value);
     if (!Number.isFinite(value) || value < 0.01 || value > 1000) { context.error.textContent = t('Enter an amount from $0.01 to $1,000.'); amount.focus(); return; }
     const usd = dollars(Math.round(value * 100) / 100);
-    void dialogSave(context, async () => { await adapter.setCeiling(scope, Math.round(value * 100) / 100); ceilingsView = await adapter.ceilings(); }, scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd }));
+    void dialogSave(context, () => adapter.setCeiling(scope, Math.round(value * 100) / 100), scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd })).then(() => loadCeilings(true));
   });
   amount.focus();
 }
@@ -1276,7 +1303,7 @@ function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus
   const question = scope.kind === 'machine' ? t('Remove this computer\'s daily ceiling of {usd}?', { usd }) : scope.kind === 'project' ? t('Remove the daily ceiling of {group}, {usd}?', { group: name, usd }) : t('Remove the ceiling of task {id}, {usd}?', { id: shortWorkflow(scope.id), usd });
   const context = openDialog(question, t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
   const confirm = submit(t('Remove ceiling')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.setCeiling(scope, null); ceilingsView = await adapter.ceilings(); }, t('Ceiling removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setCeiling(scope, null), t('Ceiling removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
@@ -1362,9 +1389,9 @@ function openrouterModelDialog(target?: { pool: string; name: string }) {
   picker.value.focus();
 }
 function openrouterRemoveDialog(target?: { pool: string; name: string }) {
-  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.') + (target ? ` ${ceilingRemovalNote(ceilingOf({ kind: 'project', pool: target.pool })) ?? ''}`.trimEnd() : ''));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
 }
 async function agentDialog(agent: AgentInfo) {
@@ -1630,11 +1657,11 @@ function renderAccounts(main: HTMLElement) {
     // A reinstall with a backup this computer can open: one press brings everything back.
     const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
     // VIS-21: an organization card above with its own action is the screen's one primary; the page's buttons go quiet.
-    const cardLeads = orgSetups(onboarding).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep }));
+    const cardLeads = orgCardLeads();
     // SB-202 (B-8): an organization's group with no seat yet leads with the seat.
     const lead = accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts });
     const empty = emptyState(t('Start with one account'), lead.lead === 'org_seat' ? lead.line : backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : lead.lead === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
-    if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
+    if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), cardLeads ? 'button quiet' : 'button primary', 'empty-restore'));
     if (lead.lead === 'org_seat') { const pool = lead.pool; empty.append(button(lead.label, () => void startLogin('claude', '', pool), cardLeads ? 'button quiet' : 'button primary', 'empty-org-sign-in'), addMenu('button quiet')); main.append(empty, kimiSection()); return; }
     empty.append(addMenu(cardLeads ? 'button quiet' : 'button primary')); main.append(empty, kimiSection()); return;
   }
@@ -2649,21 +2676,26 @@ function organizationsBar(accounts: Account[]): HTMLElement | null {
 }
 /** SB-159 (SCN-071): the PassionCode.ai connection, read when the page opens. */
 let passioncodeView: PassioncodeStatus | null = null; let passioncodeWaiting = false; let passioncodeError = '';
+/** SB-227: an action on the connection (Connect, Read now, Disconnect) moves this on; a status read
+ * issued before or during one is not applied, so it never paints over the action's answer. */
+const passioncodeClock = new MutationClock();
 async function loadPassioncode() {
-  try { passioncodeView = await adapter.passioncode('status'); passioncodeError = ''; } catch (error) { passioncodeError = safeError(error, 'read'); }
+  const stamp = passioncodeClock.stamp();
+  try { const value = await adapter.passioncode('status'); if (passioncodeClock.accepts(stamp)) { passioncodeView = value; passioncodeError = ''; } } catch (error) { if (passioncodeClock.accepts(stamp)) passioncodeError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** UX-21: the person pressed Cancel: a plain notice, not an error. */
 const PASSIONCODE_CANCELLED = 'Connecting PassionCode.ai was cancelled. Nothing changed.';
 async function passioncodeAct(action: 'connect' | 'read' | 'disconnect') {
   if (action === 'connect') { passioncodeWaiting = true; render(); }
+  passioncodeClock.begin();
   try {
     passioncodeView = await adapter.passioncode(action); passioncodeError = '';
     snapshot = await adapter.snapshot();
     if (action === 'connect') showNotice(t('Connected to PassionCode.ai: {organizations}.', { organizations: plural(passioncodeView.organizations ?? 0, { one: '{n} organization', other: '{n} organizations' }) }));
     else if (action === 'disconnect') showNotice(t('PassionCode.ai disconnected. The organizations stay here.'));
   } catch (error) { const text = safeError(error); showNotice(text, text !== PASSIONCODE_CANCELLED); }
-  finally { passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
+  finally { passioncodeClock.end(); passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
 }
 function passioncodePanel() {
   const panel = el('section', 'org-card passioncode-panel'); panel.setAttribute('aria-label', 'PassionCode.ai');
@@ -2866,12 +2898,12 @@ function backgroundRefresh() {
     // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
     if (page === 'projects') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
-    // B-8 seam read: the checklist lists sessions (SB-104); read it only where its card is drawn.
-    if (page === 'accounts' || page === 'orgs') loadOnboarding();
-    // SB-104: the session list is read only while it is on screen.
-    if (page === 'activity') void loadSessions();
-    // C-7: the ceilings are a local file read, only while a page that shows them is on screen.
-    if (page === 'agents' || page === 'tokens') void loadCeilings();
+    // B-8, SB-104, C-7, SB-227: what the page on screen shows is read again with the list.
+    const reads = backgroundReads(page);
+    if (reads.includes('onboarding')) loadOnboarding();
+    if (reads.includes('sessions')) void loadSessions();
+    if (reads.includes('ceilings')) void loadCeilings();
+    if (reads.includes('passioncode')) void loadPassioncode();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });

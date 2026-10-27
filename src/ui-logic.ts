@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainStepView } from './types';
+import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
@@ -69,6 +69,15 @@ export class MutationClock {
   stamp(): number { return this.active > 0 ? -1 : this.generation; }
   /** True when no mutation began after the stamp and none is still running. */
   accepts(stamp: number): boolean { return stamp === this.generation && this.active === 0; }
+}
+/** SB-229: a background read under the clock: `applied` with its value, or `failed`, only when no
+ * user action began after it was issued; `stale` otherwise (its value, when it answered, may predate
+ * the action: it may fill an empty view, never replace one; its failure is not shown). */
+export type ClockedRead<T> = { state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale'; value?: T };
+export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<ClockedRead<T>> {
+  const stamp = clock.stamp();
+  try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale', value }; }
+  catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale' }; }
 }
 
 export type RuleState = 'active' | 'paused' | 'expired';
@@ -330,6 +339,19 @@ export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string
   const seats = accounts.filter((a) => groupAdmits(snapshot, organization, a));
   if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
   return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
+}
+/** What the window's minute-by-minute background pass reads again besides the account list, by
+ * the page on screen: the organization checklist where its card is drawn (B-8; it lists sessions),
+ * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
+ * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
+ * mark a background read made shows without reopening the page). */
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode';
+export function backgroundReads(page: string): BackgroundRead[] {
+  if (page === 'orgs') return ['onboarding', 'passioncode'];
+  if (page === 'accounts') return ['onboarding'];
+  if (page === 'activity') return ['sessions'];
+  if (page === 'agents' || page === 'tokens') return ['ceilings'];
+  return [];
 }
 /** SB-160 (B-7, SCN-079): when the person stopped being in this organization on PassionCode.ai,
  * while it is not linked again; null otherwise (a disconnect is not leaving). */
@@ -723,8 +745,9 @@ export function ordinaryKimiNote(status: { signed_in: boolean; error: string | n
   return status.error ? t(status.error) : null;
 }
 
-/** SB-120: the order agents take over work in — the subscriptions-first preset (Claude Code,
- * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order. */
+/** SB-120: the order agents take over work in: the subscriptions-first preset (Claude Code,
+ * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order.
+ * The same list as `agent_catalog::SWITCHABLE`, tied by a check (SB-229). */
 export const TAKEOVER_ORDER = ['claude-code', 'codex', 'kimi-code', 'hermes', 'opencode'];
 const takeoverRank = (id: string) => { const i = TAKEOVER_ORDER.indexOf(id); return i < 0 ? TAKEOVER_ORDER.length : i; };
 export function sortAgents<T extends Pick<AgentRow, 'id'>>(agents: T[]): T[] {
@@ -740,6 +763,10 @@ export function defaultAgentChoices(agents: Pick<AgentRow, 'id' | 'name' | 'enab
     else if (agent.id === current) choices.push({ id: agent.id, label: agent.installed ? t('{agent} (disabled)', { agent: agent.name }) : t('{agent} (not installed)', { agent: agent.name }), on: true });
   }
   return choices;
+}
+/** C-3 (SB-71): the key a chain is filed under, `chain_view::scope_key`'s (tied by a check, SB-229). */
+export function chainScopeKey(scope: ChainScope): string {
+  return scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
 }
 /** C-3 (SB-71): a step moved one place up (`delta` -1) or down (+1); a move past either end
  * changes nothing. A new list: the one given stays as it was. */
@@ -1079,6 +1106,16 @@ function shellHookFile(file: { shell: string; path: string; state: string }, hom
     default: return { text: t('{shell}: {path}, {state}', { shell, path, state: file.state }), command: null, problem: true };
   }
 }
+/** SB-222: off by default. An organization's group with no row in the folder map is named with
+ * why (its folders belong to another group, are not on this computer, or it has none yet); the
+ * first one, in the runtime's order, when there are several. */
+function defaultOffLine(unmapped: NonNullable<ShellHookStatus['unmapped']>): string {
+  const first = unmapped[0];
+  if (!first) return t('Off: no group belongs to an organization on this computer.');
+  if (first.reason === 'held' && first.held_by) return t('Off: {organization}\'s folders belong to the group “{group}”, so terminals there keep your own settings.', { organization: first.organization, group: first.held_by });
+  if (first.reason === 'no_folder') return t('Off: {organization}\'s group “{group}” has no folder yet.', { organization: first.organization, group: first.group });
+  return t('Off: {organization}\'s folders are not on this computer.', { organization: first.organization });
+}
 /** What the Groups page's *Terminals in organization folders* section shows for a read (null while
  * reading) and the last read's or save's error (SCN-075). */
 export function shellHookView(status: ShellHookStatus | null, error: string | null = null): ShellHookView {
@@ -1097,7 +1134,7 @@ export function shellHookView(status: ShellHookStatus | null, error: string | nu
   else if (status.hook === 'default_on') line = orgs.length === 1 ? t('On: new terminals in {organization}\'s folders work in its context.', { organization: orgs[0] }) : t('On: new terminals in organization folders work in their context.');
   else if (status.hook === 'on') line = t('On: new terminals in organization folders work in their context.');
   else if (status.hook === 'off') line = t('Off: new terminals keep your own settings.');
-  else line = t('Off: no group belongs to an organization on this computer.');
+  else line = defaultOffLine(status.unmapped ?? []);
   const action = { label: wanted ? t('Turn off') : t('Turn on'), on: !wanted, disabled: !status.can_change };
   const readd = wanted && status.can_change && status.files.some((f) => f.state === 'removed_by_person');
   const note = status.can_change ? null : t('Only the installed app changes terminal settings.');
@@ -1126,7 +1163,7 @@ export function codexHookLine(status: ShellHookStatus | null): string | null {
 // ── SB-202 (B-8, SCN-076): the first run of an organization machine ──
 /** The steps of one organization's card, in the checklist's order. */
 export type OrgSetupStepId = 'organization' | 'org_group' | 'seat' | 'hook' | 'launch';
-export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[] }
+export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[]; /** SB-228: a command the line names, shown as code after it. */ command?: string }
 export interface OrgSetup { organization: { id: string; name: string }; group: { pool: string; name: string } | null; lines: OrgSetupLine[]; complete: boolean }
 export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'sign_in'; pool: string; label: string };
 export const ORG_SETUP_HIDDEN_KEY = 'switchboard.orgSetupHidden';
@@ -1150,7 +1187,7 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
       return ({
-        active: t("Terminals in {organization}'s folders work in its context. To turn this off: switchboard shell off", { organization }),
+        active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),
         pending: t('The terminal hook is on, but no start file holds it yet.'),
         off: t("The terminal hook is off: terminals in {organization}'s folders keep your own settings.", { organization }),
         waiting: t("Terminals follow {organization}'s folders once its group has a folder.", { organization }),
@@ -1177,7 +1214,7 @@ export function orgSetups(onboarding: Onboarding | null | undefined): OrgSetup[]
   for (const { organization, steps } of byOrg.values()) {
     const group = steps.find((s) => s.id === 'org_group' && s.state === 'done')?.group ?? null;
     const lines: OrgSetupLine[] = [{ id: 'organization', state: 'done', title: titles.organization, line: orgSetupLine({ id: 'organization', state: 'done', summary: '' }, organization.name, group) }];
-    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}) });
+    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}), ...(step.id === 'hook' && step.terminals === 'active' ? { command: 'switchboard shell off' } : {}) });
     const complete = lines.every((l) => l.state === 'done' || l.state === 'optional');
     if (!complete) setups.push({ organization, group, lines, complete });
   }
@@ -1197,6 +1234,31 @@ export function orgSetupShown(input: { page: string; organization: string; hidde
   if (input.page === 'orgs') return true;
   return input.page === 'accounts' && !input.hidden.includes(input.organization);
 }
+/** SB-228: the card's one caveat when a read behind the checklist failed (`degraded`): the widest
+ * first (saved settings, then sign-ins, then sessions), any other code in general words. */
+export function orgSetupCaveat(onboarding: Onboarding | null | undefined): string | null {
+  const degraded = onboarding?.degraded ?? [];
+  if (!degraded.length) return null;
+  if (degraded.includes('snapshot')) return t("Part of Switchboard's saved settings could not be read, so a step may be wrong or missing.");
+  if (degraded.includes('sign_ins')) return t('Whether a sign-in ended could not be read, so Your seat may read signed in when it is not.');
+  if (degraded.includes('sessions')) return t('The recorded sessions could not be read, so First launch may read not done.');
+  return t('Part of the setup could not be read, so a step may be wrong.');
+}
+type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null };
+/** SB-228 (VIS-21): a card with an action of its own is on screen, so its action is the screen's
+ * one primary and the page's buttons (+ New organization, Restore from backup, + Add account) go quiet. */
+export function orgSetupLeads(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): boolean {
+  return orgSetups(input.onboarding).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }));
+}
+/** SB-228 (SCN-076): the first checklist read failed, so there are no steps to show: the card of
+ * the newest organization it would be shown for, with the read-failed note only. Null once any
+ * read answered (that card keeps its steps and shows the note itself). */
+export function orgSetupUnread(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined; failed: boolean; organizations: readonly Pick<Organization, 'id' | 'name' | 'created_at'>[] }): { id: string; name: string } | null {
+  if (input.onboarding || !input.failed) return null;
+  const newest = [...input.organizations].sort((a, b) => b.created_at - a.created_at);
+  const org = newest.find((o) => orgSetupShown({ ...input, organization: o.id }));
+  return org ? { id: org.id, name: org.name } : null;
+}
 export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[] {
   try { const value: unknown = JSON.parse(store?.getItem(ORG_SETUP_HIDDEN_KEY) ?? '[]'); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []; } catch { return []; }
 }
@@ -1210,9 +1272,25 @@ export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboardin
   }
   return { lead: firstRunHint(input.current) };
 }
-/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00). */
+/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00), thousands
+ * grouped ($1,000.00, SB-230), the same in every language (a window-wide decision, `docs/brand/strings.md`). */
 export function dollars(value: number): string {
-  return `$${value.toFixed(2)}`;
+  const [whole, cents] = value.toFixed(2).split('.');
+  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${cents}`;
+}
+/** SB-230: the line the remove-key confirmation adds for a group whose daily ceiling counts that key. */
+export function ceilingRemovalNote(ceiling: { usd: number; active: boolean } | null): string | null {
+  return ceiling?.active ? t('Its daily ceiling of {usd} stops counting until the group has a key of its own again.', { usd: dollars(ceiling.usd) }) : null;
+}
+/** SB-230: what a background read leaves on screen. An answer replaces the view and clears the
+ * error; a failure names itself, except right after a saved change (`afterSave`): the change stands,
+ * what is shown stays, and the next read reports; a stale read only fills an empty view. */
+export function afterRead<V>(current: { view: V | null; error: string }, read: ClockedRead<V>, afterSave: boolean, errorText: (error: unknown) => string): { view: V | null; error: string } {
+  if (read.state === 'applied') return { view: read.value, error: '' };
+  if (read.state === 'failed' && !afterSave) return { view: current.view, error: errorText(read.error) };
+  // A stale answer fills an empty view only (a later read corrects it), and clears nothing.
+  if (read.state === 'stale' && read.value !== undefined && current.view === null) return { view: read.value, error: current.error };
+  return current;
 }
 /** One answer to a reached ceiling. There is no `recommended` field and no primary class: the
  * rule is a question without a recommended option (C-Q1, SCN-084). */
