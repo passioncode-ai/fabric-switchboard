@@ -390,7 +390,8 @@ pub async fn connect(
         checked_at: None,
         state: State::Ok,
         organizations: 0,
-        released: Vec::new(),
+        // Connecting again is not leaving or rejoining: what earlier reads found stays.
+        released: previous.map(|l| l.released).unwrap_or_default(),
     };
     write_link(root, &link)?;
     read_organizations(root, store, &mut link, &tokens.access).await
@@ -880,6 +881,18 @@ mod tests {
         let (again, events) = crate::oplog::capture_async(sync(root.path(), &store)).await;
         assert_eq!(again.unwrap()["released"], json!(released));
         assert!(!events.iter().any(|(e, _)| *e == "organization_released"));
+        // Connecting again (offered after a refused sign-in) keeps the mark and its first date.
+        let (_keep, cancel) = tokio::sync::oneshot::channel();
+        connect(
+            root.path(),
+            &store,
+            &base,
+            browser(server.clone(), base.clone(), "code=vapc_synthetic"),
+            cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(status(root.path()).unwrap()["released"], json!(released));
         // Added back: linked again by its name, and the mark goes.
         server
             .left
