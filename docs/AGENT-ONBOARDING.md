@@ -49,6 +49,12 @@ organization listed for the person, one optional `organization` step says so.
 | `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`): on by default, and working once a start file holds the hook | optional. `next.turn_off` turns it off and `next.turn_on` turns it back on: never run either unless the person asks. `next.command` (`shell status`) only reads |
 | `launch` | A session ran in the organization's context (`org:<id>`) | optional: `next.command` launches one in a folder of the group |
 
+The window's organization card (SCN-076) reads the same steps through the app and words them in
+its own language from three more fields: `org_group.groups` (the groups' names, with two or more
+bound), `seat.ended` (how many of the group's accounts of the organization must sign in again)
+and `hook.terminals` (`active`, `pending`, `off`, `waiting` or `unread`); test
+`onboarding::tests::the_organization_steps_carry_what_the_window_words`.
+
 ## Rules
 
 - Never ask the person to paste a token, password or key into the conversation, and never put

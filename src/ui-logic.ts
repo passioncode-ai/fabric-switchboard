@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { ShellHookNotice, ShellHookStatus } from './types';
+import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t } from './i18n';
 
@@ -1042,4 +1042,92 @@ export function codexHookLine(status: ShellHookStatus | null): string | null {
   const orgs = status?.codex_organizations ?? [];
   if (!status || !(status.hook === 'on' || status.hook === 'default_on') || !status.files.some((f) => f.state === 'written') || !orgs.length) return null;
   return orgs.length === 1 ? t('In {organization}\'s folders, new terminals use its Codex accounts whether this is on or off.', { organization: orgs[0] }) : t('In organization folders, new terminals use their Codex accounts whether this is on or off.');
+}
+
+// ── SB-202 (B-8, SCN-076): the first run of an organization machine ──
+/** The steps of one organization's card, in the checklist's order. */
+export type OrgSetupStepId = 'organization' | 'org_group' | 'seat' | 'hook' | 'launch';
+export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[] }
+export interface OrgSetup { organization: { id: string; name: string }; group: { pool: string; name: string } | null; lines: OrgSetupLine[]; complete: boolean }
+export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'sign_in'; pool: string; label: string };
+export const ORG_SETUP_HIDDEN_KEY = 'switchboard.orgSetupHidden';
+export function orgSetupStateLabel(state: OnboardStep['state']): string {
+  return ({ done: t('Done'), todo: t('To do'), needs_person: t('Needs you'), optional: t('Optional') })[state];
+}
+export function orgSetupTitle(setup: Pick<OrgSetup, 'organization'>): string {
+  return t('Set up {organization} on this computer', { organization: setup.organization.name });
+}
+const seatLeadLine = (organization: string, group: string) => t('Sign in with your {organization} address. It goes to the group “{group}”.', { organization, group });
+const seatLabel = (organization: string) => t('Sign in with your {organization} address', { organization });
+/** Words one step in the window's language from the checklist's fields, never from its English summary. */
+function orgSetupLine(step: OnboardStep, organization: string, group: { pool: string; name: string } | null): string {
+  switch (step.id) {
+    case 'org_group':
+      if (step.state === 'done' && step.group) return t('Its group is “{group}”.', { group: step.group.name });
+      return (step.groups ?? []).length > 1 ? t('Keep one group for {organization} on this computer: {groups}.', { organization, groups: (step.groups ?? []).join(', ') }) : t('{organization} has no group on this computer yet.', { organization });
+    case 'seat':
+      if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
+      if (!group) return t('Sign in once the group exists.');
+      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
+    case 'hook':
+      return ({
+        active: t("Terminals in {organization}'s folders work in its context. To turn this off: switchboard shell off", { organization }),
+        pending: t('The terminal hook is on, but no start file holds it yet.'),
+        off: t("The terminal hook is off: terminals in {organization}'s folders keep your own settings.", { organization }),
+        waiting: t("Terminals follow {organization}'s folders once its group has a folder.", { organization }),
+        unread: t("The terminal hook's state could not be read."),
+      })[step.terminals ?? 'unread'];
+    case 'launch':
+      return step.state === 'done' ? t("A session ran in {organization}'s context.", { organization }) : t('Launch a session in a folder of the group to check it.');
+    default:
+      return t('{organization} is on this computer.', { organization });
+  }
+}
+const ORG_STEP_TITLES = (): Record<OrgSetupStepId, string> => ({ organization: t('Organization'), org_group: t('Group'), seat: t('Your seat'), hook: t('Terminals'), launch: t('First launch') });
+/** Every organization whose checklist is not complete yet, in the checklist's order (newest first). */
+export function orgSetups(onboarding: Onboarding | null | undefined): OrgSetup[] {
+  const known = new Set<string>(['org_group', 'seat', 'hook', 'launch']);
+  const byOrg = new Map<string, { organization: { id: string; name: string }; steps: OnboardStep[] }>();
+  for (const step of onboarding?.steps ?? []) {
+    if (!step.organization || !known.has(step.id)) continue;
+    const entry = byOrg.get(step.organization.id) ?? { organization: step.organization, steps: [] };
+    entry.steps.push(step); byOrg.set(step.organization.id, entry);
+  }
+  const titles = ORG_STEP_TITLES();
+  const setups: OrgSetup[] = [];
+  for (const { organization, steps } of byOrg.values()) {
+    const group = steps.find((s) => s.id === 'org_group' && s.state === 'done')?.group ?? null;
+    const lines: OrgSetupLine[] = [{ id: 'organization', state: 'done', title: titles.organization, line: orgSetupLine({ id: 'organization', state: 'done', summary: '' }, organization.name, group) }];
+    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}) });
+    const complete = lines.every((l) => l.state === 'done' || l.state === 'optional');
+    if (!complete) setups.push({ organization, group, lines, complete });
+  }
+  return setups;
+}
+/** The card's one action: the first step not done, when the window can do it. */
+export function orgSetupAction(setup: OrgSetup): OrgSetupAction | null {
+  const first = setup.lines.find((l) => l.state === 'todo' || l.state === 'needs_person');
+  if (!first) return null;
+  if (first.id === 'org_group') return !first.groups ? { kind: 'group', organization: setup.organization.id, label: t('+ Group for {organization}', { organization: setup.organization.name }) } : null;
+  if (first.id === 'seat' && setup.group) return { kind: 'sign_in', pool: setup.group.pool, label: seatLabel(setup.organization.name) };
+  return null;
+}
+/** One first-run card at a time: the usage question, then the tour, then this card; on Accounts and on top of Organizations, and after Hide on Organizations only. */
+export function orgSetupShown(input: { page: string; organization: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null }): boolean {
+  if (tourWaits(input.usage, input.usageFailed) || input.tourStep !== null) return false;
+  if (input.page === 'orgs') return true;
+  return input.page === 'accounts' && !input.hidden.includes(input.organization);
+}
+export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[] {
+  try { const value: unknown = JSON.parse(store?.getItem(ORG_SETUP_HIDDEN_KEY) ?? '[]'); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []; } catch { return []; }
+}
+export type AccountsEmptyKey = { lead: 'backup' } | { lead: 'org_seat'; organization: string; group: string; pool: string; line: string; label: string } | { lead: 'reading' | 'add_current' | 'sign_in' };
+/** What the empty Accounts page leads with: a backup to restore, then an organization's seat (its group exists, no seat yet), then today's first-account line. */
+export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboarding | null | undefined; current: Parameters<typeof firstRunHint>[0] }): AccountsEmptyKey {
+  if (input.backup) return { lead: 'backup' };
+  for (const setup of orgSetups(input.onboarding)) {
+    const action = orgSetupAction(setup);
+    if (action?.kind === 'sign_in' && setup.group) return { lead: 'org_seat', organization: setup.organization.name, group: setup.group.name, pool: setup.group.pool, line: seatLeadLine(setup.organization.name, setup.group.name), label: action.label };
+  }
+  return { lead: firstRunHint(input.current) };
 }

@@ -3,7 +3,7 @@ import type { StatCounts, Statistics } from './ui-logic';
 import { attribution, groupAdmits, providerOrganization } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus } from './types';
+import type { PassioncodeStatus, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -108,6 +108,34 @@ export function createDemoAdapter(): Adapter {
     (state.projects ??= []).unshift({ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 20 * 86_400, organization: northwind.id });
     passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now() - 40 * 86_400, read_at: now() - 3600, checked_at: now() - 3600, organizations: 0, released: [{ organization: contoso.id, at: now() - 3 * 86_400 }] };
   }
+  // SB-202 (B-8, SCN-076): `?org=setup` is a new computer of Northwind's: connected to
+  // PassionCode.ai, its group made, no account yet; `&group=none` before the group exists.
+  const orgSetup = new URLSearchParams(location.search).get('org') === 'setup';
+  if (orgSetup) {
+    const northwind = { id: 'demo-org-northwind', name: 'Northwind', domains: ['northwind.test'], created_at: now() - 86_400, vesta_id: 'synthetic-vesta-northwind' };
+    state.organizations = [northwind];
+    state.accounts = [];
+    state.projects = new URLSearchParams(location.search).get('group') === 'none' ? [] : [{ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 3600, organization: northwind.id }];
+    passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now() - 3600, read_at: now() - 600, checked_at: now() - 600, organizations: 1 };
+  }
+  // Like the owner's `onboard` (onboarding.rs, organization steps only, the five first steps done).
+  const onboardSteps = (): Onboarding => {
+    const steps: OnboardStep[] = ['owner', 'accounts', 'project', 'mcp', 'proving_call'].map((id) => ({ id, state: 'done', summary: id }));
+    const organizations = [...(state.organizations ?? [])].sort((a, b) => b.created_at - a.created_at);
+    if (organizations.length) steps.push({ id: 'organization', state: 'done', summary: 'Organizations on this computer.' });
+    for (const o of organizations) {
+      const organization = { id: o.id, name: o.name };
+      const bound = (state.projects ?? []).filter((p) => p.organization === o.id);
+      const group = bound.length === 1 ? { pool: bound[0].pool, name: bound[0].name } : null;
+      steps.push(group ? { id: 'org_group', state: 'done', summary: '', organization, group } : { id: 'org_group', state: 'needs_person', summary: '', organization, groups: bound.map((p) => p.name) });
+      const seats = group ? state.accounts.filter((a) => a.pool === group.pool && attribution(state, a).organization === o.id) : [];
+      const ended = seats.filter((a) => signInRequired.has(a.id)).length;
+      steps.push({ id: 'seat', state: seats.some((a) => a.enabled && !signInRequired.has(a.id)) ? 'done' : 'needs_person', summary: '', organization, ended });
+      steps.push({ id: 'hook', state: 'optional', summary: '', organization, terminals: group && bound[0].folders.length ? 'active' : 'waiting' });
+      steps.push({ id: 'launch', state: 'optional', summary: '', organization });
+    }
+    return { complete: steps.every((s) => s.state === 'done' || s.state === 'optional'), degraded: [], steps };
+  };
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false };
   // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
@@ -186,6 +214,8 @@ export function createDemoAdapter(): Adapter {
   let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
+  // A new computer has no backup of its own (SB-202, `?org=setup`).
+  if (orgSetup) backups.length = 0;
   return {
     async currentAccounts() { return structuredClone(current); },
     async sessions() { return { sessions: [
@@ -492,6 +522,7 @@ export function createDemoAdapter(): Adapter {
     async loginItem() { return { ...loginItem }; },
     async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },
     async acknowledgeShellHookNotice() { await pause(); shellNotice = false; },
+    async onboard() { await pause(); return onboardSteps(); },
     async shellHookStatus() {
       await pause();
       if (shellParam === 'failed') throw new Error('Switchboard could not read its own state.');

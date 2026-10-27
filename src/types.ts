@@ -145,6 +145,8 @@ export interface Adapter {
   acknowledgeShellHookNotice(): Promise<void>;
   /** SB-183 (node A-7): the Groups page's *Terminals in organization folders* section. */
   shellHookStatus(): Promise<ShellHookStatus>;
+  /** SB-202 (B-8): the organization checklist for the first run. */
+  onboard(): Promise<Onboarding>;
   /** Turn off / Turn on: the same as `switchboard shell off|on`, refused outside the installed app. */
   setShellHook(on: boolean): Promise<ShellHookStatus>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
@@ -187,6 +189,9 @@ export interface ShellHookNotice { organization: string; group: string }
 /** One start file the terminal hook changed or left alone, as `shell-hook.json` records it. */
 export interface ShellHookFile { shell: string; path: string; state: string }
 /** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
+/** SB-202 (B-8): one step of `switchboard onboard`, as the window reads it through the Tauri `onboard` command. */
+export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread' }
+export interface Onboarding { complete: boolean; degraded: string[]; steps: OnboardStep[] }
 export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; /** Organizations whose folder map rows carry a Codex account. */ codex_organizations?: string[]; can_change: boolean; home: string | null }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }

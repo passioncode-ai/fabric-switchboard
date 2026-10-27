@@ -902,6 +902,103 @@ async fn agent_setup(state: State<'_, Slot>) -> Result<Value, String> {
     }
     Ok(setup)
 }
+/// SB-202 (B-8): the organization checklist for the window's first run, the same steps
+/// `switchboard onboard` reads, filled from this owner. Only the organization steps are read by
+/// the window; the agent's MCP registration is not looked up here.
+#[tauri::command]
+async fn onboard(state: State<'_, Slot>) -> Result<Value, String> {
+    let runtime = state.runtime().await?;
+    let snapshot = runtime.execute(Operation::Snapshot).await?;
+    let (saved, partial) = switchboard_runtime::onboarding::read_snapshot(&snapshot);
+    let organizations = saved.as_ref().is_some_and(|s| !s.organizations.is_empty());
+    let (monitor, sessions, shell) = if organizations {
+        (
+            runtime.execute(Operation::MonitorStatus).await.ok(),
+            runtime
+                .execute(Operation::Sessions { all: true })
+                .await
+                .ok(),
+            Some(runtime.shell_hook_status()),
+        )
+    } else {
+        (None, None, None)
+    };
+    let root = runtime.root.clone();
+    let passioncode = tokio::task::spawn_blocking(move || {
+        switchboard_runtime::vesta::status(&root).is_ok_and(|v| v["connected"] == true)
+    })
+    .await
+    .unwrap_or(false);
+    let probe = onboard_probe(OnboardReads {
+        snapshot: &snapshot,
+        saved,
+        partial,
+        monitor: monitor.as_ref(),
+        sessions: sessions.as_ref(),
+        shell,
+        passioncode,
+    });
+    Ok(switchboard_runtime::onboarding::steps(&probe))
+}
+/// What `onboard` read; a read that failed is `None` and named in `degraded`.
+struct OnboardReads<'a> {
+    snapshot: &'a Value,
+    saved: Option<switchboard_core::Snapshot>,
+    partial: bool,
+    monitor: Option<&'a Value>,
+    sessions: Option<&'a Value>,
+    shell: Option<Value>,
+    passioncode: bool,
+}
+fn onboard_probe(reads: OnboardReads<'_>) -> switchboard_runtime::onboarding::Probe {
+    let mut probe = switchboard_runtime::onboarding::Probe {
+        owner_online: true,
+        passioncode: reads.passioncode,
+        ..Default::default()
+    };
+    for provider in ["claude", "codex"] {
+        let count = reads.snapshot["accounts"].as_array().map_or(0, |accounts| {
+            accounts
+                .iter()
+                .filter(|a| a["provider"] == provider && a["enabled"] == true)
+                .count()
+        });
+        probe.accounts.push((provider.into(), count));
+    }
+    if reads.partial {
+        probe.degraded.push("snapshot".into());
+    }
+    if reads
+        .saved
+        .as_ref()
+        .is_some_and(|s| !s.organizations.is_empty())
+    {
+        let ids = |value: Option<&Value>, list: &str, field: Option<&str>| -> Option<Vec<String>> {
+            Some(
+                value?[list]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|item| match field {
+                        Some(field) => item[field].as_str(),
+                        None => item.as_str(),
+                    })
+                    .map(str::to_owned)
+                    .collect(),
+            )
+        };
+        match ids(reads.monitor, "sign_in_required", None) {
+            Some(list) => probe.sign_in_required = list,
+            None => probe.degraded.push("sign_ins".into()),
+        }
+        match ids(reads.sessions, "sessions", Some("context")) {
+            Some(list) => probe.contexts = list,
+            None => probe.degraded.push("sessions".into()),
+        }
+        probe.shell = reads.shell;
+    }
+    probe.snapshot = reads.saved;
+    probe
+}
 #[tauri::command]
 fn link_cli() -> Result<Value, String> {
     switchboard_runtime::agents::link_bundled_cli()
@@ -1173,6 +1270,7 @@ fn main() {
             shell_hook_notice,
             acknowledge_shell_hook_notice,
             shell_hook_status,
+            onboard,
             set_shell_hook,
             update_status,
             set_auto_update,
@@ -1318,6 +1416,54 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /// B-8: the window's checklist is filled from this owner's reads; a read that failed is
+    /// named, and a machine without organizations reads nothing more.
+    #[test]
+    fn the_window_checklist_reads_the_owner_and_names_what_failed() {
+        let snapshot = json!({"accounts": [
+            {"provider": "claude", "enabled": true},
+            {"provider": "claude", "enabled": false},
+            {"provider": "codex", "enabled": true}
+        ]});
+        let mut saved = switchboard_core::Snapshot::default();
+        let reads = |saved: Option<switchboard_core::Snapshot>, monitor: Option<&'static Value>| {
+            onboard_probe(OnboardReads {
+                snapshot: Box::leak(Box::new(snapshot.clone())),
+                saved,
+                partial: false,
+                monitor,
+                sessions: None,
+                shell: Some(json!({"hook": "off"})),
+                passioncode: true,
+            })
+        };
+        let plain = reads(Some(saved.clone()), None);
+        assert_eq!(
+            plain.accounts,
+            vec![("claude".into(), 1), ("codex".into(), 1)]
+        );
+        assert!(
+            plain.degraded.is_empty(),
+            "no organization: nothing more read"
+        );
+        assert!(plain.shell.is_none());
+        saved
+            .organizations
+            .push(switchboard_core::organizations::Organization {
+                id: "o-acme".into(),
+                name: "Acme".into(),
+                domains: vec![],
+                provider_organizations: vec![],
+                created_at: 1,
+                vesta_id: None,
+            });
+        let monitor: &'static Value = Box::leak(Box::new(json!({"sign_in_required": ["a-1"]})));
+        let probe = reads(Some(saved), Some(monitor));
+        assert_eq!(probe.sign_in_required, vec!["a-1".to_owned()]);
+        assert_eq!(probe.degraded, vec!["sessions".to_owned()]);
+        assert_eq!(probe.shell, Some(json!({"hook": "off"})));
+        assert!(probe.passioncode);
+    }
     use super::*;
 
     fn args(list: &[&str]) -> Vec<String> {

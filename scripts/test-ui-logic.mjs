@@ -1033,4 +1033,68 @@ check(() => {
     assert.match(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }).body, /Acme web/);
   } finally { i18nForShell.setLocale('en'); }
 });
+// SB-202 (B-8, SCN-076): the window's first run on an organization machine.
+{
+  const org = { id: 'o-acme', name: 'Acme' };
+  const group = { pool: 'acme-work', name: 'Acme work' };
+  const five = ['owner', 'accounts', 'project', 'mcp', 'proving_call'].map((id) => ({ id, state: 'done', summary: id }));
+  const withOrg = (extra) => ({ complete: false, degraded: [], steps: [...five, { id: 'organization', state: 'done', summary: 'x' }, ...extra.map((s) => ({ organization: org, summary: 'english', ...s }))] });
+  const noGroup = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }, { id: 'hook', state: 'optional', terminals: 'waiting' }, { id: 'launch', state: 'optional' }]);
+  const noSeat = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 0 }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
+  const ready = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'done' }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
+  const asked = { available: true, enabled: true, disclosed: false };
+  const answered = { available: true, enabled: true, disclosed: true };
+  // the organization card waits for the usage question and the tour
+  check(() => {
+    const [setup] = logic.orgSetups(noGroup);
+    assert.equal(setup.organization.name, 'Acme');
+    assert.equal(logic.orgSetupTitle(setup), 'Set up Acme on this computer');
+    assert.deepEqual(setup.lines.map((l) => [l.id, l.state]), [['organization', 'done'], ['org_group', 'needs_person'], ['seat', 'needs_person'], ['hook', 'optional'], ['launch', 'optional']]);
+    assert.equal(setup.lines[1].line, 'Acme has no group on this computer yet.');
+    assert.deepEqual(logic.orgSetupAction(setup), { kind: 'group', organization: 'o-acme', label: '+ Group for Acme' });
+    const shown = (usage, tourStep, page = 'accounts', hidden = [], failed = false) => logic.orgSetupShown({ page, organization: 'o-acme', hidden, usage, usageFailed: failed, tourStep });
+    assert.equal(shown(asked, null), false, 'the usage question comes first');
+    assert.equal(shown(null, null), false, 'its status is still being read');
+    assert.equal(shown(answered, 0), false, 'then the tour');
+    assert.equal(shown(answered, null), true, 'then the card');
+    assert.equal(shown(null, null, 'accounts', [], true), true, 'a failed status read does not hold the card back');
+    assert.equal(shown(answered, null, 'orgs'), true, 'on top of Organizations too');
+    assert.equal(shown(answered, null, 'agents'), false, 'nowhere else');
+    assert.equal(shown(answered, null, 'accounts', ['o-acme']), false, 'Hide keeps it off Accounts');
+    assert.equal(shown(answered, null, 'orgs', ['o-acme']), true, 'and on Organizations');
+    const [seat] = logic.orgSetups(noSeat);
+    assert.deepEqual(logic.orgSetupAction(seat), { kind: 'sign_in', pool: 'acme-work', label: 'Sign in with your Acme address' });
+    assert.equal(seat.lines[2].line, 'Sign in with your Acme address. It goes to the group “Acme work”.');
+    assert.equal(seat.lines[3].line, "Terminals in Acme's folders work in its context. To turn this off: switchboard shell off");
+    const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
+    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again.');
+    const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
+    assert.equal(two.lines[1].line, 'Keep one group for Acme on this computer: Acme web, Acme two.');
+    assert.equal(logic.orgSetupAction(two), null, 'which group stays is the person\'s');
+    assert.deepEqual(logic.orgSetups(ready), [], 'every step done or optional: the card goes');
+    // Several organizations: one card each, in the checklist's order (newest first).
+    const globex = { id: 'o-globex', name: 'Globex' };
+    const both = { ...noGroup, steps: [...noGroup.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
+    assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Globex']);
+    assert.equal(logic.orgSetupStateLabel('needs_person'), 'Needs you');
+  });
+  // the empty Accounts page on an organization machine leads with the seat
+  check(() => {
+    const signedIn = { claude: { status: 'available' }, codex: null };
+    assert.deepEqual(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: signedIn }), { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: 'Sign in with your Acme address. It goes to the group “Acme work”.', label: 'Sign in with your Acme address' });
+    assert.equal(logic.accountsEmptyKey({ backup: true, onboarding: noSeat, current: signedIn }).lead, 'backup', 'a backup to restore still comes first');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noGroup, current: signedIn }).lead, 'add_current', 'no group yet: the card asks for it, the page keeps its line');
+  });
+  // guard: no organization, no card, today's empty state
+  check(() => {
+    const plain = { complete: true, degraded: [], steps: five };
+    assert.deepEqual(logic.orgSetups(plain), []);
+    assert.deepEqual(logic.orgSetups(null), []);
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: plain, current: { claude: { status: 'missing' }, codex: null } }).lead, 'sign_in');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: null, current: { claude: { status: 'available' } } }).lead, 'add_current');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: null, current: null }).lead, 'reading');
+    const lonely = { complete: true, degraded: [], steps: [...five, { id: 'organization', state: 'optional', summary: 'PassionCode.ai lists no organization for you yet.' }] };
+    assert.deepEqual(logic.orgSetups(lonely), [], 'PassionCode.ai listing none: no card');
+  });
+}
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
