@@ -966,6 +966,15 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`a_launch_that_never_started_is_not_where_the_work_went`). A first session that continues no
   workflow and names no parent gets no `continued_as` from the fallback or a recovery: they hand
   over a workflow, and only a launch that continued that workflow is linked.
+  **Without reading every record (SB-219).** A launch names the records it took over in
+  `continued_from` (a list, empty when none), and each workflow keeps an index of the launches
+  that continued it, `launches/by-workflow/<workflow>.json` (0600, at most 64 ids, pruned with the
+  records after 90 days unwritten); a hand-over and a launch that never started read only the
+  records `continued_from` names, and a continuation only the workflow's indexed launches. A
+  record from before it has no `continued_from`, and a workflow with no index is found by one full
+  scan, which seeds the index. The records' file work runs in a blocking section, off the async
+  workers (`launches::tests::linking_a_continuation_among_thousands_of_records_reads_no_full_scan`,
+  3,000 records).
 - **The plain session list says it too.** `sessions()` (CLI `sessions`, MCP `switchboard_sessions` without `history`) copies `provider_session_id`, `transcript`, `session_started_at`, `last_turn_at`, `turns`, `ended`, `ended_at` and `continued_as` from the record of the launch a home's `.session.json` names (`launches::add_outcome`), so the card of a home's latest session says how it ended and where its work went (fabric-dashboards, board `62d78b7f`, 2026-10-26). A missing record leaves the row as before (`a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went`).
 - **Reading.** `Operation::Launches {}` lists every record newest first, at most 500, with `total`
   and each record's `state` now: its home's own (`starting`, `running`, `ended`, `unknown`) while
