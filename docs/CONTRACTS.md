@@ -1901,8 +1901,8 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   "newline_added", "created", "at"}], "notice_pending"}`, `state` one of `written`,
   `removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
   `unreadable`, `policy_blocked` (a PowerShell profile whose execution policy keeps it from
-  running: not written, node A-8), `constrained_language` (PowerShell runs in Constrained
-  Language Mode on this computer: not written, SB-225); `created` only when true,
+  running: not written, node A-8), `constrained_language` (that profile's PowerShell edition runs
+  in Constrained Language Mode on this computer: not written, SB-225); `created` only when true,
   `notice_pending` only while one waits; what `shell status` shows. Nothing ever written and
   nothing wanted: no record.
 - **The first-time notice.** The first run that writes a block while no choice is made saves
@@ -2058,11 +2058,14 @@ Language Mode.
 - **Constrained Language Mode** (SB-225), as PowerShell decides it for a script with no
   signature: Windows Defender Application Control enforcing user-mode code integrity
   (`WldpGetLockdownPolicy` for the PowerShell host answers `WLDP_LOCKDOWN_UMCIENFORCE_FLAG`; audit
-  alone does not count), or the machine's `__PSLockdownPolicy` (`HKLM\SYSTEM\CurrentControlSet\
-  Control\Session Manager\Environment`, decimal or `0x` hexadecimal) with its enforce bit 4
-  (`windows::lockdown`). Then no profile is written and each reads `constrained_language`
-  (window, MCP, `shell status`), with the same record rules as `policy_blocked`; the mode is never
-  changed. AppLocker's script rules are not read: there the hook's own check leaves it inert.
+  alone does not count) holds both editions; the machine's `__PSLockdownPolicy`
+  (`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, decimal or `0x`
+  hexadecimal) with its enforce bit 4 holds Windows PowerShell 5.1 only, since a release build of
+  PowerShell 7 ignores it (`windows::lockdown` answers a `Lockdown` per edition). Then that
+  edition's profile is not written and reads `constrained_language` (window, MCP, `shell
+  status`), with the same record rules as `policy_blocked`; the mode is never changed.
+  `WldpGetLockdownPolicy` is looked up in System32's `wldp.dll` when asked, so a Windows without
+  it reads as no lockdown rather than an app that cannot start. AppLocker's script rules are not read: there the hook's own check leaves it inert.
   Tests: `windows::tests::constrained_language_mode_is_read_from_application_control_and_the_lockdown_variable`,
   `install::tests::constrained_language_mode_writes_no_profile_and_says_so`.
 - **Not covered.** The run lock (`flock` on the data folder) does not
@@ -2106,11 +2109,16 @@ managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026
 - **Claude shell home** `<data>/shell/claude-<pool>` (0700), for a pool with a row whose `claude`
   is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`,
   through `carry::link_into_shell_home`: symbolic links on macOS and Linux; on Windows, SB-226,
-  a folder as a directory junction and a file as a hard link on the same volume, neither needing
-  a privilege or an administrator; a junction is renewed when it leads elsewhere, a hard link
-  named in `<home>/.switchboard-links` when the person's file was replaced, and the homes'
-  fingerprint counts each carried file's time there so the next pass does it; a real file in the
-  home is never replaced, another volume carries nothing), `.claude.json` with `hasCompletedOnboarding` and, when the person
+  a folder as a directory junction to any local drive and a file as a hard link on the volume of
+  Switchboard's data, neither needing a privilege or an administrator; a junction's target is
+  written as Windows names it (`/` read as `\`, `carry::junction_target`), or none is made; a
+  junction is renewed when it leads elsewhere; each hard link is recorded in
+  `<home>/.switchboard-links` with the file's identity (volume serial and file index), and only a
+  home file that still has it is Switchboard's (`carry::file_step`): linked again when the person's
+  file was replaced, removed when the person's file is gone; the homes' fingerprint counts each
+  carried file's time there so the next pass does it; a real file in the home, or one a session
+  replaced there, is never replaced or removed and leaves the record; a file on another volume and
+  anything on a network share are not carried), `.claude.json` with `hasCompletedOnboarding` and, when the person
   registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
   file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
   without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
@@ -2119,8 +2127,13 @@ managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026
   `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
   capability, no credential file and none of the person's secrets anywhere in the home; on
   Windows the file and folder read through the home), on Windows
-  `carry::windows_tests::a_shell_home_on_windows_carries_folders_as_junctions_and_files_as_hard_links`
-  and `a_junction_names_local_folders_only`.
+  `carry::windows_tests::a_shell_home_on_windows_carries_folders_as_junctions_and_files_as_hard_links`,
+  `a_deleted_source_takes_its_hard_link_out_of_the_shell_home`,
+  `a_home_file_a_session_replaced_is_kept`, `a_source_named_with_slashes_gets_a_junction_that_resolves`
+  and `a_junction_names_local_folders_only`; the decisions on every platform:
+  `carry::tests::a_shell_homes_hard_link_is_replaced_or_removed_only_while_it_is_still_switchboards`,
+  `the_hard_link_record_keeps_each_files_identity_and_reads_an_earlier_one`,
+  `a_junction_target_is_written_as_windows_names_it_or_not_at_all`.
 - **Codex shell home** `<data>/shell/codex-<pool>` (0700), for a pool with an enabled Codex
   account: an `AGENTS.md` link and `config.toml` (0600) with SB-143's marked provider blocks
   (`codex_route::with_provider`): `base_url = "http://<proxy>/codex/_auto/v1"`, the machine's auto

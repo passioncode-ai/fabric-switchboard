@@ -224,7 +224,7 @@ export function createDemoAdapter(): Adapter {
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
   let codexOn = false;
   // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
-  // off, default_off, inactive, zdotdir, removed, policy, dev, failed, notice); without it, on by
+  // off, default_off, inactive, zdotdir, removed, policy, constrained, dev, failed, notice); without it, on by
   // default while the demo holds an organization's group. Synthetic paths only.
   const shellParam = new URLSearchParams(location.search).get('shell');
   const shellHome = '/Users/demo';
@@ -235,6 +235,8 @@ export function createDemoAdapter(): Adapter {
     zdotdir: [{ ...zshrc, state: 'skipped_zdotdir_unknown' }],
     removed: [zshrc, { shell: 'bash', path: `${shellHome}/.bash_profile`, state: 'removed_by_person' }],
     policy: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' }],
+    // SB-225: `__PSLockdownPolicy` holds Windows PowerShell 5.1 only; PowerShell 7 keeps the block.
+    constrained: [{ shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1', state: 'constrained_language' }, { shell: 'pwsh', path: 'C:\\Users\\demo\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'written' }],
   };
   let shellChoice: 'on' | 'off' | 'default' = shellParam === 'on' ? 'on' : shellParam === 'off' ? 'off' : 'default';
   let shellFiles: ShellHookFile[] = shellParam && shellStart[shellParam] ? shellStart[shellParam].map((f) => ({ ...f })) : shellParam === 'off' || shellParam === 'default_off' ? [] : [zshrc, fishFile].map((f) => ({ ...f }));

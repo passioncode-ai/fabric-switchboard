@@ -140,14 +140,40 @@ pub fn group_policy(enable_scripts: Option<u32>, policy: Option<&str>) -> Option
         _ => policy.and_then(Policy::parse),
     }
 }
-/// Whether PowerShell is held to Constrained Language Mode for scripts on this computer, as
-/// PowerShell itself decides it for a script with no signature: a Windows Defender Application
-/// Control policy that enforces user-mode code integrity (`WldpGetLockdownPolicy` answers
-/// `WLDP_LOCKDOWN_UMCIENFORCE_FLAG` for the PowerShell host), or the `__PSLockdownPolicy`
-/// variable with its enforce bit (4) in the machine's environment (Windows PowerShell reads it;
-/// PowerShell 7 too in debug builds, so both editions count it). AppLocker's script rules are
-/// not read here: there the hook itself sees the language mode and does nothing (`hook.ps1`).
-pub fn lockdown(wldp: Option<u32>, lockdown_policy: Option<&str>) -> bool {
+/// Which editions of PowerShell run scripts in Constrained Language Mode on this computer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Lockdown {
+    /// Windows PowerShell 5.1.
+    pub desktop: bool,
+    /// PowerShell 7.
+    pub core: bool,
+}
+impl Lockdown {
+    /// Both editions alike.
+    pub const fn both(on: bool) -> Lockdown {
+        Lockdown {
+            desktop: on,
+            core: on,
+        }
+    }
+    /// Whether `edition` runs in Constrained Language Mode.
+    pub fn of(self, edition: Edition) -> bool {
+        match edition {
+            Edition::Desktop => self.desktop,
+            Edition::Core => self.core,
+        }
+    }
+}
+
+/// Which editions PowerShell holds to Constrained Language Mode for scripts on this computer, as
+/// each decides it for a script with no signature: a Windows Defender Application Control policy
+/// that enforces user-mode code integrity (`WldpGetLockdownPolicy` answers
+/// `WLDP_LOCKDOWN_UMCIENFORCE_FLAG` for the PowerShell host) holds both; the `__PSLockdownPolicy`
+/// variable with its enforce bit (4) in the machine's environment holds Windows PowerShell 5.1
+/// only, since a release build of PowerShell 7 ignores it (it reads the variable in debug builds
+/// alone). AppLocker's script rules are not read here: there the hook itself sees the language
+/// mode and does nothing (`hook.ps1`).
+pub fn lockdown(wldp: Option<u32>, lockdown_policy: Option<&str>) -> Lockdown {
     // `WLDP_LOCKDOWN_UMCIENFORCE_FLAG`; the audit flag alone (8) only reports.
     const UMCI_ENFORCE: u32 = 0x4;
     let wdac = wldp.is_some_and(|state| state & UMCI_ENFORCE != 0);
@@ -161,7 +187,10 @@ pub fn lockdown(wldp: Option<u32>, lockdown_policy: Option<&str>) -> bool {
             },
         )
         .is_some_and(|value| value & 0x4 != 0);
-    wdac || variable
+    Lockdown {
+        desktop: wdac || variable,
+        core: wdac,
+    }
 }
 
 /// The policy a `powershell.config.json` sets, if any.
@@ -179,9 +208,9 @@ pub struct Host {
     pub documents: PathBuf,
     /// The editions installed and the policy in force for each.
     pub editions: Vec<(Edition, Policy)>,
-    /// PowerShell runs in Constrained Language Mode on this computer ([`lockdown`]): the hook
-    /// cannot act there, so no profile is written.
-    pub constrained: bool,
+    /// The editions that run in Constrained Language Mode on this computer ([`lockdown`]): the
+    /// hook cannot act there, so their profiles are not written.
+    pub constrained: Lockdown,
 }
 /// One profile the installer looks after.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -207,7 +236,7 @@ impl Host {
                     .iter()
                     .find(|(e, _)| *e == edition)
                     .is_some_and(|(_, policy)| policy.blocks_profiles()),
-                constrained: self.constrained,
+                constrained: self.constrained.of(edition),
             })
             .collect()
     }
@@ -252,25 +281,57 @@ pub fn process_host() -> Option<Host> {
     })
 }
 
-/// Windows Defender Application Control, as PowerShell asks it.
+/// Windows Defender Application Control, as PowerShell asks it. `wldp.dll` and its
+/// `WldpGetLockdownPolicy` are looked up when asked, from System32 only, so a Windows without
+/// them reads as no lockdown instead of an app that cannot start.
 #[cfg(windows)]
 mod wldp {
+    use windows_sys::Win32::Foundation::FreeLibrary;
+    use windows_sys::Win32::System::LibraryLoader::{
+        GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32,
+    };
     use windows_sys::Win32::System::WindowsProgramming::{
-        WldpGetLockdownPolicy, WLDP_HOST_ID_POWERSHELL, WLDP_HOST_INFORMATION,
+        WLDP_GETLOCKDOWNPOLICY_FN, WLDP_HOST_ID_POWERSHELL, WLDP_HOST_INFORMATION,
         WLDP_HOST_INFORMATION_REVISION,
     };
+    type GetLockdownPolicy = unsafe extern "system" fn(
+        *const WLDP_HOST_INFORMATION,
+        *mut u32,
+        u32,
+    ) -> windows_sys::core::HRESULT;
     /// The lockdown state for the PowerShell host, None when it cannot be read.
     pub fn powershell_lockdown() -> Option<u32> {
-        let host = WLDP_HOST_INFORMATION {
-            dwRevision: WLDP_HOST_INFORMATION_REVISION,
-            dwHostId: WLDP_HOST_ID_POWERSHELL,
-            szSource: std::ptr::null(),
-            hSource: std::ptr::null_mut(),
+        let name: Vec<u16> = "wldp.dll\0".encode_utf16().collect();
+        // SAFETY: `name` is a NUL-terminated wide string that lives for the call.
+        let module = unsafe {
+            LoadLibraryExW(
+                name.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
         };
-        let mut state: u32 = 0;
-        // SAFETY: `host` and `state` live for the call; no source is named.
-        let status = unsafe { WldpGetLockdownPolicy(&host, &mut state, 0) };
-        (status >= 0).then_some(state)
+        if module.is_null() {
+            return None;
+        }
+        // SAFETY: the module is loaded; the name is a NUL-terminated ANSI string.
+        let found = unsafe { GetProcAddress(module, WLDP_GETLOCKDOWNPOLICY_FN) };
+        let state = found.and_then(|function| {
+            // SAFETY: `WldpGetLockdownPolicy` has this signature (wldp.h).
+            let function: GetLockdownPolicy = unsafe { std::mem::transmute(function) };
+            let host = WLDP_HOST_INFORMATION {
+                dwRevision: WLDP_HOST_INFORMATION_REVISION,
+                dwHostId: WLDP_HOST_ID_POWERSHELL,
+                szSource: std::ptr::null(),
+                hSource: std::ptr::null_mut(),
+            };
+            let mut state: u32 = 0;
+            // SAFETY: `host` and `state` live for the call; no source is named.
+            let status = unsafe { function(&host, &mut state, 0) };
+            (status >= 0).then_some(state)
+        });
+        // SAFETY: the module was loaded above and nothing from it is used after this.
+        unsafe { FreeLibrary(module) };
+        state
     }
 }
 
@@ -477,7 +538,7 @@ mod tests {
                 (Edition::Core, Policy::RemoteSigned),
                 (Edition::Desktop, Policy::Restricted),
             ],
-            constrained: false,
+            constrained: Lockdown::default(),
         };
         assert_eq!(
             host.profiles(),
@@ -505,15 +566,24 @@ mod tests {
     }
 
     /// SB-225: Constrained Language Mode, as PowerShell decides it for a script with no
-    /// signature: Application Control enforcing user-mode code integrity, or the machine's
-    /// `__PSLockdownPolicy` with its enforce bit. Audit alone does not constrain.
+    /// signature: Application Control enforcing user-mode code integrity holds both editions; the
+    /// machine's `__PSLockdownPolicy` with its enforce bit holds Windows PowerShell 5.1 only
+    /// (a release build of PowerShell 7 ignores it). Audit alone does not constrain.
     #[test]
     fn constrained_language_mode_is_read_from_application_control_and_the_lockdown_variable() {
-        assert!(!lockdown(None, None));
-        assert!(!lockdown(Some(0), None));
-        assert!(!lockdown(Some(0x8000_0000 | 0x8), None), "audit only");
-        assert!(lockdown(Some(0x8000_0000 | 0x4), None));
-        assert!(lockdown(Some(0x8000_0000 | 0x4 | 0x8), None));
+        let none = Lockdown::default();
+        assert_eq!(lockdown(None, None), none);
+        assert_eq!(lockdown(Some(0), None), none);
+        assert_eq!(lockdown(Some(0x8000_0000 | 0x8), None), none, "audit only");
+        assert_eq!(
+            lockdown(Some(0x8000_0000 | 0x4), None),
+            Lockdown::both(true)
+        );
+        assert_eq!(
+            lockdown(Some(0x8000_0000 | 0x4 | 0x8), None),
+            Lockdown::both(true)
+        );
+        assert_eq!(lockdown(Some(0x4), Some("4")), Lockdown::both(true));
         for (value, constrained) in [
             ("4", true),
             (" 4 ", true),
@@ -525,13 +595,32 @@ mod tests {
             ("", false),
             ("constrained", false),
         ] {
-            assert_eq!(lockdown(None, Some(value)), constrained, "{value:?}");
+            let read = lockdown(None, Some(value));
+            assert_eq!(read.desktop, constrained, "{value:?}");
+            assert!(!read.core, "PowerShell 7 ignores {value:?}");
         }
-        // Every profile of a constrained computer says so.
+        // Each profile says what its own edition does.
         let host = Host {
             documents: PathBuf::from("/Users/ana/Documents"),
-            editions: vec![(Edition::Desktop, Policy::RemoteSigned)],
-            constrained: true,
+            editions: vec![
+                (Edition::Desktop, Policy::RemoteSigned),
+                (Edition::Core, Policy::RemoteSigned),
+            ],
+            constrained: lockdown(None, Some("4")),
+        };
+        let constrained: Vec<(Edition, bool)> = host
+            .profiles()
+            .iter()
+            .map(|p| (p.edition, p.constrained))
+            .collect();
+        assert_eq!(
+            constrained,
+            [(Edition::Desktop, true), (Edition::Core, false)]
+        );
+        assert!(host.profiles().iter().all(|p| !p.blocked));
+        let host = Host {
+            constrained: Lockdown::both(true),
+            ..host
         };
         assert!(host.profiles().iter().all(|p| p.constrained && !p.blocked));
     }

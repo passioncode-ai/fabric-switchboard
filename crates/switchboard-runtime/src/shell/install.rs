@@ -485,11 +485,18 @@ impl Encoding {
         }
     }
 }
-/// A start file's bytes as text: UTF-8 (a byte order mark kept as `U+FEFF`), or UTF-16LE when
-/// it starts with that byte order mark (the mark kept the same way, so the bytes come back
-/// exactly). None for anything else, and for text holding a NUL: UTF-16 without a byte order
-/// mark reads as valid UTF-8 full of NULs, and a block written into it would garble it.
-fn decode(bytes: &[u8]) -> Option<(String, Encoding)> {
+/// A start file's bytes as text. A PowerShell profile (`profile`) is UTF-8 (a byte order mark
+/// kept as `U+FEFF`) or UTF-16LE when it starts with that byte order mark (the mark kept the same
+/// way, so the bytes come back exactly); None for anything else, and for text holding a NUL:
+/// UTF-16 without a byte order mark reads as valid UTF-8 full of NULs, and a block written into it
+/// would garble it. Any other start file (zsh, bash, fish) is UTF-8, a NUL included, as before
+/// SB-225: a block written into one earlier still comes out.
+fn decode(bytes: &[u8], profile: bool) -> Option<(String, Encoding)> {
+    if !profile {
+        return String::from_utf8(bytes.to_vec())
+            .ok()
+            .map(|text| (text, Encoding::Utf8));
+    }
     if bytes.starts_with(b"\xff\xfe") {
         let (pairs, rest) = bytes.as_chunks::<2>();
         if !rest.is_empty() {
@@ -536,9 +543,7 @@ fn read_start(path: &Path, host: &Host, utf16: bool) -> Result<Option<Read>, Sta
     #[cfg(not(unix))]
     let _ = host;
     let bytes = std::fs::read(path).map_err(|_| State::Unreadable)?;
-    let (text, encoding) = decode(&bytes)
-        .filter(|(_, encoding)| utf16 || *encoding == Encoding::Utf8)
-        .ok_or(State::Unreadable)?;
+    let (text, encoding) = decode(&bytes, utf16).ok_or(State::Unreadable)?;
     #[cfg(unix)]
     let mode = {
         use std::os::unix::fs::PermissionsExt;
@@ -1180,7 +1185,7 @@ mod tests {
         assert_eq!(std::fs::read_to_string(zshrc(&w)).unwrap(), "own\n");
         assert!(!record_path(&w.root).exists());
         // An organization: written.
-        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert_eq!(set_and_apply(&w, Some(true), true).written, 1);
         // Off wins over the organization.
         set_and_apply(&w, Some(false), true);
         assert_eq!(std::fs::read_to_string(zshrc(&w)).unwrap(), "own\n");
@@ -1346,7 +1351,7 @@ mod tests {
             "eval \"$(/opt/homebrew/bin/brew shellenv)\"\n",
         )
         .unwrap();
-        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert_eq!(set_and_apply(&w, Some(true), true).written, 1);
         assert!(block_in(&std::fs::read_to_string(zshrc(&w)).unwrap()));
         // Once the person makes their own `~/.zshrc`, the next run writes into it.
         let w = world();
@@ -1359,7 +1364,7 @@ mod tests {
         let w = world();
         std::fs::write(w.host.home.join(".zshenv"), "export ZDOTDIR=$HOME/z\n").unwrap();
         std::fs::write(zshrc(&w), "own\n").unwrap();
-        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert_eq!(set_and_apply(&w, Some(true), true).written, 1);
     }
 
     /// A start file the installer created is given back too: deleted when nothing of the
@@ -1370,7 +1375,7 @@ mod tests {
         w.host.login_shell = Some("bash".into());
         let profile = w.host.home.join(".bash_profile");
         assert!(!profile.exists());
-        assert_eq!(set_and_apply(&w, None, true).written, 1);
+        assert_eq!(set_and_apply(&w, Some(true), true).written, 1);
         assert!(block_in(&std::fs::read_to_string(&profile).unwrap()));
         assert!(read_record(&w.root).files.iter().all(|e| e.created));
         set_choice(&w.root, false).unwrap();
@@ -1495,7 +1500,7 @@ mod tests {
         w.host.windows = Some(windows::Host {
             documents: w.host.home.join("Documents"),
             editions: vec![(Edition::Desktop, desktop), (Edition::Core, core)],
-            constrained: false,
+            constrained: windows::Lockdown::default(),
         });
         w
     }
@@ -1629,7 +1634,7 @@ mod tests {
                 (Edition::Desktop, Policy::RemoteSigned),
                 (Edition::Core, Policy::AllSigned),
             ],
-            constrained: false,
+            constrained: windows::Lockdown::default(),
         });
         let report = apply(&w.root, &w.host, true, false);
         assert_eq!(report.written, 1, "{report:?}");
@@ -1664,7 +1669,7 @@ mod tests {
             w.host.windows = Some(windows::Host {
                 documents: w.host.home.join("Documents"),
                 editions: vec![(Edition::Desktop, policy), (Edition::Core, policy)],
-                constrained: false,
+                constrained: windows::Lockdown::default(),
             });
         };
         // Blocked: both profiles keep their block untouched, recorded as policy_blocked.
@@ -1719,7 +1724,7 @@ mod tests {
         assert_eq!(report.written, 1, "{report:?}");
         let bytes = std::fs::read(&desktop).unwrap();
         assert!(bytes.starts_with(b"\xff\xfe"), "still UTF-16LE");
-        let (text, encoding) = decode(&bytes).unwrap();
+        let (text, encoding) = decode(&bytes, true).unwrap();
         assert_eq!(encoding, Encoding::Utf16Le);
         assert!(text.starts_with("\u{feff}Set-Alias ll Get-ChildItem\r\n# Сергей's profile\r\n"));
         assert!(block_in(&text), "{text}");
@@ -1735,12 +1740,37 @@ mod tests {
         assert_eq!(std::fs::read(&desktop).unwrap(), original);
         assert_eq!(std::fs::read(&core).unwrap(), unmarked);
         // Odd lengths and lone surrogates are not text.
-        assert_eq!(decode(b"\xff\xfea"), None);
-        assert_eq!(decode(b"\xff\xfe\x00\xd8"), None);
+        assert_eq!(decode(b"\xff\xfea", true), None);
+        assert_eq!(decode(b"\xff\xfe\x00\xd8", true), None);
         assert_eq!(
-            decode("\u{feff}x".as_bytes()),
+            decode("\u{feff}x".as_bytes(), true),
             Some(("\u{feff}x".to_owned(), Encoding::Utf8))
         );
+        // Only a PowerShell profile is read as UTF-16; another start file is UTF-8 only.
+        assert_eq!(decode(b"\xff\xfea\x00", false), None);
+        assert_eq!(
+            decode(b"a\x00b", false),
+            Some(("a\x00b".to_owned(), Encoding::Utf8))
+        );
+        assert_eq!(decode(b"a\x00b", true), None);
+    }
+
+    /// Seam R2: the NUL rule is PowerShell's. A `.zshrc` holding a NUL still gets the block and
+    /// gives its bytes back, as before SB-225.
+    #[test]
+    fn a_zsh_start_file_with_a_nul_keeps_todays_behaviour() {
+        let w = world();
+        let original = b"export A=1\n# \x00 left by a tool\n";
+        std::fs::write(zshrc(&w), original).unwrap();
+        let report = set_and_apply(&w, Some(true), true);
+        assert!(report.written >= 1, "{report:?}");
+        let text = std::fs::read(zshrc(&w)).unwrap();
+        assert!(text.starts_with(original));
+        assert!(block_in(&String::from_utf8(text).unwrap()));
+        assert_eq!(state_of(&w, &zshrc(&w)), Some(State::Written));
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read(zshrc(&w)).unwrap(), original);
     }
 
     /// SB-225: in Constrained Language Mode the hook can do nothing, so no profile is written;
@@ -1753,7 +1783,7 @@ mod tests {
         std::fs::write(&desktop, "# mine\n").unwrap();
         let constrained = |w: &mut World, on: bool| {
             if let Some(host) = w.host.windows.as_mut() {
-                host.constrained = on;
+                host.constrained = windows::Lockdown::both(on);
             }
         };
         constrained(&mut w, true);
@@ -1784,6 +1814,17 @@ mod tests {
         apply(&w.root, &w.host, true, false);
         assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
         assert!(!profile(&w, Edition::Core).exists());
+        // `__PSLockdownPolicy` alone holds Windows PowerShell 5.1 only: PowerShell 7's profile is
+        // written, 5.1's is not.
+        if let Some(host) = w.host.windows.as_mut() {
+            host.constrained = windows::lockdown(None, Some("4"));
+        }
+        assert_eq!(set_and_apply(&w, Some(true), true).written, 1);
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
+        assert_eq!(state_of(&w, &desktop), Some(State::ConstrainedLanguage));
+        let core = profile(&w, Edition::Core);
+        assert!(block_in(&std::fs::read_to_string(&core).unwrap()));
+        assert_eq!(state_of(&w, &core), Some(State::Written));
     }
 
     #[test]

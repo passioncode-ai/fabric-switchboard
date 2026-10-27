@@ -240,8 +240,9 @@ switchboard shell on                # put it back, with or without an organizati
   wherever Documents was redirected), except where the execution policy is `Restricted` or
   `AllSigned`: that profile is not changed and `shell status` says so (`policy_blocked`);
   Switchboard never changes the policy. Where PowerShell is held to Constrained Language Mode
-  (Application Control, or `__PSLockdownPolicy`), no profile is changed and `shell status` says
-  so (`constrained_language`). A profile saved in UTF-16 (with its byte order mark) is written in
+  (Application Control holds both editions; `__PSLockdownPolicy` holds Windows PowerShell 5.1
+  only), that edition's profile is not changed and `shell status` says so
+  (`constrained_language`). A profile saved in UTF-16 (with its byte order mark) is written in
   UTF-16 and given back byte for byte. It reads the hook script only when it is there.
   A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
   `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
