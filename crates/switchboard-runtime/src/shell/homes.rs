@@ -6,7 +6,8 @@
 //! `Snapshot::project_for` names and whose group is bound to an organization (`map`).
 //!
 //! - A Claude shell home holds the person's carried files as links (SB-137: `CLAUDE.md`,
-//!   skills, commands, agents, output styles, plugins, hooks; macOS and Linux), a `.claude.json`
+//!   skills, commands, agents, output styles, plugins, hooks; on Windows folders as directory
+//!   junctions and files as hard links, SB-226, `carry::link_into_shell_home`), a `.claude.json`
 //!   past the first-run screens with the Fabric board server (a plain `claude` takes no
 //!   `--mcp-config`), and a `settings.json` of the person's carried settings with one `env`
 //!   value: a fixed placeholder `ANTHROPIC_AUTH_TOKEN`. The placeholder is not a secret: the
@@ -191,7 +192,13 @@ pub(crate) fn key(snapshot: &Snapshot, sources: &Sources) -> u64 {
                     .iter()
                     .chain(["AGENTS.md"].iter())
                 {
-                    stamp(name).is_some().hash(&mut h);
+                    // On Windows a carried file is a hard link (SB-226): a file an editor
+                    // replaced is linked again, so its time counts there.
+                    if cfg!(windows) {
+                        stamp(name).hash(&mut h);
+                    } else {
+                        stamp(name).is_some().hash(&mut h);
+                    }
                 }
             }
         }
@@ -274,7 +281,7 @@ fn claude_home(root: &Path, pool: &str, sources: &Sources) -> Result<bool, ()> {
     crate::launch::private_dir(&home).map_err(|_| ())?;
     let user = (sources.user)(Provider::Claude);
     if let Some(user) = &user {
-        crate::carry::link_into(&home, user, crate::carry::CLAUDE_LINKS);
+        crate::carry::link_into_shell_home(&home, user, crate::carry::CLAUDE_LINKS);
     }
     let mut written = false;
     // `.claude.json` is Claude Code's own file too (projects, history): only two keys are ours.
@@ -329,7 +336,7 @@ fn codex_home(
     crate::launch::private_dir(&root.join(map::DIR)).map_err(|_| ())?;
     crate::launch::private_dir(&home).map_err(|_| ())?;
     if let Some(user) = (sources.user)(Provider::Codex) {
-        crate::carry::link_into(&home, &user, &["AGENTS.md"]);
+        crate::carry::link_into_shell_home(&home, &user, &["AGENTS.md"]);
     }
     let path = home.join("config.toml");
     let text = match std::fs::read_to_string(&path) {
@@ -514,6 +521,19 @@ mod tests {
                 .unwrap()
                 .file_type()
                 .is_symlink());
+        }
+        // Windows (SB-226): the file a hard link, the folder a junction.
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                std::fs::read_to_string(home.join("CLAUDE.md")).unwrap(),
+                "the person's rules"
+            );
+            assert!(std::fs::symlink_metadata(home.join("skills"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert!(home.join("skills").is_dir());
         }
         let state: Value =
             serde_json::from_slice(&std::fs::read(home.join(".claude.json")).unwrap()).unwrap();
