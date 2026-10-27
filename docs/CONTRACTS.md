@@ -707,7 +707,14 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   is not saved removes nothing and is not refused
   (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`,
   `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`,
-  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Deleting a
+  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Whether the
+  slot holds a key is read inside that lock (SB-223), and the lock is the core's `SPEND_WRITE`,
+  which a backup's restore also holds while it puts a saved key or `spend.json` back: a first key
+  the window or a restore saves while a CLI replacement waits is one that replacement replaces,
+  so it is refused (`spend::tests::a_first_key_saved_while_a_cli_replacement_waits_is_one_it_replaces`,
+  `two_cli_saves_of_one_slot_at_once_save_one_first_key_and_refuse_the_other`,
+  `a_backups_key_is_put_back_under_the_spend_write_lock`); a group's key saved while the group is
+  deleted is refused or goes with it (`a_key_save_racing_the_groups_removal_leaves_no_key_without_its_group`). Deleting a
   group (`switchboard project delete`, `RemoveProject`) removes its own OpenRouter key with it, so
   the same rule holds there: from the CLI or MCP a group that holds its own key is refused with
   `KEY_COUNTED_BY_CEILING` while a machine ceiling is set or a task ceiling counts from that key,

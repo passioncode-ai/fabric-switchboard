@@ -685,7 +685,10 @@ pub fn restore(
     for copy in payload.agent_keys {
         // Never over a key saved on this install.
         // A project key returns only when its project is back too (`set_agent_key_for` refuses one
-        // whose project is gone).
+        // whose project is gone). Under the spend write lock (SB-223): a replacement from the CLI
+        // decides whether it replaces a key under the same lock, so a key put back here is one
+        // it sees.
+        let _spend = crate::SPEND_WRITE.lock().unwrap_or_else(|p| p.into_inner());
         if store
             .agent_key_for(&copy.service, copy.pool.as_deref())?
             .is_none()
@@ -698,6 +701,9 @@ pub fn restore(
     }
     for (name, value) in payload.settings {
         let path = store.root().join(&name);
+        // `spend.json` is written under the runtime's spend write lock (SB-223).
+        let _spend = (name == "spend.json")
+            .then(|| crate::SPEND_WRITE.lock().unwrap_or_else(|p| p.into_inner()));
         // Only the known settings, never over a choice made on this install.
         if SETTING_FILES.contains(&name.as_str())
             && value.len() as u64 <= setting_limit(&name)

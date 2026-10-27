@@ -3903,8 +3903,11 @@ async fn execute(
         } => {
             // C-Q9: replacing a key whose spend a ceiling counts (a capped group's own, any key
             // under a machine ceiling, a task ceiling's baseline key) starts that count again.
-            let replaces = service == "openrouter"
-                && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()));
+            // SB-223: whether the slot holds a key is read inside the spend write lock.
+            let replaces = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
             let saved = spend::guard_group_key(root, pool.as_deref(), replaces, by, || {
                 store.set_agent_key_for(&service, pool.as_deref(), &key, model)
             })?;
@@ -3929,8 +3932,10 @@ async fn execute(
             // C-Q9: removing a key whose spend a ceiling counts moves its paid steps to a key the
             // ceiling does not count, or out of a machine ceiling's sum. A key that is not saved
             // removes nothing and loosens nothing.
-            let exists = service == "openrouter"
-                && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()));
+            let exists = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
             let removed = spend::guard_group_key(root, pool.as_deref(), exists, by, || {
                 store.remove_agent_key_for(&service, pool.as_deref())
             })?;

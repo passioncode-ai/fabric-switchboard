@@ -1,5 +1,9 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
 pub mod agent_keys;
+/// One write of the spending ceilings' file (`spend.json`) and of a saved agent key under a
+/// ceiling's watch at a time in this process (SB-223): the runtime's spend module holds it to
+/// decide and write, and a backup's restore holds it to put a key or `spend.json` back.
+pub static SPEND_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub mod backup;
 mod credential;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

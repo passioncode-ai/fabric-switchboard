@@ -15,7 +15,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::Mutex;
 use switchboard_core::{workflow_id_valid, ChainScope, Snapshot};
 
 pub const FILE: &str = "spend.json";
@@ -85,8 +84,9 @@ pub const NO_QUESTION: &str =
     "No open question with that id: it was answered, or its ceiling changed or was removed.";
 
 /// One read-modify-write of the file at a time in this process (the owner, or an offline
-/// command holding the store's lock).
-static WRITE: Mutex<()> = Mutex::new(());
+/// command holding the store's lock). The lock lives in the core (`SPEND_WRITE`), so a backup's
+/// restore of `spend.json` and of saved keys takes it too (SB-223).
+use switchboard_core::SPEND_WRITE as WRITE;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpendFile {
@@ -458,29 +458,31 @@ pub fn refusal(reason: &str) -> &'static str {
     }
 }
 
-/// Removes or replaces a saved OpenRouter key through `change` under the write lock (C-Q9): the
-/// machine's key with `pool` `None`, else that group's own. From the CLI or MCP a key whose spend a
-/// ceiling counts is refused, since a removed key leaves the count (its paid steps move to another
-/// key) and a new one starts it again: a group's own key while the group holds a ceiling
-/// (`KEY_HOLDS_CEILING`); any key while a machine ceiling adds every saved key's daily spend up,
-/// and the key a task ceiling counts from, its baseline (`KEY_COUNTED_BY_CEILING`). `replaces`
-/// says whether the slot has a key now (saving a first key loosens nothing). An unreadable file
-/// refuses every surface but the window, since whether a ceiling counts the key cannot be told.
 /// Whether a key is saved, as the counted-key refusal reads it (SB-215): a read that failed is
 /// a key that may be saved, so a ceiling counting it refuses the change (fails closed).
 pub(crate) fn saved_or_unknown<T>(read: Result<Option<T>, String>) -> bool {
     !matches!(read, Ok(None))
 }
 
+/// Removes or replaces a saved OpenRouter key through `change` under the write lock (C-Q9): the
+/// machine's key with `pool` `None`, else that group's own. From the CLI or MCP a key whose spend a
+/// ceiling counts is refused, since a removed key leaves the count (its paid steps move to another
+/// key) and a new one starts it again: a group's own key while the group holds a ceiling
+/// (`KEY_HOLDS_CEILING`); any key while a machine ceiling adds every saved key's daily spend up,
+/// and the key a task ceiling counts from, its baseline (`KEY_COUNTED_BY_CEILING`). `replaces`
+/// says whether the slot has a key now (saving a first key loosens nothing); it is asked inside
+/// the write lock (SB-223), so a first key another surface saves meanwhile (the window, a
+/// backup's restore) is a key this change replaces. An unreadable file refuses every surface but
+/// the window, since whether a ceiling counts the key cannot be told.
 pub fn guard_group_key<T>(
     root: &Path,
     pool: Option<&str>,
-    replaces: bool,
+    replaces: impl FnOnce() -> bool,
     by: Surface,
     change: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
     let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
-    if replaces && by != Surface::Window {
+    if by != Surface::Window && replaces() {
         let file = read(root)?;
         if let Some(pool) = pool {
             let scope = ChainScope::Project {
@@ -1026,6 +1028,7 @@ pub fn check(root: &Path, snapshot: &Snapshot, step: &PaidStep, reads: &Reads) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use switchboard_core::agent_keys::AgentKey;
     use switchboard_core::Project;
 
@@ -2422,5 +2425,198 @@ mod tests {
             !file.baselines.iter().any(|b| b.workflow == id(1)),
             "the oldest uncapped went"
         );
+    }
+
+    /// SB-223: a store on a vault that remembers which items exist.
+    fn key_store(dir: &Path) -> std::sync::Arc<switchboard_core::Store> {
+        std::sync::Arc::new(
+            switchboard_core::Store::open(
+                dir.to_owned(),
+                std::sync::Arc::new(switchboard_core::MemoryVault::default()),
+            )
+            .unwrap(),
+        )
+    }
+    fn set_key(by: Surface, key: &str, pool: Option<&str>) -> crate::Operation {
+        crate::Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: key.into(),
+            model: None,
+            pool: pool.map(str::to_owned),
+            by,
+        }
+    }
+    fn run(
+        store: std::sync::Arc<switchboard_core::Store>,
+        root: std::path::PathBuf,
+        operation: crate::Operation,
+    ) -> std::thread::JoinHandle<Result<serde_json::Value, String>> {
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(crate::execute(store, &root, None, operation))
+        })
+    }
+
+    #[test]
+    fn a_first_key_saved_while_a_cli_replacement_waits_is_one_it_replaces() {
+        // SB-223: `AgentKeySet` worked out `replaces` before taking the write lock; a first key
+        // the window saved meanwhile was then replaced from the CLI past a machine ceiling.
+        let dir = tempfile::tempdir().unwrap();
+        let store = key_store(dir.path());
+        set_ceiling(
+            dir.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+        let held = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+        let cli = run(
+            store.clone(),
+            dir.path().to_owned(),
+            set_key(Surface::Cli, "sk-or-v1-from-cli", None),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The window's first key lands while the CLI waits for the lock (the window took it in
+        // its own guard; here the test holds it).
+        store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-from-window", None)
+            .unwrap();
+        drop(held);
+        assert_eq!(cli.join().unwrap().unwrap_err(), KEY_COUNTED_BY_CEILING);
+        let kept = store.agent_key_for("openrouter", None).unwrap().unwrap();
+        assert_eq!(
+            store.agent_key_secret(&kept).unwrap(),
+            "sk-or-v1-from-window"
+        );
+    }
+
+    #[test]
+    fn two_cli_saves_of_one_slot_at_once_save_one_first_key_and_refuse_the_other() {
+        // SB-223: both worked out "no key yet" and both saved; the second replaced the first past
+        // the machine ceiling.
+        let dir = tempfile::tempdir().unwrap();
+        let store = key_store(dir.path());
+        set_ceiling(
+            dir.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            T,
+        )
+        .unwrap();
+        for round in 0..20 {
+            if store.agent_key_for("openrouter", None).unwrap().is_some() {
+                // Each round starts with no key: the window removes it.
+                crate::spend::guard_group_key(
+                    dir.path(),
+                    None,
+                    || true,
+                    Surface::Window,
+                    || store.remove_agent_key_for("openrouter", None),
+                )
+                .unwrap();
+            }
+            let held = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+            let a = run(
+                store.clone(),
+                dir.path().to_owned(),
+                set_key(Surface::Cli, "sk-or-v1-one", None),
+            );
+            let b = run(
+                store.clone(),
+                dir.path().to_owned(),
+                set_key(Surface::Mcp, "sk-or-v1-two", None),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            drop(held);
+            let answers = [a.join().unwrap(), b.join().unwrap()];
+            assert_eq!(
+                answers.iter().filter(|a| a.is_ok()).count(),
+                1,
+                "round {round}: {answers:?}"
+            );
+            assert!(answers
+                .iter()
+                .any(|a| a.as_ref().err().map(String::as_str) == Some(KEY_COUNTED_BY_CEILING)));
+        }
+    }
+
+    #[test]
+    fn a_key_save_racing_the_groups_removal_leaves_no_key_without_its_group() {
+        // SB-223: a group's first key saved from the CLI while the window deletes the group: the
+        // key is saved and goes with the group, or is refused; never a key of a missing group.
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().unwrap();
+            let store = key_store(dir.path());
+            let folder = dir.path().join("repo");
+            std::fs::create_dir_all(&folder).unwrap();
+            let group = store
+                .save_project(None, "alpha", &[folder.canonicalize().unwrap()], &[])
+                .unwrap();
+            let save = run(
+                store.clone(),
+                dir.path().to_owned(),
+                set_key(Surface::Cli, "sk-or-v1-alpha", Some(&group.pool)),
+            );
+            let remover = {
+                let store = store.clone();
+                let pool = group.pool.clone();
+                std::thread::spawn(move || store.remove_project(&pool))
+            };
+            let saved = save.join().unwrap();
+            remover.join().unwrap().unwrap();
+            let snapshot = store.snapshot().unwrap();
+            assert!(snapshot.projects.iter().all(|p| p.pool != group.pool));
+            assert!(
+                snapshot.agent_keys.iter().all(|k| k.pool.is_none()),
+                "a key of a removed group stayed ({saved:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backups_key_is_put_back_under_the_spend_write_lock() {
+        // SB-223: `backup::restore` saved keys without the lock a CLI replacement decides under.
+        use switchboard_core::{AuthKind, Credential, Provider};
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let one = key_store(&temp.path().join("one"));
+        one.add(
+            "Fixture".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "fixture-only").unwrap(),
+        )
+        .unwrap();
+        one.set_agent_key_for("openrouter", None, "sk-or-v1-backed-up", None)
+            .unwrap();
+        let keys = Keys(Mutex::new(None));
+        let info = switchboard_core::backup::write(&one, &backups, &keys, T)
+            .unwrap()
+            .unwrap();
+        let two = key_store(&temp.path().join("two"));
+        let held = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+        let restore = {
+            let (two, backups, file) = (two.clone(), backups.clone(), info.file.clone());
+            std::thread::spawn(move || {
+                switchboard_core::backup::restore(&two, &backups, &file, &keys)
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            two.agent_key_for("openrouter", None).unwrap().is_none(),
+            "the key was put back without the lock"
+        );
+        drop(held);
+        assert_eq!(restore.join().unwrap().unwrap().agent_keys, 1);
+        assert!(two.agent_key_for("openrouter", None).unwrap().is_some());
     }
 }
