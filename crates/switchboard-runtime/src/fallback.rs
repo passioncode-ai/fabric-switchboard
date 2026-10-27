@@ -3372,8 +3372,10 @@ mod tests {
                 Gate::Run
             }
         };
+        // HAND_OVER is one lock per process: neighbouring tests hold it across 10 s reads
+        // (SB-221), so the turn may come late. A self-deadlock never ends, so 60 s still tells.
         let done = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(60),
             hand_over(&act, &gate, WF, &dir, &[hermes()]),
         )
         .await
