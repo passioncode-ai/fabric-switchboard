@@ -1511,6 +1511,10 @@ and every read wait on is taken under it, never the other way round, and only fo
   `a_restore_waits_for_a_removal_or_a_save_and_never_overwrites_their_item`).
 - The order of the credential and the metadata is the one before H-2: the credential first, so
   a crash between them leaves metadata that names a credential that works.
+- These tests read "not held behind a Keychain call" as a snapshot wait under 80 % of the slow
+  vault's call, now one second: a snapshot held behind a call waits all of it (S2: the fixed
+  150 ms bound before failed at load average ~58, where a snapshot also waits for a core and
+  for a metadata write; `not_behind_keychain` in `crates/switchboard-core/tests/storage.rs`).
 - A quota check compares its credential under the metadata lock (`same_generation`). A write no
   longer holds that lock, so the store's vault wrapper marks each item while a write or a
   removal of it runs, and a check that finds its item marked is refused as `credential_changed`,

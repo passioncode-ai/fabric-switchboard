@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- **Cancelling a sign-in on a busy Mac.** Cancel no longer says a waiting sign-in would not end when its Terminal script had already ended on the hang-up and the system had not yet cleared it; it waits for the sign-in to read idle and cleans up.
 - **Two edges of 0.6.83 closed.** A `Stop` hook input over 8 MiB now answers `{}` (no decision) instead of an error code. When the record of the last automatic restart holds a time ahead of the clock and cannot be rewritten, the six-hour pause now ends six hours after it was first seen, so the app still restarts into an update on its own.
 - **A session that went on by itself is retried sooner.** A stop the session resumed on its own no longer counts as a failed restart: if it hits its limit again within 30 minutes, it is probed again after 2 minutes, not 5.
 - **Session hooks answer faster.** After each turn the hook now updates the launch record and settles a recovery stop at the same time, so it takes at most 1.5 s instead of 3 s; a stop on a limit is registered without waiting for the record. A slow launch in the log now says whether it was a launch or a continue.
