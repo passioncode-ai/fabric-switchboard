@@ -915,11 +915,23 @@ mod tests {
     fn read_back(root: &Path, id: &str) -> Value {
         read(root, id).unwrap()
     }
+    /// A transcript path as Claude Code reports one: absolute on this platform. `/synthetic/...`
+    /// names no drive, so on Windows it is not absolute and the hooks rightly record nothing.
+    fn transcript_at(name: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!(
+                r"C:\Users\synthetic\.claude\projects\C--work-x\{name}"
+            ))
+        } else {
+            PathBuf::from(format!("/synthetic/home/projects/x/{name}"))
+        }
+    }
 
     #[test]
     fn the_start_and_stop_hooks_record_the_session_its_transcript_and_its_turns() {
         let (_temp, root, id) = fixture();
-        let transcript = Path::new("/synthetic/home/projects/x/0f3c.jsonl");
+        let transcript = transcript_at("0f3c.jsonl");
+        let transcript = transcript.as_path();
         let answer = event(
             &root,
             &id,
@@ -948,7 +960,8 @@ mod tests {
     #[test]
     fn a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went() {
         let (_temp, root, id) = fixture();
-        let transcript = Path::new("/synthetic/home/projects/x/0f3c.jsonl");
+        let transcript = transcript_at("0f3c.jsonl");
+        let transcript = transcript.as_path();
         event(
             &root,
             &id,
@@ -975,6 +988,41 @@ mod tests {
         fs::remove_file(path(&root, &id)).unwrap();
         let row = crate::launch::sessions(&root, true).remove(0);
         assert!(row["ended"].is_null() && row["transcript"].is_null());
+    }
+    /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
+    /// also with `/` separators); a path without a drive is not absolute there and is not
+    /// recorded.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_transcript_is_recorded_and_one_without_a_drive_is_not() {
+        for (spelling, kept) in [
+            (r"C:\Users\x\.claude\projects\C--work-repo\0f3c.jsonl", true),
+            ("C:/Users/x/.claude/projects/C--work-repo/0f3c.jsonl", true),
+            (
+                r"\\?\C:\Users\x\.claude\projects\C--work-repo\0f3c.jsonl",
+                true,
+            ),
+            (r"\Users\x\.claude\projects\0f3c.jsonl", false),
+            ("/synthetic/home/projects/x/0f3c.jsonl", false),
+            (r"C:Users\x\0f3c.jsonl", false),
+        ] {
+            let (_temp, root, id) = fixture();
+            event(
+                &root,
+                &id,
+                Event::Start,
+                Some("0f3c"),
+                Some(Path::new(spelling)),
+                5,
+            );
+            let r = read_back(&root, &id);
+            assert_eq!(r["provider_session_id"], "0f3c", "{spelling}");
+            if kept {
+                assert_eq!(r["transcript"], spelling, "{spelling}");
+            } else {
+                assert!(r["transcript"].is_null(), "{spelling}");
+            }
+        }
     }
     #[test]
     fn a_malformed_report_or_an_unknown_launch_records_nothing() {
@@ -1197,7 +1245,8 @@ mod tests {
         widened(&path(&root, &id));
         widened(&home.join(crate::launch::SESSION_RECORD));
         fs::write(home.join(".launch-pending"), b"").unwrap();
-        let transcript = Path::new("/synthetic/home/projects/x/0f3c.jsonl");
+        let transcript = transcript_at("0f3c.jsonl");
+        let transcript = transcript.as_path();
         let answer = event(
             &root,
             &id,
@@ -1224,8 +1273,10 @@ mod tests {
         // SB-218: a `claude -p` the launched session runs inherits `SWITCHBOARD_LAUNCH_ID` and
         // its hooks report on the parent's record.
         let (_temp, root, id) = fixture();
-        let parent = Path::new("/synthetic/home/projects/x/parent.jsonl");
-        let child = Path::new("/synthetic/home/projects/x/child.jsonl");
+        let parent = transcript_at("parent.jsonl");
+        let parent = parent.as_path();
+        let child = transcript_at("child.jsonl");
+        let child = child.as_path();
         event(&root, &id, Event::Start, Some("parent"), Some(parent), 200);
         event(&root, &id, Event::Turn, Some("parent"), None, 210);
         let answer = event(&root, &id, Event::Start, Some("child"), Some(child), 220);
@@ -1246,7 +1297,8 @@ mod tests {
         event(&root, &id, Event::Start, Some("child"), Some(child), 250);
         assert_eq!(read_back(&root, &id)["nested_sessions"], json!(["child"]));
         // The parent's own `/clear` moves the record to its new session.
-        let cleared = Path::new("/synthetic/home/projects/x/cleared.jsonl");
+        let cleared = transcript_at("cleared.jsonl");
+        let cleared = cleared.as_path();
         let answer = event_from(
             &root,
             &id,
