@@ -150,8 +150,11 @@ export function createDemoAdapter(): Adapter {
       steps.push({ id: 'hook', state: 'optional', summary: '', organization, terminals: group && bound[0].folders.length ? 'active' : 'waiting' });
       steps.push({ id: 'launch', state: 'optional', summary: '', organization });
     }
-    return { complete: steps.every((s) => s.state === 'done' || s.state === 'optional'), degraded: [], steps };
+    // SB-228: `&onboard=degraded` names a read that failed behind the checklist.
+    return { complete: steps.every((s) => s.state === 'done' || s.state === 'optional'), degraded: onboardParam === 'degraded' ? ['sign_ins'] : [], steps };
   };
+  // SB-228: `&onboard=failed` makes every checklist read fail (the card shows its note only).
+  const onboardParam = new URLSearchParams(location.search).get('onboard');
   const loginItem = { available: true, enabled: true };
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false, restart_after: null };
   // `?usage=ask` shows the first-run usage question (issue #128); `?usage=sent` the one an upgraded install sees.
@@ -252,7 +255,8 @@ export function createDemoAdapter(): Adapter {
   let suggestions: ProjectSuggestion[] = [];
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   // A new computer has no backup of its own (SB-202, `?org=setup`).
-  if (orgSetup) backups.length = 0;
+  // `&backup=1` keeps one, to see the card's action lead beside Restore from backup (SB-228, VIS-21).
+  if (orgSetup && new URLSearchParams(location.search).get('backup') !== '1') backups.length = 0;
   return {
     async currentAccounts() { return structuredClone(current); },
     async sessions() { return { sessions: [
@@ -593,7 +597,7 @@ export function createDemoAdapter(): Adapter {
     async loginItem() { return { ...loginItem }; },
     async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },
     async acknowledgeShellHookNotice() { await pause(); shellNotice = false; },
-    async onboard() { await pause(); return onboardSteps(); },
+    async onboard() { await pause(); if (onboardParam === 'failed') throw new Error('Switchboard could not read its own state.'); return onboardSteps(); },
     async shellHookStatus() {
       await pause();
       if (shellParam === 'failed') throw new Error('Switchboard could not read its own state.');

@@ -1149,7 +1149,7 @@ export function codexHookLine(status: ShellHookStatus | null): string | null {
 // ── SB-202 (B-8, SCN-076): the first run of an organization machine ──
 /** The steps of one organization's card, in the checklist's order. */
 export type OrgSetupStepId = 'organization' | 'org_group' | 'seat' | 'hook' | 'launch';
-export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[] }
+export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[]; /** SB-228: a command the line names, shown as code after it. */ command?: string }
 export interface OrgSetup { organization: { id: string; name: string }; group: { pool: string; name: string } | null; lines: OrgSetupLine[]; complete: boolean }
 export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'sign_in'; pool: string; label: string };
 export const ORG_SETUP_HIDDEN_KEY = 'switchboard.orgSetupHidden';
@@ -1173,7 +1173,7 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
       return ({
-        active: t("Terminals in {organization}'s folders work in its context. To turn this off: switchboard shell off", { organization }),
+        active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),
         pending: t('The terminal hook is on, but no start file holds it yet.'),
         off: t("The terminal hook is off: terminals in {organization}'s folders keep your own settings.", { organization }),
         waiting: t("Terminals follow {organization}'s folders once its group has a folder.", { organization }),
@@ -1200,7 +1200,7 @@ export function orgSetups(onboarding: Onboarding | null | undefined): OrgSetup[]
   for (const { organization, steps } of byOrg.values()) {
     const group = steps.find((s) => s.id === 'org_group' && s.state === 'done')?.group ?? null;
     const lines: OrgSetupLine[] = [{ id: 'organization', state: 'done', title: titles.organization, line: orgSetupLine({ id: 'organization', state: 'done', summary: '' }, organization.name, group) }];
-    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}) });
+    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}), ...(step.id === 'hook' && step.terminals === 'active' ? { command: 'switchboard shell off' } : {}) });
     const complete = lines.every((l) => l.state === 'done' || l.state === 'optional');
     if (!complete) setups.push({ organization, group, lines, complete });
   }
@@ -1219,6 +1219,31 @@ export function orgSetupShown(input: { page: string; organization: string; hidde
   if (tourWaits(input.usage, input.usageFailed) || input.tourStep !== null) return false;
   if (input.page === 'orgs') return true;
   return input.page === 'accounts' && !input.hidden.includes(input.organization);
+}
+/** SB-228: the card's one caveat when a read behind the checklist failed (`degraded`): the widest
+ * first (saved settings, then sign-ins, then sessions), any other code in general words. */
+export function orgSetupCaveat(onboarding: Onboarding | null | undefined): string | null {
+  const degraded = onboarding?.degraded ?? [];
+  if (!degraded.length) return null;
+  if (degraded.includes('snapshot')) return t("Part of Switchboard's saved settings could not be read, so a step may be wrong or missing.");
+  if (degraded.includes('sign_ins')) return t('Whether a sign-in ended could not be read, so Your seat may read signed in when it is not.');
+  if (degraded.includes('sessions')) return t('The recorded sessions could not be read, so First launch may read not done.');
+  return t('Part of the setup could not be read, so a step may be wrong.');
+}
+type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null };
+/** SB-228 (VIS-21): a card with an action of its own is on screen, so its action is the screen's
+ * one primary and the page's buttons (+ New organization, Restore from backup, + Add account) go quiet. */
+export function orgSetupLeads(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): boolean {
+  return orgSetups(input.onboarding).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }));
+}
+/** SB-228 (SCN-076): the first checklist read failed, so there are no steps to show: the card of
+ * the newest organization it would be shown for, with the read-failed note only. Null once any
+ * read answered (that card keeps its steps and shows the note itself). */
+export function orgSetupUnread(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined; failed: boolean; organizations: readonly Pick<Organization, 'id' | 'name' | 'created_at'>[] }): { id: string; name: string } | null {
+  if (input.onboarding || !input.failed) return null;
+  const newest = [...input.organizations].sort((a, b) => b.created_at - a.created_at);
+  const org = newest.find((o) => orgSetupShown({ ...input, organization: o.id }));
+  return org ? { id: org.id, name: org.name } : null;
 }
 export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[] {
   try { const value: unknown = JSON.parse(store?.getItem(ORG_SETUP_HIDDEN_KEY) ?? '[]'); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []; } catch { return []; }

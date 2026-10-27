@@ -1087,7 +1087,10 @@ check(() => {
     const [seat] = logic.orgSetups(noSeat);
     assert.deepEqual(logic.orgSetupAction(seat), { kind: 'sign_in', pool: 'acme-work', label: 'Sign in with your Acme address' });
     assert.equal(seat.lines[2].line, 'Sign in with your Acme address. It goes to the group “Acme work”.');
-    assert.equal(seat.lines[3].line, "Terminals in Acme's folders work in its context. To turn this off: switchboard shell off");
+    // SB-228: the command is code of its own, not words in the line.
+    assert.equal(seat.lines[3].line, "Terminals in Acme's folders work in its context. To turn this off:");
+    assert.equal(seat.lines[3].command, 'switchboard shell off');
+    assert.equal(seat.lines[2].command, undefined);
     const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
     assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again.');
     const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
@@ -1099,6 +1102,42 @@ check(() => {
     const both = { ...noGroup, steps: [...noGroup.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
     assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Globex']);
     assert.equal(logic.orgSetupStateLabel('needs_person'), 'Needs you');
+  });
+  // SB-228: the card's caveat from `degraded`, one line, the widest read first.
+  check(() => {
+    assert.equal(logic.orgSetupCaveat(noSeat), null);
+    assert.equal(logic.orgSetupCaveat(null), null);
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sessions'] }), 'The recorded sessions could not be read, so First launch may read not done.');
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sessions', 'sign_ins'] }), 'Whether a sign-in ended could not be read, so Your seat may read signed in when it is not.');
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sign_ins', 'snapshot'] }), "Part of Switchboard's saved settings could not be read, so a step may be wrong or missing.");
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['something_new'] }), 'Part of the setup could not be read, so a step may be wrong.');
+  });
+  // SB-228 (VIS-21): the card's own action is the screen's one primary when the card is shown with one.
+  check(() => {
+    const leads = (onboarding, page = 'accounts', usage = answered, tourStep = null, hidden = []) => logic.orgSetupLeads({ onboarding, page, hidden, usage, usageFailed: false, tourStep });
+    assert.equal(leads(noSeat), true);
+    assert.equal(leads(noSeat, 'orgs'), true);
+    assert.equal(leads(noSeat, 'accounts', asked), false, 'the usage question first: the card is not shown');
+    assert.equal(leads(noSeat, 'accounts', answered, 0), false, 'the tour first');
+    assert.equal(leads(noSeat, 'accounts', answered, null, ['o-acme']), false, 'hidden on Accounts');
+    assert.equal(leads(noSeat, 'orgs', answered, null, ['o-acme']), true, 'still on Organizations');
+    assert.equal(leads(ready), false, 'no card');
+    const two = withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]);
+    assert.equal(leads(two), false, 'a card with no action of its own leads nothing');
+  });
+  // SB-228 (SCN-076): the first checklist read failed: a card with the note, for the newest organization.
+  check(() => {
+    const organizations = [{ id: 'o-old', name: 'Old', created_at: 1 }, { id: 'o-acme', name: 'Acme', created_at: 5 }];
+    const unread = (input) => logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, ...input });
+    assert.deepEqual(unread({}), { id: 'o-acme', name: 'Acme' });
+    assert.deepEqual(unread({ page: 'orgs' }), { id: 'o-acme', name: 'Acme' });
+    assert.equal(unread({ onboarding: noSeat }), null, 'a read before: the card keeps its steps and shows the note itself');
+    assert.equal(unread({ failed: false }), null, 'still reading');
+    assert.equal(unread({ organizations: [] }), null, 'no organization, no card');
+    assert.equal(unread({ page: 'agents' }), null);
+    assert.equal(unread({ usage: asked }), null, 'the usage question first');
+    assert.deepEqual(unread({ hidden: ['o-acme'] }), { id: 'o-old', name: 'Old' }, 'Hide on Accounts holds for that organization');
+    assert.equal(unread({ hidden: ['o-acme', 'o-old'] }), null);
   });
   // the empty Accounts page on an organization machine leads with the seat
   check(() => {
