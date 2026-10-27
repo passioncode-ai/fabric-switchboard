@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -120,6 +120,26 @@ function answerUsage(focus: string, shown: boolean) {
   // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted, shown); }, () => usageAnswerText(wanted, analyticsState), focus);
 }
+/** SB-202 (B-8, SCN-076): "Set up {organization} on this computer", worded from the checklist the runtime computed. */
+function orgSetupCard(setup: OrgSetup) {
+  const id = `org-setup-${setup.organization.id}`;
+  const card = el('section', 'org-setup'); card.setAttribute('aria-labelledby', `${id}-title`);
+  const title = el('h2', '', orgSetupTitle(setup)); title.id = `${id}-title`;
+  const list = el('ol', 'org-setup-steps');
+  for (const line of setup.lines) {
+    const item = el('li', `org-setup-step is-${line.state}`);
+    const text = el('div', 'org-setup-text'); text.append(el('strong', '', line.title), el('span', '', line.line));
+    item.append(el('span', `org-setup-state is-${line.state}`, orgSetupStateLabel(line.state)), text); list.append(item);
+  }
+  card.append(title, list);
+  if (onboardingError) card.append(el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
+  const actions = el('div', 'org-setup-actions');
+  const action = orgSetupAction(setup);
+  if (action) actions.append(action.kind === 'group' ? button(action.label, () => projectDialog(undefined, action.organization), 'button primary', `${id}-group`) : button(action.label, () => void startLogin('claude', '', action.pool), 'button primary', `${id}-sign-in`));
+  if (page === 'accounts') actions.append(button(t('Hide'), () => { orgSetupHidden = [...orgSetupHidden, setup.organization.id]; try { noticeStore()?.setItem(ORG_SETUP_HIDDEN_KEY, JSON.stringify(orgSetupHidden)); } catch { /* hidden for this window only */ } render(); restoreFocus('page-title'); }, 'text-button', `${id}-hide`));
+  if (actions.childElementCount) card.append(actions);
+  return card;
+}
 function usageQuestionCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
   const title = el('h2', '', t('Share anonymous usage counts?')); title.id = 'usage-question-title';
@@ -166,6 +186,10 @@ let loginItemError = false;
 let updateState: UpdateStatus | null = null;
 let updateError = false;
 let analyticsState: AnalyticsStatus | null = null;
+/** SB-202 (B-8): the organization checklist (Tauri `onboard`), read only while an organization exists; the last read stays when one fails. */
+let onboarding: Onboarding | null = null;
+let onboardingError = false;
+let orgSetupHidden = hiddenOrgSetups(noticeStore());
 let analyticsError = false;
 let backupError = false;
 let busy = false;
@@ -204,6 +228,12 @@ async function readContext(): Promise<Context> {
 }
 function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
 async function refreshContext() { applyContext(await readContext()); }
+/** SB-202 (B-8): the checklist is read again with the account list; a machine without organizations reads nothing. */
+function loadOnboarding() {
+  if (!(snapshot?.organizations ?? []).length) { onboarding = null; onboardingError = false; return; }
+  const stamp = clock.stamp();
+  void adapter.onboard().then((value) => { if (clock.accepts(stamp)) { onboarding = value; onboardingError = false; } }, () => { onboardingError = true; }).finally(backgroundRender);
+}
 /** Background results apply only when no user mutation began after they were requested. */
 function backgroundRender() {
   if (busy || loading || openMenu || document.querySelector('dialog')) return;
@@ -250,6 +280,7 @@ async function reload() {
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
   render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
+  loadOnboarding();
   // Unit tier D: these reads apply only when no action began after this Refresh.
   const readStamp = clock.stamp();
   void loadOpenrouter(readStamp);
@@ -283,7 +314,7 @@ async function mutate(action: () => Promise<unknown>, success: string | (() => s
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
-  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
+  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); loadOnboarding(); }
 }
 
 /** Returns false when a background render found nothing to change and left the DOM alone. */
@@ -351,6 +382,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
+  if (snapshot && (page === 'accounts' || page === 'orgs')) for (const setup of orgSetups(onboarding)) if (orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep })) main.append(orgSetupCard(setup));
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
@@ -677,7 +709,7 @@ function projectFolderList(project: Project) {
   }
   return wrap;
 }
-function projectDialog(existing?: Project) {
+function projectDialog(existing?: Project, organization?: string) {
   const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s repositories (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a repository may be in several groups.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
   const folders = foldersPicker(context, existing?.folders ?? [], 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
@@ -686,13 +718,15 @@ function projectDialog(existing?: Project) {
   // SB-109 (SCN-070): with organizations, the group runs on one organization's accounts or on personal ones.
   const organizations = snapshot!.organizations ?? [];
   const orgPicker = organizations.length ? select([['personal', t('Personal accounts')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
-  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : 'personal';
+  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : organization && organizations.some((o) => o.id === organization) ? organization : 'personal';
+  // SB-202 (B-8): + Group for {organization} starts with its name and its seats already here.
+  if (!existing && organization) name.value = organizations.find((o) => o.id === organization)?.name ?? '';
   const chosenOrg = () => (orgPicker && orgPicker.value !== 'personal' ? orgPicker.value : null);
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
-    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = !!existing && account.pool === existing.pool;
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? account.pool === existing.pool : !!organization && attribution(snapshot!, account).organization === organization;
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
@@ -1175,13 +1209,13 @@ function menu(key: string, label: string, items: ([string, () => void] | [string
   }
   return wrapper;
 }
-function addMenu() {
+function addMenu(className = 'button primary') {
   return menu('add', t('Add account'), [
     [t('Sign in to another Claude account'), () => void startLogin('claude')],
     [t('Sign in to another Codex account'), () => void startLogin('codex')],
     [t('Import from Claude Swap'), () => void importSwap()],
     [t('Add an API key or token…'), () => addDialog()],
-  ], 'button primary', t('+ Add account'));
+  ], className, t('+ Add account'));
 }
 /** Official sign-in without a form: Terminal opens, completion is detected, the email names the account. */
 async function startLogin(provider: Provider, label = '', pool = 'default') {
@@ -1245,6 +1279,7 @@ async function loginSaved(text: string) {
   await refreshContext();
   try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The account was added, but the list could not be refreshed. Retry loading accounts.'); }
   showNotice(text);
+  loadOnboarding();
 }
 async function cancelLogin() {
   const login = pendingLogin; if (!login) return;
@@ -1303,9 +1338,14 @@ function renderAccounts(main: HTMLElement) {
   if (!accounts.length) {
     // A reinstall with a backup this computer can open: one press brings everything back.
     const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
-    const empty = emptyState(t('Start with one account'), backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : firstRunHint(currentAccounts) === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
+    // VIS-21: an organization card above with its own action is the screen's one primary; the page's buttons go quiet.
+    const cardLeads = orgSetups(onboarding).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep }));
+    // SB-202 (B-8): an organization's group with no seat yet leads with the seat.
+    const lead = accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts });
+    const empty = emptyState(t('Start with one account'), lead.lead === 'org_seat' ? lead.line : backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : lead.lead === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
-    empty.append(addMenu()); main.append(empty, kimiSection()); return;
+    if (lead.lead === 'org_seat') { const pool = lead.pool; empty.append(button(lead.label, () => void startLogin('claude', '', pool), cardLeads ? 'button quiet' : 'button primary', 'empty-org-sign-in'), addMenu('button quiet')); main.append(empty, kimiSection()); return; }
+    empty.append(addMenu(cardLeads ? 'button quiet' : 'button primary')); main.append(empty, kimiSection()); return;
   }
   const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
   const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
@@ -2216,7 +2256,7 @@ function select(options: [string, string][]) { const node = el('select'); option
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
 async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string, operation: Operation = 'change') {
   context.error.textContent = ''; context.setBusy(true); clock.begin();
-  try { await action(); await refreshContext(); showNotice(restoredText || success); restoredText = ''; try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
+  try { await action(); await refreshContext(); showNotice(restoredText || success); restoredText = ''; try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); loadOnboarding(); }
   catch (error) { context.error.textContent = t(safeError(error, operation)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
@@ -2534,7 +2574,7 @@ function backgroundRefresh() {
     // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
     // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
     if (page === 'projects') shellHookKey = '';
-    snapshot = data; applyContext(context); backgroundRender();
+    snapshot = data; applyContext(context); backgroundRender(); loadOnboarding();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.

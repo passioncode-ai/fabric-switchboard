@@ -96,6 +96,7 @@ export const nativeAdapter: Adapter = {
   shellHookNotice: () => readWithDeadline(invoke('shell_hook_notice')),
   acknowledgeShellHookNotice: async () => { await invoke('acknowledge_shell_hook_notice'); },
   shellHookStatus: () => readWithDeadline(invoke('shell_hook_status')),
+  onboard: () => readWithDeadline(invoke('onboard')),
   setShellHook: (on) => invoke('set_shell_hook', { on }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
   setAnalytics: (enabled, question) => invoke('set_analytics', { enabled, question: question ?? null }),

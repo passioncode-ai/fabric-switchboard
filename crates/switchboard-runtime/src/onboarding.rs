@@ -394,18 +394,23 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
             }
             // Which group stays the organization's is the person's choice; the command is what
             // the agent runs on the others once the person said.
-            None if bound.len() > 1 => step(
-                "org_group",
-                "needs_person",
-                format!(
-                    "Keep one group for {name} on this computer: {}.",
-                    bound.join(", ")
-                ),
-                json!({
-                    "person": format!("Say which of these groups stays {name}'s on this computer."),
-                    "command": format!("{cli} project edit --pool <group> --organization personal"),
-                }),
-            ),
+            None if bound.len() > 1 => {
+                let mut s = step(
+                    "org_group",
+                    "needs_person",
+                    format!(
+                        "Keep one group for {name} on this computer: {}.",
+                        bound.join(", ")
+                    ),
+                    json!({
+                        "person": format!("Say which of these groups stays {name}'s on this computer."),
+                        "command": format!("{cli} project edit --pool <group> --organization personal"),
+                    }),
+                );
+                // B-8: the window names them in its own language, never by parsing the summary.
+                s["groups"] = json!(bound);
+                s
+            }
             // Whether a settings file exists, and which folders, is the person's to say.
             None => step(
                 "org_group",
@@ -444,21 +449,25 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 format!("{name}'s account in “{}” is signed in.{unread}", group.name),
                 Value::Null,
             ),
-            Some(group) => step(
-                "seat",
-                "needs_person",
-                if ended > 0 {
-                    format!(
+            Some(group) => with(
+                "ended",
+                json!(ended),
+                step(
+                    "seat",
+                    "needs_person",
+                    if ended > 0 {
+                        format!(
                         "None of {name}'s accounts in {} is signed in: {ended} must sign in again.",
                         group.name
                     )
-                } else {
-                    format!("“{}” holds no signed-in account of {name}.", group.name)
-                },
-                json!({
-                    "command": format!("{cli} login begin --provider {provider} --pool {}", shell_word(&group.pool)),
-                    "person": person,
-                }),
+                    } else {
+                        format!("“{}” holds no signed-in account of {name}.", group.name)
+                    },
+                    json!({
+                        "command": format!("{cli} login begin --provider {provider} --pool {}", shell_word(&group.pool)),
+                        "person": person,
+                    }),
+                ),
             ),
             None => step(
                 "seat",
@@ -480,37 +489,38 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 .is_some_and(|files| files.iter().any(|f| f["state"] == "written"))
         });
         // `turn_on` and `turn_off` are the person's: the agent runs either only when asked.
+        // B-8: `terminals` names the state for the window, which words it in its own language.
         push(match hook {
-            "on" | "default_on" if installed => step(
+            "on" | "default_on" if installed => with("terminals", json!("active"), step(
                 "hook",
                 "optional",
                 format!("Terminals in {place} folders work in {name}'s context."),
                 json!({"turn_off": format!("{cli} shell off")}),
-            ),
-            "on" | "default_on" => step(
+            )),
+            "on" | "default_on" => with("terminals", json!("pending"), step(
                 "hook",
                 "optional",
                 format!("The terminal hook is on, but no start file holds it yet: terminals in {place} folders keep your own settings for now."),
                 json!({"command": format!("{cli} shell status"), "turn_off": format!("{cli} shell off")}),
-            ),
-            "off" => step(
+            )),
+            "off" => with("terminals", json!("off"), step(
                 "hook",
                 "optional",
                 format!("The terminal hook is off: terminals in {place} folders keep your own settings."),
                 json!({"turn_on": format!("{cli} shell on")}),
-            ),
-            "default_off" => step(
+            )),
+            "default_off" => with("terminals", json!("waiting"), step(
                 "hook",
                 "optional",
                 format!("Terminals do not follow {name}'s folders yet: the app turns this on once its group has a folder."),
                 json!({"command": format!("{cli} shell status")}),
-            ),
-            _ => step(
+            )),
+            _ => with("terminals", json!("unread"), step(
                 "hook",
                 "optional",
                 "The terminal hook's state could not be read.".into(),
                 json!({"command": format!("{cli} shell status")}),
-            ),
+            )),
         });
         let context = format!("org:{}", organization.id);
         push(if probe.contexts.contains(&context) {
@@ -537,6 +547,12 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
         });
     }
     steps
+}
+
+/// A step with one more field the window reads (B-8), so it never parses a summary.
+fn with(key: &str, value: Value, mut step: Value) -> Value {
+    step[key] = value;
+    step
 }
 
 /// Whether the agent's configuration names a `switchboard` MCP server for `folder`. Reads only
@@ -928,6 +944,41 @@ mod tests {
             .unwrap()
             .contains("lists no organization"));
         assert_eq!(answer["complete"], true);
+    }
+
+    /// B-8: the window words the card in its own language from these fields, never by reading
+    /// a summary.
+    #[test]
+    fn the_organization_steps_carry_what_the_window_words() {
+        let answer = steps(&acme());
+        assert_eq!(by_id(&answer, "hook")["terminals"], "active");
+        let mut probe = acme();
+        probe.shell = Some(json!({"hook": "off"}));
+        assert_eq!(by_id(&steps(&probe), "hook")["terminals"], "off");
+        probe.shell = Some(json!({"hook": "default_on", "files": []}));
+        assert_eq!(by_id(&steps(&probe), "hook")["terminals"], "pending");
+        probe.shell = Some(json!({"hook": "default_off"}));
+        assert_eq!(by_id(&steps(&probe), "hook")["terminals"], "waiting");
+        probe.shell = None;
+        assert_eq!(by_id(&steps(&probe), "hook")["terminals"], "unread");
+        // A seat that must sign in again counts as ended; a group with none at all reads 0.
+        let mut probe = acme();
+        probe.sign_in_required = vec!["a-1".into()];
+        assert_eq!(by_id(&steps(&probe), "seat")["ended"], 1);
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        probe.sign_in_required.clear();
+        assert_eq!(by_id(&steps(&probe), "seat")["ended"], 0);
+        // Two groups bound to one organization: both named.
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        let mut second = snapshot.projects[0].clone();
+        second.pool = "acme-two".into();
+        second.name = "Acme two".into();
+        snapshot.projects.push(second);
+        assert_eq!(
+            by_id(&steps(&probe), "org_group")["groups"],
+            json!(["Acme work", "Acme two"])
+        );
     }
 
     #[test]
