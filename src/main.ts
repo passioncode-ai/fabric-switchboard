@@ -945,12 +945,11 @@ function availableAgentsPanel(view: AgentsOverview) {
 // C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
 let chainsView: Chains | null = null;
 let chainsError = '';
-/** SB-229: under the clock, so a read from before a Save never paints over the saved chain; a read
- * that answers clears an earlier failure. */
+/** SB-229: under the clock, so a read from before a Save never paints over the saved chain (it may
+ * only fill an empty panel); a read that answers clears an earlier failure. */
 async function loadChains() {
   const read = await clockedRead(clock, () => adapter.chains());
-  if (read.state === 'applied') { chainsView = read.value; chainsError = ''; }
-  else if (read.state === 'failed') chainsError = safeError(read.error, 'read');
+  ({ view: chainsView, error: chainsError } = afterRead({ view: chainsView, error: chainsError }, read, false, (error) => safeError(error, 'read')));
   backgroundRender();
 }
 const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;

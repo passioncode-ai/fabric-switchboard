@@ -71,11 +71,12 @@ export class MutationClock {
   accepts(stamp: number): boolean { return stamp === this.generation && this.active === 0; }
 }
 /** SB-229: a background read under the clock: `applied` with its value, or `failed`, only when no
- * user action began after it was issued; `stale` otherwise (its value or its failure may predate
- * the action, so neither is shown). */
-export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<{ state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale' }> {
+ * user action began after it was issued; `stale` otherwise (its value, when it answered, may predate
+ * the action: it may fill an empty view, never replace one; its failure is not shown). */
+export type ClockedRead<T> = { state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale'; value?: T };
+export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<ClockedRead<T>> {
   const stamp = clock.stamp();
-  try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale' }; }
+  try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale', value }; }
   catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale' }; }
 }
 
@@ -1283,10 +1284,12 @@ export function ceilingRemovalNote(ceiling: { usd: number; active: boolean } | n
 }
 /** SB-230: what a background read leaves on screen. An answer replaces the view and clears the
  * error; a failure names itself, except right after a saved change (`afterSave`): the change stands,
- * what is shown stays, and the next read reports; a stale read changes nothing. */
-export function afterRead<V>(current: { view: V | null; error: string }, read: { state: 'applied'; value: V } | { state: 'failed'; error: unknown } | { state: 'stale' }, afterSave: boolean, errorText: (error: unknown) => string): { view: V | null; error: string } {
+ * what is shown stays, and the next read reports; a stale read only fills an empty view. */
+export function afterRead<V>(current: { view: V | null; error: string }, read: ClockedRead<V>, afterSave: boolean, errorText: (error: unknown) => string): { view: V | null; error: string } {
   if (read.state === 'applied') return { view: read.value, error: '' };
   if (read.state === 'failed' && !afterSave) return { view: current.view, error: errorText(read.error) };
+  // A stale answer fills an empty view only (a later read corrects it), and clears nothing.
+  if (read.state === 'stale' && read.value !== undefined && current.view === null) return { view: read.value, error: current.error };
   return current;
 }
 /** One answer to a reached ceiling. There is no `recommended` field and no primary class: the

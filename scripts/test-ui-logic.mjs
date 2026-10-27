@@ -1183,13 +1183,13 @@ check(() => {
     assert.equal(failed.state, 'failed'); assert.equal(failed.error.message, 'read failed');
     // An action began while the read was out: neither its value nor its failure is applied.
     let pending = later(); let read = logic.clockedRead(clock, () => pending.promise); clock.begin(); clock.end(); pending.settle.resolve(1);
-    assert.deepEqual(await read, { state: 'stale' });
+    assert.deepEqual(await read, { state: 'stale', value: 1 }, 'its value comes back marked stale: it may only fill an empty view');
     pending = later(); read = logic.clockedRead(clock, () => pending.promise); clock.begin(); pending.settle.reject(new Error('x'));
     assert.deepEqual(await read, { state: 'stale' }, 'a failure during an action is not reported');
     clock.end();
     // Issued during an action: stale too.
     clock.begin(); read = logic.clockedRead(clock, async () => 2); clock.end();
-    assert.deepEqual(await read, { state: 'stale' });
+    assert.deepEqual(await read, { state: 'stale', value: 2 });
     cases += 1;
   }
 
@@ -1319,6 +1319,11 @@ check(() => {
     assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, true, text), shown);
     assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, false, text), { view: shown.view, error: 'read: x' });
     assert.deepEqual(logic.afterRead(shown, { state: 'stale' }, false, text), shown);
+    // A stale read never replaces what is shown, but fills an empty view (a page opened while an
+    // action ran would otherwise read "Reading…" until the next Refresh); a later read corrects it.
+    assert.deepEqual(logic.afterRead(shown, { state: 'stale', value: { questions: [] } }, false, text), shown);
+    assert.deepEqual(logic.afterRead({ view: null, error: '' }, { state: 'stale', value: { questions: [2] } }, false, text), { view: { questions: [2] }, error: '' });
+    assert.deepEqual(logic.afterRead({ view: null, error: 'old' }, { state: 'stale', value: { questions: [2] } }, false, text), { view: { questions: [2] }, error: 'old' }, 'its error stays: the read is not trusted to clear it');
     assert.equal(logic.keyLimitLine({ limit: 20, limit_reset: 'monthly' }), "Key's own limit: $20.00, resets monthly");
     assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: 'daily' }), "Key's own limit: $10.00, resets daily");
     assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: null }), "Key's own limit: $10.00, never resets");
