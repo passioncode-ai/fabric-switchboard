@@ -51,6 +51,9 @@ pub struct Host {
     pub uid: Option<u32>,
     /// The CLI the hook script names; None: no hook can be written.
     pub cli: Option<PathBuf>,
+    /// PowerShell's profiles and execution policies (node A-8): read on Windows, None
+    /// elsewhere (a test gives one to install into an injected Documents folder).
+    pub windows: Option<super::windows::Host>,
 }
 impl Host {
     /// This process's user: `HOME`, `ZDOTDIR`, the login shell (`SHELL`).
@@ -68,6 +71,10 @@ impl Host {
         let uid = Some(unsafe { libc::getuid() });
         #[cfg(not(unix))]
         let uid = None;
+        #[cfg(windows)]
+        let windows = super::windows::process_host();
+        #[cfg(not(windows))]
+        let windows = None;
         Some(Host {
             home,
             zdotdir,
@@ -75,6 +82,7 @@ impl Host {
             macos: cfg!(target_os = "macos"),
             uid,
             cli,
+            windows,
         })
     }
     fn login(&self, shell: &str) -> bool {
@@ -94,14 +102,34 @@ struct Target {
     /// zsh's start file is missing and may live in another folder (`ZDOTDIR` set where this
     /// process cannot see it): never created.
     zdotdir_unknown: bool,
+    /// A PowerShell profile whose execution policy keeps it from running: never written.
+    policy_blocked: bool,
 }
 
-/// The start files of the shells present for `host`. None on Windows yet (PowerShell is node
-/// A-8; `cmd.exe` and Git Bash are not covered).
+/// The start files of the shells present for `host`: on Windows the PowerShell profiles only
+/// (`cmd.exe` and Git Bash are not covered), elsewhere zsh, bash and fish, plus the PowerShell
+/// profiles a test gives.
 fn targets(host: &Host) -> Vec<Target> {
-    if cfg!(windows) {
-        return vec![];
+    let mut out = if cfg!(windows) {
+        Vec::new()
+    } else {
+        posix_targets(host)
+    };
+    // Each edition's profile, created when absent (Windows PowerShell is part of Windows, and
+    // PowerShell 7 counts only when installed or its folder exists), as both read it.
+    for profile in host.windows.iter().flat_map(|w| w.profiles()) {
+        out.push(Target {
+            kind: scripts::Kind::Pwsh,
+            path: profile.path,
+            own_file: false,
+            create: true,
+            zdotdir_unknown: false,
+            policy_blocked: profile.blocked,
+        });
     }
+    out
+}
+fn posix_targets(host: &Host) -> Vec<Target> {
     let exists = |p: &Path| std::fs::symlink_metadata(p).is_ok();
     let mut out = Vec::new();
     let zsh = host
@@ -116,6 +144,7 @@ fn targets(host: &Host) -> Vec<Target> {
             zdotdir_unknown: host.zdotdir.is_none() && !exists(&zsh) && zdotdir_may_move(host),
             path: zsh,
             own_file: false,
+            policy_blocked: false,
         });
     }
     let bash = if host.macos {
@@ -134,6 +163,7 @@ fn targets(host: &Host) -> Vec<Target> {
             zdotdir_unknown: false,
             path: bash,
             own_file: false,
+            policy_blocked: false,
         });
     }
     let fish = host.home.join(".config").join("fish");
@@ -144,6 +174,7 @@ fn targets(host: &Host) -> Vec<Target> {
             own_file: true,
             create: true,
             zdotdir_unknown: false,
+            policy_blocked: false,
         });
     }
     out
@@ -205,11 +236,26 @@ pub fn installed_app(exe: &Path, home: Option<&Path>) -> bool {
 /// never names itself (its file goes with the next `cargo clean`), only an installed copy found
 /// the same way. None: no CLI to name.
 pub fn hook_cli() -> Option<PathBuf> {
-    if !cfg!(debug_assertions) {
-        return crate::launch::agent_cli();
+    let cli = if !cfg!(debug_assertions) {
+        crate::launch::agent_cli()
+    } else {
+        let current = std::env::current_exe().ok()?.canonicalize().ok()?;
+        crate::launch::installed_cli(&current)
+    };
+    cli.map(|p| plain_path(&p))
+}
+
+/// `path` as a script names it: without the `\\?\` prefix a canonical Windows path carries
+/// (`\\?\UNC\server\share` becomes `\\server\share`), which PowerShell's own path
+/// handling does not read as a plain file system path.
+pub(crate) fn plain_path(path: &Path) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if let Some(rest) = text.strip_prefix("\\\\?\\UNC\\") {
+        return PathBuf::from(format!("\\\\{rest}"));
     }
-    let current = std::env::current_exe().ok()?.canonicalize().ok()?;
-    crate::launch::installed_cli(&current)
+    PathBuf::from(text.strip_prefix("\\\\?\\").unwrap_or(text))
 }
 
 /// What the installer did to one start file.
@@ -224,6 +270,9 @@ pub enum State {
     /// `~/.zshenv` or `~/.zprofile`, which an app started from the Dock does not see).
     SkippedZdotdirUnknown,
     Unreadable,
+    /// A PowerShell profile whose execution policy (`Restricted` or `AllSigned`) keeps it, or
+    /// the unsigned hook, from running: nothing written, the policy never changed (A-Q4).
+    PolicyBlocked,
 }
 
 /// One start file in the record.
@@ -353,8 +402,25 @@ fn block(kind: scripts::Kind, hook: &Path) -> Option<String> {
             let q = scripts::sh_quote(hook);
             format!("if [ -r {q} ]; then . {q}; fi")
         }
+        scripts::Kind::Pwsh => ps_line(hook),
     };
     Some(format!("{OPEN}\n{line}\n{CLOSE}\n"))
+}
+
+/// The PowerShell block's line. Windows PowerShell 5.1 reads a profile without a byte order
+/// mark in the system's code page, so the line stays ASCII: a hook path that is not ASCII (a
+/// user name in another script) is carried as base64 of its UTF-8 and read inside a script
+/// block, which leaves no variable behind (the hook keeps everything in global variables).
+fn ps_line(hook: &str) -> String {
+    if hook.is_ascii() {
+        let q = scripts::ps_quote(hook);
+        return format!("if (Test-Path -LiteralPath {q}) {{ . {q} }}");
+    }
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(hook.as_bytes());
+    format!(
+        "& {{ $f = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')); if (Test-Path -LiteralPath $f) {{ . $f }} }}"
+    )
 }
 
 /// Where the block is in a start file's text.
@@ -650,6 +716,20 @@ fn install_one(
         report.skipped += 1;
         return previous.cloned();
     }
+    // The execution policy is read, never changed (A-Q4): the profile is left as it is, a block
+    // in it from an earlier run included, until the policy lets it run.
+    // What an earlier run did to the file (a line break added, the file created) stays in the
+    // record, so `shell off` and a later relaxed policy still give it back.
+    if target.policy_blocked {
+        report.skipped += 1;
+        return Some(Entry {
+            created: previous.is_some_and(|e| e.created),
+            ..entry(
+                State::PolicyBlocked,
+                previous.is_some_and(|e| e.newline_added),
+            )
+        });
+    }
     let read = match read_start(&target.path, host) {
         Ok(read) => read,
         Err(state) => {
@@ -881,6 +961,7 @@ mod tests {
                 macos: true,
                 uid: Some(uid()),
                 cli: Some(cli),
+                windows: None,
             },
         }
     }
@@ -1346,5 +1427,264 @@ mod tests {
         let report = apply(&bad, &w.host, true, false);
         assert!(report.no_hook);
         assert_eq!(std::fs::read_to_string(zshrc(&w)).unwrap(), "own\n");
+    }
+
+    // PowerShell (node A-8): the same installer over an injected Documents folder.
+
+    use super::super::windows::{self, Edition, Policy};
+    /// A world without zsh or bash, with both PowerShell editions under `<home>/Documents`.
+    fn pwsh_world(desktop: Policy, core: Policy) -> World {
+        let mut w = world();
+        w.host.login_shell = None;
+        w.host.windows = Some(windows::Host {
+            documents: w.host.home.join("Documents"),
+            editions: vec![(Edition::Desktop, desktop), (Edition::Core, core)],
+        });
+        w
+    }
+    fn profile(w: &World, edition: Edition) -> PathBuf {
+        windows::profile_path(&w.host.home.join("Documents"), edition)
+    }
+
+    #[test]
+    fn a_powershell_profile_gets_the_block_and_gives_it_back_byte_identical() {
+        // No final line break and CRLF lines, as Notepad leaves a profile.
+        let original = "Set-Alias ll Get-ChildItem\r\n# mine, “quoted”";
+        let w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let desktop = profile(&w, Edition::Desktop);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, original).unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert!(report.wanted && report.written == 2, "{report:?}");
+        assert!(report.first_written);
+        let hook = scripts::hook_path(&w.root, scripts::Kind::Pwsh);
+        assert_eq!(hook.file_name().unwrap(), "hook.ps1");
+        let line = format!(
+            "if (Test-Path -LiteralPath '{0}') {{ . '{0}' }}",
+            hook.display()
+        );
+        let text = std::fs::read_to_string(&desktop).unwrap();
+        assert_eq!(text, format!("{original}\n{OPEN}\n{line}\n{CLOSE}\n"));
+        // PowerShell 7's profile did not exist: created, with its folder, holding the block.
+        let core = profile(&w, Edition::Core);
+        assert_eq!(
+            std::fs::read_to_string(&core).unwrap(),
+            format!("{OPEN}\n{line}\n{CLOSE}\n")
+        );
+        // The hook file, with the byte order mark Windows PowerShell 5.1 needs.
+        let bytes = std::fs::read(&hook).unwrap();
+        assert!(bytes.starts_with("\u{feff}# Fabric Switchboard".as_bytes()));
+        for path in [&desktop, &core] {
+            assert_eq!(
+                state_of(&w, path),
+                Some(State::Written),
+                "{}",
+                path.display()
+            );
+        }
+        let record = read_record(&w.root);
+        assert!(record.files.iter().all(|e| e.shell == "pwsh"), "{record:?}");
+        // Again: nothing changes.
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), text);
+        // Off: the person's profile byte for byte, the created one gone, its folder kept.
+        set_choice(&w.root, false).unwrap();
+        let off = apply(&w.root, &w.host, true, false);
+        assert_eq!(off.removed, 2, "{off:?}");
+        assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
+        assert!(!core.exists());
+        assert!(core.parent().unwrap().is_dir());
+    }
+
+    #[test]
+    fn a_powershell_block_the_person_removed_is_not_written_back() {
+        let w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let desktop = profile(&w, Edition::Desktop);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, "$env:EDITOR = 'code'\n").unwrap();
+        set_and_apply(&w, None, true);
+        assert!(block_in(&std::fs::read_to_string(&desktop).unwrap()));
+        // The person takes it out, and adds a line of their own.
+        std::fs::write(
+            &desktop,
+            "$env:EDITOR = 'code'\nSet-PSReadLineOption -EditMode Emacs\n",
+        )
+        .unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(
+            std::fs::read_to_string(&desktop).unwrap(),
+            "$env:EDITOR = 'code'\nSet-PSReadLineOption -EditMode Emacs\n"
+        );
+        assert_eq!(state_of(&w, &desktop), Some(State::RemovedByPerson));
+        // PowerShell 7's created profile is left as it is: still written.
+        assert_eq!(
+            state_of(&w, &profile(&w, Edition::Core)),
+            Some(State::Written)
+        );
+        // `shell on` writes it again, after the person's lines.
+        apply(&w.root, &w.host, true, true);
+        let text = std::fs::read_to_string(&desktop).unwrap();
+        assert!(text.starts_with("$env:EDITOR = 'code'\nSet-PSReadLineOption -EditMode Emacs\n"));
+        assert!(block_in(&text));
+        // A linked profile (a dotfile manager's) is never written.
+        let w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let core = profile(&w, Edition::Core);
+        std::fs::create_dir_all(core.parent().unwrap()).unwrap();
+        let target = w.host.home.join("dotfiles-profile.ps1");
+        std::fs::write(&target, "mine\n").unwrap();
+        std::os::unix::fs::symlink(&target, &core).unwrap();
+        set_and_apply(&w, None, true);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "mine\n");
+        assert_eq!(state_of(&w, &core), Some(State::SkippedSymlink));
+    }
+
+    #[test]
+    fn a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked() {
+        let w = pwsh_world(Policy::Restricted, Policy::AllSigned);
+        let desktop = profile(&w, Edition::Desktop);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, "# mine\n").unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 0, "{report:?}");
+        assert!(!report.first_written);
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
+        assert!(!profile(&w, Edition::Core).exists(), "nothing created");
+        for edition in Edition::ALL {
+            assert_eq!(
+                state_of(&w, &profile(&w, edition)),
+                Some(State::PolicyBlocked)
+            );
+        }
+        // What the window, MCP and `shell status` read.
+        let status = map::status(Some(&w.root), None, &|_| None);
+        let states: Vec<&str> = status["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["state"].as_str().unwrap())
+            .collect();
+        assert_eq!(states, ["policy_blocked", "policy_blocked"], "{status}");
+        // Whoever manages the computer allows local scripts: the next run writes the block.
+        let mut w = w;
+        w.host.windows = Some(windows::Host {
+            documents: w.host.home.join("Documents"),
+            editions: vec![
+                (Edition::Desktop, Policy::RemoteSigned),
+                (Edition::Core, Policy::AllSigned),
+            ],
+        });
+        let report = apply(&w.root, &w.host, true, false);
+        assert_eq!(report.written, 1, "{report:?}");
+        assert!(block_in(&std::fs::read_to_string(&desktop).unwrap()));
+        assert_eq!(state_of(&w, &desktop), Some(State::Written));
+        assert_eq!(
+            state_of(&w, &profile(&w, Edition::Core)),
+            Some(State::PolicyBlocked)
+        );
+        // Off takes the written block out; the blocked profile was never touched.
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read_to_string(&desktop).unwrap(), "# mine\n");
+        assert!(!profile(&w, Edition::Core).exists());
+    }
+
+    /// A profile written while scripts ran, then blocked by a stricter policy: the record keeps
+    /// what Switchboard did to it, so `shell off` (during the block or after it is relaxed) gives
+    /// back the person's bytes and deletes the profile Switchboard created.
+    #[test]
+    fn a_policy_that_turns_blocked_keeps_what_off_gives_back() {
+        let mut w = pwsh_world(Policy::RemoteSigned, Policy::RemoteSigned);
+        let original = "Set-Alias ll Get-ChildItem";
+        let desktop = profile(&w, Edition::Desktop);
+        let core = profile(&w, Edition::Core);
+        std::fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+        std::fs::write(&desktop, original).unwrap();
+        let report = set_and_apply(&w, None, true);
+        assert_eq!(report.written, 2, "{report:?}");
+        assert!(core.is_file());
+        let blocked = |w: &mut World, policy: Policy| {
+            w.host.windows = Some(windows::Host {
+                documents: w.host.home.join("Documents"),
+                editions: vec![(Edition::Desktop, policy), (Edition::Core, policy)],
+            });
+        };
+        // Blocked: both profiles keep their block untouched, recorded as policy_blocked.
+        blocked(&mut w, Policy::AllSigned);
+        apply(&w.root, &w.host, true, false);
+        for path in [&desktop, &core] {
+            assert_eq!(state_of(&w, path), Some(State::PolicyBlocked));
+            assert!(block_in(&std::fs::read_to_string(path).unwrap()));
+        }
+        // Off while blocked: the person's bytes back, the created profile gone.
+        set_choice(&w.root, false).unwrap();
+        let off = apply(&w.root, &w.host, true, false);
+        assert_eq!(off.removed, 2, "{off:?}");
+        assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
+        assert!(!core.exists());
+
+        // On again, blocked, then relaxed: the flags survive the blocked run, so off still
+        // gives the same back.
+        set_choice(&w.root, true).unwrap();
+        blocked(&mut w, Policy::RemoteSigned);
+        apply(&w.root, &w.host, true, false);
+        blocked(&mut w, Policy::Restricted);
+        apply(&w.root, &w.host, true, false);
+        blocked(&mut w, Policy::RemoteSigned);
+        apply(&w.root, &w.host, true, false);
+        for path in [&desktop, &core] {
+            assert_eq!(state_of(&w, path), Some(State::Written));
+        }
+        set_choice(&w.root, false).unwrap();
+        apply(&w.root, &w.host, true, false);
+        assert_eq!(std::fs::read(&desktop).unwrap(), original.as_bytes());
+        assert!(!core.exists());
+    }
+
+    #[test]
+    fn the_cli_a_hook_names_has_no_verbatim_prefix() {
+        for (given, named) in [
+            (
+                r"\\?\C:\Program Files\Fabric Switchboard\switchboard.exe",
+                r"C:\Program Files\Fabric Switchboard\switchboard.exe",
+            ),
+            (
+                r"\\?\UNC\server\share\switchboard.exe",
+                r"\\server\share\switchboard.exe",
+            ),
+            (r"C:\tools\switchboard.exe", r"C:\tools\switchboard.exe"),
+            ("/usr/local/bin/switchboard", "/usr/local/bin/switchboard"),
+        ] {
+            assert_eq!(
+                plain_path(Path::new(given)),
+                PathBuf::from(named),
+                "{given}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hook_path_that_is_not_ascii_keeps_the_powershell_block_ascii() {
+        let hook = Path::new("/Users/Сергей/AppData/Local/sb/shell/hook.ps1");
+        let line = ps_line(hook.to_str().unwrap());
+        assert!(line.is_ascii(), "{line}");
+        use base64::Engine;
+        let encoded = line
+            .split("FromBase64String('")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        assert_eq!(decoded, hook.to_str().unwrap().as_bytes());
+        assert!(
+            line.contains("if (Test-Path -LiteralPath $f) { . $f }"),
+            "{line}"
+        );
+        // An ASCII path with a quote stays a literal, the quote doubled.
+        assert_eq!(
+            ps_line("C:\\Users\\o'brien\\hook.ps1"),
+            "if (Test-Path -LiteralPath 'C:\\Users\\o''brien\\hook.ps1') { . 'C:\\Users\\o''brien\\hook.ps1' }"
+        );
     }
 }

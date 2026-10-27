@@ -469,6 +469,7 @@ mod tests {
             // SAFETY: getuid has no preconditions and cannot fail.
             uid: Some(unsafe { libc::getuid() }),
             cli: Some(app_cli.clone()),
+            windows: None,
         };
         crate::shell::install::set_choice(&root, true).unwrap();
         crate::shell::install::apply(&root, &host, true, true);

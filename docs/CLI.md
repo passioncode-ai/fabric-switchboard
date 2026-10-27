@@ -198,7 +198,7 @@ every folder there answers `none`.
 switchboard shell status            # the hook's state, this terminal, the folder's group and homes
 switchboard shell status --dir /w/acme --json
 switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every change of folder
-switchboard shell init zsh          # the hook script itself (also bash, fish)
+switchboard shell init zsh          # the hook script itself (also bash, fish, pwsh)
 switchboard shell off               # take the hook out of every start file and keep it out
 switchboard shell on                # put it back, with or without an organization's group
 ```
@@ -212,9 +212,10 @@ switchboard shell on                # put it back, with or without an organizati
   Code reads Switchboard's route only from the folder it starts in, so in a subfolder the Claude
   field is `-` (a group with no Codex account answers `none` there). Budget 25 ms
   (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
-- `shell init <zsh|bash|fish>` prints the hook script, naming this executable and the data folder,
-  for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in `.zshrc`
-  (bash likewise), `switchboard shell init fish | source` in fish's. On every change of folder it
+- `shell init <zsh|bash|fish|pwsh>` prints the hook script, naming this executable and the data
+  folder, for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in
+  `.zshrc` (bash likewise), `switchboard shell init fish | source` in fish's,
+  `switchboard shell init pwsh | Out-String | Invoke-Expression` in a PowerShell profile. On every change of folder it
   asks `shell env` and exports the group's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
   `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
   them back exactly when you leave; a variable you change while inside stays yours. It prints
@@ -229,7 +230,11 @@ switchboard shell on                # put it back, with or without an organizati
   see where zsh reads it: `shell status` then gives `eval "$(switchboard shell init zsh)"` to add
   yourself), bash's login file on
   macOS (`.bash_profile`, `.bash_login` or `.profile`) and `.bashrc` on Linux, and fish's own file
-  `~/.config/fish/conf.d/fabric-switchboard.fish`. It reads the hook script only when it is there.
+  `~/.config/fish/conf.d/fabric-switchboard.fish`; on Windows, `Microsoft.PowerShell_profile.ps1`
+  of each PowerShell edition installed (`WindowsPowerShell\` and `PowerShell\` under Documents,
+  wherever Documents was redirected), except where the execution policy is `Restricted` or
+  `AllSigned`: that profile is not changed and `shell status` says so (`policy_blocked`);
+  Switchboard never changes the policy. It reads the hook script only when it is there.
   A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
   `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
   written back. `shell off` gives every file back byte for byte (a start file Switchboard created

@@ -938,7 +938,7 @@ check(() => {
     { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_zdotdir_unknown' },
     { shell: 'bash', path: `${home}/.bash_profile`, state: 'skipped_owner' },
     { shell: 'bash', path: '/etc/bashrc', state: 'unreadable' },
-    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\profile.ps1', state: 'policy_blocked' },
+    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' },
   ];
   const inactive = logic.shellHookView({ ...base, hook: 'default_on', files: skipped });
   assert.equal(inactive.state, 'inactive');
@@ -953,6 +953,10 @@ check(() => {
   assert.match(inactive.files[4].text, /^PowerShell's execution policy stops profiles from loading/);
   assert.equal(logic.shellHookView({ ...base, hook: 'on', files: [] }).state, 'inactive', 'on with no shell present');
   assert.equal(logic.shellInitLine('fish'), 'switchboard shell init fish | source');
+  // A linked PowerShell profile (node A-8): the line PowerShell reads.
+  assert.equal(logic.shellInitLine('pwsh'), 'switchboard shell init pwsh | Out-String | Invoke-Expression');
+  const linked = logic.shellHookView({ ...base, hook: 'default_on', files: [{ shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'skipped_symlink' }] });
+  assert.equal(linked.files[0].command, 'switchboard shell init pwsh | Out-String | Invoke-Expression');
   // A block the person took out: said, and the window can add it back.
   const removed = logic.shellHookView({ ...base, hook: 'default_on', files: [written[0], { shell: 'bash', path: `${home}/.bash_profile`, state: 'removed_by_person' }] });
   assert.equal(removed.state, 'default_on');

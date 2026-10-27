@@ -1,5 +1,5 @@
-//! The terminal hook's scripts for zsh, bash and fish (SB-183, node A-2), and
-//! `switchboard shell init <shell>`.
+//! The terminal hook's scripts for zsh, bash, fish (SB-183, node A-2) and PowerShell (node A-8),
+//! and `switchboard shell init <shell>`.
 //!
 //! On every change of folder a hooked terminal asks `switchboard shell env` (the folder map, no
 //! owner, no lock) what applies, and moves `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
@@ -14,16 +14,25 @@
 //! - the CLI missing, older, failing (or, in zsh, silent for ten seconds), or an answer of
 //!   another form: read as `none`, so what the hook holds is given back and nothing else
 //!   changes; nothing is printed;
-//! - fish: only an interactive fish is hooked (`conf.d` is read by fish scripts too).
+//! - fish: only an interactive fish is hooked (`conf.d` is read by fish scripts too);
+//! - PowerShell (Windows PowerShell 5.1 and PowerShell 7): the prompt is wrapped and acts when
+//!   the location changed, so only a shell that shows a prompt follows folders after loading;
+//!   the CLI gets ten seconds, as in zsh; the person's prompt keeps its `$?` and
+//!   `$LASTEXITCODE`; the file is written with a UTF-8 byte order mark, which Windows
+//!   PowerShell 5.1 needs to read a path that is not ASCII.
 //!
 //! The scripts are templates (`hook.zsh`, `hook.bash`, `hook.fish`, with `core.sh` shared by
-//! zsh and bash) holding the CLI's and the data folder's absolute paths, quoted for the shell.
+//! zsh and bash, and `hook.ps1`) holding the CLI's and the data folder's absolute paths, quoted
+//! for the shell.
 use std::path::{Path, PathBuf};
 
 const CORE: &str = include_str!("core.sh");
 const ZSH: &str = include_str!("hook.zsh");
 const BASH: &str = include_str!("hook.bash");
 const FISH: &str = include_str!("hook.fish");
+const PWSH: &str = include_str!("hook.ps1");
+/// The UTF-8 byte order mark the PowerShell hook file starts with.
+const BOM: &str = "\u{feff}";
 
 /// A shell the hook is written for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -31,14 +40,26 @@ pub enum Kind {
     Zsh,
     Bash,
     Fish,
+    /// PowerShell: Windows PowerShell 5.1 and PowerShell 7 (`pwsh`), one script for both.
+    Pwsh,
 }
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Zsh, Kind::Bash, Kind::Fish];
+    pub const ALL: [Kind; 4] = [Kind::Zsh, Kind::Bash, Kind::Fish, Kind::Pwsh];
+    /// The shells of macOS and Linux.
+    pub const POSIX: [Kind; 3] = [Kind::Zsh, Kind::Bash, Kind::Fish];
     pub fn name(self) -> &'static str {
         match self {
             Kind::Zsh => "zsh",
             Kind::Bash => "bash",
             Kind::Fish => "fish",
+            Kind::Pwsh => "pwsh",
+        }
+    }
+    /// The hook file's extension: PowerShell reads only a `.ps1` file as a script.
+    fn extension(self) -> &'static str {
+        match self {
+            Kind::Pwsh => "ps1",
+            other => other.name(),
         }
     }
     pub fn parse(name: &str) -> Option<Self> {
@@ -49,7 +70,7 @@ impl Kind {
 /// `<data>/shell/hook.<shell>`: the file a start file's block reads.
 pub fn hook_path(root: &Path, kind: Kind) -> PathBuf {
     root.join(super::map::DIR)
-        .join(format!("hook.{}", kind.name()))
+        .join(format!("hook.{}", kind.extension()))
 }
 
 /// `value` as one single-quoted word of a POSIX shell.
@@ -59,6 +80,21 @@ pub(crate) fn sh_quote(value: &str) -> String {
 /// `value` as one single-quoted word of fish (`\\` and `\'` are its only escapes there).
 pub(crate) fn fish_quote(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+/// `value` as one single-quoted string of PowerShell. Every character PowerShell reads as a
+/// single quote is doubled: U+0027 and the typographic U+2018, U+2019, U+201A and U+201B;
+/// nothing else is special there, `$` and the backtick included.
+pub(crate) fn ps_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('\'');
+    for c in value.chars() {
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
 }
 
 /// The hook script for `kind`, calling the CLI at `cli` with the data folder `data`. None when
@@ -76,11 +112,13 @@ pub fn script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
     let quote = match kind {
         Kind::Fish => fish_quote,
         Kind::Zsh | Kind::Bash => sh_quote,
+        Kind::Pwsh => ps_quote,
     };
     let template = match kind {
         Kind::Zsh => ZSH,
         Kind::Bash => BASH,
         Kind::Fish => FISH,
+        Kind::Pwsh => PWSH,
     };
     Some(
         template
@@ -90,9 +128,13 @@ pub fn script(kind: Kind, cli: &Path, data: &Path) -> Option<String> {
     )
 }
 
-/// Writes `<data>/shell/hook.<shell>` (0600) when its bytes change. Ok(true): written now.
+/// Writes `<data>/shell/hook.<shell>` (`hook.ps1` for PowerShell, with a byte order mark)
+/// (0600) when its bytes change. Ok(true): written now.
 pub(crate) fn write(root: &Path, kind: Kind, cli: &Path) -> Result<bool, ()> {
-    let text = script(kind, cli, root).ok_or(())?;
+    let mut text = script(kind, cli, root).ok_or(())?;
+    if kind == Kind::Pwsh {
+        text.insert_str(0, BOM);
+    }
     let path = hook_path(root, kind);
     if std::fs::read(&path).is_ok_and(|current| current == text.as_bytes()) {
         return Ok(false);
@@ -171,6 +213,8 @@ mod tests {
 
     fn shell_path(kind: Kind) -> Option<&'static str> {
         let path = match kind {
+            // PowerShell has its own test: `windows::tests::the_ps1_transition_matches_the_posix_one`.
+            Kind::Pwsh => return None,
             Kind::Zsh => "/bin/zsh",
             Kind::Bash => "/bin/bash",
             Kind::Fish => [
@@ -185,7 +229,7 @@ mod tests {
     }
     /// The shells present here; a missing one is named once, so the skip is visible.
     fn shells() -> Vec<Kind> {
-        Kind::ALL
+        Kind::POSIX
             .into_iter()
             .filter(|k| {
                 let found = shell_path(*k).is_some();
@@ -224,6 +268,7 @@ mod tests {
         let prompt = match kind {
             Kind::Bash => "eval \"$PROMPT_COMMAND\"",
             Kind::Zsh | Kind::Fish => ":",
+            Kind::Pwsh => unreachable!("POSIX shells only"),
         };
         let load = match kind {
             Kind::Fish => format!("source {}", fish_quote(&hook.to_string_lossy())),
@@ -237,6 +282,7 @@ mod tests {
             // fish reads `conf.d` in every fish, scripts too: the hook acts only in an
             // interactive one, so the tests run fish as one.
             Kind::Fish => command.args(["--no-config", "-i", "-c", &script]),
+            Kind::Pwsh => unreachable!("POSIX shells only"),
         };
         command
             .env_clear()
@@ -412,7 +458,7 @@ mod tests {
             let w = world();
             let allexport = match kind {
                 Kind::Bash | Kind::Zsh => "set -a\n",
-                Kind::Fish => "",
+                Kind::Fish | Kind::Pwsh => "",
             };
             let body = format!(
                 "{allexport}{}\n/usr/bin/env\necho ---\n{}\n/usr/bin/env",
@@ -710,6 +756,7 @@ mod tests {
                 Kind::Bash => "false\neval \"$PROMPT_COMMAND\"\necho status=$?".to_owned(),
                 Kind::Zsh => "false\necho status=$?".to_owned(),
                 Kind::Fish => "false\necho status=$status".to_owned(),
+                Kind::Pwsh => unreachable!("POSIX shells only"),
             };
             let body = [cd(kind, &w.acme), show(kind, "acme"), status].join("\n");
             let (out, err) = run(&w, kind, &w.cli, &[("CLAUDE_CONFIG_DIR", "/own")], &body);
