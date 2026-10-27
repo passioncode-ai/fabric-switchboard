@@ -649,6 +649,51 @@ mod tests {
         assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
         owner.shutdown(Duration::from_secs(8)).await;
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_requests_lock_ms_counts_only_its_own_waits() {
+        // H-2 fix cycle 1 (adversarial): two requests answered at once each count their own
+        // waits. One waits for the store's lock behind a slow removal; the other never takes
+        // the lock and reads None, not the first one's wait.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let removing = {
+            let store = store.clone();
+            std::thread::spawn(move || store.remove(&account.id))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let locking = {
+            let store = store.clone();
+            tokio::spawn(measure_lock_waits(async move {
+                crate::blocking::run(|| store.snapshot().unwrap());
+            }))
+        };
+        let lockless = tokio::spawn(measure_lock_waits(async {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }));
+        let (_, waited) = locking.await.unwrap();
+        let (_, untouched) = lockless.await.unwrap();
+        removing.join().unwrap().unwrap();
+        assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        assert_eq!(untouched, None, "a request that took no lock names no wait");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
     async fn fixture() -> (tempfile::TempDir, Owner, Descriptor) {
         let tmp = tempfile::tempdir().unwrap();
         let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))

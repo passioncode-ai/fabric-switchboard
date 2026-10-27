@@ -655,6 +655,9 @@ impl Store {
     }
     /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
     pub fn remove_project(&self, pool: &str) -> Result<Project, String> {
+        // H-2: under the credential lock, so no save of this project's key lands between the
+        // metadata and the deletions; the deletions run after the metadata lock is released.
+        let _writes = self.credential_lock()?;
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let index = candidate
@@ -678,6 +681,7 @@ impl Store {
             .retain(|k| k.pool.as_deref() != Some(pool));
         append_event(&mut candidate, "project", None, "removed");
         self.publish(&mut state, candidate)?;
+        drop(state);
         self.changed();
         for id in keys {
             let _ = self.vault.delete(&id);

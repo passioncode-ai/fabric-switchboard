@@ -561,22 +561,38 @@ impl CountedVault {
         if let Ok(mut writing) = self.writing.lock() {
             *writing.entry(id.to_owned()).or_default() += 1;
         }
-        let result = write();
-        self.writes
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if let Ok(mut writing) = self.writing.lock() {
-            if let Some(n) = writing.get_mut(id) {
-                *n -= 1;
-                if *n == 0 {
-                    writing.remove(id);
-                }
-            }
-        }
-        result
+        // The guard counts the write and then clears the mark when `write` returns and when it
+        // unwinds, so a panicking write never leaves its item marked (every later quota check
+        // of it refused) and the count has moved before a check can find the item unmarked.
+        let _mark = WriteMark { vault: self, id };
+        write()
     }
     /// Whether a write or removal of `id` runs now; true when that cannot be known.
     fn is_writing(&self, id: &str) -> bool {
         self.writing.lock().map_or(true, |w| w.contains_key(id))
+    }
+}
+/// One write's mark on `id` in `CountedVault::writing`; dropping it counts the write, then
+/// clears the mark.
+struct WriteMark<'a> {
+    vault: &'a CountedVault,
+    id: &'a str,
+}
+impl Drop for WriteMark<'_> {
+    fn drop(&mut self) {
+        self.vault
+            .writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut writing = match self.vault.writing.lock() {
+            Ok(writing) => writing,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(n) = writing.get_mut(self.id) {
+            *n -= 1;
+            if *n == 0 {
+                writing.remove(self.id);
+            }
+        }
     }
 }
 impl Vault for CountedVault {
@@ -593,6 +609,9 @@ impl Vault for CountedVault {
 
 /// H-2: how many times a save plans again when the metadata moved under its write.
 const SAVE_ATTEMPTS: usize = 4;
+/// H-2: a save that planned `SAVE_ATTEMPTS` times and found the account's group changed under
+/// each write. Nothing is saved; the old credential is back in place.
+const SAVE_CONTENDED: &str = "Account groups kept changing while the account was saved";
 /// One `save_account` call, planned against the metadata without touching the vault.
 struct SaveRequest<'a> {
     label: &'a str,
@@ -1300,7 +1319,7 @@ impl Store {
                 }
             }
         }
-        Err("Account metadata could not be saved".into())
+        Err(SAVE_CONTENDED.into())
     }
     /// Reads each of `ids`' credentials into `reads`, outside the metadata lock.
     fn read_into(
@@ -2136,5 +2155,57 @@ mod refusal_code_tests {
                 "{message}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod write_mark_tests {
+    use super::*;
+
+    /// H-2 adversarial (P4c): a quota check reads the write count, then whether the item is
+    /// marked. If the mark cleared before the count moved, a check could find the item unmarked
+    /// with the old count and trust a read of the old credential. The test holds the map of
+    /// marks while the write ends: the count must move while the mark is still in place.
+    #[test]
+    fn the_write_count_moves_before_the_in_flight_mark_clears() {
+        let vault = Arc::new(CountedVault {
+            inner: Arc::new(MemoryVault::default()),
+            writes: Default::default(),
+            writing: Default::default(),
+        });
+        let (in_write, wrote) = std::sync::mpsc::channel();
+        let (finish, finished) = std::sync::mpsc::channel::<()>();
+        let writer = {
+            let vault = vault.clone();
+            std::thread::spawn(move || {
+                vault.written("synthetic-item", || {
+                    let _ = in_write.send(());
+                    let _ = finished.recv();
+                    Ok(())
+                })
+            })
+        };
+        wrote
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the write runs");
+        assert!(vault.is_writing("synthetic-item"));
+        let before = vault.writes.load(std::sync::atomic::Ordering::SeqCst);
+        let marks = vault.writing.lock().unwrap();
+        finish.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while vault.writes.load(std::sync::atomic::Ordering::SeqCst) == before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the count did not move while the mark was held: it clears the mark first"
+            );
+            std::thread::yield_now();
+        }
+        assert!(
+            marks.contains_key("synthetic-item"),
+            "the mark is still in place"
+        );
+        drop(marks);
+        writer.join().unwrap().unwrap();
+        assert!(!vault.is_writing("synthetic-item"));
     }
 }

@@ -412,6 +412,7 @@ const coreErrors: Record<string, string> = {
   'Account metadata is corrupt; restore a known-good backup': 'Account metadata could not be read. Restore a known-good backup before continuing.',
   'Unsupported account metadata version': 'This account metadata version is not supported. Open it with a compatible Switchboard version.',
   'Account metadata could not be saved': 'Account metadata could not be saved. Check storage access and retry.',
+  'Account groups kept changing while the account was saved': 'The account\'s group kept changing while it was being saved, so nothing was saved. Wait a moment, then retry.',
   'Storage failure; credential cleanup requires recovery': 'The account could not be saved and credential cleanup needs recovery. Check storage before retrying.',
   'Native vault is not implemented on this platform': 'Native credential storage is not available on this platform. Use a supported native build.',
   'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use a supported native build.',

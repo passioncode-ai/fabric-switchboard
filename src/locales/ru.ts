@@ -355,6 +355,7 @@ export const RU: Record<string, string> = {
   "Account metadata could not be read. Restore a known-good backup before continuing.": "Не удалось прочитать сведения об аккаунтах. Прежде чем продолжать, восстановите исправную резервную копию.",
   "This account metadata version is not supported. Open it with a compatible Switchboard version.": "Эта версия сведений об аккаунтах не поддерживается. Откройте их в совместимой версии Switchboard.",
   "Account metadata could not be saved. Check storage access and retry.": "Не удалось сохранить сведения об аккаунтах. Проверьте доступ к хранилищу и повторите.",
+  "The account's group kept changing while it was being saved, so nothing was saved. Wait a moment, then retry.": "Группа аккаунта менялась, пока он сохранялся, поэтому ничего не сохранено. Подождите немного и повторите.",
   "The account could not be saved and credential cleanup needs recovery. Check storage before retrying.": "Аккаунт не сохранён, а лишние учётные данные удалить не удалось. Проверьте хранилище, прежде чем повторять.",
   "Native credential storage is not available on this platform. Use a supported native build.": "Системное хранилище учётных данных на этой платформе недоступно. Используйте сборку для поддерживаемой платформы.",
   "Secure account storage is not available on this platform. Use a supported native build.": "Защищённое хранилище аккаунтов на этой платформе недоступно. Используйте сборку для поддерживаемой платформы.",

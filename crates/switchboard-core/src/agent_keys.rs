@@ -111,58 +111,85 @@ impl Store {
             expires_at: None,
             account_id: None,
         };
-        let mut state = self.lock()?;
-        let mut candidate = state.clone();
-        if let Some(p) = pool {
-            if !candidate.projects.iter().any(|x| x.pool == p) {
-                return Err(KEY_POOL_INVALID.into());
-            }
-        }
+        // H-2: the Keychain is read and written under the credential lock only. The metadata
+        // lock is taken to plan (is the pool there, is a key saved for it) and again to publish
+        // the same plan against the metadata as it is then. Agent keys are written, and
+        // projects removed, only under the credential lock (`set_agent_key_for`,
+        // `remove_agent_key_for`, `remove_project`), so the plan stays true; if it did not, the
+        // write is put back.
+        let _writes = self.credential_lock()?;
         let pool = pool.map(str::to_owned);
-        let existing = candidate
-            .agent_keys
-            .iter()
-            .position(|k| k.service == service && k.pool == pool);
-        let (entry, old) = match existing {
-            Some(i) => {
-                let entry = &mut candidate.agent_keys[i];
-                let old = self
-                    .vault
-                    .get(&entry.id)
-                    .map_err(vault::surface("Credential storage unavailable"))?;
-                entry.saved_at = now();
-                if model.is_some() {
-                    entry.model = model;
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let saved_at = now();
+        let plan = |state: &Snapshot| -> Result<(Snapshot, AgentKey, bool), String> {
+            let mut candidate = state.clone();
+            if let Some(p) = pool.as_deref() {
+                if !candidate.projects.iter().any(|x| x.pool == p) {
+                    return Err(KEY_POOL_INVALID.into());
                 }
-                (entry.clone(), Some(old))
             }
-            None => {
-                let entry = AgentKey {
-                    service: service.to_owned(),
-                    id: uuid::Uuid::new_v4().to_string(),
-                    saved_at: now(),
-                    pool,
-                    model,
-                };
-                candidate.agent_keys.push(entry.clone());
-                (entry, None)
-            }
+            let existing = candidate
+                .agent_keys
+                .iter()
+                .position(|k| k.service == service && k.pool == pool);
+            let (entry, replaces) = match existing {
+                Some(i) => {
+                    let entry = &mut candidate.agent_keys[i];
+                    entry.saved_at = saved_at;
+                    if model.is_some() {
+                        entry.model = model.clone();
+                    }
+                    (entry.clone(), true)
+                }
+                None => {
+                    let entry = AgentKey {
+                        service: service.to_owned(),
+                        id: new_id.clone(),
+                        saved_at,
+                        pool: pool.clone(),
+                        model: model.clone(),
+                    };
+                    candidate.agent_keys.push(entry.clone());
+                    (entry, false)
+                }
+            };
+            append_event(&mut candidate, "agent_key", None, "saved");
+            crate::validate_snapshot(&candidate)?;
+            Ok((candidate, entry, replaces))
         };
-        append_event(&mut candidate, "agent_key", None, "saved");
-        crate::validate_snapshot(&candidate)?;
+        let (_, entry, replaces) = plan(&*self.lock()?)?;
+        let old = if replaces {
+            Some(
+                self.vault
+                    .get(&entry.id)
+                    .map_err(vault::surface("Credential storage unavailable"))?,
+            )
+        } else {
+            None
+        };
         self.vault
             .put(&entry.id, &credential)
             .map_err(vault::surface("Credential storage unavailable"))?;
-        if self.publish(&mut state, candidate).is_err() {
-            let restored = match old {
-                Some(old) => self.vault.put(&entry.id, &old),
-                None => self.vault.delete(&entry.id),
-            };
-            restored.map_err(|_| "Storage failure; credential cleanup requires recovery")?;
-            return Err("Account metadata could not be saved".into());
+        let mut state = self.lock()?;
+        let published = match plan(&state) {
+            Ok((candidate, now_entry, _)) if now_entry.id == entry.id => self
+                .publish(&mut state, candidate)
+                .map(|()| now_entry)
+                .map_err(|_| "Account metadata could not be saved".to_owned()),
+            Ok(_) => Err("Account metadata could not be saved".to_owned()),
+            Err(error) => Err(error),
+        };
+        drop(state);
+        match published {
+            Ok(entry) => {
+                self.changed();
+                Ok(entry)
+            }
+            Err(error) => {
+                self.restore_credential(&entry.id, old.as_ref())?;
+                Err(error)
+            }
         }
-        self.changed();
-        Ok(entry)
     }
 
     /// Changes only the default model of a saved key.
@@ -250,18 +277,25 @@ impl Store {
     }
     /// As `remove_agent_key`, for a project pool's key (SB-144).
     pub fn remove_agent_key_for(&self, service: &str, pool: Option<&str>) -> Result<bool, String> {
-        let mut state = self.lock()?;
-        let mut candidate = state.clone();
-        let Some(i) = candidate
-            .agent_keys
-            .iter()
-            .position(|k| k.service == service && k.pool.as_deref() == pool)
-        else {
-            return Ok(false);
+        // H-2: the metadata is published under the metadata lock, the item deleted after it
+        // without that lock, both under the credential lock, so a save of the same key never
+        // lands between them.
+        let _writes = self.credential_lock()?;
+        let entry = {
+            let mut state = self.lock()?;
+            let mut candidate = state.clone();
+            let Some(i) = candidate
+                .agent_keys
+                .iter()
+                .position(|k| k.service == service && k.pool.as_deref() == pool)
+            else {
+                return Ok(false);
+            };
+            let entry = candidate.agent_keys.remove(i);
+            append_event(&mut candidate, "agent_key", None, "removed");
+            self.publish(&mut state, candidate)?;
+            entry
         };
-        let entry = candidate.agent_keys.remove(i);
-        append_event(&mut candidate, "agent_key", None, "removed");
-        self.publish(&mut state, candidate)?;
         self.changed();
         let _ = self.vault.delete(&entry.id);
         Ok(true)
