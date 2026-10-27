@@ -80,7 +80,9 @@ fn organization<'a>(
         .filter(|id| snapshot.organization(id).is_some())
 }
 
-/// Whether a group bound to an organization exists on this computer (the default-on rule).
+/// Whether a group bound to an organization exists on this computer: what the homes' fingerprint
+/// follows. Not the hook's default: that is `map::organizations_present`, the map's rows, which a
+/// group whose folders another group takes does not get.
 pub(crate) fn organizations_present(snapshot: &Snapshot) -> bool {
     snapshot
         .projects

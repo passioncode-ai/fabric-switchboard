@@ -1693,12 +1693,18 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   `a_second_run_waits_for_the_first` (`shell off` started between the owner's read and rename
   waits; the file ends as it was and the record agrees).
 - **When.** At the owner's start (`enable_shell_hook`), and in a bindings pass whose
-  fingerprint moved when the presence of a group bound to an existing organization flipped
-  (`shell::homes::organizations_present`); never on a timer, never on an idle pass. Log event
+  fingerprint moved when whether the folder map (just written by the same pass) holds a valid
+  row flipped (`shell::map::organizations_present`); never on a timer, never on an idle pass. Log event
   `shell_hook` (`wanted`, `written`, `removed`, `skipped`, `changed`, `no_hook`), numbers and
   flags only.
-- **The rule.** Wanted when `<data>/shell-hook` is `on`, or absent while an organization's group
-  exists; `off` takes every block out and never writes again. Tests:
+- **The rule.** Wanted when `<data>/shell-hook` is `on`, or absent while the folder map holds a
+  valid row (`shell::map::organizations_mapped`: a folder of a group bound to an existing
+  organization that `project_for` gives that group and that exists on disk); `off` takes every
+  block out and never writes again. The installer and `shell status` (so the window, MCP and
+  onboarding's `hook` step) decide `default_on` by this one rule from the same file, so a written
+  block and the reported state agree (A-7 fix cycle 1; a group whose only folder a personal group
+  takes is neither written nor reported). Tests:
+  `owner_tests::the_hook_reported_is_the_hook_written`,
   `shell::install::tests::default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins`,
   `the_last_organization_group_leaving_removes_the_default_block`.
 - **Where** (macOS and Linux; Windows has none yet, PowerShell is node A-8): zsh
@@ -1750,7 +1756,11 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   null) and clears it with `acknowledge_shell_hook_notice`; the adapter's `shellHookNotice` and
   `acknowledgeShellHookNotice`. Test:
   `lifecycle_tests::the_first_time_notice_waits_for_the_window_across_a_restart` (a second and a
-  third owner over the same folder: there until acknowledged, then never again). Where it shows
+  third owner over the same folder: there until acknowledged, then never again). Only an owner
+  holding the installed app's home answers or acknowledges it, so a development build or
+  `serve` over the same data folder neither posts nor clears it (A-7 fix cycle 1); the group it
+  names is one whose folder the map holds. Test:
+  `owner_tests::only_the_installed_owner_reads_or_acknowledges_the_notice`. Where it shows
   (node A-7): the app's folder watcher (`src-tauri/src/suggestions.rs` `watch`) reads it when the
   folder counter moves and at least every 5 minutes, posts one system notification
   (`shell_hook_text`, English or Russian as the menu) once per run while it waits, and emits
@@ -1768,7 +1778,8 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
 - **Window and MCP (node A-7).** `Runtime::shell_hook_status` answers what `shell status` reads
   without the terminal's own fields (`terminal`, `here`, `folder`), plus `can_change` (this owner
   holds the installed app's home, `enable_shell_hook`), `organizations` (the names of the
-  organizations a group is bound to, sorted) and `home` (to show start files as `~/...`).
+  organizations whose groups the folder map holds, sorted), `codex_organizations` (those of them
+  whose map rows carry a Codex account: the Codex section's line names only these) and `home` (to show start files as `~/...`).
   `Runtime::set_shell_hook(on)` saves the choice and runs the installer at once, as
   `shell on|off` does, then answers the status; an owner without the installed app's home refuses
   with “Only the installed app changes terminal settings.” and changes nothing. Tauri

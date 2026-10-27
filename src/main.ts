@@ -434,8 +434,9 @@ let shellHookState: ShellHookStatus | null = null; let shellHookLoading = false;
 const shellHookInputs = () => JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, p.organization ?? null, p.folders.length]));
 function loadShellHook() {
   if (shellHookLoading) return;
-  shellHookLoading = true; const key = shellHookInputs();
-  void adapter.shellHookStatus().then((s) => { shellHookState = s; shellHookError = ''; shellHookKey = key; }, (e) => { shellHookError = t(safeError(e, 'read')); shellHookKey = key; }).finally(() => { shellHookLoading = false; render(); });
+  shellHookLoading = true; const key = shellHookInputs(); const stamp = clock.stamp();
+  // A read issued before *Turn off* / *Turn on* may predate it: it is not applied over the change.
+  void adapter.shellHookStatus().then((s) => { if (clock.accepts(stamp) || !shellHookState) { shellHookState = s; shellHookError = ''; } shellHookKey = key; }, (e) => { if (clock.accepts(stamp) || !shellHookState) shellHookError = t(safeError(e, 'read')); shellHookKey = key; }).finally(() => { shellHookLoading = false; render(); });
 }
 function setShellHook(on: boolean, focusKey: string) {
   void mutate(async () => { shellHookState = await adapter.setShellHook(on); }, shellHookToggleNotice(on), focusKey);
@@ -460,6 +461,8 @@ function shellHookSection() {
     section.append(list);
   }
   if (view.note) section.append(el('p', 'form-note', view.note));
+  // *Add the block again* saves the choice `on` as *Turn on* does (A-7 fix cycle 1, N3): said beside it.
+  if (view.action && view.readd) section.append(el('p', 'form-note', t('Adding the block again saves your choice to keep the hook on, as Turn on does.')));
   if (view.action) {
     const action = view.action; const controls = el('div', 'org-card-actions');
     const toggle = button(action.label, () => setShellHook(action.on, 'shell-hook-toggle'), 'button', 'shell-hook-toggle'); toggle.disabled = action.disabled; controls.append(toggle);
@@ -2521,6 +2524,9 @@ function backgroundRefresh() {
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
+    // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
+    // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
+    if (page === 'projects') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();

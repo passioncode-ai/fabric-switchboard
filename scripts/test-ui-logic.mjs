@@ -909,7 +909,7 @@ const i18nForShell = await load('../src/i18n.ts');
 // to add), outside the installed app, a block the person took out, and the notices (SCN-074, SCN-075).
 check(() => {
   const home = '/Users/ana';
-  const base = { choice: 'default', map: 'ok', files: [], organizations: ['Acme'], can_change: true, home };
+  const base = { choice: 'default', map: 'ok', files: [], organizations: ['Acme'], codex_organizations: ['Acme'], can_change: true, home };
   const reading = logic.shellHookView(null);
   assert.equal(reading.state, 'reading'); assert.equal(reading.action, null); assert.equal(reading.retry, false);
   const failed = logic.shellHookView(null, 'Switchboard could not read its own state.');
@@ -979,6 +979,10 @@ check(() => {
   assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written }), "In Acme's folders, new terminals use its Codex accounts whether this is on or off.");
   assert.equal(logic.codexHookLine({ ...base, hook: 'off', choice: 'off' }), null);
   assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: skipped }), null, 'inactive says nothing about Codex');
+  // A-7 fix cycle 1 (N1): only organizations whose map rows carry a Codex account are named.
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, codex_organizations: [] }), null, 'no Codex account: nothing about Codex');
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'], codex_organizations: ['Globex'] }), "In Globex's folders, new terminals use its Codex accounts whether this is on or off.");
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'], codex_organizations: ['Acme', 'Globex'] }), 'In organization folders, new terminals use their Codex accounts whether this is on or off.');
   // Russian: every line has its entry, with the organization kept.
   i18nForShell.setLocale('ru');
   try {

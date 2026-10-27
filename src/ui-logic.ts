@@ -1009,8 +1009,10 @@ export function shellHookNoticeText(notice: ShellHookNotice): { title: string; b
     body: t('New terminals opened in {group}\'s folders run claude and codex on {organization}\'s accounts and history. Turn this off under Groups.', { group: notice.group, organization: notice.organization }),
   };
 }
-/** SCN-066: under *Codex in group folders*, while the terminal hook is on in an organization's folders. */
+/** SCN-066: under *Codex in group folders*, while the terminal hook is on in an organization's folders.
+ * Only organizations whose folder map rows carry a Codex account (`codex_organizations`): elsewhere `codex` keeps the person's sign-in. */
 export function codexHookLine(status: ShellHookStatus | null): string | null {
-  if (!status || !(status.hook === 'on' || status.hook === 'default_on') || !status.files.some((f) => f.state === 'written') || !status.organizations.length) return null;
-  return status.organizations.length === 1 ? t('In {organization}\'s folders, new terminals use its Codex accounts whether this is on or off.', { organization: status.organizations[0] }) : t('In organization folders, new terminals use their Codex accounts whether this is on or off.');
+  const orgs = status?.codex_organizations ?? [];
+  if (!status || !(status.hook === 'on' || status.hook === 'default_on') || !status.files.some((f) => f.state === 'written') || !orgs.length) return null;
+  return orgs.length === 1 ? t('In {organization}\'s folders, new terminals use its Codex accounts whether this is on or off.', { organization: orgs[0] }) : t('In organization folders, new terminals use their Codex accounts whether this is on or off.');
 }

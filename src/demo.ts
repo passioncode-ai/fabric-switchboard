@@ -168,7 +168,7 @@ export function createDemoAdapter(): Adapter {
     const organizations = shellOrganizations();
     const hook = shellChoice === 'on' ? 'on' : shellChoice === 'off' ? 'off' : organizations.length ? 'default_on' : 'default_off';
     const files = hook === 'default_off' && !shellParam ? [] : shellFiles;
-    return { hook, choice: shellChoice, map: 'ok', files: files.map((f) => ({ ...f })), organizations, can_change: shellParam !== 'dev', home: shellHome };
+    return { hook, choice: shellChoice, map: 'ok', files: files.map((f) => ({ ...f })), organizations, codex_organizations: organizations, can_change: shellParam !== 'dev', home: shellHome };
   };
   let looseRepositories = ['/srv/projects/beta-cli', '/srv/projects/notes-site'];
   let suggestions: ProjectSuggestion[] = [];

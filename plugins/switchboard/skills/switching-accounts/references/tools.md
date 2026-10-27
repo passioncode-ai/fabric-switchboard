@@ -330,10 +330,11 @@ operator asks.
 ### `switchboard_shell_hook`: `path?`
 
 Whether this computer's terminals follow organization folders, as `switchboard shell status`
-reads it: `hook` (`on`, `off`, `default_on` because a group belongs to an organization,
-`default_off`), `choice`, `map`, each start file in `files` with its `state` (`written`,
-`removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
-`unreadable`, `policy_blocked`), and in `here` the group, context and homes a terminal gets in
+reads it: `hook` (`on`, `off`, `default_on` because the folder map holds a folder of a group
+bound to an organization, `default_off`), `choice`, `map`, each start file in `files` with its
+`state` (`written`, `removed_by_person`, `skipped_symlink`, `skipped_owner`,
+`skipped_zdotdir_unknown`, `unreadable`; `policy_blocked` comes with PowerShell on Windows, node
+A-8), and in `here` the group, context and homes a terminal gets in
 `path` (default the agent's folder). Reads files only.
 
 ### `switchboard_shell_hook_set`: `on`
@@ -470,3 +471,7 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "No open question with that id…" | call `switchboard_ceilings` for the open questions |
 | "Only Switchboard's own data folder can change your terminals' start files…" | run the server without `--data-dir`, or ask the operator to use the app's switch |
 | "No installed switchboard command was found for the hook to run…" | install Fabric Switchboard, then turn it on again |
+| "on is true or false." | `switchboard_shell_hook_set` takes `on`: `true` or `false` |
+| "The hook cannot name this executable or the data folder…" | Switchboard or its data folder sits at a path that is not absolute or not valid text: reinstall, then turn it on again |
+| "The terminal hook's choice could not be saved in Switchboard's data folder." | the data folder is not writable; nothing changed, try again once it is |
+| "Your home folder could not be found, so no start file was changed." | the server runs without a home folder (`HOME`); run it as the person's own user |

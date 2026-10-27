@@ -1288,6 +1288,7 @@ export const RU: Record<string, string> = {
   "Start files": "Файлы запуска",
   "Terminal hook": "Привязка терминалов",
   "Add the block again": "Добавить блок снова",
+  "Adding the block again saves your choice to keep the hook on, as Turn on does.": "Если добавить блок снова, Switchboard запомнит, что привязка терминалов включена, как после «Включить».",
   "Open Groups": "Открыть группы",
   "fish: its own file, added": "fish: отдельный файл, добавлен",
   "{shell}: {path}, added": "{shell}: {path}, блок добавлен",
