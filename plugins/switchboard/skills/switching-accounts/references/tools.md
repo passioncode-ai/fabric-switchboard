@@ -80,7 +80,7 @@ Annotations: `readOnlyHint: true`.
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
-### `switchboard_sessions`: `all?` (boolean)
+### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `launch_id?` (string)
 
 `{sessions[]}`: the sessions Switchboard launched (Claude Code, Codex, Kimi Code, Hermes,
 OpenCode and catalog agents): `account_id`, `label`, `agent` (the catalog id, such as
@@ -91,6 +91,15 @@ absent before 0.6.80, and on Kimi Code, Hermes and OpenCode sessions before 0.7.
 `running`, `ended`, `unknown`).
 Without `all`, only starting and running ones. A session started outside Switchboard is not
 listed.
+
+With `history` (SB-212): `{launches[], total}`, every launch of the last 90 days, newest first
+(at most 500), one record per launch even when a later launch reused its home: the fields above
+plus `launch_id`, `launched_by` (`surface`: `window`, `cli`, `mcp`, `fallback`, `recovery` or
+`dashboards`; `caller_launch_id`, `caller_project`, `caller_program`, `by`, `parent`),
+`provider_session_id`, `transcript` (the path of its transcript), `turns`, `last_turn_at`, `ended`
+(`limit` when it stopped on one), `ended_at`, `handover` and `continued_as` (`{kind, id}`: the
+launch or hand-over its work went to). With `launch_id`: `{launch, up, down}`, that launch, who
+launched it up to the first launch, and what it launched or what took its work over.
 
 ### `switchboard_onboarding`: `path?` (absolute folder), `host?` (`claude` or `codex`)
 

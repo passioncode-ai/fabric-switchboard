@@ -1411,3 +1411,198 @@ fn project_bindings_are_listed_offline() {
     );
     assert!(json["data"]["bindings"][0].get("token_sha256").is_none());
 }
+/// SB-212: a synthetic launch record, as a launch writes it (0600).
+fn plant_launch(root: &std::path::Path, id: &str, extra: serde_json::Value) {
+    let dir = root.join("launches");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut record = serde_json::json!({"launch_id": id, "account_id": "a-1",
+        "provider": "claude", "pool": "default", "launched_at": 100,
+        "home_path": "runtimes/claude-default",
+        "launched_by": {"surface": "cli", "caller_launch_id": null, "caller_project": null,
+            "caller_program": "zsh", "by": null, "parent": null}});
+    for (k, v) in extra.as_object().unwrap() {
+        record[k] = v.clone();
+    }
+    let file = dir.join(format!("{id}.json"));
+    std::fs::write(&file, record.to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+fn read_launch(root: &std::path::Path, id: &str) -> serde_json::Value {
+    serde_json::from_slice(
+        &std::fs::read(root.join("launches").join(format!("{id}.json"))).unwrap(),
+    )
+    .unwrap()
+}
+/// Runs a hook command with `input` on stdin and, when given, the session's launch id.
+fn hook_run(root: &std::path::Path, args: &[&str], input: &[u8], launch: Option<&str>) -> String {
+    let mut command = binary();
+    command
+        .arg("--data-dir")
+        .arg(root)
+        .args(args)
+        .env_remove("SWITCHBOARD_LAUNCH_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(id) = launch {
+        command.env("SWITCHBOARD_LAUNCH_ID", id);
+    }
+    let mut child = command.spawn().unwrap();
+    // A host may close the pipe early; the hook still ends well.
+    let _ = child.stdin.take().unwrap().write_all(input);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+#[test]
+fn a_launched_sessions_hooks_record_its_transcript_turns_and_stop_and_nothing_else_does() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = "5b7f2c1e-0000-4000-8000-000000000001";
+    plant_launch(root, id, serde_json::json!({}));
+    let dir = root.to_string_lossy().into_owned();
+    let transcript = "/synthetic/home/projects/x/0f3c.jsonl";
+    let start = serde_json::json!({"session_id": "0f3c", "transcript_path": transcript,
+        "cwd": dir, "hook_event_name": "SessionStart"});
+    let suggest = ["project", "suggest", "--from-hook"];
+    // Without the variable: an ordinary session, nothing is written.
+    hook_run(root, &suggest, start.to_string().as_bytes(), None);
+    assert!(read_launch(root, id)["transcript"].is_null());
+    hook_run(root, &suggest, start.to_string().as_bytes(), Some(id));
+    let record = read_launch(root, id);
+    assert_eq!(record["provider_session_id"], "0f3c");
+    assert_eq!(record["transcript"], transcript);
+    let stop = serde_json::json!({"session_id": "0f3c", "cwd": dir, "hook_event_name": "Stop"});
+    for _ in 0..2 {
+        let said = hook_run(
+            root,
+            &["recovery", "hook"],
+            stop.to_string().as_bytes(),
+            Some(id),
+        );
+        assert_eq!(
+            said.trim(),
+            "{}",
+            "a Stop hook's answer stays an empty object"
+        );
+    }
+    assert_eq!(read_launch(root, id)["turns"], 2);
+    let limit = serde_json::json!({"session_id": "0f3c", "cwd": dir, "error": "rate_limit",
+        "hook_event_name": "StopFailure"});
+    hook_run(
+        root,
+        &["--json", "recovery", "hook"],
+        limit.to_string().as_bytes(),
+        Some(id),
+    );
+    assert_eq!(read_launch(root, id)["ended"], "limit");
+    // Garbage, an oversized input and a planted id never fail a session or write anything.
+    let before = read_launch(root, id);
+    hook_run(root, &suggest, b"not json", Some(id));
+    hook_run(
+        root,
+        &["recovery", "hook"],
+        &vec![b'x'; 9 * 1024 * 1024],
+        Some(id),
+    );
+    hook_run(
+        root,
+        &["recovery", "hook"],
+        stop.to_string().as_bytes(),
+        Some("../../escape"),
+    );
+    assert_eq!(read_launch(root, id), before);
+    assert!(!root.join("escape.json").exists());
+}
+#[test]
+fn the_history_and_one_launch_with_its_chain_read_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (a, b, c) = (
+        "5b7f2c1e-0000-4000-8000-00000000000a",
+        "5b7f2c1e-0000-4000-8000-00000000000b",
+        "5b7f2c1e-0000-4000-8000-00000000000c",
+    );
+    plant_launch(root, a, serde_json::json!({"launched_at": 100}));
+    plant_launch(
+        root,
+        b,
+        serde_json::json!({"launched_at": 200, "launched_by": {"surface": "cli",
+            "caller_launch_id": a, "by": "voc-learn"}}),
+    );
+    plant_launch(
+        root,
+        c,
+        serde_json::json!({"launched_at": 300, "launched_by": {"surface": "cli",
+            "caller_launch_id": b}}),
+    );
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(root)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let listed: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "sessions", "--history"])).unwrap();
+    let ids: Vec<&str> = listed["data"]["launches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["launch_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [c, b, a], "newest first");
+    let text = run(&["sessions", "--history"]);
+    assert!(text.contains("cli:voc-learn"), "{text}");
+    let shown: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "sessions", "show", b])).unwrap();
+    assert_eq!(shown["data"]["launch"]["launch_id"], b);
+    assert_eq!(shown["data"]["up"][0]["launch_id"], a);
+    assert_eq!(shown["data"]["down"][0]["launch_id"], c);
+    let text = run(&["sessions", "show", b]);
+    assert!(
+        text.contains("Launched by:") && text.contains("Then:"),
+        "{text}"
+    );
+}
+#[test]
+fn a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("not-created");
+    for (flag, value) in [
+        ("--by", "two words"),
+        ("--by", "x".repeat(65).as_str()),
+        ("--parent", "../escape"),
+    ] {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(&root)
+            .args(["launch", "acct", "--working-directory", "/tmp", flag, value])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{flag} {value}");
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            said.contains("letters, digits") || said.contains("as the parent"),
+            "{said}"
+        );
+        assert!(!root.exists());
+    }
+}

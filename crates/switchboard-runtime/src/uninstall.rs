@@ -49,6 +49,8 @@ const OWNED: &[&str] = &[
     "logs",
     "fabric-handovers",
     "handovers",
+    // One record per launch (SB-212): ids, folders and times; the transcripts stay in the homes.
+    "launches",
     "backup-id",
     "login-item",
     "auto-update",

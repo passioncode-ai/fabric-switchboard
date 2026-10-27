@@ -236,7 +236,7 @@ Account list order is display-only; it never selects/activates. Within provider/
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
 - With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
-- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
 ## Near-limit quota checks (SB-106, 2026-10-12)
 
@@ -862,6 +862,87 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   (open, drain, close).
 - Test: `a_launch_records_its_session_and_the_list_follows_its_process`; MCP
   `handshake_lists_tools_and_rejects_malformed_messages` (`switchboard_sessions`).
+
+## Launch records and their chain (SB-212, 2026-10-26)
+
+Code: `crates/switchboard-runtime/src/launches.rs`, `launch::home_state`, `Operation::Launched`,
+`Operation::LaunchEvent`, `Operation::Launches`, `from_outside` and `launched` in `lib.rs`, CLI
+`launch --by/--parent/--surface`, `sessions --history`, `sessions show`, the plugin's hooks
+through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sessions`.
+
+- **One record per launch.** A home is reused, so its `.session.json` names only its latest
+  launch. Every launch that writes one (Claude Code, Codex, Kimi Code, Hermes and OpenCode
+  continuations, agents through the proxy or on the OpenRouter key) also writes
+  `<data>/launches/<launch_id>.json` (0600, a rename) with the same fields plus `launch_id` (a
+  UUID v4), `launched_by` and `home_path` (the home relative to the data folder); `.session.json`
+  gains `launch_id` and `launched_by`. A failed write of `.session.json` fails the launch as
+  before; a failed write of the record is logged (`launch_record` `failed`) and never fails it.
+  The session's script exports `SWITCHBOARD_LAUNCH_ID=<launch_id>`; the variable is in the
+  scrubbed list, so one inherited from a caller never reaches a session that has its own.
+- **`launched_by`**, every key present, null when unknown: `surface` (`window`, `cli`, `mcp`,
+  `fallback`, `recovery`, `dashboards`; `mcp` is reserved, since no MCP tool launches a session
+  yet, and `dashboards` and `recovery` are written only when the caller passes `--surface
+  dashboards` or `--surface recovery`), `caller_launch_id` (the `SWITCHBOARD_LAUNCH_ID` of the
+  process that ran `switchboard`, when it is a launch id), `caller_project` (the pool of the group
+  holding the caller's folder; the folder itself is never stored), `caller_program` (the parent
+  process's name from the kernel, the first word without its folder, at most 64 safe characters,
+  never an argument: `launches::program_name`), `by` (`--by`, at most 64 letters, digits, dots,
+  hyphens or underscores) and `parent` (`--parent`, a launch id). A request through the control
+  listener or offline is never `window`: a bare launch reads as `cli`, and a claimed `window`
+  becomes `cli` (`from_outside`). The automatic fallback's hand-over is `fallback`. A malformed
+  `by` or `parent` is refused before anything runs (`launches::BY_INVALID`,
+  `launches::PARENT_INVALID`); a malformed caller id is dropped. A launch answer carries
+  `launch_id`. `LaunchedBy` ignores a field it does not know, so a later command's new field
+  reaches this owner as if it were absent (`a_field_this_version_does_not_know_is_ignored`).
+- **An older owner.** In the update window (§ Version skew above) an owner from before 0.7.0
+  cannot read `launched` and answers 400, having done nothing. The command then sends the bare
+  launch once, without who asked for it, and logs `launch_record` `outcome=owner_older`; the
+  launch runs and nothing records it until the owner restarts. No other operation is sent again
+  (`control::tests::a_launch_an_older_owner_cannot_read_is_sent_again_bare`).
+- **What it did.** The plugin's hooks report on the session's own record when
+  `SWITCHBOARD_LAUNCH_ID` is set (`Operation::LaunchEvent`, through the owner when it runs, else
+  offline under the store's lock; bounded by the hooks' 1.5 s; never fails the session):
+  `SessionStart` writes `provider_session_id` (the input's `session_id`) and `transcript` (its
+  `transcript_path`, absolute) and `session_started_at`, only when the input names a valid
+  session id or an absolute transcript path: any other JSON object writes nothing, not even
+  `session_started_at` (`a_start_without_a_session_or_a_transcript_writes_nothing`); `Stop`
+  writes `last_turn_at` and adds one to `turns`; `StopFailure` on `rate_limit` or `billing_error`
+  writes `ended: "limit"` and `ended_at`. Without the variable, or with an input that is not a
+  JSON object, nothing is asked. The `Stop` hook makes at most two calls of 1.5 s each (the turn,
+  then a recovery stop the session has), so it takes up to 3 s, inside the plugin's 5 s timeout.
+- **Where it went.** `continued_as` is set once, where the successor is known, and only to a
+  launch that started: a launch naming a
+  `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
+  earlier launch that continued the same workflow; a hand-over left for a console
+  (`fallback::queue_handover`) adds `handover: <id>` to the launch it holds and turns the earlier
+  launch's into `{kind: "handover", id: <hand-over id>, launch_id}`. `workflow` is reserved. A
+  launch whose operation fails after its record was written (Terminal did not open, a hand-over
+  could not be queued) never started: its record gets `ended: "not_started"` and `ended_at`, a
+  `continued_as` naming it is set back to null, and it is never taken for a workflow's latest
+  launch, so the next launch that starts takes the link
+  (`a_launch_that_never_started_is_not_where_the_work_went`). A first session that continues no
+  workflow and names no parent gets no `continued_as` from the fallback or a recovery: they hand
+  over a workflow, and only a launch that continued that workflow is linked.
+- **The plain session list says it too.** `sessions()` (CLI `sessions`, MCP `switchboard_sessions` without `history`) copies `provider_session_id`, `transcript`, `session_started_at`, `last_turn_at`, `turns`, `ended`, `ended_at` and `continued_as` from the record of the launch a home's `.session.json` names (`launches::add_outcome`), so the card of a home's latest session says how it ended and where its work went (fabric-dashboards, board `62d78b7f`, 2026-10-26). A missing record leaves the row as before (`a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went`).
+- **Reading.** `Operation::Launches {}` lists every record newest first, at most 500, with `total`
+  and each record's `state` now: its home's own (`starting`, `running`, `ended`, `unknown`) while
+  the home's `.session.json` still names this launch, else `ended`. `Operation::Launches
+  {launch_id}` answers `{launch, up, down}`: `up` follows `parent`, else `caller_launch_id`, else
+  the launch whose `continued_as` names it, to the first; `down` lists, breadth first, the
+  launches naming it as caller or parent (`via: child`) and the one it continued as (`via:
+  continued_as`), 64 at most each way; a record no longer kept reads `missing: true`. Only
+  `<id>.json` regular files are read, and `home_path` is followed only inside `homes`,
+  `runtimes` or `kimi`. Records written before 0.7.0 have no `launch_id` and list as before.
+- **Retention.** The background pass removes records not written for 90 days, at its first pass
+  and then at most once an hour (`launch_records_pruned` with `count`); `switchboard uninstall`
+  removes `launches/`. Nothing of it is sent to analytics.
+- Tests: `launch::tests::two_launches_of_one_home_keep_two_records_and_each_script_names_its_own`,
+  `a_chain_of_three_launches_follows_the_variable_each_session_exports`,
+  `a_launch_naming_its_parent_continues_it_and_the_parent_says_so`, `launches::tests::*`,
+  `launch_record_tests::*`, CLI
+  `a_launched_sessions_hooks_record_its_transcript_turns_and_stop_and_nothing_else_does`,
+  `the_history_and_one_launch_with_its_chain_read_from_the_command_line`,
+  `a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked`.
 
 ## Installed agents, switching and the default agent (SB-119/SB-120, 2026-10-14)
 

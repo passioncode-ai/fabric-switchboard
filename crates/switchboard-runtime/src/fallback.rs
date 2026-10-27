@@ -379,15 +379,20 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
     // for a console to take (`handovers`); the monitor opens it in Terminal after two minutes.
     let in_fabric = crate::handovers::enabled(&runtime.root);
     pass_with(runtime, now, &bin, |workflow, account, dir| async move {
-        let answer = runtime
-            .execute(Operation::Continue {
+        // SB-212: the session's launch record says the fallback started it.
+        let answer = crate::launches::scoped(
+            Some(crate::launches::LaunchedBy::surface(
+                crate::launches::Surface::Fallback,
+            )),
+            runtime.execute(Operation::Continue {
                 workflow_id: workflow.clone(),
                 id: account.clone(),
                 mode: "isolated".into(),
                 working_directory: dir.clone(),
                 in_place: in_fabric,
-            })
-            .await?;
+            }),
+        )
+        .await?;
         if in_fabric {
             let snapshot = runtime.store.snapshot().ok();
             queue_handover(
@@ -562,6 +567,15 @@ pub(crate) fn queue_handover(
         created_at: now,
         paid,
     };
+    // SB-212: the launch the hand-over holds names it, and the launch it continues says the
+    // work went through it.
+    if let Some(launch) = answer["launch_id"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(crate::launches::recorded)
+    {
+        crate::launches::link_handover(root, &launch, &handover.id);
+    }
     if crate::handovers::record(root, &handover).is_err() {
         if !crate::handovers::offer_live(&handover, crate::monitor::now()) {
             return Err("The hand-over offer expired before it could be opened.".into());

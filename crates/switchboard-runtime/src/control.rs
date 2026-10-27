@@ -258,6 +258,8 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    // SB-212: a launch asked for through this door is never the window's.
+    let operation = crate::from_outside(operation);
     if let Some(refusal) = crate::window_only_refusal(&operation) {
         return Json(Reply::Error {
             message: refusal.into(),
@@ -312,6 +314,24 @@ fn operation_kind(operation: &Operation) -> &'static str {
 /// Authentication/protocol/timeouts never trigger a second, offline mutation.
 /// The caller must acquire Store's exclusive lock before any offline operation.
 pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>, String> {
+    match request_once(root, operation).await {
+        // SB-212: an owner older than `launched` (the update window, CONTRACTS.md "Version
+        // skew") refused it with a 400 before doing anything. The bare launch is sent once,
+        // without who asked for it, so a launch keeps working until the owner restarts.
+        Err(message) if message == CONTROL_OWNER_OLDER => match operation {
+            Operation::Launched { inner, .. } => {
+                oplog::event(
+                    "launch_record",
+                    &[("outcome", oplog::Field::Code("owner_older"))],
+                );
+                request_once(root, inner).await
+            }
+            _ => Err(message),
+        },
+        answer => answer,
+    }
+}
+async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value>, String> {
     let path = root.join(FILE);
     match std::fs::symlink_metadata(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -626,6 +646,98 @@ mod tests {
         assert!(malformed_refusal(Some(env!("CARGO_PKG_VERSION")))
             .starts_with("Control request refused"));
         assert!(malformed_refusal(Some("garbage")).starts_with("Control request refused"));
+    }
+    /// SB-212 (B-1): a newer command wraps a launch in `launched`, which an owner still running
+    /// from before 0.7.0 cannot read (the update window). The 400 did nothing, so the command
+    /// sends the bare launch once, without its provenance, and the older owner runs it.
+    #[tokio::test]
+    async fn a_launch_an_older_owner_cannot_read_is_sent_again_bare() {
+        use std::sync::Mutex as StdMutex;
+        let tmp = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let token = "b".repeat(64);
+        let descriptor = Descriptor {
+            protocol: 1,
+            address: listener.local_addr().unwrap(),
+            token: token.clone(),
+            pid: None,
+        };
+        private_fs::private_write(
+            &tmp.path().join(FILE),
+            &serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
+        let seen: Arc<StdMutex<Vec<String>>> = Arc::default();
+        let observed = seen.clone();
+        let router = Router::new().fallback(move |request: Request<Body>| {
+            let observed = observed.clone();
+            let token = token.clone();
+            async move {
+                if request.uri().path() == "/v1/hello" {
+                    let nonce = request
+                        .headers()
+                        .get("x-switchboard-challenge")
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    let mut response = Json(Hello {
+                        proof: proof(&token, &nonce),
+                    })
+                    .into_response();
+                    response.headers_mut().insert(
+                        VERSION_HEADER,
+                        axum::http::HeaderValue::from_static("0.6.10"),
+                    );
+                    return response;
+                }
+                let body = to_bytes(request.into_body(), REQUEST_LIMIT).await.unwrap();
+                let value: Value = serde_json::from_slice(&body).unwrap();
+                let tag = value["operation"].as_str().unwrap_or_default().to_owned();
+                observed.lock().unwrap().push(tag.clone());
+                // An earlier owner knows `launch` and not `launched`.
+                if tag == "launched" {
+                    return StatusCode::BAD_REQUEST.into_response();
+                }
+                Json(Reply::Ok {
+                    value: serde_json::json!({"script": "ran"}),
+                })
+                .into_response()
+            }
+        });
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let launch = Operation::Launch {
+            id: "acct".into(),
+            mode: "managed".into(),
+            working_directory: tmp.path().to_owned(),
+            in_place: true,
+            args: Vec::new(),
+        };
+        let wrapped = crate::launched(
+            launch,
+            crate::launches::LaunchedBy::surface(crate::launches::Surface::Dashboards),
+        );
+        let answer = request(tmp.path(), &wrapped).await.unwrap().unwrap();
+        assert_eq!(answer["script"], "ran");
+        assert_eq!(*seen.lock().unwrap(), vec!["launched", "launch"]);
+        // Anything else an older owner refuses is not sent again.
+        seen.lock().unwrap().clear();
+        let refused = request(
+            tmp.path(),
+            &Operation::Launched {
+                by: crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+                inner: Box::new(Operation::Launched {
+                    by: crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+                    inner: Box::new(Operation::Snapshot),
+                }),
+            },
+        )
+        .await;
+        assert_eq!(refused.unwrap_err(), CONTROL_OWNER_OLDER);
+        assert_eq!(*seen.lock().unwrap(), vec!["launched", "launched"]);
+        task.abort();
     }
     #[tokio::test]
     async fn the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew() {
