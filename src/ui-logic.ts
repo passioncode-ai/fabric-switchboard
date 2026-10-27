@@ -331,6 +331,12 @@ export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string
   if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
   return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
 }
+/** SB-160 (B-7, SCN-079): when the person stopped being in this organization on PassionCode.ai,
+ * while it is not linked again; null otherwise (a disconnect is not leaving). */
+export function organizationReleasedAt(status: { connected: boolean; released?: { organization: string; at: number }[] } | null, organization: Pick<Organization, 'id' | 'vesta_id'>): number | null {
+  if (!status?.connected || organization.vesta_id) return null;
+  return status.released?.find((r) => r.organization === organization.id)?.at ?? null;
+}
 /** SB-159: the PassionCode.ai panel's line as a translation key and its values. */
 export function passioncodeLine(status: { connected: boolean; state?: string; read_at?: number | null; organizations?: number } | null): { key: string; values?: Record<string, string | number> } {
   if (!status || !status.connected) return { key: 'Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.' };

@@ -1689,18 +1689,18 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** PassionCode.ai connected (SCN-071); an organization that came from it.
 **Entry point:** none: the next read (at start, or every 6 hours, or *Read now*); *Organizations* shows it.
 **Steps:**
-1. A read no longer lists the organization → its card loses the *PassionCode.ai* mark and reads “Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.”
+1. A read no longer lists the organization → `vesta.json` records its local id and the time of that read (never its name; a later read keeps the first date), the log says `organization_released {count}`, and its card loses the *PassionCode.ai* mark and reads, under its name and domains, “Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.”
 2. The organization, its group's binding, its accounts and their statistics stay; nothing is deleted.
 3. *Remove…* on the card (SCN-069) → the confirmation → the organization goes and its groups turn personal (SCN-070).
-**Alt paths:** the person is added back → the next read links it again by name or domain and the line goes; PassionCode.ai unreachable → nothing changes, the last copy stays in force (SCN-071); *Disconnect* is not leaving: organizations stay local with no released line; an older build reading the connection file after a downgrade may read the connection as unreadable, and connecting again repairs it.
+**Alt paths:** the person is added back → the next read links it again by name or domain and the line goes; the person removes it → its mark leaves `vesta.json` at the next read; PassionCode.ai unreachable → nothing changes, the last copy stays in force (SCN-071); *Disconnect* is not leaving: organizations stay local with no released line; an older build reading the connection file after a downgrade may read the connection as unreadable, and connecting again repairs it.
 **Expected result:** leaving is visible, with its date, and costs nothing until the person removes it.
 **UI elements:** the released line on the organization card, *Remove…*.
 **States covered:** released, rejoined, read failed, removed by the person, disconnected.
 **Errors & recovery:** a read that fails changes nothing; the log records `organization_released {count}` only.
 **Status:** draft
 **Meaning:** SB-160, [dossier B](../runs/2026-10-26-iteration-0.7.0/dossier-b-organization-person.md) 3.4 "Leaving PassionCode.ai"; amends SCN-071's alt path.
-**Copy:** every quoted string here is draft copy; it goes through copywriting and Copylot (en-US, ru-RU) in wave 4 before it ships.
-**Coverage:** NOT_RUN, none yet: scenario written before code (node B-7).
+**Copy:** the released line is checked with Copylot (register ui, voice “PassionCode.ai site voice v2”): en-US report 2ec0173b-984d-402c-b77b-b413e524d161, ru-RU report d5a65746-bb0c-422b-a513-11d782f6ef59 (node B-7); Russian: «Этой организации нет среди ваших организаций в PassionCode.ai с {date}. Её группы по-прежнему не принимают другие аккаунты. Удалите её, когда она станет не нужна.»
+**Coverage:** partial (code tests and a WebKit demo; no live PassionCode.ai read). Node B-7: `vesta::tests::an_organization_left_on_passioncode_is_marked_with_its_date` (released with its id and date, nothing removed, no name in the file, logged once, the first date kept, linked again clears it, removed by the person clears it); storage `organizations_from_passioncode_are_linked_kept_current_and_released` (unchanged, green); ui-logic case “an organization left on PassionCode.ai is marked with its date” (`organizationReleasedAt`); WebKit demo `?demo=1&org=ended` (Contoso) at 740 and 1100 px, light and dark, English and Russian ([evidence](../runs/2026-10-26-iteration-0.7.0/evidence/b7/)).
 **Product:** unobserved
 **Traces:** SB-160, SB-159, SCN-069, SCN-070, SCN-071
 

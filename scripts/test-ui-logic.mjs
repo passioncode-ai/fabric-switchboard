@@ -807,6 +807,15 @@ check(() => {
   assert.equal(logic.groupSeatsEndedText(snap, { name: 'Mine', organization: null }, [home], ['h']), null, 'a personal group: no seats');
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], undefined), null);
 });
+// SB-160 (B-7, SCN-079): an organization left on PassionCode.ai is marked with its date until it is linked again.
+check(() => {
+  const status = { connected: true, released: [{ organization: 'o1', at: 1000 }] };
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: null }), 1000);
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: 'v-acme' }), null, 'linked again');
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o2', vesta_id: null }), null);
+  assert.equal(logic.organizationReleasedAt({ connected: false }, { id: 'o1' }), null, 'disconnected: no line');
+  assert.equal(logic.organizationReleasedAt(null, { id: 'o1' }), null);
+});
 // SB-159: the PassionCode.ai panel's sentence for each state.
 check(() => {
   assert.match(logic.passioncodeLine(null).key, /^Not connected/);
