@@ -82,7 +82,7 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
-          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
+          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: The fixtures leave the source tree as checked out
         run: |
@@ -138,7 +138,7 @@ jobs:
       - run: npm ci
       - name: Tests against a real Secret Service
         run: |
-          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test --workspace --locked'
+          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test --workspace --locked --no-fail-fast'
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: The CLI, the app, the .deb and the AppImage
         env:

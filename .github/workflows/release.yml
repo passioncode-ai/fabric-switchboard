@@ -217,7 +217,7 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
-          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
+          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the CLI (static CRT) and the desktop executable
         run: |
@@ -406,7 +406,7 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime tests, against a real Secret Service
         run: |
-          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy --locked'
+          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy --locked --no-fail-fast'
       - name: Build the CLI, the app, the .deb and the AppImage
         env:
           # linuxdeploy is itself an AppImage: extract-and-run needs no FUSE on the runner; no
