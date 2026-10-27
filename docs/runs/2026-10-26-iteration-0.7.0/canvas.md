@@ -137,3 +137,7 @@ SB-221 cause found: `fallback::HAND_OVER` is one lock per process and neighbouri
 ### W1 merged (2026-10-27, stability and Windows plan)
 
 `w5/w1-windows-tests` `beb0fab` merged (SB-224, plan `docs/reports/2026-10-27-stability-windows-debts/README.md` on main). `WF` ungated (it was `#[cfg(unix)]` though cross-platform tests use it), one `libc` test gated unix, unix-only helpers gated, two Windows dead-code lints. `cargo xwin check --tests` (x64) for runtime, core, cli: exit 0; `cargo xwin check -p fabric-switchboard`: exit 0; macOS test count 939 before and after; clippy 0. Native Windows runs: the nightly dispatched on `iteration/0.7.0` next.
+
+### S3 merged (2026-10-27)
+
+`w5/s3-updates` `64a4264` merged (SB-207, SB-208). An `Urgent: <reason>` line in the version's CHANGELOG section (or `manifest --urgent`) writes `urgent` into `latest.json` before the publish job attests it; a marker without a reason is refused; today's CHANGELOG has no line the marker matches (checked by the lead). `Updates::status()` carries `restart_after` and About says when a waiting update starts. Copylot `b7c46d90`, `63c56098`, `8bdfe8bb`. Gate on the branch: clippy, `cargo test -p fabric-switchboard`, script unittests, tsc, ui-logic 84, locale 1471, brand, docs 0; after the merge tsc, ui-logic, locale, script tests, docs re-run.
