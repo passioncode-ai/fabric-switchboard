@@ -953,6 +953,18 @@ async fn shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
         .shell_hook_notice()
         .unwrap_or(Value::Null))
 }
+/// SB-183 (node A-7): the Groups page's *Terminals in organization folders* section: the hook's
+/// state, each start file, the organizations it follows and whether this app may change it.
+#[tauri::command]
+async fn shell_hook_status(state: State<'_, Slot>) -> Result<Value, String> {
+    Ok(state.runtime().await?.shell_hook_status())
+}
+/// *Turn off* / *Turn on* in that section: the same as `switchboard shell off|on`, through the
+/// installed owner; any other app refuses and changes nothing.
+#[tauri::command]
+async fn set_shell_hook(state: State<'_, Slot>, on: bool) -> Result<Value, String> {
+    state.runtime().await?.set_shell_hook(on)
+}
 /// The window showed the first-time notice: never shown again.
 #[tauri::command]
 async fn acknowledge_shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1160,6 +1172,8 @@ fn main() {
             set_login_item,
             shell_hook_notice,
             acknowledge_shell_hook_notice,
+            shell_hook_status,
+            set_shell_hook,
             update_status,
             set_auto_update,
             restart_to_update,

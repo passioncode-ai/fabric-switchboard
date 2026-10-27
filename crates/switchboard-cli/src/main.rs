@@ -3387,22 +3387,13 @@ mod mcp_parity {
         ("backup now", Tool("switchboard_backup_now")),
         ("backup restore", Not(PERSON)),
         ("onboard", Tool("switchboard_onboarding")),
-        (
-            "shell status",
-            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
-        ),
+        ("shell status", Tool("switchboard_shell_hook")),
         (
             "shell env",
             Not("SB-183: the terminal hook's own question on every change of folder, one line for a shell script; not an agent action"),
         ),
-        (
-            "shell on",
-            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
-        ),
-        (
-            "shell off",
-            Not("SB-183: the MCP tool switchboard_shell_hook (read and set) lands with the window's switch, node A-7 of 0.7.0"),
-        ),
+        ("shell on", Tool("switchboard_shell_hook_set")),
+        ("shell off", Tool("switchboard_shell_hook_set")),
         (
             "shell init",
             Not("SB-183: prints the hook script for a person's own start file; not an agent action"),

@@ -138,7 +138,7 @@ impl Map {
         }
         let target = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
         let mut best: Option<(usize, &Row)> = None;
-        for row in self.rows.iter().filter(|row| row.valid()) {
+        for row in self.valid_rows() {
             let folder = Path::new(&row.folder);
             if !target.starts_with(folder) {
                 continue;
@@ -150,6 +150,25 @@ impl Map {
         }
         best.map(|(_, row)| row)
     }
+}
+impl Map {
+    /// The rows a reader acts on: the valid ones, in the map's order.
+    pub fn valid_rows(&self) -> impl Iterator<Item = &Row> {
+        self.rows.iter().filter(|row| row.valid())
+    }
+}
+/// Whether the hook is on by default: the map holds a valid row, a folder of a group bound to
+/// an organization. The one rule for it (A-7 fix cycle 1): the owner's installer writes the
+/// default block by it and `status` (the window, MCP `switchboard_shell_hook`, `shell status`,
+/// onboarding's `hook` step) reports `default_on` by it, both from the same file, so a written
+/// block and a reported state never disagree. A group whose folders are all taken by another
+/// group (`project_for`) or missing on disk has no row and so does not count.
+pub fn organizations_mapped(loaded: &Loaded) -> bool {
+    matches!(loaded, Loaded::Read(map) if map.valid_rows().next().is_some())
+}
+/// [`organizations_mapped`] of the map in `root`.
+pub fn organizations_present(root: &Path) -> bool {
+    organizations_mapped(&read(root))
 }
 impl Row {
     /// A row the answer can carry: an absolute folder, a pool that names a folder inside
@@ -272,7 +291,7 @@ pub fn status(
     let root = root.filter(|r| r.is_absolute());
     let loaded = root.map_or(Loaded::Unreadable, read);
     let choice = root.map_or(Choice::Default, choice);
-    let organizations = matches!(&loaded, Loaded::Read(map) if map.rows.iter().any(Row::valid));
+    let organizations = organizations_mapped(&loaded);
     let hook = match choice {
         Choice::On => "on",
         Choice::Off => "off",

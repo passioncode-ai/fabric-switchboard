@@ -334,6 +334,12 @@ pub fn set_choice(root: &Path, on: bool) -> Result<(), String> {
 /// The one sentence a failed choice answers with.
 pub const CHOICE_UNSAVED: &str =
     "The terminal hook's choice could not be saved in Switchboard's data folder.";
+/// The window's switch in an app that is not the installed one (a development build, `serve`,
+/// another data folder): nothing changes.
+pub const NOT_INSTALLED: &str = "Only the installed app changes terminal settings.";
+/// `shell on` when the hook cannot name the CLI or the data folder.
+pub const NO_PATH: &str =
+    "The hook cannot name this executable or the data folder: a path is not absolute or not valid text.";
 
 /// The block for a start file of `kind` reading `hook`; None when the hook's path is not text.
 fn block(kind: scripts::Kind, hook: &Path) -> Option<String> {

@@ -5,11 +5,11 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
+import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -246,6 +246,7 @@ async function reload() {
   loading = false;
   // UX-02, UX-03: Refresh reads statistics and the Codex switch again, so their errors clear.
   codexRouteState = null; codexRouteError = '';
+  shellHookState = null; shellHookError = '';
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
   render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
@@ -395,7 +396,7 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), codexRouteSection(), diskMapSection(), rulesSection());
+  main.append(projectsSection(), codexRouteSection(), shellHookSection(), diskMapSection(), rulesSection());
 }
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
 let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = ''; let codexRouteKey = '';
@@ -419,12 +420,69 @@ function codexRouteSection() {
     section.append(el('p', 'account-meta', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
     else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
+    const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
     const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on || !r.projects.length ? 'button' : 'button primary', 'codex-route-toggle');
     act.disabled = !r.on && !!r.conflict;
     section.append(act);
   }
   return section;
+}
+/** SB-183 (node A-7): whether terminals follow organization folders (SCN-075), beside *Codex in group folders*. */
+let shellHookState: ShellHookStatus | null = null; let shellHookLoading = false; let shellHookError = ''; let shellHookKey = '';
+/** What the section's answer depends on: the groups, their organizations and folders. */
+const shellHookInputs = () => JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, p.organization ?? null, p.folders.length]));
+function loadShellHook() {
+  if (shellHookLoading) return;
+  shellHookLoading = true; const key = shellHookInputs(); const stamp = clock.stamp();
+  // A read issued before *Turn off* / *Turn on* may predate it: it is not applied over the change.
+  void adapter.shellHookStatus().then((s) => { if (clock.accepts(stamp) || !shellHookState) { shellHookState = s; shellHookError = ''; } shellHookKey = key; }, (e) => { if (clock.accepts(stamp) || !shellHookState) shellHookError = t(safeError(e, 'read')); shellHookKey = key; }).finally(() => { shellHookLoading = false; render(); });
+}
+function setShellHook(on: boolean, focusKey: string) {
+  void mutate(async () => { shellHookState = await adapter.setShellHook(on); }, shellHookToggleNotice(on), focusKey);
+}
+function shellHookSection() {
+  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'shell-hook-heading');
+  const heading = el('h2', 'section-heading', t('Terminals in organization folders')); heading.id = 'shell-hook-heading';
+  section.append(heading, el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and takes it out byte for byte when you turn this off.')));
+  if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
+  if (!shellHookState && !shellHookError) loadShellHook();
+  const view = shellHookView(shellHookState, shellHookError || null);
+  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta', view.line));
+  if (view.error) section.append(el('p', 'form-error', view.error));
+  if (view.retry) { section.append(button(t('Retry'), () => { shellHookError = ''; loadShellHook(); render(); }, 'button', 'shell-hook-retry')); return section; }
+  if (view.files.length) {
+    const list = el('ul', 'shell-hook-files'); list.setAttribute('aria-label', t('Start files'));
+    view.files.forEach((file, index) => {
+      const item = el('li', file.problem ? 'form-note shell-hook-problem' : 'form-note'); item.append(el('span', '', file.text));
+      if (file.command) { const command = file.command; const line = el('div', 'policy-row'); line.append(el('code', 'address', command)); const copy = button(t('Copy'), () => copyText(copy, command, t('Terminal hook')), 'text-button', `shell-hook-copy-${index}`); line.append(copy); item.append(line); }
+      list.append(item);
+    });
+    section.append(list);
+  }
+  if (view.note) section.append(el('p', 'form-note', view.note));
+  // *Add the block again* saves the choice `on` as *Turn on* does (A-7 fix cycle 1, N3): said beside it.
+  if (view.action && view.readd) section.append(el('p', 'form-note', t('Adding the block again saves your choice to keep the hook on, as Turn on does.')));
+  if (view.action) {
+    const action = view.action; const controls = el('div', 'org-card-actions');
+    const toggle = button(action.label, () => setShellHook(action.on, 'shell-hook-toggle'), 'button', 'shell-hook-toggle'); toggle.disabled = action.disabled; controls.append(toggle);
+    if (view.readd) controls.append(button(t('Add the block again'), () => setShellHook(true, 'shell-hook-readd'), 'button', 'shell-hook-readd'));
+    section.append(controls);
+  }
+  return section;
+}
+/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Groups; read while the window is visible, then acknowledged. */
+let shellNoticeReading = false;
+function checkShellHookNotice() {
+  if (shellNoticeReading || document.hidden) return;
+  shellNoticeReading = true;
+  void adapter.shellHookNotice().then((found) => {
+    if (!found || document.hidden) return;
+    const { title, body } = shellHookNoticeText(found);
+    showNotice(`${title}. ${body}`); noticeAction = { label: t('Open Groups'), run: () => { notice = ''; goTo('projects', 'shell-hook-toggle'); } };
+    shellHookState = null; render();
+    void adapter.acknowledgeShellHookNotice().catch(() => { /* shown again at the next look */ });
+  }, () => { /* read again at the next look */ }).finally(() => { shellNoticeReading = false; });
 }
 /** SB-135 part 2: the Git repositories under the folders the person chose, each with its project or none; one moves or joins in place. Read only when the section is open. */
 let mapOpen = false; let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';
@@ -2450,7 +2508,8 @@ function policyDialog(existing?: RotationPolicy) {
 
 render();
 if (demo) { const { createDemoAdapter } = await import('./demo'); adapter = createDemoAdapter(); }
-void reload();
+// SB-183 (node A-7): a first-time notice that waited (the window was closed) shows once the list is read.
+void reload().then(() => checkShellHookNotice());
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
 // Menus close on Escape and on a click anywhere outside them.
@@ -2465,6 +2524,9 @@ function backgroundRefresh() {
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
+    // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
+    // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
+    if (page === 'projects') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
     // SB-104: the session list is read only while it is on screen.
     if (page === 'activity') void loadSessions();
@@ -2476,6 +2538,10 @@ setInterval(backgroundRefresh, 60_000);
 // SB-117/SB-131: the owner says when it added a folder to a project or took a deleted one out;
 // the project list is read again at once.
 onProjectSuggestions(() => backgroundRefresh());
+// SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window says so once.
+onShellHook(() => { shellHookState = null; checkShellHookNotice(); backgroundRefresh(); });
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });
+// SB-183 (node A-7): a first-time notice that waited while the window was hidden shows when it is shown.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkShellHookNotice(); });

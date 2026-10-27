@@ -12,6 +12,11 @@ export function onProjectSuggestions(callback: () => void) {
   if (!native) return;
   void import('@tauri-apps/api/event').then(({ listen }) => listen('project-suggestions', () => callback())).catch(() => { /* the minute refresh still reads them */ });
 }
+/** SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window shows its notice. */
+export function onShellHook(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('shell-hook', () => callback())).catch(() => { /* read again when the window is shown */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => readWithDeadline(invoke('snapshot')),
@@ -90,6 +95,8 @@ export const nativeAdapter: Adapter = {
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
   shellHookNotice: () => readWithDeadline(invoke('shell_hook_notice')),
   acknowledgeShellHookNotice: async () => { await invoke('acknowledge_shell_hook_notice'); },
+  shellHookStatus: () => readWithDeadline(invoke('shell_hook_status')),
+  setShellHook: (on) => invoke('set_shell_hook', { on }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
   setAnalytics: (enabled, question) => invoke('set_analytics', { enabled, question: question ?? null }),
   updateStatus: () => readWithDeadline(invoke('update_status')),
@@ -107,6 +114,9 @@ const safeErrors = new Set([
   'Choose a model for this launch, or set the key\'s default model on the API keys page or with switchboard agents openrouter model.',
   'This account belongs to a group. Launch it from one of the group\'s folders.',
   'This folder belongs to a group. Launch one of the group\'s accounts.',
+  // The terminal hook (SB-183, node A-7).
+  'Only the installed app changes terminal settings.',
+  'The terminal hook\'s choice could not be saved in Switchboard\'s data folder.',
   // Organizations (SB-158).
   'Organization not found.',
   'Another organization already has this name.',
@@ -314,6 +324,7 @@ const safeErrors = new Set([
   'Usage unavailable. Check the account and retry later.',
 ]);
 const coreErrors: Record<string, string> = {
+  'The hook cannot name this executable or the data folder: a path is not absolute or not valid text.': 'The terminal hook could not be written: the path of Switchboard or of its data folder is not plain text. Reinstall Switchboard, then turn it on again.',
   // Window rewrites of backend sentences (CPY-04, CPY-05, D-1): current actions, groups, and the next step.
   'Account saved; isolated login cleanup needs attention.': 'The account was saved. A temporary sign-in folder was left behind; Switchboard removes it before the next sign-in.',
   'Native activation requires a Claude OAuth profile.': 'Switching Claude Code needs a Claude account signed in with OAuth.',

@@ -546,3 +546,7 @@ g:hover > .chart-bar { opacity: .82; }
 @media (max-width: 820px) {
   .account-row .kimi-usage { grid-column: 2 / 3; grid-row: 2; max-width: 360px; }
 }
+/* SB-183 (node A-7): the start files under Terminals in organization folders. */
+.shell-hook-files { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
+.shell-hook-files > li { margin: 0; }
+.shell-hook-files .policy-row { margin-top: var(--space-1); }
