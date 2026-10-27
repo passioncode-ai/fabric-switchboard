@@ -1710,6 +1710,37 @@ itself and stopped again starts the backoff at 120 s (SB-209,
 `a_stop_the_session_resumed_by_itself_does_not_raise_the_next_attempt`); the file's format is
 unchanged. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
 
+## Context binding in 0.7.0: where each contract lives (SB-183, SB-201, node A-9)
+
+Dossier A section 5 ([dossier](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md))
+named the contracts the context binding touches. Each is recorded in the section named here; the
+code and the test given are the proof (paths at the iteration's head, `a476db1`).
+
+| Contract | Recorded in | Code | Proof |
+|---|---|---|---|
+| One context rule for every session: the group of the pool, else the group of the folder, else what pays; disagreement gives `personal` | [Session list](#session-list-sb-95-2026-10-11) | `Snapshot::context_for` `crates/switchboard-core/src/organizations.rs:202`, `session_context` `:190`, `key_context` `:227` | core `a_session_without_an_account_takes_its_keys_group_else_personal` (`organizations.rs:760`) |
+| Kimi Code, Hermes, OpenCode, OpenRouter and proxy agent launches carry `context` and `SWITCHBOARD_CONTEXT`; the last two write a `.session.json` | [Session list](#session-list-sb-95-2026-10-11) | `crates/switchboard-runtime/src/launch.rs`, `kimi.rs` | `an_openrouter_launch_records_its_session_and_context` (`launch.rs:4471`), `a_proxy_agent_launch_records_its_context` (`launch.rs:4534`) |
+| The folder map v1 and the `shell env` answer | [The terminal hook's folder map](#the-terminal-hooks-folder-map-sb-183-node-a-1-2026-10-26) | `crates/switchboard-runtime/src/shell/map.rs:19-32` (version, 1 MiB, file names), `write` `:68`, `read` `:102` | `the_longest_folder_of_an_organization_group_answers_its_homes_and_context` (`map.rs:427`); CLI `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` (`crates/switchboard-cli/tests/shell.rs:73`) |
+| `SWITCHBOARD_CONTEXT`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` of a plain session in an organization's folder, the person's own given back on leaving | [The terminal hook's scripts](#the-terminal-hooks-scripts-sb-183-node-a-2-2026-10-26) | `shell/scripts.rs` `script` `:103`, templates `hook.zsh`, `hook.bash`, `hook.fish`, `core.sh` | `entering_and_leaving_restores_unset_and_set_values` (`scripts.rs:364`), `the_saved_values_are_not_exported` (`:476`) |
+| The person's start files: markers, the choice `shell-hook`, the record `shell-hook.json`, on by default (D-3) | [The terminal hook's start files](#the-terminal-hooks-start-files-sb-183-node-a-3-2026-10-26) | `shell/install.rs` markers `:34-35`, `set_choice` `:386`, `apply` `:643`, `remove_all` `:966` | `the_block_goes_in_and_comes_out_leaving_the_file_byte_identical` (`install.rs:1044`), `default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins` (`:1179`) |
+| PowerShell 5.1 and 7 profiles, the execution policy read and never changed, Constrained Language Mode | [The terminal hook for PowerShell](#the-terminal-hook-for-powershell-sb-183-node-a-8-2026-10-27) | `shell/windows.rs` `PROFILE` `:29`, `profile_paths` `:57`, `profile_policy` `:128`, `lockdown` `:176`; `shell/hook.ps1` | `profile_paths_follow_the_documents_folder_for_each_edition` (`windows.rs:507`), `the_ps1_transition_matches_the_posix_one` (`:834`) |
+| The organizations' shell homes, keyed by pool (H-2), with a placeholder token and no credential | [The organizations' shell homes](#the-organizations-shell-homes-sb-183-node-a-4-2026-10-26) | `shell/homes.rs` `PLACEHOLDER` `:34`, `rows` `:99`, `sync` `:267`; called from `Runtime::bindings_pass` (`crates/switchboard-runtime/src/lib.rs:1146`) | `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (`homes.rs:539`); the client side measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md) |
+| A folder inside Switchboard's data folder is never the person's own | [The person's own Claude Code and Codex folders](#the-persons-own-claude-code-and-codex-folders-sb-183-node-a-5-2026-10-26) | `crates/switchboard-runtime/src/person.rs:34-53`, `inside` `:75` | `a_config_dir_inside_switchboards_data_is_never_the_persons_own` (`person.rs:114`) |
+| Uninstall takes the blocks out and owns `shell-hook`, `shell-hook.json` | [Uninstall](#uninstall-sb-29-2026-10-05) | `crates/switchboard-runtime/src/uninstall.rs:46-47` (`OWNED`), `:69` (`shell` kept as a home folder) | `apply_removes_owned_things_and_keeps_the_persons_files` (`uninstall.rs:442`) |
+| CLI `switchboard shell status`, `env`, `on`, `off`, `init <shell>` (zsh, bash, fish, pwsh) | [CLI](CLI.md#terminals-in-an-organizations-folders-sb-183-070) | `crates/switchboard-cli/src/main.rs:244` (`Shell`), `crates/switchboard-cli/src/shell.rs:18-56` (`ShellCmd`) | the CLI tests in `crates/switchboard-cli/tests/shell.rs` |
+| MCP `switchboard_shell_hook` (read) and `switchboard_shell_hook_set` (write, hidden under `--read-only`) | the start files section | `crates/switchboard-cli/src/mcp.rs:105-106`, `:883-886` | `handshake_lists_tools_and_rejects_malformed_messages` (`crates/switchboard-cli/tests/mcp.rs:139`, the hook tools at `:217-223`) |
+| The window's section *Terminals in organization folders* | SCN-075 in [scenarios](ux/scenarios.md) | `shellHookSection` in `src/main.ts` | `the_shell_hook_section_reads_every_state` (`scripts/test-ui-logic.mjs:973`) |
+| Lifecycle: the shell homes, map, scripts and start files in *Writes*; the hook's question in its own row | [AGENTS.md](../AGENTS.md#lifecycle) | as above | `python3 scripts/check_docs.py` |
+| The design decision H-3, amended for D-3, PowerShell and the shell homes | [design](research/session-home-per-context-2026-10-24.md) H-3 | none | none (a record of a decision) |
+
+**Not guarded by a proxy test.** Node A-6 (two proxy tests that pin the facts the shell homes rely
+on: a placeholder bearer with a folder's capability header reaches its pool, and an `_auto` request
+from an unmapped folder carries no sign-in upstream) was not built in 0.7.0:
+`grep -n "placeholder" crates/switchboard-proxy/src/tests.rs` prints nothing. The client side is
+measured ([A-0](evidence/shell-home-measurement-2026-10.md)); the proxy side rests on its existing
+capability tests (`a_pool_capability_reaches_its_pool_only`, `crates/switchboard-proxy/src/tests.rs:1440`).
+A board row is proposed in [the wave 5 backlog](runs/2026-10-26-iteration-0.7.0/wave5-backlog.md).
+
 ## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
 
 Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer`, `env_line`,

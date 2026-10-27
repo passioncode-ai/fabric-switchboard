@@ -183,7 +183,7 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
-### Terminals in an organization's folders (SB-183, 0.7.0, in progress)
+### Terminals in an organization's folders (SB-183, 0.7.0)
 
 In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`
 and `codex` in that group's shell homes, with `SWITCHBOARD_CONTEXT=org:<id>`, and gives the
