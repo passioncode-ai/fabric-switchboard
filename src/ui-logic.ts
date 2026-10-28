@@ -1185,7 +1185,7 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
     case 'seat':
       if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
       if (!group) return t('Sign in once the group exists.');
-      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
+      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
       return ({
         active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),

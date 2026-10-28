@@ -1111,7 +1111,8 @@ check(() => {
     assert.equal(seat.lines[3].command, 'switchboard shell off');
     assert.equal(seat.lines[2].command, undefined);
     const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
-    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again.');
+    // Note 6 of the wave 4 design pass: the card gives the account card's way out too.
+    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again. If Acme removed your seat, ask its administrator.');
     const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
     assert.equal(two.lines[1].line, 'Keep one group for Acme on this computer: Acme web, Acme two.');
     assert.equal(logic.orgSetupAction(two), null, 'which group stays is the person\'s');

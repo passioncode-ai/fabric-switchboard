@@ -584,6 +584,11 @@ g:hover > .chart-bar { opacity: .82; }
 .shell-hook-files { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
 .shell-hook-files > li { margin: 0; }
 .shell-hook-files .policy-row { margin-top: var(--space-1); }
+/* F4 (wave 4 design pass): a section's state line (Codex in group folders, Terminals in organization
+   folders) stands apart from its explanation, in body text; a start file the hook could not use is
+   marked like a ceiling warning. */
+.project-section .section-state { color: var(--ink); font-size: var(--t-body); margin-top: var(--space-3); }
+.shell-hook-files > li.shell-hook-problem { color: var(--ink); border-left: 3px solid var(--warn); padding-left: var(--space-2); }
 /* C-7 (SB-72): spending ceilings. A group key row wraps so its ceiling reads on its own line. */
 .key-list .repository-row { flex-wrap: wrap; }
 .ceiling-block { flex-basis: 100%; display: grid; gap: var(--space-1); margin: 0; }

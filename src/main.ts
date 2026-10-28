@@ -481,7 +481,7 @@ function codexRouteSection() {
   const r = codexRouteState;
   if (r) {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
-    section.append(el('p', 'account-meta', line));
+    section.append(el('p', 'account-meta section-state', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
     else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
     const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
@@ -512,7 +512,8 @@ function shellHookSection() {
   if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
   if (!shellHookState && !shellHookError) loadShellHook();
   const view = shellHookView(shellHookState, shellHookError || null);
-  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta', view.line));
+  // F4 (wave 4 design pass): the state stands apart from the explanation above it, in body text.
+  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta section-state', view.line));
   if (view.error) section.append(el('p', 'form-error', view.error));
   if (view.retry) { section.append(button(t('Retry'), () => { shellHookError = ''; loadShellHook(); render(); }, 'button', 'shell-hook-retry')); return section; }
   if (view.files.length) {
@@ -1274,13 +1275,15 @@ function groupCeilingLine(pool: string, own: boolean) {
   if (own || ceilingOf({ kind: 'project', pool })) return ceilingBlock({ kind: 'project', pool }, own ? groupKeyStatus?.[pool]?.credit ?? null : null);
   const block = el('div', 'ceiling-block'); block.append(el('p', 'form-note', t('A daily ceiling needs the group\'s own key.'))); return block;
 }
+/** Note 5 of the wave 4 design pass: the command is code, as everywhere else in the window (SB-228). */
+function ceilingCommandNote() { const note = el('p', 'form-note', t('Set from the command line:')); note.append(' ', el('code', 'address', 'switchboard continue --ceiling <usd>')); return note; }
 /** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here. */
 function taskCeilingsPanel() {
   const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
   if (!tasks.length) return null;
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'task-ceilings-heading');
   const heading = el('h2', '', t('Task ceilings')); heading.id = 'task-ceilings-heading';
-  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), el('p', 'form-note', t('Set from the command line: switchboard continue --ceiling <usd>.')));
+  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), ceilingCommandNote());
   const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Task ceilings'));
   for (const c of tasks) {
     const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
