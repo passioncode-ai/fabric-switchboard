@@ -133,6 +133,12 @@ export function createDemoAdapter(): Adapter {
     state.accounts = [];
     state.projects = new URLSearchParams(location.search).get('group') === 'none' ? [] : [{ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 3600, organization: northwind.id }];
     passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now() - 3600, read_at: now() - 600, checked_at: now() - 600, organizations: 1 };
+    // F3 (wave 4 design pass): `&second=1` adds an older organization with no group yet, so two
+    // cards show and only the first one's action is filled (VIS-21).
+    if (new URLSearchParams(location.search).get('second') === '1') {
+      state.organizations.push({ id: 'demo-org-fabrikam', name: 'Fabrikam', domains: ['fabrikam.test'], created_at: now() - 2 * 86_400, vesta_id: 'synthetic-vesta-fabrikam' });
+      passioncode.organizations = 2;
+    }
   }
   // Like the owner's `onboard` (onboarding.rs, organization steps only, the five first steps done).
   const onboardSteps = (): Onboarding => {

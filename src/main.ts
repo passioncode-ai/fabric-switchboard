@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
@@ -121,7 +121,7 @@ function answerUsage(focus: string, shown: boolean) {
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted, shown); }, () => usageAnswerText(wanted, analyticsState), focus);
 }
 /** SB-202 (B-8, SCN-076): "Set up {organization} on this computer", worded from the checklist the runtime computed. */
-function orgSetupCard(setup: OrgSetup) {
+function orgSetupCard(setup: OrgSetup, primary: boolean) {
   const id = `org-setup-${setup.organization.id}`;
   const card = el('section', 'org-setup'); card.setAttribute('aria-labelledby', `${id}-title`);
   const title = el('h2', '', orgSetupTitle(setup)); title.id = `${id}-title`;
@@ -140,7 +140,9 @@ function orgSetupCard(setup: OrgSetup) {
   if (onboardingError) card.append(el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
   const actions = el('div', 'org-setup-actions');
   const action = orgSetupAction(setup);
-  if (action) actions.append(action.kind === 'group' ? button(action.label, () => projectDialog(undefined, action.organization), 'button primary', `${id}-group`) : button(action.label, () => void startLogin('claude', '', action.pool), 'button primary', `${id}-sign-in`));
+  // F3 (VIS-21): with several cards, only the first one's action is filled.
+  const weight = primary ? 'button primary' : 'button';
+  if (action) actions.append(action.kind === 'group' ? button(action.label, () => projectDialog(undefined, action.organization), weight, `${id}-group`) : button(action.label, () => void startLogin('claude', '', action.pool), weight, `${id}-sign-in`));
   if (page === 'accounts') actions.append(button(t('Hide'), () => { orgSetupHidden = [...orgSetupHidden, setup.organization.id]; try { noticeStore()?.setItem(ORG_SETUP_HIDDEN_KEY, JSON.stringify(orgSetupHidden)); } catch { /* hidden for this window only */ } render(); restoreFocus('page-title'); }, 'text-button', `${id}-hide`));
   if (actions.childElementCount) card.append(actions);
   return card;
@@ -243,11 +245,15 @@ async function readContext(): Promise<Context> {
 }
 function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
 async function refreshContext() { applyContext(await readContext()); }
+/** F1 (SCN-079): organizations the person left on PassionCode.ai get no setup card. */
+const releasedOrgs = () => releasedOrganizations(passioncodeView, snapshot?.organizations ?? []);
 /** SB-228 (VIS-21): an organization card with its own action is on this page. */
-const orgCardLeads = () => orgSetupLeads({ onboarding, page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep });
-/** SB-202 (B-8): the checklist is read again with the account list; a machine without organizations reads nothing. */
+const orgCardLeads = () => orgSetupLeads({ onboarding, page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() });
+/** SB-202 (B-8): the checklist is read again with the account list; a machine without organizations reads nothing.
+ * F1: the connection's status (a local read) comes with it, so a left organization gets no card on Accounts either. */
 function loadOnboarding() {
   if (!(snapshot?.organizations ?? []).length) { onboarding = null; onboardingError = false; return; }
+  if (page !== 'orgs') void loadPassioncode();
   const stamp = clock.stamp();
   void adapter.onboard().then((value) => { if (clock.accepts(stamp)) { onboarding = value; onboardingError = false; } }, () => { onboardingError = true; }).finally(backgroundRender);
 }
@@ -403,9 +409,15 @@ function render(options: { background?: boolean } = {}): boolean {
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
   if (snapshot && (page === 'accounts' || page === 'orgs')) {
-    for (const setup of orgSetups(onboarding)) if (orgSetupShown({ page, organization: setup.organization.id, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep })) main.append(orgSetupCard(setup));
-    const unread = orgSetupUnread({ onboarding, failed: onboardingError, organizations: snapshot.organizations ?? [], page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep });
-    if (unread) main.append(orgSetupUnreadCard(unread));
+    const screen = { page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() };
+    const leader = orgSetupPrimary({ ...screen, onboarding });
+    const cards = orgSetups(onboarding, screen.released).filter((setup) => orgSetupShown({ ...screen, organization: setup.organization.id })).map((setup) => orgSetupCard(setup, setup.organization.id === leader));
+    const unread = orgSetupUnread({ onboarding, failed: onboardingError, organizations: snapshot.organizations ?? [], page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() });
+    if (unread) cards.push(orgSetupUnreadCard(unread));
+    // F1 (SCN-079): another organization's card would push each card's released line below the fold, so leaving is said above it.
+    const left = page === 'orgs' && cards.length ? releasedSummary(passioncodeView, snapshot.organizations ?? []) : null;
+    if (left) main.append(el('p', 'surface-note org-released org-released-summary', left));
+    main.append(...cards);
   }
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
@@ -473,12 +485,12 @@ function codexRouteSection() {
   const r = codexRouteState;
   if (r) {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
-    section.append(el('p', 'account-meta', line));
+    section.append(el('p', 'account-meta section-state', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
     else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
     const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
-    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on || !r.projects.length ? 'button' : 'button primary', 'codex-route-toggle');
+    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), 'button', 'codex-route-toggle');
     act.disabled = !r.on && !!r.conflict;
     section.append(act);
   }
@@ -504,7 +516,8 @@ function shellHookSection() {
   if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
   if (!shellHookState && !shellHookError) loadShellHook();
   const view = shellHookView(shellHookState, shellHookError || null);
-  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta', view.line));
+  // F4 (wave 4 design pass): the state stands apart from the explanation above it, in body text.
+  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta section-state', view.line));
   if (view.error) section.append(el('p', 'form-error', view.error));
   if (view.retry) { section.append(button(t('Retry'), () => { shellHookError = ''; loadShellHook(); render(); }, 'button', 'shell-hook-retry')); return section; }
   if (view.files.length) {
@@ -1112,7 +1125,9 @@ function connectPanel() {
     setup.append(facts, el('h3', '', t('Or register the tools yourself')));
   }
   setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command-line tool was not found on PATH.')));
-  if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
+  // VIS-21: *Use Subscriptions first* above leads while no chain is set; then this one does.
+  const linkLeads = firstPrimary([['chain_preset', !!chainsView && !chainsView.chains.length], ['link_cli', true]]) === 'link_cli';
+  if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), linkLeads ? 'button primary' : 'button', 'link-cli'));
   setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
   setup.append(el('p', 'form-note', t('Sessions you launch from Switchboard get these tools automatically when the command-line tool is available. Isolated sessions get the read-only tools.')));
   return setup;
@@ -1264,13 +1279,15 @@ function groupCeilingLine(pool: string, own: boolean) {
   if (own || ceilingOf({ kind: 'project', pool })) return ceilingBlock({ kind: 'project', pool }, own ? groupKeyStatus?.[pool]?.credit ?? null : null);
   const block = el('div', 'ceiling-block'); block.append(el('p', 'form-note', t('A daily ceiling needs the group\'s own key.'))); return block;
 }
+/** Note 5 of the wave 4 design pass: the command is code, as everywhere else in the window (SB-228). */
+function ceilingCommandNote() { const note = el('p', 'form-note', t('Set from the command line:')); note.append(' ', el('code', 'address', 'switchboard continue --ceiling <usd>')); return note; }
 /** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here. */
 function taskCeilingsPanel() {
   const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
   if (!tasks.length) return null;
   const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'task-ceilings-heading');
   const heading = el('h2', '', t('Task ceilings')); heading.id = 'task-ceilings-heading';
-  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), el('p', 'form-note', t('Set from the command line: switchboard continue --ceiling <usd>.')));
+  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), ceilingCommandNote());
   const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Task ceilings'));
   for (const c of tasks) {
     const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
@@ -1650,16 +1667,18 @@ function renderAccounts(main: HTMLElement) {
   termsBanner(status);
   rulesStrip(status);
   if (status.childElementCount) main.append(status);
-  renderCurrent(main);
-  renderPolicies(main);
   const accounts = snapshot!.accounts;
-  if (!accounts.length) {
-    // A reinstall with a backup this computer can open: one press brings everything back.
-    const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
-    // VIS-21: an organization card above with its own action is the screen's one primary; the page's buttons go quiet.
-    const cardLeads = orgCardLeads();
-    // SB-202 (B-8): an organization's group with no seat yet leads with the seat.
-    const lead = accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts });
+  // A reinstall with a backup this computer can open: one press brings everything back.
+  const backup = accounts.length ? undefined : backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
+  // VIS-21: an organization card above with its own action is the screen's one primary; the page's buttons go quiet.
+  const cardLeads = orgCardLeads();
+  // SB-202 (B-8): an organization's group with no seat yet leads with the seat.
+  const lead = accounts.length ? null : accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts, released: releasedOrgs() });
+  // F2 (SCN-076 step 7): while the organization's action leads, Add to Switchboard and Turn on for Claude Code are bordered.
+  const orgLeads = accountsOrgActionLeads({ cardLeads, emptyLead: lead });
+  renderCurrent(main, orgLeads);
+  renderPolicies(main, orgLeads);
+  if (lead) {
     const empty = emptyState(t('Start with one account'), lead.lead === 'org_seat' ? lead.line : backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : lead.lead === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), cardLeads ? 'button quiet' : 'button primary', 'empty-restore'));
     if (lead.lead === 'org_seat') { const pool = lead.pool; empty.append(button(lead.label, () => void startLogin('claude', '', pool), cardLeads ? 'button quiet' : 'button primary', 'empty-org-sign-in'), addMenu('button quiet')); main.append(empty, kimiSection()); return; }
@@ -2026,7 +2045,7 @@ function addDialog() {
   });
   provider.focus();
 }
-function renderCurrent(main: HTMLElement) {
+function renderCurrent(main: HTMLElement, quiet = false) {
   const section = el('section', 'current-section'); section.setAttribute('aria-label', t('Accounts the CLIs use now'));
   const heading = el('div', 'section-heading');
   const proxy = el('span', 'proxy-status'); const dot = el('span', `status-dot ${runtimeError ? 'unavailable' : ''}`); dot.setAttribute('aria-hidden', 'true');
@@ -2043,7 +2062,7 @@ function renderCurrent(main: HTMLElement) {
       const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
       card.append(copy);
       if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
-      else card.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, 'button primary row-button', `capture-${provider}`));
+      else card.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, quiet ? 'button row-button' : 'button primary row-button', `capture-${provider}`));
     } else {
       const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
       copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));
@@ -2058,7 +2077,7 @@ function renderCurrent(main: HTMLElement) {
   section.append(grid); main.append(section);
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
-function renderPolicies(main: HTMLElement) {
+function renderPolicies(main: HTMLElement, quiet = false) {
   const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
   const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
   // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
@@ -2075,7 +2094,7 @@ function renderPolicies(main: HTMLElement) {
   if (demo) copy.append(el('span', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
-  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
+  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, quiet ? 'button row-button' : 'button primary row-button', 'auto-on'));
   for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {where}', { where: inGroup(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);

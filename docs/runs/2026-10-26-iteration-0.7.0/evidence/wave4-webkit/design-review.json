@@ -1,0 +1,659 @@
+{
+ "schema": "design-review/1",
+ "surface": "Fabric Switchboard window, iteration 0.7.0 wave 4 and stability waves",
+ "panel_revision": "none: docs/ux/test-panel.md absent",
+ "rows": [
+  {
+   "scenario": "SCN-076",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-accounts-org-card-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "card with five steps, Done/Needs you/Optional, one action for the first step not done, Hide",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "fail",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "three filled primaries on the organization computer's Accounts: the card's (or, after Hide, the empty page's) Sign in with your {organization} address plus Add to Switchboard on each ordinary CLI signed in to an unsaved account (and Turn on for Claude Code once accounts exist); SCN-076 step 7 says the seat sign-in is the one primary",
+     "where": "Accounts, In use now (src/main.ts:2046, src/main.ts:2078)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-076",
+   "step": 4,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-accounts-org-card-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Terminals line with `switchboard shell off` as code, Optional",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-076",
+   "step": 7,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "f2-three-primaries-accounts-en-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "empty page leads with 'Sign in with your Northwind address. It goes to the group “Northwind web”.'; the card's same action quiet below while the card shows",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "fail",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "three filled primaries on the organization computer's Accounts: the card's (or, after Hide, the empty page's) Sign in with your {organization} address plus Add to Switchboard on each ordinary CLI signed in to an unsaved account (and Turn on for Claude Code once accounts exist); SCN-076 step 7 says the seat sign-in is the one primary",
+     "where": "Accounts, In use now (src/main.ts:2046, src/main.ts:2078)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-076",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "f1-released-org-card-orgs-ru-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "several organizations: one card each, newest first",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "fail",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "two organization cards each carry a primary action, so Organizations shows two (Accounts too, in a fresh window); SB-228's one-primary rule holds only for one organization",
+     "where": "orgSetupCard, every card's action is 'button primary' (src/main.ts:143, loop at src/main.ts:406)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-077",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-accounts-org-card-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "the card's sign-in starts in the group (demo records it; live sign-in NOT_RUN)",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-078",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "f1-released-org-card-accounts-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "ended seat: Sign in again mark, 'Sign in to check usage', the organization's line, no generic duplicate",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "nit",
+     "what": "with a seat ended, the card's Your seat line says the accounts 'must sign in again' and leads with sign-in, while the account card says to ask the administrator if the seat was removed; the card does not carry that way out",
+     "where": "organization card, Your seat (src/ui-logic.ts orgSetupLine 'seat')",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-078",
+   "step": 3,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "group card reads 'None of Northwind web's accounts is signed in...' in the warning colour",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-079",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "f1-released-org-card-orgs-ru-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Contoso card without the PassionCode.ai mark, released line with its date; above it a setup card for Contoso",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "fail",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "an organization the person left on PassionCode.ai still gets the 'Set up {organization} on this computer' card, whose primary action (+ Group for Contoso, or Sign in with your {organization} address once its seats ended) invites setting it up again; on Organizations two such cards push the released line below the fold",
+     "where": "Accounts and Organizations, top of the page (src/ui-logic.ts:1205 orgSetups keeps released organizations; crates/switchboard-runtime/src/onboarding.rs:370 lists every organization)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-074",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "window notice in the scenario's words with Open Groups (shell=notice), both languages",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-075",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "'On: new terminals in Northwind's folders work in its context.', one line per start file, Turn off",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "fail",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "the hook's state line is set in the explanation's muted style with no space before it, so 'On, but no start file holds the hook yet...' reads as the paragraph's last sentence; a file the hook could not use (link, another user, removed, PowerShell policy, Constrained Language Mode) looks exactly like 'zsh: ~/.zshrc, added'",
+     "where": "Groups > Terminals in organization folders (src/main.ts:507 'account-meta'; src/main.ts:513 adds .shell-hook-problem, which has no rule in src/style.css:584-586)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-075",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Turn off: the scenario's notice as a toast, focus on Turn on, state 'Off: new terminals keep your own settings.'",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-075",
+   "step": 3,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Turn on: the scenario's notice, focus on Turn off",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-075",
+   "step": 6,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "f3-hook-state-and-problem-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "alt states held, inactive, zdotdir, removed, policy, constrained, dev, failed: lines in the scenario's words, Copy beside init lines, Add the block again with its note",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "fail",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "risk",
+     "what": "the hook's state line is set in the explanation's muted style with no space before it, so 'On, but no start file holds the hook yet...' reads as the paragraph's last sentence; a file the hook could not use (link, another user, removed, PowerShell policy, Constrained Language Mode) looks exactly like 'zsh: ~/.zshrc, added'",
+     "where": "Groups > Terminals in organization folders (src/main.ts:507 'account-meta'; src/main.ts:513 adds .shell-hook-problem, which has no rule in src/style.css:584-586)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-066",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "organization line under the Codex state: 'In Northwind's folders, new terminals use its Codex accounts whether this is on or off.'",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "nit",
+     "what": "pre-existing primaries beside wave 4's: Groups header '+ New group' and Codex 'Turn on'; Agents 'Use Subscriptions first' and Connect's 'Link switchboard into ~/.local/bin' (below the fold)",
+     "where": "src/main.ts:391, src/main.ts:481 (Codex toggle), src/main.ts:1006 (preset), src/main.ts:1115 (Connect)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-080",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-agents-chains-reasons-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "lead line, This computer 'Not set' with Use Subscriptions first (primary) and Edit...",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "nit",
+     "what": "pre-existing primaries beside wave 4's: Groups header '+ New group' and Codex 'Turn on'; Agents 'Use Subscriptions first' and Connect's 'Link switchboard into ~/.local/bin' (below the fold)",
+     "where": "src/main.ts:391, src/main.ts:481 (Codex toggle), src/main.ts:1006 (preset), src/main.ts:1115 (Connect)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-080",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-agents-chains-reasons-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "preset: chips in order, notice 'This computer's chain is set.', focus on Edit...",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-080",
+   "step": 3,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-agents-editor-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "editor: agent and account per step, Move up/down disabled at the ends, Remove, key pin read-only, '(not automatic)' agents, Save chain the dialog's one primary",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-080",
+   "step": 5,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-agents-chains-reasons-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Clear: confirmation in the scenario's words, focus on Cancel",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-081",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-groups-ended-chain-hook-en-light-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Groups line 'Fallback: own chain' / 'this computer's chain' as a link; it opens Agents with the group's Set for this group... focused",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-082",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-agents-chains-reasons-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "one readiness line per step, every reason in chains=reasons; Last hand-over and Passed over lines",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-083",
+   "step": 1,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-apikeys-ceilings-en-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "machine and group ceilings, key's own limit, monthly warning, 'A daily ceiling needs the group's own key.', task ceilings read-only",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": [
+    {
+     "severity": "nit",
+     "what": "the task-ceilings line names 'switchboard continue --ceiling <usd>' as plain prose, while the organization card sets 'switchboard shell off' as code (SB-228: a command the line names is code)",
+     "where": "API keys > Task ceilings (src/main.ts:1273); the same on the machine key's CLI line (src/main.ts:1331, pre-existing)",
+     "status": "open"
+    }
+   ]
+  },
+  {
+   "scenario": "SCN-083",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-apikeys-ceilings-en-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "dialog: amount prefilled, explanation, Save ceiling primary, focus in the amount",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-083",
+   "step": 6,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-apikeys-ceilings-en-light-1100.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "remove key of a capped group: the SB-230 sentence in the confirmation, focus on Cancel, Remove key in danger style",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-084",
+   "step": 2,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-apikeys-question-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "banner on Agents and API keys, oldest first, Double and Keep of equal weight, neither primary nor focused",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-084",
+   "step": 3,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-apikeys-question-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "Double: 'This computer's daily ceiling is now $20.00.', banner gone, focus on the page title",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  },
+  {
+   "scenario": "SCN-037",
+   "step": 4,
+   "persona": "P-01",
+   "pass": "build",
+   "round": 1,
+   "frame": "no Figma frame; demo build ?demo=1",
+   "capture": "ref-about-update-paused-ru-dark-740.png",
+   "engine": "webkit (Playwright 1.63.0, WebKit r2359)",
+   "outcome": "'Version 0.7.1 is ready. It starts on its own when Switchboard is idle in the background after {time} or opens again, or restart now.' with Restart to update (fixture: the demo has no paused-update parameter; its update object was rewritten in flight, test-only)",
+   "checks": {
+    "frame": "pass",
+    "primary_action": "pass",
+    "controls": "pass",
+    "focus": "pass",
+    "states": "pass",
+    "text_fit": "pass",
+    "outcome": "pass"
+   },
+   "findings": []
+  }
+ ],
+ "resources": {
+  "started": [
+   {
+    "pid": 75923,
+    "what": "vite demo server :1477",
+    "kind": "server"
+   },
+   {
+    "pid": 80789,
+    "what": "node walk.js (Playwright WebKit, 1 page)",
+    "kind": "browser"
+   },
+   {
+    "pid": 88426,
+    "what": "node walk.js sanity rerun",
+    "kind": "browser"
+   },
+   {
+    "pid": 63229,
+    "what": "node walk.js full matrix (Playwright WebKit, 1 page)",
+    "kind": "browser"
+   },
+   {
+    "pid": 53034,
+    "what": "node crops.js (Playwright WebKit, 1 page)",
+    "kind": "browser"
+   },
+   {
+    "pid": 8781,
+    "what": "node acts.js (Playwright WebKit, 1 page)",
+    "kind": "browser"
+   }
+  ],
+  "live": [],
+  "closed": true
+ }
+}

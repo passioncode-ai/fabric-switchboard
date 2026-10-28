@@ -1111,7 +1111,8 @@ check(() => {
     assert.equal(seat.lines[3].command, 'switchboard shell off');
     assert.equal(seat.lines[2].command, undefined);
     const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
-    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again.');
+    // Note 6 of the wave 4 design pass: the card gives the account card's way out too.
+    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again. If Acme removed your seat, ask its administrator.');
     const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
     assert.equal(two.lines[1].line, 'Keep one group for Acme on this computer: Acme web, Acme two.');
     assert.equal(logic.orgSetupAction(two), null, 'which group stays is the person\'s');
@@ -1175,6 +1176,52 @@ check(() => {
     assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: null, current: null }).lead, 'reading');
     const lonely = { complete: true, degraded: [], steps: [...five, { id: 'organization', state: 'optional', summary: 'PassionCode.ai lists no organization for you yet.' }] };
     assert.deepEqual(logic.orgSetups(lonely), [], 'PassionCode.ai listing none: no card');
+  });
+  // F1 (wave 4 design pass, SCN-079): an organization the person left on PassionCode.ai gets no setup card
+  check(() => {
+    const contoso = { id: 'o-contoso', name: 'Contoso' };
+    const both = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: contoso, groups: [] }, { id: 'seat', state: 'needs_person', organization: contoso }] };
+    const organizations = [{ id: 'o-acme', name: 'Acme', created_at: 1, vesta_id: 'v-acme' }, { id: 'o-contoso', name: 'Contoso', created_at: 5, vesta_id: null }];
+    const status = { connected: true, released: [{ organization: 'o-contoso', at: 1000 }] };
+    const released = logic.releasedOrganizations(status, organizations);
+    assert.deepEqual(released, ['o-contoso']);
+    assert.deepEqual(logic.releasedOrganizations({ connected: false, released: status.released }, organizations), [], 'a disconnect is not leaving');
+    assert.deepEqual(logic.releasedOrganizations(null, organizations), [], 'not read yet: nothing is left out');
+    assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Contoso'], 'without the list, both');
+    assert.deepEqual(logic.orgSetups(both, released).map((s) => s.organization.name), ['Acme'], 'the left one has no card');
+    const leftOnly = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }]);
+    assert.equal(logic.orgSetupLeads({ onboarding: leftOnly, page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null, released: ['o-acme'] }), false, 'no card, so nothing leads');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: { claude: { status: 'available' }, codex: null }, released: ['o-acme'] }).lead, 'add_current', 'the empty page does not lead with a left organization\'s seat');
+    const unread = logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, released });
+    assert.deepEqual(unread, { id: 'o-acme', name: 'Acme' }, 'the read-failed card skips the left one too');
+    // Above another organization's card, leaving is said at the top of Organizations too.
+    assert.equal(logic.releasedSummary(status, organizations), 'Contoso is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.');
+    const fabrikam = { id: 'o-fab', name: 'Fabrikam', created_at: 2, vesta_id: null };
+    assert.equal(logic.releasedSummary({ connected: true, released: [...status.released, { organization: 'o-fab', at: 900 }] }, [...organizations, fabrikam]), 'Contoso, Fabrikam are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.');
+    assert.equal(logic.releasedSummary({ connected: false, released: status.released }, organizations), null);
+    assert.equal(logic.releasedSummary(null, organizations), null);
+  });
+  // F2, F3 (wave 4 design pass, SCN-076 step 7, VIS-21): one filled button per screen
+  check(() => {
+    const globex = { id: 'o-globex', name: 'Globex' };
+    const two = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }, { id: 'seat', state: 'needs_person', organization: globex }] };
+    const screen = { page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two }), 'o-acme', 'two cards: only the first one\'s action is primary');
+    assert.equal(logic.orgSetupPrimary({ ...screen, page: 'accounts', hidden: ['o-acme'], onboarding: two }), 'o-globex', 'the first card shown');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two, released: ['o-acme'] }), 'o-globex');
+    const noAction = withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]);
+    const twoFirstQuiet = { ...noAction, steps: [...noAction.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: twoFirstQuiet }), 'o-globex', 'a card with no action of its own is skipped');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: ready }), null);
+    // Accounts: while the organization's action leads, Add to Switchboard and Turn on for Claude Code go quiet.
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: true, emptyLead: null }), true, 'the card leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: '', label: '' } }), true, 'after Hide: the empty page\'s seat sign-in leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'add_current' } }), false, 'no organization lead: the page keeps its buttons');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: null }), false);
+    // The first action offered, in the page's reading order, is the one filled button.
+    assert.equal(logic.firstPrimary([['chain_preset', true], ['link_cli', true]]), 'chain_preset', 'Agents: the chain preset above Connect');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', true]]), 'link_cli');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', false]]), null);
   });
 }
 // C-3 (SB-71): the fallback chains panel and its editor.

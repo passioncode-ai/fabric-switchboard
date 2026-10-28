@@ -43,7 +43,7 @@ organization listed for the person, one optional `organization` step says so.
 
 | Step | What it checks | Whose |
 |---|---|---|
-| `organization` | At least one organization exists on this computer | done, or optional |
+| `organization` | At least one organization exists on this computer. One the person left on PassionCode.ai (and not linked again) gets no steps of its own: it is named under `left` (`[{id, name}]`) and in the summary, and is not set up again (SCN-079; test `onboarding::tests::an_organization_left_on_passioncode_is_not_set_up_again`) | done, or optional |
 | `org_group` | The organization has exactly one group bound to it | the person: ask whether the administrator gave a settings file (then you run `next.command`) or which folders the group takes (then you run `next.alternatives`); with two groups, the person says which one stays, then you run `next.command` on the others |
 | `seat` | That group holds an account of the organization that is switched on, not used on another machine and still signed in | the person signs in with the organization's address; you may start `next.command` (the sign-in opens in the group) |
 | `hook` | Whether terminals in the group's folders work in the organization's context (`switchboard shell status`): on by default, and working once a start file holds the hook | optional. `next.turn_off` turns it off and `next.turn_on` turns it back on: never run either unless the person asks. `next.command` (`shell status`) only reads |

@@ -2,7 +2,7 @@
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
-import { t } from './i18n';
+import { t, plural } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -1185,7 +1185,7 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
     case 'seat':
       if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
       if (!group) return t('Sign in once the group exists.');
-      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
+      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
       return ({
         active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),
@@ -1201,12 +1201,26 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
   }
 }
 const ORG_STEP_TITLES = (): Record<OrgSetupStepId, string> => ({ organization: t('Organization'), org_group: t('Group'), seat: t('Your seat'), hook: t('Terminals'), launch: t('First launch') });
-/** Every organization whose checklist is not complete yet, in the checklist's order (newest first). */
-export function orgSetups(onboarding: Onboarding | null | undefined): OrgSetup[] {
+/** F1 (wave 4 design pass, SCN-079): the organizations the person left on PassionCode.ai (`released`,
+ * not linked again), by id. None while the connection is not read or is disconnected. */
+export function releasedOrganizations(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'vesta_id'>[]): string[] {
+  return organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.id);
+}
+/** F1 (SCN-079): the line at the top of Organizations, while another organization's setup card
+ * would push each card's own released line below the fold: which organizations the person left. */
+export function releasedSummary(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'name' | 'vesta_id'>[]): string | null {
+  const names = organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.name);
+  if (!names.length) return null;
+  return plural(names.length, { one: '{names} is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.', other: '{names} are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.' }, { names: names.join(', ') });
+}
+/** Every organization whose checklist is not complete yet, in the checklist's order (newest first).
+ * An organization the person left on PassionCode.ai (`released`) gets no card: its line on
+ * Organizations says so, and setting it up again is not offered (SCN-079, F1). */
+export function orgSetups(onboarding: Onboarding | null | undefined, released: readonly string[] = []): OrgSetup[] {
   const known = new Set<string>(['org_group', 'seat', 'hook', 'launch']);
   const byOrg = new Map<string, { organization: { id: string; name: string }; steps: OnboardStep[] }>();
   for (const step of onboarding?.steps ?? []) {
-    if (!step.organization || !known.has(step.id)) continue;
+    if (!step.organization || !known.has(step.id) || released.includes(step.organization.id)) continue;
     const entry = byOrg.get(step.organization.id) ?? { organization: step.organization, steps: [] };
     entry.steps.push(step); byOrg.set(step.organization.id, entry);
   }
@@ -1245,18 +1259,34 @@ export function orgSetupCaveat(onboarding: Onboarding | null | undefined): strin
   if (degraded.includes('sessions')) return t('The recorded sessions could not be read, so First launch may read not done.');
   return t('Part of the setup could not be read, so a step may be wrong.');
 }
-type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null };
+type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null; /** F1: organizations left on PassionCode.ai (`releasedOrganizations`). */ released?: readonly string[] };
 /** SB-228 (VIS-21): a card with an action of its own is on screen, so its action is the screen's
  * one primary and the page's buttons (+ New organization, Restore from backup, + Add account) go quiet. */
 export function orgSetupLeads(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): boolean {
-  return orgSetups(input.onboarding).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }));
+  return orgSetupPrimary(input) !== null;
+}
+/** F3 (wave 4 design pass, VIS-21): with several cards on screen, only the first one shown with an
+ * action of its own has the filled button; the others' actions are bordered. Its organization's id. */
+export function orgSetupPrimary(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): string | null {
+  return orgSetups(input.onboarding, input.released).find((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }))?.organization.id ?? null;
+}
+/** F2 (wave 4 design pass, SCN-076 step 7, VIS-21): on Accounts an organization's own action (its
+ * card's, or the empty page's seat sign-in after *Hide*) is the screen's one primary, so *Add to
+ * Switchboard* and *Turn on for Claude Code* go quiet beside it. */
+export function accountsOrgActionLeads(input: { cardLeads: boolean; emptyLead: AccountsEmptyKey | null }): boolean {
+  return input.cardLeads || input.emptyLead?.lead === 'org_seat';
+}
+/** VIS-21: one filled button per screen: of the actions a page offers to lead, in its reading
+ * order, the first one offered is filled; the others are bordered. */
+export function firstPrimary<T extends string>(offered: readonly (readonly [T, boolean])[]): T | null {
+  return offered.find(([, on]) => on)?.[0] ?? null;
 }
 /** SB-228 (SCN-076): the first checklist read failed, so there are no steps to show: the card of
  * the newest organization it would be shown for, with the read-failed note only. Null once any
  * read answered (that card keeps its steps and shows the note itself). */
 export function orgSetupUnread(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined; failed: boolean; organizations: readonly Pick<Organization, 'id' | 'name' | 'created_at'>[] }): { id: string; name: string } | null {
   if (input.onboarding || !input.failed) return null;
-  const newest = [...input.organizations].sort((a, b) => b.created_at - a.created_at);
+  const newest = input.organizations.filter((o) => !(input.released ?? []).includes(o.id)).sort((a, b) => b.created_at - a.created_at);
   const org = newest.find((o) => orgSetupShown({ ...input, organization: o.id }));
   return org ? { id: org.id, name: org.name } : null;
 }
@@ -1265,9 +1295,9 @@ export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[
 }
 export type AccountsEmptyKey = { lead: 'backup' } | { lead: 'org_seat'; organization: string; group: string; pool: string; line: string; label: string } | { lead: 'reading' | 'add_current' | 'sign_in' };
 /** What the empty Accounts page leads with: a backup to restore, then an organization's seat (its group exists, no seat yet), then today's first-account line. */
-export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboarding | null | undefined; current: Parameters<typeof firstRunHint>[0] }): AccountsEmptyKey {
+export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboarding | null | undefined; current: Parameters<typeof firstRunHint>[0]; released?: readonly string[] }): AccountsEmptyKey {
   if (input.backup) return { lead: 'backup' };
-  for (const setup of orgSetups(input.onboarding)) {
+  for (const setup of orgSetups(input.onboarding, input.released)) {
     const action = orgSetupAction(setup);
     if (action?.kind === 'sign_in' && setup.group) return { lead: 'org_seat', organization: setup.organization.name, group: setup.group.name, pool: setup.group.pool, line: seatLeadLine(setup.organization.name, setup.group.name), label: action.label };
   }
