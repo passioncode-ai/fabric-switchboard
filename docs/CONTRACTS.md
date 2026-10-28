@@ -611,8 +611,9 @@ detailed in the two entries below:
   `crates/switchboard-core/src/backup.rs:77`; removed by `switchboard uninstall`,
   `crates/switchboard-runtime/src/uninstall.rs:35`): ceilings, questions, task baselines and the
   last hand-over, never a key or a label. Log events `ceiling` (set, cleared, reached, kept,
-  doubled, removed) and `spend_gate` (each paid step's verdict, `fallback.rs:1303`). No analytics
-  event or prop ([ANALYTICS](ANALYTICS.md#chains-and-ceilings-070)).
+  doubled, removed) and `spend_gate` (each paid step's verdict, `fallback.rs:1303`). Analytics:
+  the counts `chains`, `ceilings` and `ceiling_questions` in `app_active`, no event, no id or
+  amount ([ANALYTICS](ANALYTICS.md#chains-and-ceilings-070), C-Q6).
 - **Not covered.** A running managed session moved onto an API-key account without a start
   (`switchboard_switch`, automatic switching, SB-98's failover) is not gated (C-N2, SB-217); paid
   starts moved off a capped group's key by moving its folder or disabling its accounts are no longer

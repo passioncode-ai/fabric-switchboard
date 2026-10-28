@@ -95,16 +95,18 @@ else identifies the machine or the person.
 |---|---|---|
 | `app_installed` | first start of this app on this machine after the person answered the switch with on (once, kept in `<data>/analytics-state.json`) | the counts below; `first_passioncode_app`: no PassionCode app had run here before |
 | `app_started` | every start of the desktop app once answered; the start of the run in which the person answers, after the answer | `launch`: `ordinary` or `background` (login item, lifecycle broker) |
-| `app_active` | once per UTC day while the app runs, window open or not | `accounts`, `enabled`, `claude`, `codex`, `oauth`, `api_key`, `setup_token`, `pools` (a count), `rotation_on` (enabled policies), `project_rules`, `projects` |
+| `app_active` | once per UTC day while the app runs, window open or not | `accounts`, `enabled`, `claude`, `codex`, `oauth`, `api_key`, `setup_token`, `pools` (a count), `rotation_on` (enabled policies), `project_rules`, `projects`; since 0.7.0 `chains`, `ceilings`, `ceiling_questions` ([below](#chains-and-ceilings-070)) |
 | `account_added` | an account appears | `provider`, `kind`, `method` (`sign_in`, `capture`, `import_claude_swap`, `manual`, `restore`, `sync`), `accounts` (total after) |
 | `account_removed` | an account disappears | `provider`, `kind`, `accounts` |
 | `project_changed` | a project created, changed or removed by the person (folders Switchboard adds or takes out by itself, SB-131, send nothing; the next person's change carries the current counts) | `change` (`created`, `updated`, `removed`), `projects`, `folders`, `project_accounts` — counts, never a name or a path |
 | `account_switched` | the account in use or a pool's managed route changes | `provider`, `target` (`native`, `managed`), `cause` (`manual`, `rotation`, `limit`) |
 
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,
-tokens, provider responses or errors, quota figures. The test
+tokens, provider responses or errors, quota figures, and (0.7.0) a chain's or ceiling's scope,
+group id, workflow id, question id, agent, key name or amount. The test
 `events_carry_counts_and_the_installation_id_never_an_identity` sends accounts whose id, label,
-identity and pool are planted strings and fails if any of them reaches the server.
+identity and pool are planted strings, and chains and ceilings with a planted group id, workflow
+id, question id, account, key name and amount, and fails if any of them reaches the server.
 
 Accounts present when analytics first runs are counted in `app_installed`, not reported as added.
 An account added or removed while analytics is off, or before the person answered, is never
@@ -112,20 +114,28 @@ reported later.
 
 ## Chains and ceilings (0.7.0)
 
-Release 0.7.0 adds no event and no prop. Nothing about fallback chains, spending ceilings and their
-questions, the spend gate, the terminal hook, the organization checklist or launch records is
-sent: `app_active` carries the same counts as before (`counts`,
-`crates/switchboard-runtime/src/analytics.rs:686-724`), and
-`grep -n '"chains"\|"ceilings"' crates/switchboard-runtime/src/analytics.rs` prints nothing.
-
 Decision C-Q6 of the 0.7.0 iteration ([questions](runs/2026-10-26-iteration-0.7.0/questions.md),
-assumed) chose, when these surfaces are counted at all, two counts in `app_active` and no new
-event: `chains` (how many fallback chains are set) and `ceilings` (how many spending ceilings),
-counts only, never a scope, a group id, an amount or a workflow id. It was not built in 0.7.0. When
-it is, the same change adds both props to the table above and plants a group id and a workflow id
-in `events_carry_counts_and_the_installation_id_never_an_identity`
-(`crates/switchboard-runtime/src/analytics.rs:872`), as the privacy rule in
-[AGENTS.md](../AGENTS.md) requires.
+assumed): fallback chains and spending ceilings are counted in `app_active` and nowhere else, with no
+new event. The event keeps its name and its earlier props; three counts join it:
+
+| Prop | Meaning | When it is left out |
+|---|---|---|
+| `chains` | how many fallback chains are set, of every scope (this computer, groups, tasks) added up | never: it is read from the store's metadata |
+| `ceilings` | how many spending ceilings are set, of every scope added up | `spend.json` cannot be read: unknown, never sent as 0 |
+| `ceiling_questions` | how many ceiling questions wait for an answer (a reached ceiling's *double* or *keep*) | as `ceilings` |
+
+Counts only: never a scope, a group id, a workflow id, a question id, an agent, a key name or an
+amount. `ceilings` and `ceiling_questions` are counted after the same pruning the window applies
+(a deleted group's ceiling, an answered question, a question past its day), so they match what
+the window shows. `spend.json` is read only on the pass that sends the day's `app_active`, so the
+idle budget is unchanged. `app_installed` carries the earlier counts only. Code:
+`active_counts` and `chains_and_ceilings` (`crates/switchboard-runtime/src/analytics.rs:731-756`);
+tests `chains_and_ceilings_are_counted_and_an_unreadable_file_is_never_zero` (`:978`) and the
+planted-identifier test (`:1009`), which plants a group id, a workflow id, a question id, an
+account, a key name and an amount in the chains and `spend.json` and checks that none leaves the
+machine. Both were shown to fail with a defect planted (the chains' scopes sent; a ceiling's
+amount sent), then restored. Nothing about the spend gate, the terminal hook, the organization
+checklist or launch records is sent.
 
 ## The shared installation id
 

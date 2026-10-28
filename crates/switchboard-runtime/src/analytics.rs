@@ -239,6 +239,8 @@ pub struct Analytics {
     key: String,
     host: String,
     shared: PathBuf,
+    /// The data folder: `spend.json` is read there once a day for `app_active` (C-Q6).
+    root: PathBuf,
     state_path: PathBuf,
     state: Mutex<State>,
     held: Mutex<Option<Held>>,
@@ -260,6 +262,7 @@ impl Analytics {
             key: key.to_owned(),
             host: host.trim_end_matches('/').to_owned(),
             shared,
+            root: data_root.to_owned(),
             state_path,
             state: Mutex::new(state),
             held: Mutex::new(None),
@@ -570,14 +573,15 @@ impl Analytics {
     }
 
     /// Every monitor pass: once a UTC day an active event with the counts, and any account added
-    /// or removed by a path no operation reported.
+    /// or removed by a path no operation reported. The ceilings file is read only on the pass
+    /// that sends the day's event, so the idle budget is unchanged.
     pub fn tick(&self, snapshot: &Snapshot, time: i64) {
         let day = time.div_euclid(86_400);
         let due = {
             let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.active_day != Some(day)
         };
-        if due && self.track("app_active", counts(snapshot)) {
+        if due && self.track("app_active", active_counts(snapshot, &self.root, time)) {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.active_day = Some(day);
             self.save(&state);
@@ -724,6 +728,33 @@ fn counts(snapshot: &Snapshot) -> Map<String, Value> {
     props
 }
 
+/// `app_active`'s props: the counts above, plus how many fallback chains and spending ceilings
+/// are set and how many ceiling questions wait (decision C-Q6, 0.7.0). Counts only: never a
+/// scope, a group id, a workflow id, a question id, an agent, a key name or an amount.
+fn active_counts(snapshot: &Snapshot, root: &Path, now: i64) -> Map<String, Value> {
+    let mut props = counts(snapshot);
+    props.extend(chains_and_ceilings(snapshot, crate::spend::read(root), now));
+    props
+}
+
+/// `chains` always; `ceilings` and `ceiling_questions` only when `spend.json` could be read
+/// (an unreadable file is unknown, never zero), after the same pruning the window applies.
+fn chains_and_ceilings(
+    snapshot: &Snapshot,
+    spend: Result<crate::spend::SpendFile, String>,
+    now: i64,
+) -> Map<String, Value> {
+    let mut props = Map::new();
+    props.insert("chains".into(), json!(snapshot.chains.len()));
+    if let Ok(mut file) = spend {
+        crate::spend::prune(&mut file, Some(snapshot), now);
+        props.insert("ceilings".into(), json!(file.ceilings.len()));
+        let open = file.questions.iter().filter(|q| q.answer.is_none()).count();
+        props.insert("ceiling_questions".into(), json!(open));
+    }
+    props
+}
+
 /// `YYYY-MM-DDTHH:MM:SS.000Z` for Unix seconds (civil-from-days, proleptic Gregorian).
 fn rfc3339(seconds: i64) -> String {
     let (days, rest) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
@@ -819,6 +850,81 @@ mod tests {
             ..Default::default()
         }
     }
+    /// Planted identifiers for C-Q6: a group id, a workflow id, a question id, an account, a key
+    /// name and an amount (4242 cents), none of which may leave the machine.
+    const PLANTED_GROUP: &str = "planted-group-id";
+    const PLANTED_WORKFLOW: &str = "wf_0123456789abcdef";
+    const PLANTED_QUESTION: &str = "q_0123456789abcdef";
+    fn planted_chains() -> Vec<switchboard_core::Chain> {
+        use switchboard_core::{Chain, ChainScope, Executor};
+        let executors = vec![Executor {
+            agent: "claude-code".into(),
+            account_id: Some("acct-chain-planted".into()),
+            key: Some("planted/prod/PLANTED_KEY_NAME".into()),
+        }];
+        [
+            ChainScope::Machine,
+            ChainScope::Project {
+                pool: PLANTED_GROUP.into(),
+            },
+            ChainScope::Workflow {
+                id: PLANTED_WORKFLOW.into(),
+            },
+        ]
+        .into_iter()
+        .map(|scope| Chain {
+            scope,
+            executors: executors.clone(),
+            updated_at: 1,
+        })
+        .collect()
+    }
+    /// Two ceilings (the machine's, a task's) and three questions: one open, one answered and
+    /// one a day old past its day, which the window no longer shows.
+    fn planted_spend(now: i64) -> crate::spend::SpendFile {
+        use crate::spend::{Answer, Ceiling, Question, SpendFile, Surface};
+        use switchboard_core::ChainScope;
+        let task = ChainScope::Workflow {
+            id: PLANTED_WORKFLOW.into(),
+        };
+        let question = |id: &str, scope: ChainScope, reached_at: i64, answered: bool| Question {
+            id: id.into(),
+            scope,
+            cents: 4242,
+            spent: 42.42,
+            reached_at,
+            answer: answered.then_some(Answer::Keep),
+            answered_at: answered.then_some(reached_at),
+            answered_by: answered.then_some(Surface::Window),
+        };
+        SpendFile {
+            ceilings: vec![
+                Ceiling {
+                    scope: ChainScope::Machine,
+                    cents: 4242,
+                    set_at: now,
+                    doubled_from: None,
+                },
+                Ceiling {
+                    scope: task.clone(),
+                    cents: 4242,
+                    set_at: now,
+                    doubled_from: None,
+                },
+            ],
+            questions: vec![
+                question(PLANTED_QUESTION, task.clone(), now, false),
+                question("q_00000000000000aa", task, now, true),
+                question(
+                    "q_00000000000000bb",
+                    ChainScope::Machine,
+                    now - 3 * 86_400,
+                    false,
+                ),
+            ],
+            ..Default::default()
+        }
+    }
     fn events(server: &Server) -> Vec<Value> {
         server
             .bodies
@@ -868,6 +974,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn chains_and_ceilings_are_counted_and_an_unreadable_file_is_never_zero() {
+        let now = 86_400 * 20_000 + 3_600;
+        let mut planted = snapshot(vec![]);
+        planted.chains = planted_chains();
+        let props = chains_and_ceilings(&planted, Ok(planted_spend(now)), now);
+        assert_eq!(
+            Value::Object(props),
+            json!({"chains": 3, "ceilings": 2, "ceiling_questions": 1}),
+            "an answered question and one past its day are not open"
+        );
+        // Nothing set: zeros, which are known.
+        let none = chains_and_ceilings(&snapshot(vec![]), Ok(Default::default()), now);
+        assert_eq!(
+            Value::Object(none),
+            json!({"chains": 0, "ceilings": 0, "ceiling_questions": 0})
+        );
+        // spend.json unreadable: the ceilings are unknown, so they are left out, never 0.
+        let unknown = chains_and_ceilings(&planted, Err("unreadable".into()), now);
+        assert_eq!(Value::Object(unknown), json!({"chains": 3}));
+        // Through the file in the data folder, as tick reads it; an absent file is no ceiling.
+        let folder = tempfile::tempdir().unwrap();
+        assert_eq!(active_counts(&planted, folder.path(), now)["ceilings"], 0);
+        let path = folder.path().join(crate::spend::FILE);
+        switchboard_core::private_fs::private_write(&path, b"{not json").unwrap();
+        let props = active_counts(&planted, folder.path(), now);
+        assert!(props.get("ceilings").is_none() && props.get("ceiling_questions").is_none());
+        assert_eq!(props["chains"], 3);
+        assert_eq!(props["accounts"], 0, "the earlier counts stay");
+    }
+
     #[tokio::test]
     async fn events_carry_counts_and_the_installation_id_never_an_identity() {
         let server = Server::default();
@@ -875,7 +1012,14 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
         let client = Analytics::new("A-SH-0000000000", &url, shared.clone(), folder.path());
-        let one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
+        let mut one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
+        // C-Q6: chains and ceilings whose scopes, ids, key name and amount are planted.
+        one.chains = planted_chains();
+        switchboard_core::private_fs::private_write(
+            &folder.path().join(crate::spend::FILE),
+            &serde_json::to_vec(&planted_spend(now())).unwrap(),
+        )
+        .unwrap();
         client.started("background", &one);
         // The start waits for the person's answer (issue #128), then goes out.
         client.set_enabled(true).unwrap();
@@ -904,6 +1048,16 @@ mod tests {
             "Label of",
             "person@example.invalid",
             "secret-pool-name",
+            PLANTED_GROUP,
+            PLANTED_WORKFLOW,
+            "0123456789abcdef",
+            PLANTED_QUESTION,
+            "acct-chain-planted",
+            "PLANTED_KEY_NAME",
+            "claude-code",
+            // An amount as a JSON number (the session id is a string of digits).
+            ":4242",
+            ":42.42",
         ] {
             assert!(!all.contains(private), "{private} left the machine");
         }
@@ -921,6 +1075,14 @@ mod tests {
         assert_eq!(sent[0]["props"]["first_passioncode_app"], true);
         assert_eq!(sent[1]["props"]["launch"], "background");
         assert_eq!(sent[2]["props"]["accounts"], 1);
+        // C-Q6: counts only, and only in app_active.
+        assert_eq!(sent[2]["props"]["chains"], 3);
+        assert_eq!(sent[2]["props"]["ceilings"], 2);
+        assert_eq!(sent[2]["props"]["ceiling_questions"], 1);
+        assert!(
+            sent[0]["props"].get("chains").is_none(),
+            "app_installed unchanged"
+        );
         assert_eq!(sent[3]["props"]["method"], "sign_in");
         assert_eq!(sent[3]["props"]["provider"], "codex");
         assert_eq!(sent[3]["props"]["kind"], "api_key");

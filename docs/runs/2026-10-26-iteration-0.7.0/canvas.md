@@ -176,7 +176,8 @@ Branch `w5/docs` from the iteration head `a476db1`, documentation only, one comm
   (built afterwards on `w5/a6-cq6`, 2026-10-28; row `new-1` done).
 - **C-9** `07294c3`: CONTRACTS `## Spending ceilings (SB-72, 0.7.0)`, the storage and the gate moved under
   it with a summary (ceilings, who loosens, gate, budget, key slot, questions, records, not covered);
-  AGENTS.md `GET /key` only at a paid start; ANALYTICS.md records C-Q6 as not built; terminology and
+  AGENTS.md `GET /key` only at a paid start; ANALYTICS.md records C-Q6 as not built (built afterwards on
+  `w5/a6-cq6`, 2026-10-28; row `new-5` done); terminology and
   strings; the XA-01 state line.
 - **B-9** `a1059ce`: [ORGANIZATION.md](../../ORGANIZATION.md) and [ORGANIZATION.ru.md](../../ORGANIZATION.ru.md),
   every step with its proof command and a Windows column; Copylot en-US `82a68bc7`, ru-RU `faec18a8`.
@@ -184,5 +185,5 @@ Branch `w5/docs` from the iteration head `a476db1`, documentation only, one comm
   entries (Copylot `2358e52a`); [release-notes-draft.md](release-notes-draft.md) (Copylot `a903757b`).
 - **Backlog**: [wave5-backlog.md](wave5-backlog.md) holds every proposed change to the guarded backlog, for
   the lead to copy in under its lease (SB-71 done, SB-72 split, SB-73 status, SB-183 title, SB-201, SB-202,
-  SB-160, SB-125, SB-96, SB-97; nine new rows, `new-1` to `new-9`).
+  SB-160, SB-125, SB-96, SB-97; nine new rows, `new-1` to `new-9`; `new-10` added with C-Q6).
 
