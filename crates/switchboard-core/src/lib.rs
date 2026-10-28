@@ -328,6 +328,10 @@ pub struct Store {
     /// Accounts whose usage check the provider refused lately (SB-106), as the runtime last
     /// said: they keep the ordinary cadence. Memory only.
     paced: Mutex<std::collections::HashSet<String>>,
+    /// Accounts whose seat the provider ended (0.7.0 B-5: a lineage refused or a usage check's
+    /// verdict) and that no new credential has replaced, as the runtime last said (SB-211).
+    /// Memory only; a failover never moves a request onto one.
+    ended: Mutex<std::collections::HashSet<String>>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -799,6 +803,7 @@ impl Store {
             limited: Default::default(),
             refused: Default::default(),
             paced: Default::default(),
+            ended: Default::default(),
         })
     }
     /// The private data folder this store owns.
@@ -899,6 +904,26 @@ impl Store {
         if let Ok(mut paced) = self.paced.lock() {
             *paced = ids;
         }
+    }
+    /// Replaces the accounts whose seat the provider ended (SB-211): the runtime's
+    /// `sign_in_required` at each background pass. A failover never picks one.
+    pub fn set_ended(&self, ids: std::collections::HashSet<String>) {
+        if let Ok(mut ended) = self.ended.lock() {
+            *ended = ids;
+        }
+    }
+    /// SB-211: the provider ended `id`'s seat just now; held out of failovers until the next
+    /// background pass says otherwise (a new sign-in replaces the credential).
+    pub fn mark_ended(&self, id: &str) {
+        if let Ok(mut ended) = self.ended.lock() {
+            ended.insert(id.to_owned());
+        }
+    }
+    pub fn ended(&self) -> std::collections::HashSet<String> {
+        self.ended
+            .lock()
+            .map(|ended| ended.clone())
+            .unwrap_or_default()
     }
     /// SB-106: while the account a session works on is near its limit (95 %) or held by one,
     /// the pool's next account — the one a switch or a failover would take — is due a minute
@@ -1074,6 +1099,8 @@ impl Store {
     ) -> Result<Option<(Account, Credential)>, String> {
         let policy = self.failover_policy(provider, pool)?;
         let mut held = self.limited();
+        // SB-211: an ended seat would refuse the one replay SB-98 allows.
+        held.extend(self.ended());
         held.extend(from.map(str::to_owned));
         let Some(id) = self.failover_candidate(&policy, &held, fits, now)? else {
             return Ok(None);
