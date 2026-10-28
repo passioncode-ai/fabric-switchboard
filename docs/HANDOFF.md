@@ -30,8 +30,14 @@
   closed (SB-71, SB-160, SB-183, SB-201, SB-202, SB-207 to SB-210, SB-212 to SB-215, SB-218 to SB-220, SB-222 to
   SB-228); SB-221, SB-229 and SB-230 stay open for what they name as left. SB-242 filed (moving accounts to another
   machine, coordinator MV-7).
-- **Exact next task.** Measure a day of `control_slow` with `lock_ms` on the installed 0.7.0 for SB-174 and SB-163,
-  then take SB-242's operator decision and the next board row by priority.
+- **After the release (2026-10-28, on `main`, for the next release).** SB-242 decided by D-4 and closed (`c3a0906`);
+  SB-211 built, a failover never moves a request onto an ended seat (PR #340, `9d78ed9`, 966 tests passed); SB-239
+  built, the agent settings unreadable message names delete-then-restore (PR #341, `0d060c0`); the guard's Windows
+  timing test (PR #337).
+- **Exact next task.** Measure a day of `control_slow` with `lock_ms` on the installed 0.7.0 for SB-174 and SB-163
+  (from 2026-10-29). Next board row by priority: SB-237 (a group's managed sessions share one route and stop
+  together): a design note first, since spreading sessions over a group's accounts changes the one-route-per-pool
+  rule of SB-98 and SB-118.
 
 ## 2026-10-26 (evening): iteration 0.7.0 «first organization», waves 1 to 3 merged
 
