@@ -2,6 +2,54 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-28: release 0.7.0 «first organization», with the stability and Windows debts closed
+
+- **Where.** `iteration/0.7.0` merged into `main` by the release pull request; run record
+  `docs/runs/2026-10-26-iteration-0.7.0/` (canvas: every node, round, fix cycle and merged gate; questions; dossiers A,
+  B, C; evidence including the wave 4 WebKit pass `evidence/wave4-webkit/design-review.md`).
+- **Done.** Waves 1 to 5 of the iteration: the terminal hook (zsh, bash, fish, PowerShell 5.1 and 7) and shell homes,
+  the organization checklist and first run, seats ended and PassionCode.ai leaving shown, contexts for every agent,
+  fallback chains and spending ceilings in the window, launch records with their chain and transcript (SB-212). The
+  operator's stability and Windows plan of 2026-10-27 ([report](reports/2026-10-27-stability-windows-debts/README.md)):
+  W1, W1b, W2 (Windows tests run and pass; the folder map's Windows rules; junctions and hard links), S1 to S5
+  (runtime reliability, urgent releases, window leftovers, spend gate edges). Runbook `docs/ORGANIZATION.md` and
+  `docs/ORGANIZATION.ru.md`.
+- **Checks run.** Nightly on the iteration and on the Windows branch green on all six jobs (runs 40581403395,
+  40585412854, 40597614931); merged gates per node in the canvas; `./scripts/check.sh` on the release tree; the
+  release workflow's own guard and nightly on the tag.
+- **Decisions.** An empty PassionCode.ai list releases nothing (SB-227); a left organization gets no setup card
+  (WebKit pass F1); one build at a time with a 4 GB floor on this Mac (canvas, build rule).
+- **Prerequisites left to people.** SB-02 (a Windows host the agent can reach), SB-01, SB-15, SB-178, SB-06 (live
+  accounts), SB-13, SB-16 (decisions); B-10 (SB-125) after 0.7.0 is installed on both machines.
+- **Exact next task.** Watch the `v0.7.0` release run to success, confirm the published assets and `latest.json`,
+  update the local install, then close the rows built in 0.7.0 (SB-71, SB-160, SB-183, SB-201, SB-202, SB-207,
+  SB-208, SB-212, SB-213, SB-214, SB-215, SB-218 to SB-230 as marked) and measure a day of `control_slow` with
+  `lock_ms` on the installed 0.7.0 for SB-174 and SB-163.
+
+## 2026-10-26 (evening): iteration 0.7.0 «first organization», waves 1 to 3 merged
+
+- **Where.** Branch `iteration/0.7.0` at `97e698f` (not on `main` yet); the run's record is
+  `docs/runs/2026-10-26-iteration-0.7.0/` on that branch: `canvas.md` (dossiers A, B, C, waves, node state, rounds,
+  D-1 design), `questions.md` (A-Q1 to A-Q8, B-Q1 to B-Q6, C-Q1 to C-Q9, C-N1, C-N2: assumed, closed, or queued with
+  fabric-workspace as Q-I).
+- **Done.** Wave 1: scenarios SCN-074 to SCN-084, SCR-03, FLW-04/05 (`d4fef33`), the shell home measurement A-0
+  (`bfee6c4`). Wave 2 merged at `1cd483b`. Wave 3 merged: `w3/shell` (A-4 shell homes and map writer, A-2 hooks R3,
+  A-3 rc installer R3) `4af3af1`; `w3/person` (B-3 organization checklist, B-4 sign-in receipt) `a6701ad`;
+  `w3/spend` (C-5 spend gate at hand-over R3, C-6 ceilings from CLI and MCP R3, three fix cycles, loop guard reached)
+  `dc734fd`. Merged gate on `dc734fd`: clippy `-D warnings` exit 0, `cargo test` core, runtime (669 passed,
+  1 ignored), cli 0 failed, `check-error-vocabulary`, `check-locale`, `check_docs`, `check_plugin` exit 0.
+- **Filed.** SB-212 (operator 2026-10-26: keep what a launched session did and its call chain; node D-1 in wave 4,
+  Dashboards part asked on board thread `62d78b7f`), SB-213 to SB-217 (non-blocking findings of the C-5/C-6 seam
+  read, decisions C-N1 and C-N2).
+- **Release gate.** Fabric Dashboards reads the new `agent` field of sessions (its 0.8.6); the hand-over record's new
+  optional `paid` field was announced on `62d78b7f` (answer before 2026-11-12).
+- **Constraint.** The MacBook's disk is at 3 to 4 GB free: one builder at a time, `CARGO_INCREMENTAL=0`, debug info
+  off, the target dir deleted between builders; a green run counts only when its output names the node's tests.
+- **Exact next task.** Wave 4 on `iteration/0.7.0`, one builder at a time: D-1 (SB-212, no UI, design in
+  `canvas.md` § D-1 design) beside the UI nodes in sequence A-7, A-8, B-6, B-7, B-8, C-3, C-7, each string through
+  Copylot (en-US, ru-RU), then the WebKit pass of the window in both themes. Target 2026-11-05; wave 5 docs and the
+  release by 2026-11-12 to 14.
+
 ## 2026-10-26: 0.6.83 hotfix (H-1 owner stalls, limit stops settled, one update restart in 6 hours)
 
 - **Objective.** The 0.6.83 hotfix of the 2026-10-25 plan ([report](reports/2026-10-25-audit-and-plan/README.md) §3A)
