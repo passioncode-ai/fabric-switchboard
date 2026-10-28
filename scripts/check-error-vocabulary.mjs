@@ -79,6 +79,11 @@ const ALLOWLIST = {
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
+  'file_information': 'a check code external::Native::read logs and answers as External sign-in unavailable (SB-243)',
+  'links': 'a check code external::Native::read logs and answers as External sign-in unavailable (SB-243)',
+  'security_information': 'a check code external::Native::read logs and answers as External sign-in unavailable (SB-243)',
+  'owner': 'a check code external::Native::read logs and answers as External sign-in unavailable (SB-243)',
+  'token': 'a check code external::Native::read logs and answers as External sign-in unavailable (SB-243)',
   // runtime lib.rs call_within(): the CLI's and switchboard mcp's way to the owner (SB-181); the
   // window talks to its own owner in process and never comes through it.
   'Operation unavailable.': 'CLI and MCP only: an operation that cannot be serialized (SB-181)',

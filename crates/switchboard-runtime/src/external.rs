@@ -72,72 +72,23 @@ fn checked_path(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-#[cfg(windows)]
-fn check_windows_file(file: &fs::File) -> Result<(), String> {
-    use std::{os::windows::io::AsRawHandle, ptr::null_mut};
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, LocalFree},
-        Security::{
-            Authorization::{GetSecurityInfo, SE_FILE_OBJECT},
-            EqualSid, GetTokenInformation, TokenUser, OWNER_SECURITY_INFORMATION, TOKEN_QUERY,
-            TOKEN_USER,
-        },
-        Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION},
-        System::Threading::{GetCurrentProcess, OpenProcessToken},
-    };
-    unsafe {
-        let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-        if GetFileInformationByHandle(file.as_raw_handle(), &mut info) == 0
-            || info.nNumberOfLinks != 1
-        {
-            return Err(UNAVAILABLE.into());
-        }
-        let mut owner = null_mut();
-        let mut descriptor = null_mut();
-        if GetSecurityInfo(
-            file.as_raw_handle(),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION,
-            &mut owner,
-            null_mut(),
-            null_mut(),
-            null_mut(),
-            &mut descriptor,
-        ) != 0
-        {
-            return Err(UNAVAILABLE.into());
-        }
-        let mut token = null_mut();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-            LocalFree(descriptor);
-            return Err(UNAVAILABLE.into());
-        }
-        let mut needed = 0;
-        GetTokenInformation(token, TokenUser, null_mut(), 0, &mut needed);
-        // A Vec<usize> guarantees TOKEN_USER alignment.
-        let mut buffer = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
-        let okay = needed > 0
-            && GetTokenInformation(
-                token,
-                TokenUser,
-                buffer.as_mut_ptr().cast(),
-                needed,
-                &mut needed,
-            ) != 0;
-        let matches = okay
-            && !owner.is_null()
-            && EqualSid(owner, (*(buffer.as_ptr().cast::<TOKEN_USER>())).User.Sid) != 0;
-        CloseHandle(token);
-        LocalFree(descriptor);
-        if !matches {
-            return Err(UNAVAILABLE.into());
-        }
-        Ok(())
+/// SB-243: a CLI's sign-in file refused, logged once per check and process by its code only
+/// (no path, no account), so a refusal on a person's machine names the check that made it.
+fn refused(check: &'static str) -> String {
+    static LOGGED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut logged = LOGGED.lock().unwrap_or_else(|p| p.into_inner());
+    if !logged.contains(&check) {
+        logged.push(check);
+        crate::oplog::event(
+            "external_file_refused",
+            &[("check", crate::oplog::Field::Code(check))],
+        );
     }
+    UNAVAILABLE.into()
 }
 impl Reader for Native {
     fn read(&self, path: &Path, cap: usize) -> Result<Option<Vec<u8>>, String> {
-        checked_path(path)?;
+        checked_path(path).map_err(|_| refused("path"))?;
         let mut o = fs::OpenOptions::new();
         o.read(true);
         #[cfg(unix)]
@@ -153,34 +104,40 @@ impl Reader for Native {
         let f = match o.open(path) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(_) => return Err(UNAVAILABLE.into()),
+            Err(_) => return Err(refused("open")),
         };
-        let m = f.metadata().map_err(|_| UNAVAILABLE)?;
-        if !m.is_file() || m.len() > cap as u64 {
-            return Err(UNAVAILABLE.into());
+        let m = f.metadata().map_err(|_| refused("metadata"))?;
+        if !m.is_file() {
+            return Err(refused("not_file"));
+        }
+        if m.len() > cap as u64 {
+            return Err(refused("too_large"));
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            if m.uid() != unsafe { libc::geteuid() } || m.nlink() != 1 {
-                return Err(UNAVAILABLE.into());
+            if m.uid() != unsafe { libc::geteuid() } {
+                return Err(refused("owner"));
+            }
+            if m.nlink() != 1 {
+                return Err(refused("links"));
             }
         }
         #[cfg(windows)]
         {
             use std::os::windows::fs::MetadataExt;
             if m.file_attributes() & 0x400 != 0 {
-                return Err(UNAVAILABLE.into());
+                return Err(refused("reparse"));
             }
-            switchboard_core::private_fs::check_path(path)?;
-            check_windows_file(&f)?;
+            switchboard_core::private_fs::check_path(path).map_err(|_| refused("path"))?;
+            switchboard_core::windows::check_foreign_file(&f).map_err(refused)?;
         }
         let mut bytes = Vec::new();
         f.take((cap + 1) as u64)
             .read_to_end(&mut bytes)
-            .map_err(|_| UNAVAILABLE)?;
+            .map_err(|_| refused("read"))?;
         if bytes.len() > cap {
-            return Err(UNAVAILABLE.into());
+            return Err(refused("too_large"));
         }
         Ok(Some(bytes))
     }
@@ -2043,6 +2000,32 @@ mod config_digest_tests {
             next_config_digest(None, Ok(None)),
             (Stamp::Account(None), true)
         );
+    }
+
+    /// SB-243: Claude Code writes its sign-in and `.claude.json` with an ordinary create, so on
+    /// Windows they belong to whatever owner its token gives: the Administrators group when it
+    /// ran as administrator (the CI runner does). Both are read; before 0.7.1 both were refused
+    /// as unsafe, and no account could be saved on such a computer.
+    #[cfg(windows)]
+    #[test]
+    fn a_sign_in_the_cli_wrote_with_an_ordinary_create_is_read_on_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".claude");
+        std::fs::create_dir_all(&home).unwrap();
+        let credentials = home.join(".credentials.json");
+        let body = br#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#;
+        std::fs::write(&credentials, body).unwrap();
+        assert_eq!(
+            Native.read(&credentials, SECRET_CAP).unwrap().as_deref(),
+            Some(&body[..])
+        );
+        let config = dir.path().join(".claude.json");
+        let text =
+            br#"{"oauthAccount":{"emailAddress":"a@example.test"},"hasCompletedOnboarding":true}"#;
+        std::fs::write(&config, text).unwrap();
+        let (digest, settled) = next_config_digest(None, Native.read(&config, CONFIG_CAP));
+        assert!(settled);
+        assert!(matches!(digest, Stamp::Account(Some(_))));
     }
 
     #[test]
