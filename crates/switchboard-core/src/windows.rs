@@ -124,6 +124,102 @@ fn owned_by_us(owner: PSID, user: PSID) -> Result<bool, String> {
         Ok(EqualSid(owner, default.sid()) != 0)
     }
 }
+/// One piece of this process's token (`TokenUser`, `TokenOwner`, `TokenGroups`), in memory
+/// aligned for its structure.
+fn token_information(class: TOKEN_INFORMATION_CLASS) -> Result<Vec<usize>, String> {
+    unsafe {
+        let mut token = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(error(io::Error::last_os_error()));
+        }
+        let token = Handle(token);
+        let mut needed = 0;
+        GetTokenInformation(token.0, class, null_mut(), 0, &mut needed);
+        let mut data = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+        if needed == 0
+            || GetTokenInformation(
+                token.0,
+                class,
+                data.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            ) == 0
+        {
+            return Err(error("token"));
+        }
+        Ok(data)
+    }
+}
+/// SB-243: whether `owner` may own a file another program of this person wrote (Claude Code's
+/// or Codex's sign-in): this user; the owner this process's token gives what it creates; or the
+/// Administrators group while this token carries it, enabled or deny-only. A program the person
+/// ran as administrator (or with UAC off) creates files the group owns, not the user's SID, and
+/// a planted file of that group needs an administrator, who could read the sign-in anyway.
+fn trusted_owner(owner: PSID) -> Result<bool, String> {
+    unsafe {
+        let user = token_information(TokenUser)?;
+        if owned_by_us(owner, (*(user.as_ptr().cast::<TOKEN_USER>())).User.Sid)? {
+            return Ok(true);
+        }
+        let mut admins = [0usize; SECURITY_MAX_SID_SIZE as usize / size_of::<usize>() + 1];
+        let mut size = (admins.len() * size_of::<usize>()) as u32;
+        if CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            null_mut(),
+            admins.as_mut_ptr().cast(),
+            &mut size,
+        ) == 0
+        {
+            return Err(error("administrators"));
+        }
+        let admins: PSID = admins.as_mut_ptr().cast();
+        if EqualSid(owner, admins) == 0 {
+            return Ok(false);
+        }
+        let groups = token_information(TokenGroups)?;
+        let groups = &*(groups.as_ptr().cast::<TOKEN_GROUPS>());
+        let list = std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize);
+        Ok(list.iter().any(|group| EqualSid(group.Sid, admins) != 0))
+    }
+}
+/// SB-243: why a sign-in file another program wrote is refused, as a code for the log, or Ok
+/// when it is this person's: one link, and an owner `trusted_owner` accepts. Its ACL is the
+/// writer's business; Switchboard copies the sign-in into its own private storage.
+pub fn check_foreign_file(file: &File) -> Result<(), &'static str> {
+    unsafe {
+        let mut info: BY_HANDLE_FILE_INFORMATION = zeroed();
+        if GetFileInformationByHandle(file.as_raw_handle(), &mut info) == 0 {
+            return Err("file_information");
+        }
+        if info.nNumberOfLinks != 1 {
+            return Err("links");
+        }
+        let mut owner = null_mut();
+        let mut sd = null_mut();
+        if GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut sd,
+        ) != 0
+        {
+            return Err("security_information");
+        }
+        let _sd = Local(sd);
+        if owner.is_null() {
+            return Err("owner");
+        }
+        match trusted_owner(owner) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("owner"),
+            Err(_) => Err("token"),
+        }
+    }
+}
 fn descriptor() -> Result<Local, String> {
     let s = format!("O:{}D:P(A;OICI;FA;;;{})", user_sid()?, user_sid()?);
     let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
@@ -448,6 +544,46 @@ pub fn process_matches(pid: u32, created: u64) -> Result<bool, String> {
 mod tests {
     use super::*;
     use crate::{private_fs, AuthKind, Credential, NativeVault, Provider, Vault};
+    /// SB-243: a sign-in file another program wrote with an ordinary create (as Claude Code
+    /// and Codex do) belongs to this person whatever owner the token gave it: the user's SID,
+    /// or the Administrators group for a process run as administrator (as the CI runner is).
+    #[test]
+    fn a_file_another_program_wrote_plainly_is_this_persons() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".credentials.json");
+        std::fs::write(&path, br#"{"claudeAiOauth":{}}"#).unwrap();
+        let file = File::open(&path).unwrap();
+        assert_eq!(check_foreign_file(&file), Ok(()));
+        // A second name for the same file is refused.
+        let other = dir.path().join("linked.json");
+        std::fs::hard_link(&path, &other).unwrap();
+        let file = File::open(&path).unwrap();
+        assert_eq!(check_foreign_file(&file), Err("links"));
+    }
+    /// SB-243: the group a token's default owner names (the Administrators group for an elevated
+    /// administrator) is trusted only while this token carries that group.
+    #[test]
+    fn the_tokens_own_user_and_default_owner_are_trusted_owners() {
+        let user = token_information(TokenUser).unwrap();
+        let owner = token_information(TokenOwner).unwrap();
+        unsafe {
+            assert!(trusted_owner((*(user.as_ptr().cast::<TOKEN_USER>())).User.Sid).unwrap());
+            assert!(trusted_owner((*(owner.as_ptr().cast::<TOKEN_OWNER>())).Owner).unwrap());
+            // LocalSystem is neither this user nor a group this token holds.
+            let mut system = [0usize; SECURITY_MAX_SID_SIZE as usize / size_of::<usize>() + 1];
+            let mut size = (system.len() * size_of::<usize>()) as u32;
+            assert_ne!(
+                CreateWellKnownSid(
+                    WinLocalSystemSid,
+                    null_mut(),
+                    system.as_mut_ptr().cast(),
+                    &mut size
+                ),
+                0
+            );
+            assert!(!trusted_owner(system.as_mut_ptr().cast()).unwrap());
+        }
+    }
     #[test]
     fn windows_strict_read_refuses_widened_acl_without_mutating_file() {
         let temp = tempfile::tempdir().unwrap();

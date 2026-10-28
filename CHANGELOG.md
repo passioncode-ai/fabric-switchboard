@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On Windows, accounts can be added again when Claude Code ran as administrator or with UAC off: its sign-in files belong to the Administrators group then, and Switchboard refused them as unsafe, so no account could be saved (SB-243). A refused sign-in file now names the check that refused it in the log.
 - A request a provider refused for a limit is never moved onto a seat the provider has ended: the one retry on another account of the group skips accounts that need a new sign-in (SB-211).
 - When agent settings cannot be read, the message now says to delete the file before restoring a backup: a restore never writes over a file that is there (SB-239).
 
