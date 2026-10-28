@@ -1176,6 +1176,24 @@ check(() => {
     const lonely = { complete: true, degraded: [], steps: [...five, { id: 'organization', state: 'optional', summary: 'PassionCode.ai lists no organization for you yet.' }] };
     assert.deepEqual(logic.orgSetups(lonely), [], 'PassionCode.ai listing none: no card');
   });
+  // F1 (wave 4 design pass, SCN-079): an organization the person left on PassionCode.ai gets no setup card
+  check(() => {
+    const contoso = { id: 'o-contoso', name: 'Contoso' };
+    const both = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: contoso, groups: [] }, { id: 'seat', state: 'needs_person', organization: contoso }] };
+    const organizations = [{ id: 'o-acme', name: 'Acme', created_at: 1, vesta_id: 'v-acme' }, { id: 'o-contoso', name: 'Contoso', created_at: 5, vesta_id: null }];
+    const status = { connected: true, released: [{ organization: 'o-contoso', at: 1000 }] };
+    const released = logic.releasedOrganizations(status, organizations);
+    assert.deepEqual(released, ['o-contoso']);
+    assert.deepEqual(logic.releasedOrganizations({ connected: false, released: status.released }, organizations), [], 'a disconnect is not leaving');
+    assert.deepEqual(logic.releasedOrganizations(null, organizations), [], 'not read yet: nothing is left out');
+    assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Contoso'], 'without the list, both');
+    assert.deepEqual(logic.orgSetups(both, released).map((s) => s.organization.name), ['Acme'], 'the left one has no card');
+    const leftOnly = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }]);
+    assert.equal(logic.orgSetupLeads({ onboarding: leftOnly, page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null, released: ['o-acme'] }), false, 'no card, so nothing leads');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: { claude: { status: 'available' }, codex: null }, released: ['o-acme'] }).lead, 'add_current', 'the empty page does not lead with a left organization\'s seat');
+    const unread = logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, released });
+    assert.deepEqual(unread, { id: 'o-acme', name: 'Acme' }, 'the read-failed card skips the left one too');
+  });
 }
 // C-3 (SB-71): the fallback chains panel and its editor.
 {
