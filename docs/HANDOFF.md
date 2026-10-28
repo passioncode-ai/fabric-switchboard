@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-28: release 0.7.1, accounts can be added on Windows again (SB-243)
+
+- **Why.** The Windows acceptance of 2026-10-28 (Windows 10 Pro 19045, fabric-workspace
+  `docs/reports/2026-10-28-windows-acceptance/README.md`) could save no account on 0.6.83 or 0.7.0: every CLI sign-in
+  file was refused as unsafe because its owner was the Administrators group, not the user's SID.
+- **Done.** PR #343 (`9f16fbb`): `switchboard_core::windows::check_foreign_file`, the `external_file_refused` log
+  event; Windows tests failed on the old code (nightly 40661988382) and pass with the fix (40661940136); gate
+  `./scripts/check.sh` 1075 passed. Also in 0.7.1: SB-211 (PR #340), SB-239 (PR #341).
+- **Exact next task.** Watch the `v0.7.1` release run, confirm assets and `latest.json`, the local install, then ask
+  the tester (through fabric-workspace) to retry adding an account after the app updates; if it is refused again, the
+  log's `external_file_refused` `check` names the cause. Close SB-243, SB-211, SB-239 on that evidence.
+
 ## 2026-10-28: release 0.7.0 «first organization», with the stability and Windows debts closed
 
 - **Where.** `iteration/0.7.0` merged into `main` by the release pull request; run record
