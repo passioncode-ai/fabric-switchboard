@@ -4039,7 +4039,9 @@ mod tests {
         hermes_chain(&runtime);
         let repo = tempfile::tempdir().unwrap();
         let bin = engine_two(root.path(), &a.id, &dir_of(&repo));
-        let budget = std::time::Duration::from_millis(400);
+        // Wide enough for two 100 ms reads and their gates on a loaded CI runner (400 ms failed
+        // there once, nightly 40672431293), still shorter than one launch below.
+        let budget = std::time::Duration::from_millis(2000);
         let acted = Arc::new(AtomicUsize::new(0));
         let act = |_: String, _: String, _: PathBuf| {
             let acted = acted.clone();
