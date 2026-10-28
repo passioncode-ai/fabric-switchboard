@@ -154,7 +154,7 @@ const safeErrors = new Set([
   'Too many folders wait for an answer. Answer some in Switchboard first.',
   // Hermes's model and provider (SB-80): each names the fix.
   'Hermes is not installed. Install it from hermes-agent.nousresearch.com, then try again.',
-  'Agent settings (agents-settings.json) could not be read. Restore it from a backup, or delete it to start over with every agent enabled and no default.',
+  'Agent settings (agents-settings.json) could not be read. Delete agents-settings.json, then restore a backup to get the settings back, or leave it deleted to start over with every agent enabled and no default.',
   'No such agent in the catalog. Run switchboard agents list.',
   'Switchboard cannot hand work to this agent yet, so it cannot be the default.',
   'This agent is disabled for taking over work. Enable it on the Agents page, then try again.',

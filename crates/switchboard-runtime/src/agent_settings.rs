@@ -17,7 +17,7 @@ pub const NOT_INSTALLED: &str =
 pub const DISABLED: &str =
     "This agent is disabled for taking over work. Enable it on the Agents page, then try again.";
 pub const NAME_AN_ACCOUNT: &str = "Name the account or agent to continue on (--account), or choose a default agent on the Agents page.";
-pub const UNREADABLE: &str = "Agent settings (agents-settings.json) could not be read. Restore it from a backup, or delete it to start over with every agent enabled and no default.";
+pub const UNREADABLE: &str = "Agent settings (agents-settings.json) could not be read. Delete agents-settings.json, then restore a backup to get the settings back, or leave it deleted to start over with every agent enabled and no default.";
 /// OpenRouter's public model list (no key).
 const MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
 const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);

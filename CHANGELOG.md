@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - A request a provider refused for a limit is never moved onto a seat the provider has ended: the one retry on another account of the group skips accounts that need a new sign-in (SB-211).
+- When agent settings cannot be read, the message now says to delete the file before restoring a backup: a restore never writes over a file that is there (SB-239).
 
 ## 0.7.0
 
