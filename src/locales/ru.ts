@@ -1058,7 +1058,7 @@ export const RU: Record<string, string> = {
   "Disabled": "Выключен",
   "Set default": "Сделать по умолчанию",
   "Recommended models": "Рекомендуемые модели",
-  "Agent settings (agents-settings.json) could not be read. Restore it from a backup, or delete it to start over with every agent enabled and no default.": "Не удалось прочитать настройки агентов (agents-settings.json). Восстановите файл из резервной копии или удалите его, тогда все агенты будут включены, а агент по умолчанию не выбран.",
+  "Agent settings (agents-settings.json) could not be read. Delete agents-settings.json, then restore a backup to get the settings back, or leave it deleted to start over with every agent enabled and no default.": "Не удалось прочитать настройки агентов (agents-settings.json). Удалите agents-settings.json и восстановите резервную копию, чтобы вернуть настройки, или оставьте файл удалённым: тогда все агенты будут включены, а агент по умолчанию не выбран.",
   "This agent is disabled for taking over work. Enable it on the Agents page, then try again.": "Этому агенту запрещено подхватывать работу. Включите его на странице «Агенты» и повторите.",
   "Name the account or agent to continue on (--account), or choose a default agent on the Agents page.": "Укажите аккаунт или агента, на котором продолжить (--account), либо выберите агента по умолчанию на странице «Агенты».",
   "The default agent has no account that can take this workflow now. Name one with --account, or choose another default agent.": "У агента по умолчанию сейчас нет аккаунта, который может взять эту работу. Укажите аккаунт через --account или выберите другого агента по умолчанию.",
